@@ -1,6 +1,6 @@
 # moca DESIGN.md — v1 contract
 
-Status: **REV 5 — steering applied, awaiting final lock**. Revision log at bottom. Once locked, this doc is the source of truth; changes require a new revision, not silent drift.
+Status: **REV 6 — steering applied, awaiting final lock**. Revision log at bottom. Once locked, this doc is the source of truth; changes require a new revision, not silent drift.
 
 ## Purpose
 
@@ -23,7 +23,7 @@ internal/
   context/           token accounting, truncation, summarization, cache markers
   session/           JSONL append-only transcripts, resume
   tui/               Bubble Tea: input, scrollback, status bar, spinner, diff view
-  config/            single TOML config, typed, validated
+  config/            single JSONC config, typed, validated
   skills/            Agent Skills loader (SKILL.md) + slash-command templates
   permissions/       path jail, shell allowlist, per-tool gates
 ```
@@ -154,40 +154,36 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
 
 ## 12. Config
 
-`~/.config/moca/config.toml` — single file, typed struct, fail-fast validation:
+`~/.config/moca/config.jsonc` — single file, typed struct, fail-fast validation. **JSONC over TOML (rev 6):** stdlib-parseable (comments stripped pre-parse, Go `encoding/json` decodes the result — zero third-party config deps), and it matches the house dotfiles sync machinery (`merge-opencode-config.py` / `merge-pi-config.py` semantics: recursive object merge, live-only keys kept, ordered array union, scalar template-wins / `--live-wins` flip, `.bak` backup, byte-identical-if-unchanged so comments survive). JSONC is also the native shape of the OpenCode ecosystem configs `moca mcp import` reads — one parser everywhere.
 
-```toml
-default_provider = "opencode-go"
-model      = "opencode-go/glm-5.3-flash"   # everyday turns — cheap, fast
-model_hard = "opencode-go/glm-5.3"         # /hard escalation: planning, gnarly debug
+```jsonc
+{
+  "defaultProvider": "opencode-go",
+  "model":      "opencode-go/glm-5.3-flash",   // everyday turns — cheap, fast
+  "modelHard":  "opencode-go/glm-5.3",          // /hard escalation: planning, gnarly debug
 
-[providers.anthropic]
-auth        = "api_key"      # or "oauth" → moca login anthropic (Claude Pro/Max)
-api_key_env = "ANTHROPIC_API_KEY"
+  "providers": {
+    "anthropic":   { "auth": "api_key", "apiKeyEnv": "ANTHROPIC_API_KEY" },  // or "oauth" → moca login anthropic (Claude Pro/Max)
+    "opencode-go": { "auth": "api_key", "apiKeyEnv": "OPENCODE_API_KEY" },   // OpenCode Zen subscription key
+    "openai":      { "auth": "api_key", "apiKeyEnv": "OPENAI_API_KEY" }       // or "oauth" → moca login openai (ChatGPT Plus/Pro)
+  },
 
-[providers.opencode-go]
-auth        = "api_key"      # OpenCode Zen subscription key
-api_key_env = "OPENCODE_API_KEY"
+  "shell": {
+    "allow": ["go", "git", "grep", "rg", "find", "ls", "cat", "head", "tail",
+              "mkdir", "sed", "awk", "curl", "mise", "python", "pytest",
+              "node", "npm", "docker", "kubectl", "terraform", "ansible",
+              "rtk", "graphify"]
+  },
 
-[providers.openai]
-auth        = "api_key"      # or "oauth" → moca login openai (ChatGPT Plus/Pro)
-api_key_env = "OPENAI_API_KEY"
+  "mcp": {
+    "context7": { "url": "https://mcp.context7.com/mcp" }   // lazy: starts on first call, not at startup
+  },
 
-[shell]
-allow = ["go", "git", "grep", "rg", "find", "ls", "cat", "head", "tail",
-         "mkdir", "sed", "awk", "curl", "mise", "python", "pytest",
-         "node", "npm", "docker", "kubectl", "terraform", "ansible",
-         "rtk", "graphify"]
-
-[mcp.context7]                           # lazy: starts on first call, not at startup
-url = "https://mcp.context7.com/mcp"
-
-[context]
-compact_at_pct = 80
-keep_turns     = 4
+  "context": { "compactAtPct": 80, "keepTurns": 4 }
+}
 ```
 
-**Model routing:** `/effort` sets the effort level (validated against the catalog); `/hard` = `/model model_hard` + `/effort high`; compaction summaries always run on the cheap `model` at minimal effort. No auto-escalation heuristics in v1 — explicit is cheaper to debug than clever. Keys never appear as literals — env indirection or OAuth token store only.
+**Model routing:** `/effort` sets the effort level (validated against the catalog); `/hard` = switch to `modelHard` + `/effort high`; compaction summaries always run on the cheap `model` at minimal effort. No auto-escalation heuristics in v1 — explicit is cheaper to debug than clever. Keys never appear as literals — env indirection or OAuth token store only.
 
 ## 13. System prompt
 
@@ -221,6 +217,7 @@ subagents · hooks · plan mode · LSP · web browsing · image gen · voice · 
 
 ## Revision log
 
+- **rev 6 (2026-10-03, Ben's question → adopted):** config format TOML → **JSONC** (`~/.config/moca/config.jsonc`, camelCase keys) — stdlib-parseable (comment-strip pre-parse + `encoding/json`, zero config deps), matches the house dotfiles merge machinery (merge-opencode-config.py / merge-pi-config.py semantics: recursive object merge, live-only keys kept, ordered array union, template-wins/`--live-wins`, `.bak`, byte-identical-if-unchanged), native shape of OpenCode-ecosystem configs `moca mcp import` reads.
 - **rev 5 (2026-10-03, Ben's steering):** status bar moved to the **bottom, below the input area** · input area is a real multi-line text area with native multi-line paste (bracketed-paste, verbatim, never auto-sent; >50-line pastes render collapsed, buffer intact; native copy via inline rendering + OSC 52) · `shift+enter` = newline (enhanced keyboard reporting — Kitty protocol/xterm modifyOtherKeys — with `alt+enter`/`ctrl+j` fallbacks + one-time hint on plain terminals).
 - **rev 4 (2026-10-03, Ben's steering):** status bar from day 1 with the exact field set: cwd · branch (dirty marker) · provider/model · **effort** · context size + usage % · session tokens in/out · session cost — effort promoted to a first-class request parameter (`/effort`, protocol-mapped, catalog-validated, default medium); `/hard` = model_hard + effort high; layout inverted (bar on top); context-usage estimate and per-response usage accounting pulled into phase 3.
 - **rev 3 (2026-10-03, Ben's steering):** MCP support in v1, lazy by design — one fixed ~200-token `mcp` proxy tool (§10.5), server tool lists never enter the prompt, lazy server lifecycle (first-call start, 10-min idle stop), discovery index, stdio + streamable HTTP, filtered subprocess env, risky-tool gating, `moca mcp import`; tool count six → seven (schema frozen at phase 2 as a stub so no churn); phase plan six → seven phases (MCP gets its own PR).
