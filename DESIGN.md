@@ -53,7 +53,7 @@ Claude/ChatGPT subscription OAuth endpoints are **not yet verified** — phase 6
 - **Cache breakpoints**: explicit positions in `Request` (anthropic `cache_control` native; openai protocols via prefix-stability discipline).
 - No SDKs. Hand-rolled HTTP + SSE.
 
-## 4. Tools — the six, frozen for v1
+## 4. Tools — the seven, frozen for v1
 
 | Tool | Semantics |
 |------|-----------|
@@ -63,6 +63,7 @@ Claude/ChatGPT subscription OAuth endpoints are **not yet verified** — phase 6
 | `shell` | command + timeout (default 30s, max 300s). **`bash -lc` on Unix, `pwsh -NoProfile -Command` on Windows.** Runs in workdir, jailed (§7). Output head+tail truncated at 30K chars with `[… N lines omitted]`. |
 | `search` | ripgrep-semantics in pure Go (pattern + glob + path). Line-numbered matches, 200-hit cap, `files_only` mode. No external rg dependency. |
 | `ls` | path, one level, dirs suffixed `/`, hidden opt-in. |
+| `mcp` | **Lazy MCP proxy (see §10.5).** Fixed ~200-token schema: `{action: "search" \| "call", server, tool, args, query}`. MCP server tool lists are NEVER injected into the prompt — discovery happens inside the tool over a cached name+description index; full schema is fetched only when a call is made. |
 
 Schema churn rule: these JSON schemas are frozen after phase 2. New tool = v2 discussion — every session re-reads schemas (token cost) and tool-list churn kills prompt-cache reuse.
 
@@ -112,6 +113,29 @@ No binary plugin system in v1 (probably ever). Three composable, standards-based
 - **rtk** (token-compressed CLI proxy: `rtk read/ls/git/diff/test/docker/gh/…`) — in the default allowlist; ships a built-in `rtk` skill teaching preferences. Natural extension of moca's mission: the system prompt's token-discipline section says *prefer rtk-prefixed variants where they exist*.
 - **graphify** (codebase-graph CLI) — in the default allowlist; its SKILL.md is drop-in via the standard loader. `graphify install --platform moca` needs a one-line platform entry upstream — contribute it in phase 6; until merged, manual copy into the skills dir works identically.
 
+### 10.5 MCP — lazy by design (rev 3)
+
+MCP support ships in v1 **because Ben uses MCP servers daily** (OpenCode + Pi via `pi-mcp-adapter`, which validated this exact architecture). The token-lean approach, learned from pi-mcp-adapter's measured results (100 installed servers → 0 running at session start, ~200 tokens of prompt cost, vs 7 GB RAM / 10k+ tokens eager):
+
+- **One fixed `mcp` proxy tool, ~200-token schema** — `{action: "search"|"call", server, tool, args, query}`. Server tool lists are NEVER injected into the prompt. This is what makes MCP compatible with moca's mission: the eager approach (inject every server's schemas) is the single fastest way to destroy a lean context.
+- **Lazy lifecycle**: configured servers start on first call, stop after 10 idle minutes (config: `mcp.idle_timeout`). A stopped server keeps its tools discoverable (cached index); it restarts on next call (~0.1–0.3s local). No eager spawning at startup, ever.
+- **Discovery index**: at first use (not startup), moca reads a server's tool list once, caches `{server, tool, name, description}`; `action: "search"` ranks over that index (word match in v1). Full input schema is fetched only when the model actually calls the tool.
+- **Config** (same file, one block per server — pi-mcp-adapter/Claude-Code-compatible shape):
+
+```toml
+[mcp.context7]
+url = "https://mcp.context7.com/mcp"     # streamable HTTP
+
+[mcp.filesystem]
+command = "npx"                            # stdio
+args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+```
+
+- **Transports**: stdio + streamable HTTP in v1. Legacy SSE and sampling/elicitation: no (v2 discussion).
+- **Env hygiene**: stdio subprocesses get a filtered env (PATH, HOME, USER, LANG, TERM, TMPDIR, XDG_*) + explicit `env` entries only — same rule as Hermes's native MCP client (no accidental credential leakage to servers).
+- **Path jail does NOT apply to MCP tools** — a server's own tool defines its scope (a GitHub server talks to GitHub). `approveTools`-style gating for risky MCP tools: v1 refuses calls to tools whose names match `create|delete|drop|remove|push|deploy` unless allowlisted per server in config (`mcp.<name>.approve = ["create_issue"]`) or the user approves in TUI (one-key). One-shot `-p` mode: allowlist only, no interactive approval.
+- **Import**: `moca mcp import` reads existing Claude Code / OpenCode / Pi MCP configs on the machine and writes them into moca's config (mechanical translation, previewed before writing). Day-1 convenience so your existing servers work immediately.
+
 ## 11. TUI
 
 - Bubble Tea + lipgloss. Compact/dense per house style: tight padding, no banners.
@@ -147,6 +171,9 @@ allow = ["go", "git", "grep", "rg", "find", "ls", "cat", "head", "tail",
          "node", "npm", "docker", "kubectl", "terraform", "ansible",
          "rtk", "graphify"]
 
+[mcp.context7]                           # lazy: starts on first call, not at startup
+url = "https://mcp.context7.com/mcp"
+
 [context]
 compact_at_pct = 80
 keep_turns     = 4
@@ -170,20 +197,22 @@ One session, real repo, unattended — **on the `opencode-go` provider** (proves
 
 ## 15. Explicit non-goals (v1)
 
-MCP · subagents · hooks · plan mode · LSP · web browsing · image gen · voice · telemetry · **binary plugin/extension system** (skills + commands + allowlist are the extension model — a fourth mechanism needs a design revision) · `serve` mode.
+subagents · hooks · plan mode · LSP · web browsing · image gen · voice · telemetry · **binary plugin/extension system** (skills + commands + allowlist + the §10.5 lazy `mcp` proxy are the extension model — a fifth mechanism needs a design revision) · `serve` mode · MCP sampling/elicitation/legacy-SSE (v2 discussion).
 
 ## Phase plan (each = one PR, reviewed)
 
 1. **Skeleton + protocol adapters + streaming** — anthropic-messages + openai-completions codecs, api-key auth. Gate: `moca -p 'hi'` streams **via anthropic AND opencode-go**.
-2. **Six tools + agent loop + permissions + skills loader** — path jail and allowlist land *with* the tools (no ungated phase). Gates: edit-ladder 10/10 green, jail enforced, a skill discovered.
+2. **Seven tools + agent loop + permissions + skills loader** — path jail and allowlist land *with* the tools (no ungated phase); `mcp` tool ships as a stub returning "no servers configured" (schema frozen from day 1 — no churn later). Gates: edit-ladder 10/10 green, jail enforced, a skill discovered.
 3. **TUI shell + slash commands** — Gate: full session in TUI; `/model`, `/hard` work.
 4. **Context manager + sessions** — Gate: compaction holds at 80%, resume works, live cost line.
-5. **rtk + model_hard routing + graphify compatibility** — Gates: rtk-wrapped commands preferred in a real session; a graphify/pi SKILL.md loads unchanged.
-6. **OAuth providers + upstream graphify PR + v0.1** — Claude subscription + ChatGPT subscription login (endpoints verified live first), `graphify install --platform moca` upstream, polish, tag `v0.1.0` when §14 passes.
+5. **MCP lazy proxy** — stdio + streamable HTTP transports, discovery index, lazy lifecycle, `moca mcp import`. Gates: a real server (e.g. context7 or filesystem) callable via the proxy with no server tool schemas in the prompt (verified by inspecting the request payload); server stopped after idle timeout; import converts an existing Claude-Code/OpenCode/Pi config.
+6. **rtk + model_hard routing + graphify compatibility** — Gates: rtk-wrapped commands preferred in a real session; a graphify/pi SKILL.md loads unchanged.
+7. **OAuth providers + upstream graphify PR + v0.1** — Claude subscription + ChatGPT subscription login (endpoints verified live first), `graphify install --platform moca` upstream, polish, tag `v0.1.0` when §14 passes.
 
 **Edit-ladder tests (phase 2, non-negotiable):** exact unique · exact ambiguous · whitespace-fallback hit · fallback ambiguous · no match · no-op new==old · CRLF file · unicode file · 50-line span · trailing-newline-missing file.
 
 ## Revision log
 
+- **rev 3 (2026-10-03, Ben's steering):** MCP support in v1, lazy by design — one fixed ~200-token `mcp` proxy tool (§10.5), server tool lists never enter the prompt, lazy server lifecycle (first-call start, 10-min idle stop), discovery index, stdio + streamable HTTP, filtered subprocess env, risky-tool gating, `moca mcp import`; tool count six → seven (schema frozen at phase 2 as a stub so no churn); phase plan six → seven phases (MCP gets its own PR).
 - **rev 2 (2026-10-03, Ben's steering):** `bash` → `shell` (PowerShell on Windows) · `model` + `model_hard` from day 1 · three day-1 providers (OpenCode Go / Claude / OpenAI, incl. subscription OAuth) replacing the anthropic+openai-compat pair · external tools (rtk, graphify) from day 1 via skills/commands/allowlist · phase plan restructured (permissions pulled into phase 2, OAuth + upstream graphify PR in phase 6).
 - **rev 1 (2026-10-03):** initial draft.
