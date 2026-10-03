@@ -1,0 +1,17 @@
+# binaries
+moca
+dist/
+*.test
+*.out
+
+# env / secrets — NEVER commit
+.env
+*.key
+
+# editors
+.idea/
+.vscode/
+*.swp
+
+# os
+.DS_Store
