@@ -1,6 +1,6 @@
 # moca DESIGN.md — v1 contract
 
-Status: **REV 6 — steering applied, awaiting final lock**. Revision log at bottom. Once locked, this doc is the source of truth; changes require a new revision, not silent drift.
+Status: **REV 7 — steering applied, awaiting final lock**. Revision log at bottom. Once locked, this doc is the source of truth; changes require a new revision, not silent drift.
 
 ## Purpose
 
@@ -25,7 +25,7 @@ internal/
   tui/               Bubble Tea: input, scrollback, status bar, spinner, diff view
   config/            single JSONC config, typed, validated
   skills/            Agent Skills loader (SKILL.md) + slash-command templates
-  permissions/       path jail, shell allowlist, per-tool gates
+  permissions/       path jail, shell allowlist, project trust, per-tool gates
 ```
 
 **Direction of dependencies: `agent` may import everything; `tools`, `provider`, `session`, `context`, `config`, `skills`, `permissions` import nothing from each other except `config` types. `tui` imports `agent` (drives it), never the reverse.** No cycles, ever. This is the whole "minimal" promise made structural.
@@ -68,6 +68,8 @@ Claude/ChatGPT subscription OAuth endpoints are **not yet verified** — phase 6
 
 Schema churn rule: these JSON schemas are frozen after phase 2. New tool = v2 discussion — every session re-reads schemas (token cost) and tool-list churn kills prompt-cache reuse.
 
+`write` and `edit` store a **pre-edit snapshot** of the target file (hash-addressed, `~/.local/share/moca/snapshot/`) before writing — best-effort cheap undo when the workdir isn't a git repo (OpenCode ships the same mechanism; landed phase 2).
+
 ## 5. Edit-tool contract
 
 1. `old_string` must be **unique** in the file. Ambiguous → error listing hit line numbers, no write.
@@ -78,7 +80,17 @@ Schema churn rule: these JSON schemas are frozen after phase 2. New tool = v2 di
 
 ## 6. Context manager
 
-Budgets (config-overridable): context window from catalog (fallback 200K); **compaction at 80%** — keep system prompt + last 4 turns verbatim, older turns → one summary request to the **default (cheap) model**, labeled `COMPACTION NOTE (lossy)`. Tool output caps per §4. `read` always returns line numbers + totals so re-reads target windows, never whole files.
+Budgets are **token-denominated** (config-overridable) — a percentage conflates a 200K and a 1M window; the catalog already knows the window.
+
+- **Trigger**: `estimatedTokens > contextWindow − reserveTokens` (default `reserveTokens` **16K** — room left for the response). Checked after every completed tool batch and before every new user prompt.
+- **keepRecentTokens** (default **20K**): recent tokens kept verbatim; everything older → summarized. Replaces "last N turns".
+- **Cut-point rule: never cut between a tool call and its result** (results stay with their call). Valid cuts: user messages, assistant messages, complete tool batches. A single user-message span exceeding keepRecent cuts mid-span at an assistant message (split span → two summaries merged: prior history + span prefix).
+- **Compaction entry**: `summary` + `firstKeptEntryId` + `tokensBefore` + `usage` (the summary's own cost counts toward session totals). Repeated compactions summarize from the previous compaction's kept boundary, so kept messages are never silently dropped from later summaries.
+- **Summary request**: cheap `model`, minimal effort, **prompt-cache writes disabled** — a one-off prompt; polluting the cache is pure loss.
+- **Structured summary format** (Pi's proved shape): Goal / Constraints & Preferences / Progress (done · in-progress · blocked) / Key Decisions / Next Steps / Critical Context + `<read-files>`/`<modified-files>` lists, tracked **cumulatively** across compactions.
+- **Serialization for summarization**: conversation flattened to text (`[User]:` … `[Assistant thinking]:` … `[Assistant tool calls]: read(path=…)` … `[Tool result]:` …), **tool results truncated at 2K chars** — the summarizer doesn't need full outputs; labeled `COMPACTION NOTE (lossy)`.
+- **Overflow recovery**: provider context-overflow error or early `stop_reason: length` → **one compact-and-retry attempt**; retry runs as a fresh turn. Recovery failure surfaces the original error.
+- `read` always returns line numbers + totals so re-reads target windows, never whole files.
 
 Token efficiency = prompt caching (§3) + windowed reads + diff-shaped results + truncation + compaction. NOT stripped tool descriptions — descriptive schemas up front are cheaper than failed calls.
 
@@ -87,17 +99,20 @@ Token efficiency = prompt caching (§3) + windowed reads + diff-shaped results +
 - **Path jail**: workdir and children. `read`/`write`/`edit` refuse outside; `~` expansion only inside the jail. Windows: normalized slash comparison.
 - **shell**: deny-by-allowlist, first-token match, platform-agnostic list (Unix-only entries like `sed`/`awk` simply never fire on Windows). Not allowlisted → refusal naming the prefix to ask about (TUI: one-key allow/deny). `rm`, `sudo`, `dd`, `shred`, and piping into them: **hard no in v1, no override**.
 - Default allowlist (§12) includes the external tools (`rtk`, `graphify`) — see §10.
+- **Project trust**: loading `<workdir>/.moca/` resources (skills, prompts) requires a trust decision for that directory — a cloned repo can plant them; that's prompt injection plus a slash-command surface. TUI: one-time prompt on first open of an untrusted workdir. One-shot `-p`: `--approve` / `--no-approve` flags, default **no** (project resources skipped). Saved decisions in `~/.local/share/moca/trust.json` (canonical paths). Global resources (`~/.config/moca/skills/`) are always trusted (user-installed by definition).
+- **maxSteps** (config, default **40**): max agentic iterations per run; at the limit the model gets one final request instructing it to wrap up with text only (forced summarization of progress + remaining work). Runaway protection — a confused model looping `read` calls is the #1 token burner.
 - One-shot `-p` mode: workdir-only, no interactive escalation; refusals are transcript errors.
 
 ## 8. Sessions
 
-- `~/.local/share/moca/sessions/<date>-<slug>-<id8>.jsonl`, append-only, one object per line: `{t, role, content, tool_use, tool_result, usage, model}`.
-- Resume: `moca --resume <id8>` / `--resume last`. Tool schemas and compaction state rebuild from transcript.
+- `~/.local/share/moca/sessions/<date>-<slug>-<id8>.jsonl`, append-only. **Every entry has an `id` + `parentId`** — linear chain in v1; the ids make a session tree a v2 extension, not a schema change (Pi's proven shape). Entry types: `message` (user/assistant, **thinking blocks persisted**), `tool_use` + `tool_result`, `compaction`, `model_change`, `error`.
+- `compaction` entry: `summary`, `firstKeptEntryId`, `tokensBefore`, `usage` (§6). Request context rebuilds from the transcript: latest compaction summary + entries from `firstKeptEntryId` onward.
+- Resume: `moca --resume <id8>` / `--resume last` / **`--continue`** (most recent session in this workdir).
 - `usage` on every assistant turn → cumulative cost line live in the status bar.
 
 ## 9. Skills
 
-- Agent Skills standard, same shape as Pi/Claude Code/OpenCode: `<workdir>/.moca/skills/<name>/SKILL.md` + `~/.config/moca/skills/`.
+- Agent Skills standard, same shape as Pi/Claude Code/OpenCode: `<workdir>/.moca/skills/<name>/SKILL.md` + `~/.config/moca/skills/` (the latter always trusted; the former requires project trust, §7).
 - Frontmatter: `name`, `description`, optional `argument-hint`. Discovery = name+description in the system prompt only; body loaded on explicit request. Token-cheap by construction.
 - **Ecosystem compatibility is a hard requirement**: any SKILL.md written for pi/claude-code/opencode (including graphify's, including pi packages) must load unchanged. Tested in phase 5.
 
@@ -151,6 +166,9 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
   - session tokens/cost accumulate from `usage` in responses — cache reads/writes itemized in `/cost` detail, not the bar.
   - updates are event-driven, not polled; during streaming only the spinner changes.
 - Streaming renders inline; tool calls render as collapsible one-liners (`▸ edit main.go [+3 −1]`); `v` opens the diff pager.
+- **Thinking blocks render collapsed** as a one-liner (`⋯ thinking N lines`), toggle to expand — every catalog model emits reasoning; it is persisted in the session (§8) and serialized into compaction (§6), never shown expanded by default.
+- **Input during a run**: a message sent while the agent works is **steering** — it enters after the current assistant turn completes (before the next tool batch). `esc` aborts the run; queued steering messages return to the editor. The input box is never dead.
+- **`!` prefix** runs a shell command from the input box; output enters the conversation as a user message (`!!` runs it locally without model visibility).
 
 ## 12. Config
 
@@ -179,7 +197,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
     "context7": { "url": "https://mcp.context7.com/mcp" }   // lazy: starts on first call, not at startup
   },
 
-  "context": { "compactAtPct": 80, "keepTurns": 4 }
+  "context": { "reserveTokens": 16384, "keepRecentTokens": 20000, "maxSteps": 40 }
 }
 ```
 
@@ -206,9 +224,9 @@ subagents · hooks · plan mode · LSP · web browsing · image gen · voice · 
 ## Phase plan (each = one PR, reviewed)
 
 1. **Skeleton + protocol adapters + streaming** — anthropic-messages + openai-completions codecs, api-key auth. Gate: `moca -p 'hi'` streams **via anthropic AND opencode-go**.
-2. **Seven tools + agent loop + permissions + skills loader** — path jail and allowlist land *with* the tools (no ungated phase); `mcp` tool ships as a stub returning "no servers configured" (schema frozen from day 1 — no churn later). Gates: edit-ladder 10/10 green, jail enforced, a skill discovered.
-3. **TUI shell + slash commands + status bar** — status bar (bottom, below input) from the first frame: cwd · branch · provider/model · effort · context size & usage % · session tokens · session cost. Gate: full session in TUI; `/model`, `/effort`, `/hard` work; bar reflects a `shell`-tool branch change at the next turn; a multi-line paste inserts verbatim and sends intact; `shift+enter` newline verified on an enhanced-keyboard terminal and fallback confirmed on one without.
-4. **Context manager + sessions** — Gate: compaction holds at 80%, resume works, live cost line.
+2. **Seven tools + agent loop + permissions + skills loader + session schema** — path jail, allowlist, project trust, maxSteps, and the session schema (entry ids + types incl. `compaction` placeholder, thinking persisted) land *with* the tools (no ungated phase); `mcp` tool ships as a stub returning "no servers configured" (schema frozen from day 1 — no churn later); pre-edit snapshots. Gates: edit-ladder 10/10 green, jail enforced, untrusted workdir's project skills NOT loaded (trust prompt works), maxSteps forces wrap-up, a skill discovered.
+3. **TUI shell + slash commands + status bar** — status bar (bottom, below input) from the first frame: cwd · branch · provider/model · effort · context size & usage % · session tokens · session cost. Thinking blocks render collapsed; steering input during runs; `!` prefix; `--continue`. Gate: full session in TUI; `/model`, `/effort`, `/hard` work; bar reflects a `shell`-tool branch change at the next turn; a multi-line paste inserts verbatim and sends intact; `shift+enter` newline verified on an enhanced-keyboard terminal and fallback confirmed on one without; a steering message queued mid-run lands after the current assistant turn.
+4. **Context manager + compaction + resume** — token budgets (reserve 16K / keepRecent 20K), cut-point rules, structured summaries with cumulative file tracking, overflow compact-and-retry, no-cache-write on summary requests. Gate: long synthetic session crosses the token threshold and compacts (context shrinks, no tool result orphaned from its call); provider overflow triggers one compact-and-retry; resume + `--continue` rebuild request context from the transcript incl. compaction entries.
 5. **MCP lazy proxy** — stdio + streamable HTTP transports, discovery index, lazy lifecycle, `moca mcp import`. Gates: a real server (e.g. context7 or filesystem) callable via the proxy with no server tool schemas in the prompt (verified by inspecting the request payload); server stopped after idle timeout; import converts an existing Claude-Code/OpenCode/Pi config.
 6. **rtk + model_hard routing + graphify compatibility** — Gates: rtk-wrapped commands preferred in a real session; a graphify/pi SKILL.md loads unchanged.
 7. **OAuth providers + upstream graphify PR + v0.1** — Claude subscription + ChatGPT subscription login (endpoints verified live first), `graphify install --platform moca` upstream, polish, tag `v0.1.0` when §14 passes.
@@ -217,6 +235,7 @@ subagents · hooks · plan mode · LSP · web browsing · image gen · voice · 
 
 ## Revision log
 
+- **rev 7 (2026-10-03, Ben approved design review):** compaction rewritten token-denominated (reserveTokens 16K / keepRecentTokens 20K, cut-point rules — never orphan a tool result, overflow compact-and-retry, no-cache-write on summary, structured summary + cumulative file tracking, 2K truncation in serialization) · session schema: entry ids + types incl. `compaction` (+ `--continue`) · thinking blocks persisted/rendered-collapsed · steering input during runs · project trust (`--approve`/`--no-approve`, trust.json) · maxSteps 40 runaway guard · `!` prefix · pre-edit snapshots. Sources: Pi's shipped compaction/security/usage docs, OpenCode's agents docs + on-disk data layout (snapshot/, tool-output/).
 - **rev 6 (2026-10-03, Ben's question → adopted):** config format TOML → **JSONC** (`~/.config/moca/config.jsonc`, camelCase keys) — stdlib-parseable (comment-strip pre-parse + `encoding/json`, zero config deps), matches the house dotfiles merge machinery (merge-opencode-config.py / merge-pi-config.py semantics: recursive object merge, live-only keys kept, ordered array union, template-wins/`--live-wins`, `.bak`, byte-identical-if-unchanged), native shape of OpenCode-ecosystem configs `moca mcp import` reads.
 - **rev 5 (2026-10-03, Ben's steering):** status bar moved to the **bottom, below the input area** · input area is a real multi-line text area with native multi-line paste (bracketed-paste, verbatim, never auto-sent; >50-line pastes render collapsed, buffer intact; native copy via inline rendering + OSC 52) · `shift+enter` = newline (enhanced keyboard reporting — Kitty protocol/xterm modifyOtherKeys — with `alt+enter`/`ctrl+j` fallbacks + one-time hint on plain terminals).
 - **rev 4 (2026-10-03, Ben's steering):** status bar from day 1 with the exact field set: cwd · branch (dirty marker) · provider/model · **effort** · context size + usage % · session tokens in/out · session cost — effort promoted to a first-class request parameter (`/effort`, protocol-mapped, catalog-validated, default medium); `/hard` = model_hard + effort high; layout inverted (bar on top); context-usage estimate and per-response usage accounting pulled into phase 3.
