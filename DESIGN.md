@@ -1,6 +1,6 @@
 # moca DESIGN.md — v1 contract
 
-Status: **REV 4 — steering applied, awaiting final lock**. Revision log at bottom. Once locked, this doc is the source of truth; changes require a new revision, not silent drift.
+Status: **REV 5 — steering applied, awaiting final lock**. Revision log at bottom. Once locked, this doc is the source of truth; changes require a new revision, not silent drift.
 
 ## Purpose
 
@@ -140,15 +140,17 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
 ## 11. TUI
 
 - Bubble Tea + lipgloss. Compact/dense per house style: tight padding, no banners.
-- Layout: **status bar (top, 1 line, from day 1)** · scrollback (fills) · input box (bottom).
+- Layout: scrollback (fills) · input box · **status bar (bottom, below the input area, 1 line, from day 1)**.
+- **Input area is a real multi-line text area** (cursor, wrapping, vertical scroll within the box):
+  - **Multi-line copy/paste works natively.** Paste: bracketed-paste mode detects pastes and inserts the full content verbatim — never truncated, never auto-sent. A paste >50 lines renders as a collapsed `[paste N lines]` display chip in the input view (`alt+p` toggles) while the full content stays intact in the buffer. Copy: inline rendering (no alt-screen) and no mouse capture in v1 — native terminal selection + copy works over the whole scrollback; OSC 52 additionally writes selected text to the clipboard (works over SSH).
+  - **`shift+enter` = new line** (primary). Technical note: plain terminals send identical bytes for Enter and Shift+Enter — distinguishing them requires enhanced keyboard reporting (Kitty keyboard protocol or xterm `modifyOtherKeys`). Phase 3 pins the Bubble Tea version with that support enabled and degrades gracefully: `alt+enter` / `ctrl+j` fallback bindings plus a one-time status hint when the terminal can't report it.
+  - `enter` sends · `↑/↓` input history (at buffer edges) · `esc` interrupt · `ctrl+c` twice quit · `/` prefix = commands: `/model`, `/effort`, `/hard`, `/clear`, `/compact`, `/cost`.
 - **Status bar — one line, always current, contains exactly:** `cwd` (home-abbreviated, e.g. `~/projects/moca`) · `branch` (git, dirty marker `*`, non-git = dimmed `-`) · `provider/model` + **effort** (e.g. `opencode-go/glm-5.3-flash · med`) · **context size and usage %** (e.g. `ctx 1M · 23%`) · **session tokens in/out** (e.g. `24k/6k`) · **session cost** (e.g. `$0.0412`), live per response.
   - cwd and branch update on every turn end (they can change mid-session via tools).
   - context usage % = estimated tokens of the next request against the catalog's context window; recalculated after every tool result and response.
   - session tokens/cost accumulate from `usage` in responses — cache reads/writes itemized in `/cost` detail, not the bar.
   - updates are event-driven, not polled; during streaming only the spinner changes.
 - Streaming renders inline; tool calls render as collapsible one-liners (`▸ edit main.go [+3 −1]`); `v` opens the diff pager.
-- Keys: `enter` send · `alt+enter` newline · `↑/↓` history · `esc` interrupt · `ctrl+c` twice quit · `/` commands: `/model`, `/effort`, `/hard`, `/clear`, `/compact`, `/cost`.
-- Paste >8 lines → `[paste N lines]` chip, `alt+p` expands.
 
 ## 12. Config
 
@@ -209,7 +211,7 @@ subagents · hooks · plan mode · LSP · web browsing · image gen · voice · 
 
 1. **Skeleton + protocol adapters + streaming** — anthropic-messages + openai-completions codecs, api-key auth. Gate: `moca -p 'hi'` streams **via anthropic AND opencode-go**.
 2. **Seven tools + agent loop + permissions + skills loader** — path jail and allowlist land *with* the tools (no ungated phase); `mcp` tool ships as a stub returning "no servers configured" (schema frozen from day 1 — no churn later). Gates: edit-ladder 10/10 green, jail enforced, a skill discovered.
-3. **TUI shell + slash commands + status bar** — status bar from the first frame: cwd · branch · provider/model · effort · context size & usage % · session tokens · session cost. Gate: full session in TUI; `/model`, `/effort`, `/hard` work; bar reflects a `shell`-tool branch change at the next turn.
+3. **TUI shell + slash commands + status bar** — status bar (bottom, below input) from the first frame: cwd · branch · provider/model · effort · context size & usage % · session tokens · session cost. Gate: full session in TUI; `/model`, `/effort`, `/hard` work; bar reflects a `shell`-tool branch change at the next turn; a multi-line paste inserts verbatim and sends intact; `shift+enter` newline verified on an enhanced-keyboard terminal and fallback confirmed on one without.
 4. **Context manager + sessions** — Gate: compaction holds at 80%, resume works, live cost line.
 5. **MCP lazy proxy** — stdio + streamable HTTP transports, discovery index, lazy lifecycle, `moca mcp import`. Gates: a real server (e.g. context7 or filesystem) callable via the proxy with no server tool schemas in the prompt (verified by inspecting the request payload); server stopped after idle timeout; import converts an existing Claude-Code/OpenCode/Pi config.
 6. **rtk + model_hard routing + graphify compatibility** — Gates: rtk-wrapped commands preferred in a real session; a graphify/pi SKILL.md loads unchanged.
@@ -219,6 +221,7 @@ subagents · hooks · plan mode · LSP · web browsing · image gen · voice · 
 
 ## Revision log
 
+- **rev 5 (2026-10-03, Ben's steering):** status bar moved to the **bottom, below the input area** · input area is a real multi-line text area with native multi-line paste (bracketed-paste, verbatim, never auto-sent; >50-line pastes render collapsed, buffer intact; native copy via inline rendering + OSC 52) · `shift+enter` = newline (enhanced keyboard reporting — Kitty protocol/xterm modifyOtherKeys — with `alt+enter`/`ctrl+j` fallbacks + one-time hint on plain terminals).
 - **rev 4 (2026-10-03, Ben's steering):** status bar from day 1 with the exact field set: cwd · branch (dirty marker) · provider/model · **effort** · context size + usage % · session tokens in/out · session cost — effort promoted to a first-class request parameter (`/effort`, protocol-mapped, catalog-validated, default medium); `/hard` = model_hard + effort high; layout inverted (bar on top); context-usage estimate and per-response usage accounting pulled into phase 3.
 - **rev 3 (2026-10-03, Ben's steering):** MCP support in v1, lazy by design — one fixed ~200-token `mcp` proxy tool (§10.5), server tool lists never enter the prompt, lazy server lifecycle (first-call start, 10-min idle stop), discovery index, stdio + streamable HTTP, filtered subprocess env, risky-tool gating, `moca mcp import`; tool count six → seven (schema frozen at phase 2 as a stub so no churn); phase plan six → seven phases (MCP gets its own PR).
 - **rev 2 (2026-10-03, Ben's steering):** `bash` → `shell` (PowerShell on Windows) · `model` + `model_hard` from day 1 · three day-1 providers (OpenCode Go / Claude / OpenAI, incl. subscription OAuth) replacing the anthropic+openai-compat pair · external tools (rtk, graphify) from day 1 via skills/commands/allowlist · phase plan restructured (permissions pulled into phase 2, OAuth + upstream graphify PR in phase 6).
