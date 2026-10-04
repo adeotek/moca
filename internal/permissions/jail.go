@@ -99,7 +99,10 @@ func within(base, p string) bool {
 
 func (j *Jail) Resolve(path string, write bool) (string, error) {
 	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("cannot expand ~: %w", err)
+		}
 		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
 	}
 	if !filepath.IsAbs(path) {

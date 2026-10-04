@@ -5,6 +5,7 @@ package tools
 import (
 	"context"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -69,5 +70,53 @@ func TestTruncate(t *testing.T) {
 	}
 	if Truncate("short", 30_000) != "short" {
 		t.Fatal("no-op under cap")
+	}
+}
+
+func TestTruncateLongLines(t *testing.T) {
+	// One line longer than the whole budget: both ends must still be shown.
+	long := strings.Repeat("x", 100_000)
+	got := Truncate(long, 30_000)
+	if !strings.HasPrefix(got, "xxx") || !strings.HasSuffix(got, "xxx") || !strings.Contains(got, "bytes omitted]") {
+		t.Fatalf("len=%d %q…%q", len(got), got[:40], got[len(got)-40:])
+	}
+	if len(got) > 30_100 {
+		t.Fatalf("oversized: %d", len(got))
+	}
+	// Normal head lines followed by one very long line: the tail must survive.
+	mixed := strings.Repeat("short line\n", 40) + strings.Repeat("y", 100_000)
+	got = Truncate(mixed, 30_000)
+	if !strings.Contains(got, "short line") || !strings.Contains(got, "bytes omitted]") || !strings.HasSuffix(got, "yyy") {
+		t.Fatalf("mixed: len=%d tail=%q", len(got), got[len(got)-20:])
+	}
+}
+
+func TestRunShellBoundsCapture(t *testing.T) {
+	out, err := RunShell(context.Background(), t.TempDir(), os.Environ(), "seq 1 200000", 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.Output, "bytes omitted]") || len(out.Output) > shellCaptureMax+100 {
+		t.Fatalf("capture must be bounded: %d bytes", len(out.Output))
+	}
+	if !strings.HasPrefix(out.Output, "1\n") || !strings.HasSuffix(strings.TrimSpace(out.Output), "200000") {
+		t.Fatalf("head/tail lost: %q…%q", out.Output[:10], out.Output[len(out.Output)-20:])
+	}
+}
+
+func TestRunShellSetsidDescendantDoesNotBlock(t *testing.T) {
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid not available")
+	}
+	start := time.Now()
+	out, err := RunShell(context.Background(), t.TempDir(), os.Environ(), "setsid sleep 30 & echo hi", 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 4*time.Second {
+		t.Fatalf("Wait blocked on a straggler holding the pipe: %v", time.Since(start))
+	}
+	if !strings.Contains(out.Output, "hi") || out.TimedOut || out.ExitCode != 0 {
+		t.Fatalf("%+v", out)
 	}
 }

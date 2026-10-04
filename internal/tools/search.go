@@ -16,7 +16,10 @@ import (
 	"github.com/adeotek/moca/internal/llm"
 )
 
-const searchCap = 200
+const (
+	searchCap         = 200
+	searchMaxFileSize = 4 << 20
+)
 
 type searchTool struct{}
 
@@ -56,6 +59,7 @@ func (searchTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resu
 	}
 	var hits []string
 	capped := false
+	skippedLarge := 0
 	var rules []ignoreRule
 	loadIgnores := func(dirAbs, rel string) {
 		for _, n := range []string{".gitignore", ".ignore"} {
@@ -63,6 +67,28 @@ func (searchTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resu
 				rules = append(rules, parseIgnore(rel, b)...)
 			}
 		}
+	}
+	// gitignore semantics: ignore files apply from the workdir down, deeper
+	// files overriding. Rules are keyed by paths relative to base; load the
+	// ancestors of start first, the walk loads start itself and below.
+	base := start
+	if r, err := filepath.Rel(env.Root, start); err == nil && !strings.HasPrefix(r, "..") {
+		base = env.Root
+	}
+	relBase := func(dir string) string {
+		r, err := filepath.Rel(base, dir)
+		if err != nil || r == "." {
+			return ""
+		}
+		return filepath.ToSlash(r)
+	}
+	for cur := env.Root; base != start && cur != start; {
+		loadIgnores(cur, relBase(cur))
+		r, err := filepath.Rel(cur, start)
+		if err != nil {
+			break
+		}
+		cur = filepath.Join(cur, strings.SplitN(filepath.ToSlash(r), "/", 2)[0])
 	}
 	// display paths relative to the workdir when inside it
 	display := func(abs string) string {
@@ -75,23 +101,20 @@ func (searchTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resu
 		if err != nil || ctx.Err() != nil {
 			return ctx.Err()
 		}
-		rel, _ := filepath.Rel(start, p)
-		rel = filepath.ToSlash(rel)
-		if rel == "." {
-			if d.IsDir() {
-				loadIgnores(p, "")
-			}
-		} else {
-			if strings.HasPrefix(d.Name(), ".") || ignored(rules, rel, d.IsDir()) {
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
+		rel := relBase(p)
+		switch {
+		case p == start:
 			if d.IsDir() {
 				loadIgnores(p, rel)
-				return nil
 			}
+		case strings.HasPrefix(d.Name(), ".") || ignored(rules, rel, d.IsDir()):
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		case d.IsDir():
+			loadIgnores(p, rel)
+			return nil
 		}
 		if d.IsDir() || !d.Type().IsRegular() {
 			return nil
@@ -105,6 +128,12 @@ func (searchTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resu
 			if ok, _ := path.Match(a.Glob, target); !ok {
 				return nil
 			}
+		}
+		if fi, err := d.Info(); err != nil {
+			return nil
+		} else if fi.Size() > searchMaxFileSize {
+			skippedLarge++
+			return nil
 		}
 		data, err := os.ReadFile(p)
 		if err != nil || bytes.IndexByte(data[:min(len(data), 8192)], 0) >= 0 {
@@ -136,11 +165,18 @@ func (searchTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resu
 		return errorf("%v", err)
 	}
 	if len(hits) == 0 {
-		return Result{Content: "[no matches]", Summary: a.Pattern + " (0)"}
+		msg := "[no matches]"
+		if skippedLarge > 0 {
+			msg += fmt.Sprintf("\n[… %d files larger than %d MB skipped]", skippedLarge, searchMaxFileSize>>20)
+		}
+		return Result{Content: msg, Summary: a.Pattern + " (0)"}
 	}
 	out := strings.Join(hits, "\n")
 	if capped {
 		out += "\n[… results capped at 200; narrow the pattern or path]"
+	}
+	if skippedLarge > 0 {
+		out += fmt.Sprintf("\n[… %d files larger than %d MB skipped]", skippedLarge, searchMaxFileSize>>20)
 	}
 	return Result{Content: out, Summary: fmt.Sprintf("%s (%d)", a.Pattern, len(hits))}
 }

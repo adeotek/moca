@@ -58,3 +58,32 @@ func TestSearchCap(t *testing.T) {
 		t.Fatalf("cap: %d lines", strings.Count(r.Content, "\n"))
 	}
 }
+
+func TestSearchAppliesAncestorIgnores(t *testing.T) {
+	env, root := testEnv(t)
+	write(t, root, ".gitignore", "ignored.txt\n")
+	write(t, root, "sub/ignored.txt", "needle\n")
+	write(t, root, "sub/kept.txt", "needle\n")
+
+	r := run(t, searchTool{}, env, map[string]any{"pattern": "needle", "path": "sub"})
+	if r.Content != "sub/kept.txt:1:needle" {
+		t.Fatalf("workdir .gitignore must apply to a sub-path search: %q", r.Content)
+	}
+	r = run(t, searchTool{}, env, map[string]any{"pattern": "needle"})
+	if r.Content != "sub/kept.txt:1:needle" {
+		t.Fatalf("%q", r.Content)
+	}
+}
+
+func TestSearchSkipsHugeFiles(t *testing.T) {
+	env, root := testEnv(t)
+	write(t, root, "small.txt", "needle\n")
+	write(t, root, "big.txt", "needle\n"+strings.Repeat("filler line\n", (searchMaxFileSize/12)+2))
+	r := run(t, searchTool{}, env, map[string]any{"pattern": "needle"})
+	if !strings.Contains(r.Content, "small.txt:1:needle") || !strings.Contains(r.Content, "larger than 4 MB skipped]") {
+		t.Fatalf("%q", r.Content)
+	}
+	if strings.Contains(r.Content, "big.txt:1:needle") {
+		t.Fatal("huge file must be skipped, not read")
+	}
+}

@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -74,14 +76,52 @@ func (writeTool) Run(_ context.Context, env *Env, input json.RawMessage) Result 
 	if fi, err := os.Stat(abs); err == nil && fi.IsDir() {
 		return errorf("%s is a directory", a.Path)
 	}
-	prev, readErr := os.ReadFile(abs)
+	prevLines, hasPrev := 0, false
+	if fi, err := os.Stat(abs); err == nil && !fi.IsDir() {
+		if n, err := countFileLines(abs); err == nil {
+			prevLines, hasPrev = n, true
+		}
+	}
 	if err := guardedWrite(env, abs, []byte(a.Content)); err != nil {
 		return errorf("%v", err)
 	}
 	n := countLines(a.Content)
-	if readErr != nil {
+	if !hasPrev {
 		return Result{Content: fmt.Sprintf("created %s (%d lines)", a.Path, n), Summary: fmt.Sprintf("%s [+%d]", a.Path, n)}
 	}
-	m := countLines(string(prev))
-	return Result{Content: fmt.Sprintf("wrote %s (%d lines, was %d)", a.Path, n, m), Summary: fmt.Sprintf("%s [+%d −%d]", a.Path, n, m)}
+	return Result{Content: fmt.Sprintf("wrote %s (%d lines, was %d)", a.Path, n, prevLines), Summary: fmt.Sprintf("%s [+%d −%d]", a.Path, n, prevLines)}
+}
+
+// countFileLines counts a file's lines by streaming it (a previous version
+// loaded the whole file just for the count).
+func countFileLines(path string) (int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	var n, size int
+	var last byte
+	buf := make([]byte, 64<<10)
+	for {
+		k, rerr := f.Read(buf)
+		if k > 0 {
+			size += k
+			last = buf[k-1]
+			n += bytes.Count(buf[:k], []byte{'\n'})
+		}
+		if rerr != nil {
+			if rerr == io.EOF {
+				break
+			}
+			return 0, rerr
+		}
+	}
+	if size == 0 {
+		return 0, nil
+	}
+	if last != '\n' {
+		n++
+	}
+	return n, nil
 }

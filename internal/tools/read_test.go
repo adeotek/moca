@@ -109,3 +109,20 @@ func TestReadTracker(t *testing.T) {
 		t.Fatal("non-existent file needs no read")
 	}
 }
+
+func TestReadRefusesHugeFile(t *testing.T) {
+	env, root := testEnv(t)
+	p := filepath.Join(root, "huge.txt")
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(readMaxFileSize + 1); err != nil { // sparse, no disk cost
+		t.Fatal(err)
+	}
+	f.Close()
+	r := run(t, readTool{}, env, map[string]any{"path": "huge.txt"})
+	if !r.IsError || !strings.Contains(r.Content, "too large") {
+		t.Fatalf("%q", r.Content)
+	}
+}

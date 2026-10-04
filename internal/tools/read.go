@@ -1,10 +1,12 @@
 package tools
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -13,9 +15,10 @@ import (
 )
 
 const (
-	readMaxLines   = 2000
-	readMaxChars   = 50_000
-	readMaxLineLen = 2000
+	readMaxLines    = 2000
+	readMaxChars    = 50_000
+	readMaxLineLen  = 2000
+	readMaxFileSize = 256 << 20
 )
 
 type readTool struct{}
@@ -62,40 +65,62 @@ func (readTool) Run(_ context.Context, env *Env, input json.RawMessage) Result {
 	if fi.IsDir() {
 		return errorf("%s is a directory; use ls", a.Path)
 	}
-	data, err := os.ReadFile(abs)
+	if !fi.Mode().IsRegular() {
+		return errorf("%s is not a regular file (%s); not read", a.Path, fi.Mode().Type())
+	}
+	if fi.Size() > readMaxFileSize {
+		return errorf("%s is %d bytes; too large to read in one call (limit %d MB) — use shell (head/tail) or search",
+			a.Path, fi.Size(), readMaxFileSize>>20)
+	}
+	f, err := os.Open(abs)
 	if err != nil {
 		return errorf("%v", err)
 	}
-	if bytes.IndexByte(data[:min(len(data), 8192)], 0) >= 0 {
-		return errorf("%s is a binary file (%d bytes, %s); not shown", a.Path, len(data), http.DetectContentType(data))
+	defer f.Close()
+	head := make([]byte, 8192)
+	n, rerr := io.ReadFull(f, head)
+	if rerr != nil && rerr != io.ErrUnexpectedEOF && rerr != io.EOF {
+		return errorf("%v", rerr)
+	}
+	if bytes.IndexByte(head[:n], 0) >= 0 {
+		return errorf("%s is a binary file (%d bytes, %s); not shown", a.Path, fi.Size(), http.DetectContentType(head[:n]))
 	}
 	env.Reads.Record(abs)
 
-	text := strings.TrimSuffix(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
-	lines := strings.Split(text, "\n")
-	if text == "" {
-		lines = nil
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return errorf("%v", err)
 	}
-	total := len(lines)
+	br := bufio.NewReaderSize(f, 64<<10)
+	var sb strings.Builder
+	lineNo, last, total := 0, offset-1, 0
+	for {
+		line, more, rerr := readLine(br, readMaxLineLen)
+		if rerr != nil {
+			if rerr != io.EOF {
+				return errorf("%v", rerr)
+			}
+			break
+		}
+		lineNo++
+		total = lineNo
+		if lineNo < offset || lineNo >= offset+limit {
+			continue
+		}
+		if more {
+			line += "[… line truncated]"
+		}
+		entry := fmt.Sprintf("%d|%s\n", lineNo, line)
+		if sb.Len()+len(entry) > readMaxChars && lineNo > offset {
+			continue // keep scanning to report the real total
+		}
+		sb.WriteString(entry)
+		last = lineNo
+	}
 	if total == 0 {
 		return Result{Content: "[empty file]", Summary: a.Path}
 	}
 	if offset > total {
 		return errorf("offset %d is past the end (%d lines)", offset, total)
-	}
-	var sb strings.Builder
-	last := offset - 1
-	for i := offset - 1; i < total && i < offset-1+limit; i++ {
-		line := lines[i]
-		if len(line) > readMaxLineLen {
-			line = line[:readMaxLineLen] + "[… line truncated]"
-		}
-		entry := fmt.Sprintf("%d|%s\n", i+1, line)
-		if sb.Len()+len(entry) > readMaxChars && i > offset-1 {
-			break
-		}
-		sb.WriteString(entry)
-		last = i + 1
 	}
 	footer := fmt.Sprintf("[lines %d-%d of %d]", offset, last, total)
 	if last < total {
@@ -103,4 +128,28 @@ func (readTool) Run(_ context.Context, env *Env, input json.RawMessage) Result {
 	}
 	sb.WriteString(footer)
 	return Result{Content: sb.String(), Summary: fmt.Sprintf("%s %d-%d/%d", a.Path, offset, last, total)}
+}
+
+// readLine reads one line (without its newline; a trailing \r is trimmed),
+// capped at max bytes with more=true when the line continues past the cap.
+// io.EOF is returned only when nothing was read.
+func readLine(br *bufio.Reader, max int) (line string, more bool, err error) {
+	var sb strings.Builder
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			if sb.Len() > 0 {
+				return sb.String(), more, nil
+			}
+			return "", false, err
+		}
+		if b == '\n' {
+			return strings.TrimSuffix(sb.String(), "\r"), more, nil
+		}
+		if sb.Len() < max {
+			sb.WriteByte(b)
+		} else {
+			more = true
+		}
+	}
 }

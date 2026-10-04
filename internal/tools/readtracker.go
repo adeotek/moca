@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"sync"
@@ -27,15 +28,22 @@ type ReadTracker struct {
 func NewReadTracker() *ReadTracker { return &ReadTracker{m: map[string]stamp{}} }
 
 func stampOf(abs string) (stamp, error) {
-	fi, err := os.Stat(abs)
+	f, err := os.Open(abs)
 	if err != nil {
 		return stamp{}, err
 	}
-	b, err := os.ReadFile(abs)
+	defer f.Close()
+	fi, err := f.Stat()
 	if err != nil {
 		return stamp{}, err
 	}
-	return stamp{fi.ModTime(), fi.Size(), sha256.Sum256(b)}, nil
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return stamp{}, err
+	}
+	var sum [32]byte
+	copy(sum[:], h.Sum(nil))
+	return stamp{fi.ModTime(), fi.Size(), sum}, nil
 }
 
 func (t *ReadTracker) Record(abs string) error {

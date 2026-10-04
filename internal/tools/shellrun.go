@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type ShellOutput struct {
@@ -43,11 +43,14 @@ func RunShell(ctx context.Context, dir string, env []string, command string, tim
 	}
 	cmd := exec.Command(name, args...)
 	cmd.Dir, cmd.Env = dir, env
+	// After a kill, do not wait on stragglers (setsid descendants) holding
+	// the output pipe.
+	cmd.WaitDelay = 2 * time.Second
 	devnull, _ := os.Open(os.DevNull)
 	defer devnull.Close()
 	cmd.Stdin = devnull
-	var buf bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &buf, &buf
+	w := &boundedWriter{max: shellCaptureMax}
+	cmd.Stdout, cmd.Stderr = w, w
 	setProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		return ShellOutput{}, err
@@ -61,13 +64,15 @@ func RunShell(ctx context.Context, dir string, env []string, command string, tim
 		killProcessGroup(cmd)
 		werr = <-done
 	}
-	out := ShellOutput{Output: strings.ToValidUTF8(buf.String(), "\uFFFD")}
+	out := ShellOutput{Output: strings.ToValidUTF8(w.String(), "\uFFFD")}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		out.TimedOut = true
 	}
 	var ee *exec.ExitError
 	switch {
 	case werr == nil:
+	case errors.Is(werr, exec.ErrWaitDelay):
+		// the command exited; a straggler kept the output pipe open
 	case errors.As(werr, &ee):
 		out.ExitCode = ee.ExitCode()
 	default:
@@ -79,7 +84,48 @@ func RunShell(ctx context.Context, dir string, env []string, command string, tim
 	return out, nil
 }
 
-// Truncate keeps whole lines from the head and tail, ~max/2 chars each.
+// shellCaptureMax bounds what a shell command's output can hold in memory;
+// the shell tool only ever returns 30K chars, so the rest is dropped with a
+// visible note (an unbounded buffer lets `yes` exhaust memory).
+const shellCaptureMax = 64 << 10
+
+// boundedWriter keeps the first half and the last half of what is written,
+// up to max bytes.
+type boundedWriter struct {
+	head, tail []byte
+	max        int
+	total      int64
+}
+
+func (w *boundedWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	w.total += int64(n)
+	half := w.max / 2
+	if len(w.head) < half {
+		k := min(half-len(w.head), n)
+		w.head = append(w.head, p[:k]...)
+		p = p[k:]
+	}
+	if len(p) > 0 {
+		w.tail = append(w.tail, p...)
+		if d := len(w.tail) - half; d > 0 {
+			w.tail = append(w.tail[:0], w.tail[d:]...)
+		}
+	}
+	return n, nil
+}
+
+func (w *boundedWriter) String() string {
+	dropped := w.total - int64(len(w.head)+len(w.tail))
+	if dropped <= 0 {
+		return string(w.head) + string(w.tail)
+	}
+	return string(w.head) + fmt.Sprintf("[… %d bytes omitted]\n", dropped) + string(w.tail)
+}
+
+// Truncate keeps whole lines from the head and tail, ~max/2 chars each. When
+// a side cannot hold even one line (output dominated by a single long line),
+// it falls back to character windows snapped to rune boundaries.
 func Truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
@@ -99,6 +145,36 @@ func Truncate(s string, max int) string {
 		tail = append([]string{lines[j]}, tail...)
 		n += len(lines[j])
 	}
+	if len(head) == 0 || len(tail) == 0 {
+		h := runePrefix(s, half)
+		t := runeSuffix(s, half)
+		return h + fmt.Sprintf("[… %d bytes omitted]\n", len(s)-len(h)-len(t)) + t
+	}
 	omitted := j - i + 1
 	return strings.Join(head, "") + fmt.Sprintf("[… %d lines omitted]\n", omitted) + strings.Join(tail, "")
+}
+
+// runePrefix returns the longest prefix of s that fits in n bytes without
+// splitting a rune.
+func runePrefix(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+// runeSuffix returns the longest suffix of s that fits in n bytes without
+// splitting a rune.
+func runeSuffix(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	i := len(s) - n
+	for i < len(s) && !utf8.RuneStart(s[i]) {
+		i++
+	}
+	return s[i:]
 }
