@@ -3807,3 +3807,17 @@ Replace the `**Status: …**` line with:
 git add README.md .gitignore
 git commit -m "docs: phase 1 gate passed"
 ```
+
+---
+
+## Implementation notes (post-review, folded into the phase-1 PR)
+
+- **Truncation detection** (Tasks 6–8): all three adapters return `io.ErrUnexpectedEOF` when the stream ends cleanly without its terminal event (`message_stop` / `finish_reason`|`[DONE]` / `response.completed|incomplete`) — a proxy closing mid-response must not read as a successful turn. `retryable()` covers it.
+- **Task 6 `redacted_thinking`**: the Task-6 snippet above replayed redacted blocks as empty thinking blocks — a 400 on the next turn; Anthropic requires them echoed back verbatim ("filtering out `redacted_thinking` blocks triggers a 400"). Implemented shape: capture the opaque `data` payload (`ContentBlock.Redacted` + `Signature`), replay as `{type:"redacted_thinking",data:…}` (Pi 1.0.1's proven shape).
+- **Task 6 `body()` hygiene**: messages reduced to zero blocks are skipped (`content: []` is a 400); the message-level `cache_control` breakpoint skips thinking/empty-text blocks and walks back to the last eligible block (thinking blocks cannot be cached directly — docs.anthropic.com prompt-caching).
+- **Task 7 tool calls**: `finish_reason:"length"` no longer gets force-upgraded to `tool_use` when a truncated call was assembled; the stop reason is preserved so phase 2 can turn it into an error result (§6).
+- **Task 8 responses**: reasoning summary text is accumulated from `response.reasoning_summary_text.delta` and used when the final reasoning item carries no summary.
+- **Task 9 retry**: `io.EOF` and HTTP 408 are retryable; `retry-after` waits are capped at 60s.
+- **Task 10 registry**: a config-declared model under a built-in provider must declare `protocol` — fails fast in `NewRegistry` instead of a confusing `Resolve` error.
+- **Task 11 CLI**: subcommand stubs dispatch before the "no model configured" check; SIGTERM cancels like SIGINT.
+- **Acknowledged, deferred**: `EventReset` stdout duplication in `-p` (documented above — phase 2 buffers); `glmThinking`'s `off` semantics (plan-pinned map; validate in the live smoke gate — fix would be a catalog row, not the adapter); `readSSE`'s `timer.Reset` pattern (safe on Go ≥1.23 — unbuffered timer channels, no stale value after Reset; probed on 1.27.1).
