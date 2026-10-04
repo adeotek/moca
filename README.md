@@ -1,10 +1,12 @@
 # moca — MO Coding Agent
 
+[![CI](https://github.com/adeotek/moca/actions/workflows/ci.yml/badge.svg)](https://github.com/adeotek/moca/actions/workflows/ci.yml)
+
 Minimal, token-efficient, provider-agnostic coding agent. Single Go binary, Bubble Tea TUI, seven tools, no framework.
 
 Inspired by Claude Code, OpenCode, and Pi — deliberately ~10% of their surface area. Competes on **cost per task** and **read-the-whole-codebase-in-an-hour** transparency, not features.
 
-**Status: phase 0 — [DESIGN.md](docs/specs/DESIGN.md) rev 11 (plan review fixes), awaiting lock.** No code until the doc is signed off. Per-phase implementation plans: [`docs/plans/`](docs/plans/).
+**Status: phase 1 implemented — `moca -p` streams via the anthropic-messages / openai-completions / openai-responses codecs; unit + mock-transport gates green, live provider smoke green (2026-10-05, 11/11).** Next: phase 2 (tools + agent loop). Specs: [`docs/specs/SPECS.md`](docs/specs/SPECS.md) (current state) · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) (v1 vision) · Plans: [`docs/plans/`](docs/plans/).
 
 ## Stack
 
