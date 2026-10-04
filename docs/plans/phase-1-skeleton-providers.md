@@ -3820,4 +3820,12 @@ git commit -m "docs: phase 1 gate passed"
 - **Task 9 retry**: `io.EOF` and HTTP 408 are retryable; `retry-after` waits are capped at 60s.
 - **Task 10 registry**: a config-declared model under a built-in provider must declare `protocol` — fails fast in `NewRegistry` instead of a confusing `Resolve` error.
 - **Task 11 CLI**: subcommand stubs dispatch before the "no model configured" check; SIGTERM cancels like SIGINT.
-- **Acknowledged, deferred**: `EventReset` stdout duplication in `-p` (documented above — phase 2 buffers); `glmThinking`'s `off` semantics (plan-pinned map; validate in the live smoke gate — fix would be a catalog row, not the adapter); `readSSE`'s `timer.Reset` pattern (safe on Go ≥1.23 — unbuffered timer channels, no stale value after Reset; probed on 1.27.1).
+- **Second review pass (folded into the phase-1 PR)**:
+  - `-p` buffers stdout until the stream ends and discards it on `EventReset`, so a mid-stream retry cannot duplicate text in a pipe; `StopLength` / `StopRefusal` print a diagnostic and exit 1.
+  - Tool calls whose arguments are not valid JSON (cut off by `max_tokens`) are dropped by all three adapters — never emitted, never stored — and the stop reason becomes `length`. History replay also sanitizes a nil/invalid tool `Input` to `{}`.
+  - Thinking replays verbatim only to the exact producing model and only with a signature (§3); otherwise it degrades to `[prior reasoning]` text, and redacted/empty blocks are dropped. Shared in `replay.go`.
+  - `BudgetTokens(maxTokens, effort)`: low 25% · medium 50% · high 75% · max the rest, floored at 1024 and leaving 1024 for the answer; below 2048 `max_tokens` thinking is omitted.
+  - `glmThinking` maps `off` to `"none"` so `--effort off` is explicit on the wire. **Unverified against the live opencode-go endpoint — check in the live smoke gate;** if the server rejects `none`, the fix is a catalog row, not the adapter.
+  - A built-in-provider model's protocol may come from the model entry itself (`providers.<p>.models.<m>.protocol`).
+  - Retry: ECONNREFUSED / EPIPE / ECONNABORTED / HTTP/2 GOAWAY and stream resets are retryable; `Retry-After` accepts fractional seconds and is clamped at 0; the mid-stream retry is announced and backs off like any other; a 200 that is not `text/event-stream` fails fast instead of walking the backoff schedule.
+- **Acknowledged, deferred**: `readSSE`'s `timer.Reset` pattern (safe on Go ≥1.23 — unbuffered timer channels, no stale value after Reset; probed on 1.27.1).
