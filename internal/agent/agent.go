@@ -42,10 +42,17 @@ type Agent struct {
 	entries []session.Entry // full transcript (in-memory mirror)
 	usage   llm.Usage
 	cost    float64
+	yolo    bool
+	strict  struct {
+		paths tools.PathChecker
+		cmds  tools.CommandChecker
+		ask   tools.Asker
+	}
 }
 
 func New(o Options) (*Agent, error) {
 	a := &Agent{opts: o, entries: o.Prior}
+	a.strict.paths, a.strict.cmds, a.strict.ask = o.Env.Paths, o.Env.Commands, o.Env.Ask
 	if err := a.setModel(o.Model, o.Effort); err != nil {
 		return nil, err
 	}

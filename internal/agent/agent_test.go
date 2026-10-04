@@ -63,7 +63,7 @@ func newScript(t *testing.T, turns ...string) *scriptServer {
 	return s
 }
 
-func startTest(t *testing.T, s *scriptServer, maxSteps int) (*Agent, string, *[]Event) {
+func startTest(t *testing.T, s *scriptServer, maxSteps int, mods ...func(*StartOptions)) (*Agent, string, *[]Event) {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -76,7 +76,11 @@ func startTest(t *testing.T, s *scriptServer, maxSteps int) (*Agent, string, *[]
 		t.Fatal(err)
 	}
 	var evs []Event
-	a, err := Start(StartOptions{Config: cfg, Workdir: work, Emit: func(e Event) { evs = append(evs, e) }, HTTP: s.srv.Client(), Slug: "t"})
+	o := StartOptions{Config: cfg, Workdir: work, Emit: func(e Event) { evs = append(evs, e) }, HTTP: s.srv.Client(), Slug: "t"}
+	for _, mod := range mods {
+		mod(&o)
+	}
+	a, err := Start(o)
 	if err != nil {
 		t.Fatal(err)
 	}

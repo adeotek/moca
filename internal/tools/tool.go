@@ -54,6 +54,9 @@ type Question struct {
 
 type Asker func(ctx context.Context, q Question) Answer
 
+// AutoAllow is the yolo-mode Asker: every approval is granted once.
+func AutoAllow(context.Context, Question) Answer { return AllowOnce }
+
 type Env struct {
 	Root     string
 	Paths    PathChecker

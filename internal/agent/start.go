@@ -24,6 +24,7 @@ type StartOptions struct {
 	Model   string
 	Effort  string
 	Trusted bool
+	Yolo    bool
 	Ask     tools.Asker
 	Emit    func(Event)
 	HTTP    *http.Client
@@ -94,7 +95,7 @@ func Start(o StartOptions) (*Agent, error) {
 	}
 	w, err := session.Create(filepath.Join(config.DataDir(), "sessions"), session.Header{
 		Workdir: jail.Root(), Provider: m.Provider, Model: cfg.Model, Effort: string(effort),
-		MocaVersion: config.Version, SystemPrompt: system}, slug)
+		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.Yolo}, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +103,13 @@ func Start(o StartOptions) (*Agent, error) {
 	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(cfg.Shell.Allow, jail, runtime.GOOS),
 		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
 		ShellEnv: tools.ShellEnv(os.Environ(), config.EnvRefs(cfg))}
-	return New(Options{Config: cfg, Providers: reg, Tools: tools.NewRegistry(tools.Builtins()...), Env: env,
+	a, err := New(Options{Config: cfg, Providers: reg, Tools: tools.NewRegistry(tools.Builtins()...), Env: env,
 		Session: w, Snapshots: snaps, System: system, Model: cfg.Model, Effort: effort, Emit: o.Emit})
+	if err != nil {
+		return nil, err
+	}
+	if o.Yolo {
+		a.applyYolo(true)
+	}
+	return a, nil
 }

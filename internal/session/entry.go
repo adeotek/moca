@@ -9,14 +9,15 @@ import (
 )
 
 const (
-	TypeSession     = "session"
-	TypeMessage     = "message"
-	TypeToolUse     = "tool_use"
-	TypeToolResult  = "tool_result"
-	TypeCompaction  = "compaction"
-	TypeModelChange = "model_change"
-	TypeSnapshot    = "snapshot"
-	TypeError       = "error"
+	TypeSession        = "session"
+	TypeMessage        = "message"
+	TypeToolUse        = "tool_use"
+	TypeToolResult     = "tool_result"
+	TypeCompaction     = "compaction"
+	TypeModelChange    = "model_change"
+	TypeSnapshot       = "snapshot"
+	TypeError          = "error"
+	TypePermissionMode = "permission_mode"
 )
 
 const (
@@ -32,6 +33,11 @@ type Header struct {
 	StartedAt    time.Time `json:"startedAt"`
 	MocaVersion  string    `json:"mocaVersion"`
 	SystemPrompt string    `json:"systemPrompt"`
+	Yolo         bool      `json:"yolo,omitempty"`
+}
+
+type PermissionMode struct {
+	Yolo bool `json:"yolo"`
 }
 
 type ToolUse struct {
@@ -66,19 +72,20 @@ type ErrorInfo struct {
 }
 
 type Entry struct {
-	ID          string          `json:"id"`
-	ParentID    string          `json:"parentId,omitempty"`
-	Type        string          `json:"type"`
-	Time        time.Time       `json:"ts"`
-	Session     *Header         `json:"session,omitempty"`
-	Message     *llm.Message    `json:"message,omitempty"`
-	ToolUse     *ToolUse        `json:"toolUse,omitempty"`
-	ToolResult  *llm.ToolResult `json:"toolResult,omitempty"`
-	Usage       *llm.Usage      `json:"usage,omitempty"`
-	Model       string          `json:"model,omitempty"` // producing model on assistant messages
-	Cost        float64         `json:"cost,omitempty"`
-	Compaction  *Compaction     `json:"compaction,omitempty"`
-	ModelChange *ModelChange    `json:"modelChange,omitempty"`
-	Snapshot    *SnapshotRec    `json:"snapshot,omitempty"`
-	Error       *ErrorInfo      `json:"error,omitempty"`
+	ID             string          `json:"id"`
+	ParentID       string          `json:"parentId,omitempty"`
+	Type           string          `json:"type"`
+	Time           time.Time       `json:"ts"`
+	Session        *Header         `json:"session,omitempty"`
+	Message        *llm.Message    `json:"message,omitempty"`
+	ToolUse        *ToolUse        `json:"toolUse,omitempty"`
+	ToolResult     *llm.ToolResult `json:"toolResult,omitempty"`
+	Usage          *llm.Usage      `json:"usage,omitempty"`
+	Model          string          `json:"model,omitempty"` // producing model on assistant messages
+	Cost           float64         `json:"cost,omitempty"`
+	Compaction     *Compaction     `json:"compaction,omitempty"`
+	ModelChange    *ModelChange    `json:"modelChange,omitempty"`
+	Snapshot       *SnapshotRec    `json:"snapshot,omitempty"`
+	Error          *ErrorInfo      `json:"error,omitempty"`
+	PermissionMode *PermissionMode `json:"permissionMode,omitempty"`
 }
