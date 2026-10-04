@@ -27,6 +27,8 @@ go vet ./... && gofmt -l .        # both must be clean
 ./bin/moca --version              # "moca 0.0.0-dev"
 ```
 
+CI (`.github/workflows/ci.yml`) runs the same gate set — the gofmt check, `go vet`, `go build`, `go test ./... -race` — on every PR, every push to `main`, and manually; Go is pinned from `go.mod`, no secrets required.
+
 - Version stamp: `config.Version`, set via `-ldflags "-X github.com/adeotek/moca/internal/config.Version=…"`, default `"0.0.0-dev"`.
 - Repo flow: `main` is PR-only (local pre-push hook blocks pushes to `refs/heads/main`); one branch + PR per phase (`phase/N-<slug>`) or chore (`chore/<slug>`); conventional commits; one version bump per PR (none yet — v0.1.0 at phase 7).
 - Gate scripts for the phase-1 style mock checks are not in the repo; a mock SSE server + a config pointing `baseUrl` at it reproduces them (see §10).
