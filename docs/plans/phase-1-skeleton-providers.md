@@ -621,7 +621,10 @@ func TestValidationErrors(t *testing.T) {
 }
 
 func TestSyntaxErrorReportsLineCol(t *testing.T) {
-	_, err := Parse([]byte("{\n  // c\n  \"model\": ,\n}"))
+	// `x` is a genuine syntax error on line 3. (A trailing comma — e.g.
+	// `"model": ,` — is legitimately blanked by the pre-pass, which moves
+	// the decode error to the following `}` line; not what this test pins.)
+	_, err := Parse([]byte("{\n  // c\n  \"model\": x,\n}"))
 	if err == nil || !strings.Contains(err.Error(), "3:") {
 		t.Fatalf("want line 3 in error, got %v", err)
 	}
