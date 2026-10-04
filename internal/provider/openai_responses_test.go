@@ -72,6 +72,35 @@ func TestResponsesStream(t *testing.T) {
 	}
 }
 
+// When the final reasoning item carries no summary, the streamed
+// reasoning_summary_text.delta text must still land in the persisted block.
+func TestResponsesReasoningSummaryFallback(t *testing.T) {
+	var body map[string]any
+	srv := sseServer(t, 200, `event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_9","delta":"part1 "}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_9","delta":"part2"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_9","encrypted_content":"E2","summary":[]}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}
+
+`, &body, nil)
+	defer srv.Close()
+	a := newOpenAIResponses(Model{ID: "gpt", ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning}, srv.URL, keyCred("K"), srv.Client())
+	resp, err := a.Stream(context.Background(), llm.Request{Model: "gpt", MaxTokens: 10, Effort: llm.EffortLow}, func(llm.Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	th := resp.Message.Content[0]
+	if th.Type != llm.BlockThinking || th.Text != "part1 part2" || th.ThinkingID != "rs_9" || th.Signature != "E2" {
+		t.Fatalf("summary fallback %+v", th)
+	}
+}
+
 func TestResponsesHistoryAndIncomplete(t *testing.T) {
 	var body map[string]any
 	srv := sseServer(t, 200, `event: response.incomplete

@@ -55,6 +55,10 @@ func (a *anthropicAdapter) body(req llm.Request) map[string]any {
 			case llm.BlockText:
 				blocks = append(blocks, map[string]any{"type": "text", "text": c.Text})
 			case llm.BlockThinking:
+				if c.Redacted {
+					blocks = append(blocks, map[string]any{"type": "redacted_thinking", "data": c.Signature})
+					break
+				}
 				blocks = append(blocks, map[string]any{"type": "thinking", "thinking": c.Text, "signature": c.Signature})
 			case llm.BlockToolUse:
 				blocks = append(blocks, map[string]any{"type": "tool_use", "id": c.ToolCall.ID, "name": c.ToolCall.Name, "input": c.ToolCall.Input})
@@ -92,6 +96,7 @@ type anthropicEvent struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 		Text string `json:"text"`
+		Data string `json:"data"`
 	} `json:"content_block"`
 	Delta struct {
 		Type        string `json:"type"`
@@ -154,8 +159,13 @@ func (a *anthropicAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 			switch ev.ContentBlock.Type {
 			case "text":
 				cb.Type = llm.BlockText
-			case "thinking", "redacted_thinking":
+			case "thinking":
 				cb.Type, cb.Model = llm.BlockThinking, req.Model
+			case "redacted_thinking":
+				// The opaque payload arrives complete in `data`; keep it in
+				// Signature so the block replays verbatim (never as thinking).
+				cb.Type, cb.Model, cb.Redacted, cb.Signature = llm.BlockThinking, req.Model, true, ev.ContentBlock.Data
+				cb.Text = "[Reasoning redacted]"
 			case "tool_use":
 				cb.Type = llm.BlockToolUse
 				cb.ToolCall = &llm.ToolCall{ID: ev.ContentBlock.ID, Name: ev.ContentBlock.Name}

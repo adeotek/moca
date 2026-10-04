@@ -26,13 +26,16 @@ const (
 // ContentBlock is one block of a message. Thinking blocks keep the opaque
 // replay payload (anthropic signature / openai encrypted_content) in
 // Signature, the openai reasoning item id in ThinkingID, and the producing
-// model id in Model (§3 cross-provider transform, §8 persistence).
+// model id in Model (§3 cross-provider transform, §8 persistence). Anthropic
+// redacted_thinking blocks store their opaque `data` payload in Signature
+// with Redacted set, so they replay verbatim as redacted_thinking.
 type ContentBlock struct {
 	Type       BlockType   `json:"type"`
 	Text       string      `json:"text,omitempty"`
 	Signature  string      `json:"signature,omitempty"`
 	ThinkingID string      `json:"thinkingId,omitempty"`
 	Model      string      `json:"model,omitempty"`
+	Redacted   bool        `json:"redacted,omitempty"`
 	ToolCall   *ToolCall   `json:"toolCall,omitempty"`
 	ToolResult *ToolResult `json:"toolResult,omitempty"`
 }

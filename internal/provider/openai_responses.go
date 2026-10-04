@@ -125,6 +125,7 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 	out := llm.Response{Stop: llm.StopEnd}
 	out.Message.Role = llm.RoleAssistant
 	var text strings.Builder
+	reasoning := map[string]*strings.Builder{} // per reasoning item: streamed summary deltas
 	flushText := func() {
 		if text.Len() > 0 {
 			out.Message.Content = append(out.Message.Content, llm.ContentBlock{Type: llm.BlockText, Text: text.String()})
@@ -142,6 +143,14 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 			text.WriteString(ev.Delta)
 			emit(llm.Event{Type: llm.EventText, Text: ev.Delta})
 		case "response.reasoning_summary_text.delta":
+			if ev.ItemID != "" {
+				b := reasoning[ev.ItemID]
+				if b == nil {
+					b = &strings.Builder{}
+					reasoning[ev.ItemID] = b
+				}
+				b.WriteString(ev.Delta)
+			}
 			emit(llm.Event{Type: llm.EventThinking, Text: ev.Delta})
 		case "response.output_item.done":
 			switch ev.Item.Type {
@@ -151,8 +160,16 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 				for _, s := range ev.Item.Summary {
 					sum = append(sum, s.Text)
 				}
+				summary := strings.Join(sum, "\n")
+				if summary == "" {
+					// The final item may omit the summary; keep the streamed text.
+					if b := reasoning[ev.Item.ID]; b != nil {
+						summary = b.String()
+					}
+				}
+				delete(reasoning, ev.Item.ID)
 				out.Message.Content = append(out.Message.Content, llm.ContentBlock{Type: llm.BlockThinking,
-					Text: strings.Join(sum, "\n"), ThinkingID: ev.Item.ID, Signature: ev.Item.EncryptedContent, Model: req.Model})
+					Text: summary, ThinkingID: ev.Item.ID, Signature: ev.Item.EncryptedContent, Model: req.Model})
 			case "function_call":
 				flushText()
 				args := ev.Item.Arguments

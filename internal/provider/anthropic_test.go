@@ -217,4 +217,55 @@ func TestAnthropicErrors(t *testing.T) {
 	}
 }
 
+const anthropicRedactedStream = `event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"OPAQUE-PAYLOAD"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`
+
+// Redacted thinking carries its opaque payload in `data`, complete at
+// content_block_start. It must be captured and replayed verbatim as
+// redacted_thinking — replaying it as an empty thinking block is a 400.
+func TestAnthropicRedactedThinking(t *testing.T) {
+	var body map[string]any
+	srv := sseServer(t, 200, anthropicRedactedStream, &body, nil)
+	defer srv.Close()
+	a := newAnthropic(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	resp, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 100,
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}}}}, func(llm.Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	th := resp.Message.Content[0]
+	if th.Type != llm.BlockThinking || !th.Redacted || th.Signature != "OPAQUE-PAYLOAD" || th.Model != "m" {
+		t.Fatalf("redacted capture %+v", th)
+	}
+	body = nil
+	if _, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 100,
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}},
+			{Role: llm.RoleAssistant, Content: []llm.ContentBlock{th}},
+		}}, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	got := mustJSON(body["messages"])
+	if !strings.Contains(got, `"type":"redacted_thinking"`) || !strings.Contains(got, `"data":"OPAQUE-PAYLOAD"`) {
+		t.Fatalf("redacted replay missing payload: %s", got)
+	}
+	if strings.Contains(got, `"signature":"OPAQUE-PAYLOAD"`) || strings.Contains(got, "Reasoning redacted") {
+		t.Fatalf("redacted block replayed with the wrong shape: %s", got)
+	}
+}
+
 func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
