@@ -19,9 +19,16 @@ func ResolveEnv(ref string) (string, error) {
 	}
 	v := os.Getenv(name)
 	if v == "" {
-		return "", fmt.Errorf("environment variable %s is not set (referenced as %q)", name, ref)
+		return "", &EnvError{Name: name, Ref: ref}
 	}
 	return v, nil
+}
+
+// EnvError reports an unset env: reference — a configuration error (exit 2).
+type EnvError struct{ Name, Ref string }
+
+func (e *EnvError) Error() string {
+	return fmt.Sprintf("environment variable %s is not set (referenced as %q)", e.Name, e.Ref)
 }
 
 // EnvRefs lists every variable named by an env: reference anywhere in the
