@@ -1,6 +1,6 @@
 # Phase 2 — Seven Tools, Agent Loop, Permissions, Skills, Session Schema — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `moca -p "<task>"` runs a real agent loop: the seven frozen tools behind a symlink-resolving path jail and a parsed-shell command analyser, project trust, skills + AGENTS.md in a once-built system prompt, sequential tool execution, maxSteps wrap-up, and every step persisted to an append-only JSONL session with pre-edit snapshots.
 
