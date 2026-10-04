@@ -1,6 +1,6 @@
 # Phase 3 — TUI Shell, Slash Commands, Status Bar, Steering, Model Switching — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `moca` (no `-p`) opens an inline Bubble Tea TUI: immutable scrollback, a multi-line input with native paste, a one-line status bar below it from the first frame, numbered collapsible tool/thinking items with a pager, steering during runs, interactive trust/approval prompts, `!`/`!!`, and slash commands (`/model /effort /hard /clear /compact /cost /undo /copy /show /help` plus user prompt templates). Switching model mid-session works across providers.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.27.1; Bubble Tea **v2** (`charm.land/bubbletea/v2`; keyboard enhancements = Kitty protocol / modifyOtherKeys, bracketed paste, `Println` for inline committed output), `charm.land/bubbles/v2` (textarea, viewport), `charm.land/lipgloss/v2`. These are UI deps; `mvdan.cc/sh` stays the only non-UI third-party dep.
 
-**Spec:** `docs/specs/DESIGN.md` (rev 9) — §3 (cross-provider history transform, effort clamp), §4 (`/undo`), §6 (token estimate, used by the status bar), §7 (interactive trust + approvals), §8 (`model_change`, `/clear`), §10 (slash commands), §11 (all), phase plan item 3.
+**Spec:** `docs/specs/DESIGN.md` (rev 11) — §3 (cross-provider history transform, effort clamp), §4 (`/undo`), §6 (token estimate, used by the status bar), §7 (interactive trust + approvals), §8 (`model_change`, `/clear`), §10 (slash commands), §11 (all), phase plan item 3.
 
 **Builds on:** Phases 1–2. Uses `agent.Agent/Start/StartOptions/Event*`, `session.*`, `tools.Asker/Question/Answer/RunShell/ShellEnv/Truncate`, `provider.Registry/Model`, `config.*`, `skills.ParseFrontmatter/Dir`, `permissions.LoadTrust`.
 
@@ -569,7 +569,7 @@ git commit -m "feat(agent): cross-provider history transform, model/effort switc
   - `func (a *Agent) AddNote(text string) error` — appends a user `message` entry without running (the `!` prefix).
   - `func (a *Agent) Undo() (string, error)` — `a.opts.Snapshots.Undo()`.
   - `func (a *Agent) ContextTokens() int` — usage-anchored estimate (§6): if `anchorValid`, `anchorTokens + Tokens(chars of entries appended after anchorEntries)`; else `Tokens(RequestChars(system, specs, transformed messages))`.
-  - `func (a *Agent) Status() Status`, with `type Status struct { Model provider.Model; Effort llm.Effort; ContextTokens, Window int; Usage llm.Usage; Cost float64; Sub bool; Hard bool; Yolo bool }`. `Sub` = the provider's `auth == "oauth"`.
+  - `func (a *Agent) Status() Status`, with `type Status struct { Model provider.Model; Effort llm.Effort; ContextTokens, Window int; Usage llm.Usage; Cost float64; Sub bool; Hard bool; Yolo bool }`. `Sub` = the provider's `auth == "oauth"`. (Phase 7's `SetString` builds on the same scanner — see Task 5's `AppendString`.)
   - `type SteeringApplied struct{ Texts []string }` event, emitted when queued texts are appended.
 - Loop changes in `Run`:
   - After every complete tool batch (before the next request), drain the queue and append each text as a user `message` entry. Rebuild merges them after the tool results.
@@ -1007,19 +1007,22 @@ func AppendString(path string, keyPath []string, value string, init []string) er
 		q, _ := json.Marshal(value)
 		closeAt := sp.end - 1 // index of ']'
 		last := closeAt - 1   // last non-space before ']' (comments are spaces in std)
-		for last > sp.start && strings.IndexByte(" \t\r\n", std[last]) >= 0 {
+		for last > sp.start && strings.IndexByte(" 	\r\n", std[last]) >= 0 {
 			last--
 		}
+		// A trailing comma sits in the RAW gap between the last element and ']'.
+		// Standardize blanked it to a space in std, so it is invisible there — and
+		// `last` skips whitespace, so it never points at it either way. Look for the
+		// comma in src (byte indexes match: Standardize preserves length).
+		gapComma := strings.IndexByte(string(src[last+1:closeAt]), ',')
 		switch {
 		case len(cur) == 0:
 			out = concat(src[:closeAt], q, src[closeAt:])
-		case std[last] == ',':
-			// trailing comma: insert after the last element, drop the old comma
-			elemEnd := last - 1
-			for strings.IndexByte(" \t\r\n", std[elemEnd]) >= 0 {
-				elemEnd--
-			}
-			out = concat(src[:elemEnd+1], []byte(", "+string(q)), src[elemEnd+1:last], src[last+1:])
+		case gapComma >= 0:
+			// trailing comma: insert after the last element, drop the old comma,
+			// keep whatever else follows it (whitespace, comments) up to ']'.
+			commaAt := last + 1 + gapComma
+			out = concat(src[:last+1], []byte(", "+string(q)), src[commaAt+1:])
 		default:
 			out = concat(src[:last+1], []byte(", "+string(q)), src[last+1:])
 		}

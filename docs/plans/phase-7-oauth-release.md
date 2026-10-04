@@ -1,6 +1,6 @@
 # Phase 7 — OAuth Providers, Upstream graphify PR, v0.1 — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `moca login anthropic|openai` works where (and only where) the vendor's current terms permit subscription OAuth from a third-party client. Tokens live in a 0600 store with auto-refresh, and there is an SSH/headless copy-URL + paste-code fallback. `graphify install --platform moca` is contributed upstream. The §14 ship-gate demo passes unattended on `opencode-go`, and `v0.1.0` is tagged.
 
@@ -11,7 +11,7 @@
 
 **Tech Stack:** Go 1.27.1 stdlib (`net/http`, `crypto/sha256`, `crypto/rand`, `os/exec` for opening a browser). File locking via `syscall.Flock` (Unix) / `LockFileEx` (Windows).
 
-**Spec:** `docs/specs/DESIGN.md` (rev 9) — §3 (auth modes, policy gate, token store, SSH/headless fallback, day-1 provider table), §10 (graphify upstream), §11 (`sub` cost field), §12.5 (`moca login`/`logout`), §14 (ship gate), phase plan item 7.
+**Spec:** `docs/specs/DESIGN.md` (rev 11) — §3 (auth modes, policy gate, token store, SSH/headless fallback, day-1 provider table), §10 (graphify upstream), §11 (`sub` cost field), §12.5 (`moca login`/`logout`), §14 (ship gate), phase plan item 7.
 
 **Builds on:** Phases 1–6. Uses `provider.Registry/SetOAuth/CredentialFunc/Credential`, the adapters' `Credential.OAuth` branch, `config.Validate`, `agent.Status().Sub`, `cmd/moca` subcommand routing, the session JSONL schema.
 
@@ -78,7 +78,7 @@ CHANGELOG.md
   4. **Decision:** `ship oauth` or `api_key only`.
 
 - [ ] **Step 2: Apply the decision to DESIGN.md** if any provider is `api_key only`:
-  - write a rev-10 entry in the revision log (`subscription OAuth dropped for <provider>: <one-line reason>`);
+  - add a **new revision entry** in the revision log (`subscription OAuth dropped for <provider>: <one-line reason>`);
   - update the §3 provider table and the §12 example comment;
   - update the README stack bullets.
   
@@ -896,6 +896,9 @@ func TestShipGate(t *testing.T) {
 	rtkRead := idx(func(u *use) bool { return u.name == "read" && strings.Contains(str(u, "path"), "/rtk/SKILL.md") }) >= 0
 	rtkUsed := idx(func(u *use) bool { return u.name == "shell" && strings.HasPrefix(strings.TrimSpace(str(u, "command")), "rtk ") }) >= 0
 	if !strings.Contains(sys, "- rtk:") || !(rtkRead || rtkUsed) {
+		// the literal "- rtk:" is phase-2's frozen skill-list line shape
+		// ("- <name>: <one-line description> (<absolute path>)") — if the shape
+		// ever changes, this assertion changes with it, in the same revision
 		t.Fatal("6: rtk skill not discoverable or its guidance not followed")
 	}
 	if *exitCode != 0 {

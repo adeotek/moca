@@ -1,6 +1,6 @@
 # Phase 6 — rtk, graphify, Skills Ecosystem Compatibility — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The day-1 external tools work as specified. The shell analyser unwraps `rtk <cmd>`, so `rtk` never launders a non-allowlisted command. The built-in `rtk` skill matches the real rtk CLI and is followed in a real session. graphify's SKILL.md, and SKILL.md / prompt-template files written for pi, Claude Code and OpenCode, load unchanged.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.27.1; the `rtk` and `graphify` CLIs installed locally for the live gates.
 
-**Spec:** `docs/specs/DESIGN.md` (rev 9) — §7 (shell analysis, default allowlist), §9 (skills sources, ecosystem compatibility), §10 (rtk + graphify worked examples), §13 (rtk preference line), phase plan item 6.
+**Spec:** `docs/specs/DESIGN.md` (rev 11) — §7 (shell analysis, default allowlist), §9 (skills sources, ecosystem compatibility), §10 (rtk + graphify worked examples), §13 (rtk preference line), phase plan item 6.
 
 **Builds on:** Phases 1–5. Uses `permissions.Shell` (`unwrap`, `classify`, `wordLit`), `skills.ParseFrontmatter/Discover/LoadPrompts/ExpandPrompt`, `skills/builtin/rtk/SKILL.md`, `tools.readTool` with read-only roots, `agent.BuildSystemPrompt`.
 
