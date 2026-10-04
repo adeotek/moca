@@ -3,6 +3,7 @@ package skills
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -43,5 +44,17 @@ func TestExtractBuiltins(t *testing.T) {
 	got, errs := Discover([]Dir{{dir, "builtin"}})
 	if len(errs) != 0 || len(got) != 1 || got[0].Name != "rtk" {
 		t.Fatalf("%+v %v", got, errs)
+	}
+}
+
+func TestDiscoverReportsSymlinkedDir(t *testing.T) {
+	root, real := t.TempDir(), t.TempDir()
+	mkSkill(t, real, "linked", "via symlink")
+	if err := os.Symlink(filepath.Join(real, "linked"), filepath.Join(root, "linked")); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	got, errs := Discover([]Dir{{root, "global"}})
+	if len(got) != 0 || len(errs) != 1 || !strings.Contains(errs[0].Error(), "symlink") {
+		t.Fatalf("got=%v errs=%v", got, errs)
 	}
 }

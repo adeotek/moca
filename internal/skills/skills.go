@@ -5,6 +5,7 @@ package skills
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,6 +28,11 @@ func Discover(dirs []Dir) ([]Skill, []error) {
 			continue
 		}
 		for _, e := range ents {
+			if e.Type()&fs.ModeSymlink != 0 {
+				errs = append(errs, fmt.Errorf("%s: symlinked skill directory skipped (bodies load through the read jail; move the skill in or copy it)",
+					filepath.Join(d.Path, e.Name())))
+				continue
+			}
 			if !e.IsDir() {
 				continue
 			}

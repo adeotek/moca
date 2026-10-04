@@ -200,6 +200,21 @@ func TestInterruptedExit130(t *testing.T) {
 	}
 }
 
+func TestStartFailureExit1(t *testing.T) {
+	isolate(t)
+	blocked := filepath.Join(t.TempDir(), "blocked")
+	os.WriteFile(blocked, []byte("x"), 0o644)
+	t.Setenv("XDG_DATA_HOME", blocked) // MkdirAll for the data dir fails
+	cfg := writeCfg(t, `{"model":"loc/m","providers":{"loc":{"baseUrl":"http://127.0.0.1:1","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768}}}}}`)
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"--config", cfg, "-p", "x"}, nil, &out, &errb); code != 1 {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "moca:") {
+		t.Fatalf("stderr %q", errb.String())
+	}
+}
+
 func TestOneShotToolLoopContract(t *testing.T) {
 	turns := []string{
 		"data: {\"choices\":[{\"delta\":{\"content\":\"checking\",\"tool_calls\":[{\"index\":0,\"id\":\"c\",\"function\":{\"name\":\"ls\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n",

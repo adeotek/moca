@@ -59,6 +59,8 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 			}
 		case agent.Retry:
 			fmt.Fprintf(stderr, "retry %d/%d · %s\n", e.Notice.Attempt, e.Notice.Max, e.Notice.Wait.Round(1e8))
+		case agent.Warning:
+			fmt.Fprintf(stderr, "warning: %s\n", e.Text)
 		}
 	}
 	yolo := o.YoloOn(cfg)
@@ -73,6 +75,10 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		Trusted: trusted, Yolo: yolo, Emit: emit, Slug: session.Slug(o.Prompt)})
 	if err != nil {
 		fmt.Fprintln(stderr, "moca:", err)
+		var se *agent.StartError
+		if errors.As(err, &se) {
+			return exitRuntime
+		}
 		return exitUsage
 	}
 	defer a.Session().Close()

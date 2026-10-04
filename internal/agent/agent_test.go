@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/adeotek/moca/internal/config"
-	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/session"
 )
 
@@ -196,14 +195,67 @@ func TestLengthStopTruncatedToolCall(t *testing.T) {
 		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n"
 	s := newScript(t, trunc, textTurn("ok"))
 	a, work, evs := startTest(t, s, 40)
-	a.Run(context.Background(), "x")
+	out, err := a.Run(context.Background(), "x")
+	if err != nil || out.Text != "ok" {
+		t.Fatalf("the run must recover from a truncated call: %v %q", err, out.Text)
+	}
 	if _, err := os.Stat(filepath.Join(work, "x")); err == nil {
 		t.Fatal("truncated call must not execute")
 	}
+	var ends []ToolEnd
 	for _, e := range *evs {
-		if te, ok := e.(ToolEnd); ok && !strings.Contains(strings.ToLower(te.Result.Content), "split") {
-			t.Fatal(te.Result.Content)
+		if te, ok := e.(ToolEnd); ok {
+			ends = append(ends, te)
 		}
 	}
-	_ = llm.StopLength
+	if len(ends) != 1 || !ends[0].Result.IsError || !strings.Contains(strings.ToLower(ends[0].Result.Content), "split") {
+		t.Fatalf("every call of a length turn must get the cut-off error result: %+v", ends)
+	}
+	if len(s.bodies) != 2 {
+		t.Fatalf("the loop must send a second request, got %d", len(s.bodies))
+	}
+	entries, err := session.ReadFile(a.Session().Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uses, results int
+	for _, e := range entries {
+		switch e.Type {
+		case session.TypeToolUse:
+			uses++
+			if string(e.ToolUse.Call.Input) != "{}" {
+				t.Fatalf("truncated call persisted with input %q", e.ToolUse.Call.Input)
+			}
+		case session.TypeToolResult:
+			results++
+		}
+	}
+	if uses != 1 || results != 1 {
+		t.Fatalf("tool_use=%d tool_result=%d, want 1/1", uses, results)
+	}
+	if _, err := json.Marshal(session.Messages(entries)); err != nil {
+		t.Fatalf("rebuilt conversation must marshal: %v", err)
+	}
+}
+
+func TestMaxStepsWrapUpRepairsStrayCalls(t *testing.T) {
+	wrap := "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_wrap\",\"function\":{\"name\":\"ls\",\"arguments\":\"{}\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"
+	s := newScript(t, toolTurn([2]string{"ls", `{}`}), wrap)
+	a, _, _ := startTest(t, s, 1)
+	out, err := a.Run(context.Background(), "x")
+	if err != nil || !out.MaxSteps {
+		t.Fatal(out, err)
+	}
+	entries, err := session.ReadFile(a.Session().Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fixes := session.Repair(entries, ""); len(fixes) != 0 {
+		t.Fatalf("wrap-up calls must be answered by synthetic results, %d left open", len(fixes))
+	}
+	last := entries[len(entries)-1]
+	if last.ToolResult == nil || !strings.Contains(last.ToolResult.Content, "wrap-up") {
+		t.Fatalf("%+v", last)
+	}
 }

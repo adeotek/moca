@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -146,7 +147,15 @@ func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, 
 		return resp, nil, err
 	}
 	for _, c := range calls {
-		if _, err := a.append(session.Entry{Type: session.TypeToolUse, ToolUse: &session.ToolUse{MessageID: msgEntry.ID, Call: c}}); err != nil {
+		pc := c
+		if !json.Valid(pc.Input) {
+			// A call cut off mid-JSON cannot be persisted as-is (json.Marshal
+			// fails on the invalid RawMessage); store an empty object — Run
+			// still gives it the "cut off / invalid JSON" error result
+			// without executing it (§6).
+			pc.Input = json.RawMessage("{}")
+		}
+		if _, err := a.append(session.Entry{Type: session.TypeToolUse, ToolUse: &session.ToolUse{MessageID: msgEntry.ID, Call: pc}}); err != nil {
 			return resp, nil, err
 		}
 	}
@@ -171,10 +180,21 @@ func (a *Agent) result(call llm.ToolCall, r tools.Result) error {
 	return err
 }
 
-// abort appends synthetic results for every unanswered call.
+// abort appends synthetic results for every unanswered call and reports them
+// like real tool ends.
 func (a *Agent) abort(reason string) {
 	for _, fix := range session.Repair(a.entries, reason) {
-		a.append(fix)
+		if _, err := a.append(fix); err != nil || fix.ToolResult == nil {
+			continue
+		}
+		call := llm.ToolCall{ID: fix.ToolResult.CallID}
+		for _, e := range a.entries {
+			if e.Type == session.TypeToolUse && e.ToolUse != nil && e.ToolUse.Call.ID == call.ID {
+				call = e.ToolUse.Call
+				break
+			}
+		}
+		a.emit(ToolEnd{Call: call, Result: tools.Result{Content: fix.ToolResult.Content, IsError: fix.ToolResult.IsError}})
 	}
 }
 
@@ -185,9 +205,14 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 	for step := 0; ; step++ {
 		if step == a.opts.Config.Context.MaxSteps {
 			a.append(session.Entry{Type: session.TypeMessage, Message: userText(wrapUpText)})
-			resp, _, err := a.turn(ctx, llm.ToolChoiceNone)
+			resp, calls, err := a.turn(ctx, llm.ToolChoiceNone)
 			if err != nil {
 				return Outcome{}, err
+			}
+			if len(calls) > 0 {
+				// The model ignored tool_choice: none; every call still gets
+				// exactly one result (§10).
+				a.abort("the wrap-up turn must not call tools; this call was not executed")
 			}
 			return Outcome{Text: textOf(resp.Message), MaxSteps: true}, nil
 		}

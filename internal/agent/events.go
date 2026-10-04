@@ -24,6 +24,7 @@ type TurnEnd struct {
 	Stop    llm.StopReason
 }
 type Retry struct{ Notice provider.RetryNotice }
+type Warning struct{ Text string }
 
 func (TextDelta) isEvent()     {}
 func (ThinkingDelta) isEvent() {}
@@ -32,3 +33,4 @@ func (ToolStart) isEvent()     {}
 func (ToolEnd) isEvent()       {}
 func (TurnEnd) isEvent()       {}
 func (Retry) isEvent()         {}
+func (Warning) isEvent()       {}

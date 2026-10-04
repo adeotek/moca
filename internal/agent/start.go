@@ -18,6 +18,13 @@ import (
 	"github.com/adeotek/moca/internal/tools"
 )
 
+// StartError marks a run-setup failure (data dir, session files, skills) as
+// opposed to a config or model error; cmd maps it to a runtime exit code.
+type StartError struct{ Err error }
+
+func (e *StartError) Error() string { return e.Err.Error() }
+func (e *StartError) Unwrap() error { return e.Err }
+
 type StartOptions struct {
 	Config  config.Config
 	Workdir string
@@ -51,23 +58,28 @@ func Start(o StartOptions) (*Agent, error) {
 	}
 	builtinDir, err := skills.ExtractBuiltins(config.DataDir(), config.Version)
 	if err != nil {
-		return nil, err
+		return nil, &StartError{err}
 	}
 	globalSkills := filepath.Join(config.ConfigDir(), "skills")
 	projectSkills := filepath.Join(o.Workdir, ".moca", "skills")
 	jail, err := permissions.NewJail(o.Workdir, []string{globalSkills, builtinDir})
 	if err != nil {
-		return nil, err
+		return nil, &StartError{err}
 	}
 	var dirs []skills.Dir
 	if o.Trusted {
 		dirs = append(dirs, skills.Dir{Path: projectSkills, Source: "project"})
 	}
 	dirs = append(dirs, skills.Dir{Path: globalSkills, Source: "global"}, skills.Dir{Path: builtinDir, Source: "builtin"})
-	sk, _ := skills.Discover(dirs)
+	sk, skErrs := skills.Discover(dirs)
+	for _, se := range skErrs {
+		if emit != nil {
+			emit(Warning{Text: se.Error()})
+		}
+	}
 	instr, err := skills.LoadInstructions(config.ConfigDir(), o.Workdir, o.Trusted)
 	if err != nil {
-		return nil, err
+		return nil, &StartError{err}
 	}
 	var servers []ServerLine
 	for name, s := range cfg.MCP.Servers {
@@ -97,7 +109,7 @@ func Start(o StartOptions) (*Agent, error) {
 		Workdir: jail.Root(), Provider: m.Provider, Model: cfg.Model, Effort: string(effort),
 		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.Yolo}, slug)
 	if err != nil {
-		return nil, err
+		return nil, &StartError{err}
 	}
 	snaps := session.NewSnapshots(w, filepath.Join(config.DataDir(), "snapshot"), nil)
 	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(cfg.Shell.Allow, jail, runtime.GOOS),

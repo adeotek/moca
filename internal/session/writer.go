@@ -2,11 +2,13 @@ package session
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -81,6 +83,9 @@ func Open(path string) (*Writer, []Entry, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := trimPartialLine(path); err != nil {
+		return nil, nil, err
+	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, nil, err
@@ -91,6 +96,58 @@ func Open(path string) (*Writer, []Entry, error) {
 		w.last = entries[len(entries)-1].ID
 	}
 	return w, entries, nil
+}
+
+// trimPartialLine repairs a crash-truncated trailing line: a partial line is
+// dropped (appending after it would hide every later entry from ReadFile);
+// a complete entry missing only its newline gets one.
+func trimPartialLine(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || fi.Size() == 0 {
+		return err
+	}
+	lastNL, err := lastNewline(f, fi.Size())
+	if err != nil {
+		return err
+	}
+	if lastNL == fi.Size() {
+		return nil
+	}
+	tail := make([]byte, fi.Size()-lastNL)
+	if _, err := f.ReadAt(tail, lastNL); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if json.Valid(tail) {
+		_, err = f.WriteAt([]byte{'\n'}, fi.Size())
+		return err
+	}
+	return f.Truncate(lastNL)
+}
+
+// lastNewline returns the offset just past the final '\n' (0 when there is
+// none, size when the file ends with one).
+func lastNewline(f *os.File, size int64) (int64, error) {
+	const chunk = 64 << 10
+	buf := make([]byte, chunk)
+	for off := size; off > 0; {
+		n := int64(chunk)
+		if off < n {
+			n = off
+		}
+		off -= n
+		if _, err := f.ReadAt(buf[:n], off); err != nil && !errors.Is(err, io.EOF) {
+			return 0, err
+		}
+		if i := bytes.LastIndexByte(buf[:n], '\n'); i >= 0 {
+			return off + int64(i) + 1, nil
+		}
+	}
+	return 0, nil
 }
 
 func (w *Writer) Append(e Entry) (Entry, error) {
