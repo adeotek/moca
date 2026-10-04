@@ -34,12 +34,16 @@ func TestDiscoverPrecedence(t *testing.T) {
 
 func TestExtractBuiltins(t *testing.T) {
 	data := t.TempDir()
-	dir, err := ExtractBuiltins(data, "1.2.3")
+	dir, err := ExtractBuiltins(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dir != filepath.Join(data, "builtin-skills", "1.2.3") {
+	if !strings.HasPrefix(dir, filepath.Join(data, "builtin-skills")+string(filepath.Separator)) {
 		t.Fatal(dir)
+	}
+	again, err := ExtractBuiltins(data)
+	if err != nil || again != dir {
+		t.Fatalf("extraction must be idempotent: %q vs %q, %v", dir, again, err)
 	}
 	got, errs := Discover([]Dir{{dir, "builtin"}})
 	if len(errs) != 0 || len(got) != 1 || got[0].Name != "rtk" {

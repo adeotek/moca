@@ -55,7 +55,11 @@ func applyEdit(content []byte, oldS, newS string, replaceAll bool) ([]byte, []hu
 	case n > 1:
 		return nil, nil, fmt.Errorf("old_string has %d matches (lines %s); add surrounding context to make it unique, or set replace_all", n, joinInts(matchLines(text, oldS)))
 	case replaceAll:
-		return nil, nil, errors.New("old_string not found (replace_all only matches exactly); re-read the file and copy the text verbatim")
+		msg := "old_string not found (replace_all only matches exactly); re-read the file and copy the text verbatim"
+		if lineNumPrefix.MatchString(oldS) {
+			msg += "; old_string looks like it includes read's `N|` line-number prefixes — drop them"
+		}
+		return nil, nil, errors.New(msg)
 	default:
 		var err error
 		out, hunks, err = replaceFuzzy(text, oldS, newS)

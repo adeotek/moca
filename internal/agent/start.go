@@ -56,7 +56,7 @@ func Start(o StartOptions) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	builtinDir, err := skills.ExtractBuiltins(config.DataDir(), config.Version)
+	builtinDir, err := skills.ExtractBuiltins(config.DataDir())
 	if err != nil {
 		return nil, &StartError{err}
 	}

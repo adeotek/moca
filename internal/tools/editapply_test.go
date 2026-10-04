@@ -76,6 +76,12 @@ func TestEditLadder(t *testing.T) {
 			t.Fatalf("must explain read prefixes: %s", e)
 		}
 	})
+	t.Run("no match with line-number prefixes and replace_all", func(t *testing.T) {
+		e := applyErr(t, "a\nb\n", "1|a\n2|b", "c", true)
+		if !strings.Contains(e, "N|") {
+			t.Fatalf("replace_all must explain read prefixes too: %s", e)
+		}
+	})
 	t.Run("no-op", func(t *testing.T) {
 		if e := applyErr(t, "a\n", "a", "a", false); !strings.Contains(e, "identical") {
 			t.Fatal(e)
