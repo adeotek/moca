@@ -80,6 +80,29 @@
     }
   },
   {
+    "name": "shell",
+    "description": "Run a shell command (bash -c on Unix, PowerShell on Windows). Stateless: every call starts in the workdir, so use `cd dir \u0026\u0026 cmd` within one call. stdin is empty; stdout and stderr are merged; output over 30K chars keeps head and tail. Commands are checked against an allowlist; some need user approval and some are never allowed.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The command line"
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300,
+          "description": "Seconds (default 30)"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "search",
     "description": "Search file contents recursively with a regular expression (Go RE2 syntax: no lookahead/lookbehind or backreferences; use (?i) for case-insensitive). Respects .gitignore/.ignore and skips hidden and binary files. Returns `path:line:text`, or only paths with files_only. At most 200 hits.",
     "schema": {
