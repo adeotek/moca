@@ -148,5 +148,40 @@
       },
       "additionalProperties": false
     }
+  },
+  {
+    "name": "mcp",
+    "description": "Use tools from configured MCP servers (listed in the system prompt). action=search finds tools by keyword (query, optional server); action=describe returns one tool's input schema (server, tool); action=call runs it (server, tool, args). Describe before the first call of a tool.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "search",
+            "describe",
+            "call"
+          ]
+        },
+        "server": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object",
+          "description": "Tool arguments for call"
+        },
+        "query": {
+          "type": "string",
+          "description": "Keywords for search"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    }
   }
 ]
