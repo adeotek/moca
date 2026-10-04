@@ -25,5 +25,23 @@
       ],
       "additionalProperties": false
     }
+  },
+  {
+    "name": "ls",
+    "description": "List one directory level, sorted. Directories end with `/`, symlinks with `@`. Hidden entries only with hidden=true. Use search to find files recursively.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Directory (default: workdir)"
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "Include dotfiles (default false)"
+        }
+      },
+      "additionalProperties": false
+    }
   }
 ]
