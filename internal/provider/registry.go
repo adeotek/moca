@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"net/http"
 	"slices"
@@ -21,15 +22,16 @@ var defaultBaseURLs = map[string]map[string]string{
 }
 
 type Registry struct {
-	cfg    config.Config
-	hc     *http.Client
-	notify func(RetryNotice)
-	models map[string]Model
-	oauth  map[string]CredentialFunc
+	cfg       config.Config
+	hc        *http.Client
+	notify    func(RetryNotice)
+	models    map[string]Model
+	oauth     map[string]CredentialFunc
+	sessionID string
 }
 
 func NewRegistry(cfg config.Config, hc *http.Client, notify func(RetryNotice)) (*Registry, error) {
-	r := &Registry{cfg: cfg, hc: hc, notify: notify, models: map[string]Model{}, oauth: map[string]CredentialFunc{}}
+	r := &Registry{cfg: cfg, hc: hc, notify: notify, models: map[string]Model{}, oauth: map[string]CredentialFunc{}, sessionID: rand.Text()}
 	for _, m := range builtinCatalog {
 		r.models[m.Qualified()] = m
 	}
@@ -94,9 +96,35 @@ func (r *Registry) baseURL(provider, protocol string) string {
 
 func (r *Registry) credential(provider string) CredentialFunc {
 	p := r.cfg.Providers[provider]
+	// OpenCode Go requires a stable per-conversation routing header
+	// (https://opencode.ai/docs/go/#where-can-i-use-it) and rejects requests
+	// without it (HTTP 400 MissingSessionID). One process is one conversation
+	// today; phase 3+ sessions must rebind it per conversation.
+	var extra map[string]string
+	if provider == "opencode-go" {
+		extra = map[string]string{"x-opencode-session": r.sessionID}
+	}
+	withExtra := func(c Credential) Credential {
+		if len(extra) == 0 {
+			return c
+		}
+		if c.Headers == nil {
+			c.Headers = map[string]string{}
+		}
+		for k, v := range extra {
+			c.Headers[k] = v
+		}
+		return c
+	}
 	if p.Auth == "oauth" {
 		if fn := r.oauth[provider]; fn != nil {
-			return fn
+			return func(ctx context.Context) (Credential, error) {
+				c, err := fn(ctx)
+				if err != nil {
+					return Credential{}, err
+				}
+				return withExtra(c), nil
+			}
 		}
 		return func(context.Context) (Credential, error) {
 			return Credential{}, fmt.Errorf("provider %s uses oauth: run `moca login %s`", provider, provider)
@@ -107,7 +135,7 @@ func (r *Registry) credential(provider string) CredentialFunc {
 		if err != nil {
 			return Credential{}, fmt.Errorf("provider %s: %w", provider, err)
 		}
-		return Credential{Token: v}, nil
+		return withExtra(Credential{Token: v}), nil
 	}
 }
 

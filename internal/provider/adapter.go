@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 )
 
@@ -19,8 +20,9 @@ type Adapter interface {
 }
 
 type Credential struct {
-	Token string
-	OAuth bool // bearer token from `moca login` (phase 7)
+	Token   string
+	OAuth   bool              // bearer token from `moca login` (phase 7)
+	Headers map[string]string // provider-specific request extras (e.g. OpenCode Go session routing)
 }
 
 type CredentialFunc func(ctx context.Context) (Credential, error)
@@ -36,6 +38,7 @@ func post(ctx context.Context, hc *http.Client, url string, hdr http.Header, bod
 		return nil, err
 	}
 	r.Header = hdr
+	r.Header.Set("User-Agent", "moca/"+config.Version)
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "text/event-stream")
 	resp, err := hc.Do(r)

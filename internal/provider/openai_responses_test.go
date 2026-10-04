@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -226,5 +227,24 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 	}
 	if strings.Count(got, `"type":"reasoning"`) != 1 {
 		t.Errorf("only the gpt-produced item replays as reasoning: %s", got)
+	}
+}
+
+func TestResponsesCredentialHeaders(t *testing.T) {
+	var hdr http.Header
+	srv := sseServer(t, 200, `event: response.completed
+data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}
+
+`, nil, &hdr)
+	defer srv.Close()
+	cred := func(context.Context) (Credential, error) {
+		return Credential{Token: "K", Headers: map[string]string{"x-opencode-session": "s1"}}, nil
+	}
+	a := newOpenAIResponses(Model{ID: "m", ThinkingMode: "none"}, srv.URL, cred, srv.Client())
+	if _, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 16}, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if hdr.Get("x-opencode-session") != "s1" {
+		t.Fatalf("credential headers must be applied: %v", hdr)
 	}
 }

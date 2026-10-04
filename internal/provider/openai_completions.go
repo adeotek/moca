@@ -109,6 +109,9 @@ func (a *completionsAdapter) Stream(ctx context.Context, req llm.Request, emit f
 	}
 	hdr := http.Header{}
 	hdr.Set("Authorization", "Bearer "+cred.Token)
+	for k, v := range cred.Headers {
+		hdr.Set(k, v)
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	resp, err := post(ctx, a.hc, a.url, hdr, a.body(req))

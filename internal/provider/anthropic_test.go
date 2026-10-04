@@ -495,3 +495,19 @@ func TestAnthropicHistoryToolInputSanitized(t *testing.T) {
 		t.Fatalf("tool input not sanitized: %s", got)
 	}
 }
+
+func TestAnthropicCredentialHeaders(t *testing.T) {
+	var hdr http.Header
+	srv := sseServer(t, 200, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", nil, &hdr)
+	defer srv.Close()
+	cred := func(context.Context) (Credential, error) {
+		return Credential{Token: "K", Headers: map[string]string{"x-opencode-session": "s1"}}, nil
+	}
+	a := newAnthropic(Model{ID: "m", ThinkingMode: "none"}, srv.URL, cred, srv.Client())
+	if _, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 16}, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if hdr.Get("x-opencode-session") != "s1" {
+		t.Fatalf("credential headers must be applied: %v", hdr)
+	}
+}

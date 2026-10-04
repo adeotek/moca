@@ -3,7 +3,10 @@ package provider
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -111,5 +114,69 @@ func TestOverrideBuiltinModelFields(t *testing.T) {
 	m, _, _ := r.Resolve("opencode-go/glm-5.3")
 	if m.ContextWindow != 200000 || m.Cost.Input != 1.4 {
 		t.Fatalf("override merges, not replaces: %+v", m)
+	}
+}
+
+func TestOpenCodeGoSessionHeader(t *testing.T) {
+	// The Go tier requires a stable per-conversation routing header
+	// (https://opencode.ai/docs/go/#where-can-i-use-it); without it every
+	// request is rejected with HTTP 400 MissingSessionID (found in the live
+	// smoke, 2026-10-05).
+	t.Setenv("OPENCODE_API_KEY", "K")
+	var hdrs []http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hdrs = append(hdrs, r.Header.Clone())
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	r, err := NewRegistry(mustCfg(t, fmt.Sprintf(
+		`{"model":"opencode-go/glm-5.3-flash","providers":{"opencode-go":{"baseUrls":{"openai-completions":%q}}}}`, srv.URL)),
+		srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, a, err := r.Resolve("opencode-go/glm-5.3-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := llm.Request{Model: m.ID, MaxTokens: 64, Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "hi"}}}}}
+	for i := 0; i < 2; i++ {
+		if _, err := a.Stream(context.Background(), req, func(llm.Event) {}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(hdrs) != 2 {
+		t.Fatalf("requests: %d", len(hdrs))
+	}
+	s1, s2 := hdrs[0].Get("x-opencode-session"), hdrs[1].Get("x-opencode-session")
+	if s1 == "" || s1 != s2 {
+		t.Fatalf("session header %q vs %q: must be present and stable", s1, s2)
+	}
+	if ua := hdrs[0].Get("User-Agent"); ua != "moca/"+config.Version {
+		t.Fatalf("user-agent %q, want moca/%s", ua, config.Version)
+	}
+}
+
+func TestNoSessionHeaderOutsideOpenCodeGo(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "K")
+	var hdr http.Header
+	srv := sseServer(t, 200, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", nil, &hdr)
+	defer srv.Close()
+	r, err := NewRegistry(mustCfg(t, fmt.Sprintf(
+		`{"model":"anthropic/claude-haiku-4-5","providers":{"anthropic":{"baseUrls":{"anthropic-messages":%q}}}}`, srv.URL)),
+		srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, a, err := r.Resolve("anthropic/claude-haiku-4-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Stream(context.Background(), llm.Request{Model: m.ID, MaxTokens: 16}, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if hdr.Get("x-opencode-session") != "" {
+		t.Fatalf("OpenCode routing header must not leak to other providers: %v", hdr)
 	}
 }
