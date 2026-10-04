@@ -621,7 +621,10 @@ func TestValidationErrors(t *testing.T) {
 }
 
 func TestSyntaxErrorReportsLineCol(t *testing.T) {
-	_, err := Parse([]byte("{\n  // c\n  \"model\": ,\n}"))
+	// `x` is a genuine syntax error on line 3. (A trailing comma — e.g.
+	// `"model": ,` — is legitimately blanked by the pre-pass, which moves
+	// the decode error to the following `}` line; not what this test pins.)
+	_, err := Parse([]byte("{\n  // c\n  \"model\": x,\n}"))
 	if err == nil || !strings.Contains(err.Error(), "3:") {
 		t.Fatalf("want line 3 in error, got %v", err)
 	}
@@ -3660,7 +3663,7 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 }
 ```
 
-**Known phase-1 gap (resolved in phase 2):** an `EventReset` retry re-streams text that is already on stdout. Phase 2 buffers each turn's text and prints only the final message, which removes the duplication.
+**`-p` output:** stdout is the final assistant message text only (§12.5), buffered to the end of the stream — a mid-stream retry replays the whole response, so nothing may be written to a pipe until the turn is settled. The buffer is discarded on `EventReset`; a `length`/`refusal` stop prints a diagnostic and exits 1 (the partial text is still printed).
 
 ```go
 // cmd/moca/main.go
@@ -3752,7 +3755,7 @@ Expected: `moca 0.0.0-dev`. Add `bin/` to `.gitignore` if it isn't already liste
 
 - [ ] **Step 2: Gate — stream via all three providers and both opencode-go protocol families**
 
-With real keys exported (`ANTHROPIC_API_KEY`, `OPENCODE_API_KEY`, `OPENAI_API_KEY`), run each and confirm text streams incrementally on stdout and the exit summary appears on stderr:
+With real keys exported (`ANTHROPIC_API_KEY`, `OPENCODE_API_KEY`, `OPENAI_API_KEY`), run each and confirm the final answer appears on stdout (it is buffered to the end of the stream — §12.5, see Task 11's output contract) and the exit summary appears on stderr:
 
 ```bash
 ./bin/moca -p 'hi' --model anthropic/<a catalog claude id>
@@ -3804,3 +3807,29 @@ Replace the `**Status: …**` line with:
 git add README.md .gitignore
 git commit -m "docs: phase 1 gate passed"
 ```
+
+---
+
+## Implementation notes (post-review, folded into the phase-1 PR)
+
+- **Truncation detection** (Tasks 6–8): all three adapters return `io.ErrUnexpectedEOF` when the stream ends cleanly without its terminal event (`message_stop` / `finish_reason`|`[DONE]` / `response.completed|incomplete`) — a proxy closing mid-response must not read as a successful turn. `retryable()` covers it.
+- **Task 6 `redacted_thinking`**: the Task-6 snippet above replayed redacted blocks as empty thinking blocks — a 400 on the next turn; Anthropic requires them echoed back verbatim ("filtering out `redacted_thinking` blocks triggers a 400"). Implemented shape: capture the opaque `data` payload (`ContentBlock.Redacted` + `Signature`), replay as `{type:"redacted_thinking",data:…}` (Pi 1.0.1's proven shape).
+- **Task 6 `body()` hygiene**: messages reduced to zero blocks are skipped (`content: []` is a 400); the message-level `cache_control` breakpoint skips thinking/empty-text blocks and walks back to the last eligible block (thinking blocks cannot be cached directly — docs.anthropic.com prompt-caching).
+- **Task 7 tool calls**: `finish_reason:"length"` no longer gets force-upgraded to `tool_use` when a truncated call was assembled; the stop reason is preserved so phase 2 can turn it into an error result (§6).
+- **Task 8 responses**: reasoning summary text is accumulated from `response.reasoning_summary_text.delta` and used when the final reasoning item carries no summary.
+- **Task 9 retry**: `io.EOF` and HTTP 408 are retryable; `retry-after` waits are capped at 60s.
+- **Task 10 registry**: a config-declared model under a built-in provider must declare `protocol` — fails fast in `NewRegistry` instead of a confusing `Resolve` error.
+- **Task 11 CLI**: subcommand stubs dispatch before the "no model configured" check; SIGTERM cancels like SIGINT.
+- **Second review pass (folded into the phase-1 PR)**:
+  - `-p` buffers stdout until the stream ends and discards it on `EventReset`, so a mid-stream retry cannot duplicate text in a pipe; `StopLength` / `StopRefusal` print a diagnostic and exit 1.
+  - Tool calls cut off by `max_tokens` are **kept** with their assembled (possibly invalid) arguments and the provider's `length` stop — the phase-2 loop attaches the §6 "cut off — split the work" error result to every call of a `StopLength` turn, and the tool registry rejects invalid JSON itself. History replay sanitizes a nil/invalid tool `Input` to `{}` in all three adapters so the transcript always re-sends.
+  - Thinking replays verbatim only to the exact producing model and only with a signature (§3); otherwise it degrades to `[prior reasoning]` text, and redacted/empty blocks are dropped. Shared in `replay.go`.
+  - `BudgetTokens(maxTokens, effort)`: low 25% · medium 50% · high 75% · max the rest, floored at 1024 and leaving 1024 for the answer; below 2048 `max_tokens` thinking is omitted.
+  - `glmThinking` maps `off` to `"none"` so `--effort off` is explicit on the wire. **Live smoke (2026-10-05): accepted** — the endpoint does not reject `none`, so the mapping stays; a probe shows no hard reasoning suppression (GLM largely inlines reasoning in content), so behavioral verification lands in phase 2 when thinking becomes visible.
+  - A built-in-provider model's protocol may come from the model entry itself (`providers.<p>.models.<m>.protocol`).
+  - Retry: ECONNREFUSED / EPIPE / ECONNABORTED / HTTP/2 GOAWAY and stream resets are retryable; `Retry-After` accepts fractional seconds and is clamped at 0; the mid-stream retry is announced and backs off like any other; a 200 that is not `text/event-stream` fails fast instead of walking the backoff schedule.
+- **Live smoke (2026-10-05, real OpenCode key): 11/11 green.**
+  - The `/zen/go` runs initially all failed with HTTP 400 `MissingSessionID`: the Go tier requires a stable per-conversation `x-opencode-session` header plus a client User-Agent (https://opencode.ai/docs/go/#where-can-i-use-it). Both are now sent from the registry credential path — session id is a `crypto/rand` string per process (one process is one conversation today; phase 3+ sessions must rebind it), regression tests pin header presence/stability and that other providers never see it.
+  - Matrix: minimax-m3 / glm-5.3-flash (+ `--effort off`) / kimi-k3 / gpt-6-luna / grok-4.7 on `/zen/go` defaults; claude-haiku-4-5 / claude-opus-5-5 (+ `--effort max`) / gpt-6-luna / gpt-6-astra via `/zen/v1` base-URL overrides. Real Claude and real GPT ran through the same codecs; token counts/costs sane; no key leakage in captured outputs.
+  - Direct `api.anthropic.com` / `api.openai.com` endpoints remain untested (no vendor keys); the zen override runs validate the same codec + provider paths minus the vendor base URLs.
+- **Acknowledged, deferred**: `readSSE`'s `timer.Reset` pattern (safe on Go ≥1.23 — unbuffered timer channels, no stale value after Reset; probed on 1.27.1).

@@ -1,0 +1,34 @@
+{
+  "model":      "opencode-go/glm-5.3-flash",   // everyday turns — cheap, fast
+  "modelHard":  "opencode-go/glm-5.3",          // /hard escalation: planning, gnarly debug
+
+  "providers": {
+    "anthropic":   { "auth": "api_key", "apiKey": "env:ANTHROPIC_API_KEY" },  // or "oauth" → moca login anthropic (if permitted, §3)
+    "opencode-go": { "auth": "api_key", "apiKey": "env:OPENCODE_API_KEY" },   // OpenCode Zen subscription key
+    "openai":      { "auth": "api_key", "apiKey": "env:OPENAI_API_KEY" },     // or "oauth" → moca login openai (ChatGPT Plus/Pro)
+    // optional baseUrl override per provider; custom providers too, e.g.:
+    // "vllm": { "baseUrl": "http://localhost:8000/v1", "protocol": "openai-completions", "auth": "api_key",
+    //           "apiKey": "env:VLLM_API_KEY", "models": { "qwen3-coder": { "contextWindow": 131072 } } }
+  },
+
+  "shell": {
+    "allow": ["go", "git", "gh", "grep", "rg", "find", "ls", "cat", "head", "tail",
+              "wc", "sort", "uniq", "diff", "which", "jq", "mkdir", "sed", "awk",
+              "curl", "make", "mise", "python", "pytest", "node", "npm",
+              "docker", "kubectl", "terraform", "ansible", "rtk", "graphify"]
+  },
+
+  "mcp": {
+    "idleTimeout": 600,                                        // seconds, lazy stop
+    "servers": {
+      "context7": { "url": "https://mcp.context7.com/mcp",      // lazy: starts on first call, not at startup
+                    "description": "library/API docs lookup" },
+    },
+  },
+
+  "snapshot": { "retentionDays": 30 },   // 0 = keep forever
+
+  "yolo": false,                         // true = all permission checks off by default (§7.5); --no-yolo overrides
+
+  "context": { "reserveTokens": 16384, "keepRecentTokens": 20000, "maxSteps": 40 }
+}

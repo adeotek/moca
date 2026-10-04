@@ -1,5 +1,6 @@
 # binaries
-moca
+/moca
+/bin/
 dist/
 *.test
 *.out
