@@ -1,0 +1,99 @@
+// Package permissions implements the path jail, shell command analysis and
+// project trust. It implements interfaces declared in tools without
+// importing it (§2).
+package permissions
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+)
+
+type Jail struct {
+	root     string
+	readOnly []string
+}
+
+func NewJail(root string, readOnly []string) (*Jail, error) {
+	r, err := canonical(root)
+	if err != nil {
+		return nil, fmt.Errorf("jail root: %w", err)
+	}
+	j := &Jail{root: r}
+	for _, ro := range readOnly {
+		if c, err := canonical(ro); err == nil {
+			j.readOnly = append(j.readOnly, c)
+		}
+	}
+	return j, nil
+}
+
+func (j *Jail) Root() string { return j.root }
+
+func canonical(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
+}
+
+// resolveDeep evaluates symlinks on the deepest existing ancestor and
+// re-appends the non-existent tail (new files, new dirs).
+func resolveDeep(p string) (string, error) {
+	var tail []string
+	cur := p
+	for {
+		r, err := filepath.EvalSymlinks(cur)
+		if err == nil {
+			return filepath.Join(append([]string{r}, tail...)...), nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return p, nil
+		}
+		tail = append([]string{filepath.Base(cur)}, tail...)
+		cur = parent
+	}
+}
+
+func within(base, p string) bool {
+	if runtime.GOOS == "windows" {
+		base, p = strings.ToLower(filepath.ToSlash(base)), strings.ToLower(filepath.ToSlash(p))
+		return p == base || strings.HasPrefix(p, base+"/")
+	}
+	return p == base || strings.HasPrefix(p, base+string(filepath.Separator))
+}
+
+func (j *Jail) Resolve(path string, write bool) (string, error) {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(j.root, path)
+	}
+	res, err := resolveDeep(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	if within(j.root, res) {
+		return res, nil
+	}
+	if !write {
+		for _, ro := range j.readOnly {
+			if within(ro, res) {
+				return res, nil
+			}
+		}
+		return "", fmt.Errorf("%s is outside the workdir %s (symlinks resolved); reading is limited to the workdir and skill directories", path, j.root)
+	}
+	return "", fmt.Errorf("%s is outside the workdir %s (symlinks resolved); writes are confined to the workdir", path, j.root)
+}
