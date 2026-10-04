@@ -1,1 +1,29 @@
-[]
+[
+  {
+    "name": "read",
+    "description": "Read a text file. Returns lines as `N|content` plus a `[lines A-B of TOTAL]` footer. At most 2000 lines or 50K chars per call; use offset/limit to page through large files instead of re-reading them whole. Lines longer than 2000 chars are truncated. Binary files are refused. A file must be read before write/edit may change it.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path, relative to the workdir or absolute"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based first line (default 1)"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Max lines to return (default/max 2000)"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  }
+]
