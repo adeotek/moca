@@ -1,0 +1,47 @@
+package skills
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func mkSkill(t *testing.T, dir, name, desc string) {
+	t.Helper()
+	os.MkdirAll(filepath.Join(dir, name), 0o755)
+	os.WriteFile(filepath.Join(dir, name, "SKILL.md"), []byte("---\nname: "+name+"\ndescription: "+desc+"\n---\nbody\n"), 0o644)
+}
+
+func TestDiscoverPrecedence(t *testing.T) {
+	proj, global := t.TempDir(), t.TempDir()
+	mkSkill(t, proj, "deploy", "project deploy")
+	mkSkill(t, global, "deploy", "global deploy")
+	mkSkill(t, global, "notes", "take notes")
+	os.MkdirAll(filepath.Join(global, "broken"), 0o755)
+	os.WriteFile(filepath.Join(global, "broken", "SKILL.md"), []byte("---\nname: broken\n---\n"), 0o644)
+	got, errs := Discover([]Dir{{proj, "project"}, {global, "global"}, {filepath.Join(proj, "missing"), "x"}})
+	if len(got) != 2 || got[0].Name != "deploy" || got[0].Description != "project deploy" || got[1].Name != "notes" {
+		t.Fatalf("%+v", got)
+	}
+	if !filepath.IsAbs(got[0].Path) {
+		t.Fatal("absolute path")
+	}
+	if len(errs) != 1 {
+		t.Fatalf("missing description is reported, missing dir is not: %v", errs)
+	}
+}
+
+func TestExtractBuiltins(t *testing.T) {
+	data := t.TempDir()
+	dir, err := ExtractBuiltins(data, "1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != filepath.Join(data, "builtin-skills", "1.2.3") {
+		t.Fatal(dir)
+	}
+	got, errs := Discover([]Dir{{dir, "builtin"}})
+	if len(errs) != 0 || len(got) != 1 || got[0].Name != "rtk" {
+		t.Fatalf("%+v %v", got, errs)
+	}
+}
