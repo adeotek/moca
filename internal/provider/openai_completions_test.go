@@ -107,12 +107,41 @@ func TestCompletionsTruncatedToolCall(t *testing.T) {
 		"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n", nil, nil)
 	defer srv.Close()
 	a := newOpenAICompletions(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
-	resp, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 1}, func(llm.Event) {})
+	calls := 0
+	resp, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 1}, func(e llm.Event) {
+		if e.Type == llm.EventToolCall {
+			calls++
+		}
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resp.Stop != llm.StopLength {
 		t.Fatalf("truncated tool call must keep stop=length, got %s", resp.Stop)
+	}
+	// The malformed call is neither emitted nor kept: executing it, or replaying
+	// its invalid JSON, would break the session.
+	for _, c := range resp.Message.Content {
+		if c.Type == llm.BlockToolUse {
+			t.Fatalf("truncated call kept in message: %+v", c)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("truncated call emitted %d times", calls)
+	}
+}
+
+func TestCompletionsEffortOffIsExplicit(t *testing.T) {
+	// glm/kimi: omitting reasoning_effort leaves server-side thinking on, so
+	// `off` must put an explicit value on the wire.
+	m := Model{ID: "glm", ThinkingMode: "openai", ThinkingLevelMap: glmThinking}
+	a := &completionsAdapter{m: m}
+	b := a.body(llm.Request{Model: "glm", Effort: llm.EffortOff})
+	if v, _ := b["reasoning_effort"].(string); v == "" {
+		t.Fatalf("effort off sent no reasoning_effort: %v", b)
+	}
+	if v := a.body(llm.Request{Model: "glm", Effort: llm.EffortHigh})["reasoning_effort"]; v != "high" {
+		t.Fatalf("high → %v", v)
 	}
 }
 

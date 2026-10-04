@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"math/rand/v2"
 	"time"
 
@@ -64,29 +65,43 @@ func (r *retrying) Stream(ctx context.Context, req llm.Request, emit func(llm.Ev
 			return resp, err
 		}
 		if streamed {
+			// §3: one retry of the whole turn after a mid-stream failure, announced
+			// and spaced like any other retry but outside the five-attempt budget.
 			if midRetried {
 				return resp, err
 			}
 			midRetried = true
 			emit(llm.Event{Type: llm.EventReset})
+			var base time.Duration
+			if len(r.p.Delays) > 0 {
+				base = r.p.Delays[0]
+			}
+			if perr := r.pause(ctx, err, base, 1, 1); perr != nil {
+				return resp, perr
+			}
 			continue
 		}
 		if attempt >= len(r.p.Delays) {
 			return resp, err
 		}
-		wait := r.p.Jitter(r.p.Delays[attempt])
-		if he, ok := err.(*HTTPError); ok && he.RetryAfter > wait {
-			wait = he.RetryAfter
-		}
-		if wait > maxRetryAfter {
-			wait = maxRetryAfter
-		}
 		attempt++
-		if r.p.Notify != nil {
-			r.p.Notify(RetryNotice{Attempt: attempt, Max: len(r.p.Delays), Wait: wait, Err: err})
-		}
-		if err := r.p.Sleep(ctx, wait); err != nil {
-			return resp, err
+		if perr := r.pause(ctx, err, r.p.Delays[attempt-1], attempt, len(r.p.Delays)); perr != nil {
+			return resp, perr
 		}
 	}
+}
+
+// pause announces a retry and sleeps: the jittered base delay, stretched to
+// honour retry-after, never beyond maxRetryAfter.
+func (r *retrying) pause(ctx context.Context, cause error, base time.Duration, n, of int) error {
+	wait := r.p.Jitter(base)
+	var he *HTTPError
+	if errors.As(cause, &he) && he.RetryAfter > wait {
+		wait = he.RetryAfter
+	}
+	wait = min(wait, maxRetryAfter)
+	if r.p.Notify != nil {
+		r.p.Notify(RetryNotice{Attempt: n, Max: of, Wait: wait, Err: cause})
+	}
+	return r.p.Sleep(ctx, wait)
 }

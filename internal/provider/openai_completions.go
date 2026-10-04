@@ -196,17 +196,26 @@ func (a *completionsAdapter) Stream(ctx context.Context, req llm.Request, emit f
 		idx = append(idx, i)
 	}
 	sort.Ints(idx)
+	kept, truncated := 0, false
 	for _, i := range idx {
 		p := calls[i]
 		in := p.args.String()
 		if in == "" {
 			in = "{}"
 		}
+		if !json.Valid([]byte(in)) {
+			truncated = true // cut off mid-arguments: not a call
+			continue
+		}
 		p.call.Input = json.RawMessage(in)
 		emit(llm.Event{Type: llm.EventToolCall, ToolCall: p.call})
 		out.Message.Content = append(out.Message.Content, llm.ContentBlock{Type: llm.BlockToolUse, ToolCall: p.call})
+		kept++
 	}
-	if len(calls) > 0 && out.Stop == llm.StopEnd {
+	switch {
+	case truncated:
+		out.Stop = llm.StopLength
+	case kept > 0 && out.Stop == llm.StopEnd:
 		out.Stop = llm.StopToolUse // some servers send finish_reason "stop" with tool calls
 	}
 	return out, nil

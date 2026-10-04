@@ -5,10 +5,17 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/adeotek/moca/internal/llm"
 )
 
 type evt struct{ ev, data string }
@@ -80,6 +87,49 @@ func TestRetryable(t *testing.T) {
 		if retryable(e) {
 			t.Errorf("%v should not retry", e)
 		}
+	}
+}
+
+func TestRetryableTransportErrors(t *testing.T) {
+	refused := &url.Error{Op: "Post", URL: "http://x", Err: &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}}
+	yes := []error{
+		refused,
+		os.NewSyscallError("write", syscall.EPIPE),
+		errors.New(`Post "https://x": http2: server sent GOAWAY and closed the connection; LastStreamID=1, ErrCode=NO_ERROR`),
+		errors.New("stream error: stream ID 3; INTERNAL_ERROR; received from peer"),
+	}
+	for _, e := range yes {
+		if !retryable(e) {
+			t.Errorf("%v should retry", e)
+		}
+	}
+	if retryable(errors.New("tls: failed to verify certificate")) {
+		t.Error("unrelated errors must not retry")
+	}
+}
+
+func TestRetryAfterFormats(t *testing.T) {
+	past := time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat)
+	for in, want := range map[string]time.Duration{"1.5": 1500 * time.Millisecond, "-5": 0, past: 0} {
+		r := &http.Response{StatusCode: 429, Header: http.Header{"Retry-After": {in}}, Body: io.NopCloser(strings.NewReader(""))}
+		if got := newHTTPError(r).RetryAfter; got != want {
+			t.Errorf("Retry-After %q → %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestNonSSEOKResponseIsNotRetried(t *testing.T) {
+	// A 200 JSON body (gateway error page, wrong endpoint) is not a truncated
+	// stream: surfacing it at once beats burning the whole backoff schedule.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"error":"wrong endpoint"}`)
+	}))
+	defer srv.Close()
+	a := newOpenAICompletions(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	_, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 1}, func(llm.Event) {})
+	if err == nil || retryable(err) || !strings.Contains(err.Error(), "wrong endpoint") {
+		t.Fatalf("want a non-retryable error carrying the body, got %v", err)
 	}
 }
 

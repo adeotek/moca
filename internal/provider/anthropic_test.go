@@ -162,7 +162,7 @@ func TestAnthropicBudgetAndNoCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	th := body["thinking"].(map[string]any)
-	if th["type"] != "enabled" || th["budget_tokens"].(float64) != 16384-4096 {
+	if th["type"] != "enabled" || th["budget_tokens"].(float64) != 12288 {
 		t.Fatalf("budget thinking %v", th)
 	}
 	if strings.Contains(mustJSON(body), "cache_control") {
@@ -310,7 +310,7 @@ func TestAnthropicBodyHygiene(t *testing.T) {
 		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}},
 		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
 			{Type: llm.BlockText, Text: "done"},
-			{Type: llm.BlockThinking, Text: "t", Signature: "S"},
+			{Type: llm.BlockThinking, Text: "t", Signature: "S", Model: "m"},
 		}},
 	}}, func(llm.Event) {})
 	msgs = body["messages"].([]any)
@@ -324,3 +324,161 @@ func TestAnthropicBodyHygiene(t *testing.T) {
 }
 
 func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+// Effort must change the thinking budget, and a model whose max_tokens cannot
+// hold the 1024 minimum budget plus answer room must not get thinking at all
+// (budget_tokens >= max_tokens is a 400).
+func TestAnthropicBudgetFollowsEffort(t *testing.T) {
+	budget := func(max int, e llm.Effort) (float64, bool) {
+		var body map[string]any
+		srv := sseServer(t, 200, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", &body, nil)
+		defer srv.Close()
+		m := Model{ID: "haiku", MaxOutput: 64000, ThinkingMode: "budget", ThinkingLevelMap: anthropicBudget}
+		a := newAnthropic(m, srv.URL, keyCred("K"), srv.Client())
+		if _, err := a.Stream(context.Background(), llm.Request{Model: "haiku", MaxTokens: max, Effort: e,
+			Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "x"}}}}}, func(llm.Event) {}); err != nil {
+			t.Fatal(err)
+		}
+		th, ok := body["thinking"].(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		return th["budget_tokens"].(float64), true
+	}
+	prev := 0.0
+	for _, e := range []llm.Effort{llm.EffortLow, llm.EffortMedium, llm.EffortHigh, llm.EffortMax} {
+		b, ok := budget(16384, e)
+		if !ok || b <= prev || b < 1024 || b >= 16384 {
+			t.Fatalf("effort %s: budget %v (prev %v) must rise with effort and stay in [1024, max_tokens)", e, b, prev)
+		}
+		prev = b
+	}
+	for _, max := range []int{500, 1024, 2047} {
+		if b, ok := budget(max, llm.EffortMax); ok {
+			t.Fatalf("max_tokens %d cannot hold a thinking budget, got %v", max, b)
+		}
+	}
+	if b, ok := budget(2048, llm.EffortMax); !ok || b != 1024 {
+		t.Fatalf("smallest thinking-capable window: budget %v ok %v", b, ok)
+	}
+}
+
+// Thinking is replayed verbatim only to the exact model that produced it and
+// only with a signature. Anything else degrades to labelled text (or nothing
+// for redacted/empty blocks) instead of a 400 on every later turn.
+func TestAnthropicForeignThinking(t *testing.T) {
+	var body map[string]any
+	srv := sseServer(t, 200, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", &body, nil)
+	defer srv.Close()
+	a := newAnthropic(Model{ID: "claude", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	if _, err := a.Stream(context.Background(), llm.Request{Model: "claude", MaxTokens: 10, Messages: []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: llm.BlockThinking, Text: "from glm", Model: "glm"},                               // other model, unsigned
+			{Type: llm.BlockThinking, Text: "from other", Signature: "FOREIGN-SIG", Model: "other"}, // other model, signed
+			{Type: llm.BlockThinking, Text: "[Reasoning redacted]", Signature: "FOREIGN-DATA", Model: "other", Redacted: true},
+			{Type: llm.BlockThinking, Text: "unsigned same model", Model: "claude"},       // cannot replay
+			{Type: llm.BlockThinking, Text: "mine", Signature: "MY-SIG", Model: "claude"}, // replayable
+			{Type: llm.BlockText, Text: "answer"},
+		}},
+	}}, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	got := mustJSON(body["messages"])
+	for _, bad := range []string{`"signature":""`, "FOREIGN-SIG", "FOREIGN-DATA", "redacted_thinking"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("foreign thinking leaked %s: %s", bad, got)
+		}
+	}
+	for _, want := range []string{`"signature":"MY-SIG"`, "[prior reasoning]\\nfrom glm", "[prior reasoning]\\nfrom other", "[prior reasoning]\\nunsigned same model"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %s: %s", want, got)
+		}
+	}
+	if strings.Count(got, `"type":"thinking"`) != 1 {
+		t.Errorf("only the same-model signed block replays as thinking: %s", got)
+	}
+}
+
+// A tool_use cut off by max_tokens (no content_block_stop, or invalid JSON)
+// is not a call: it must not be emitted or kept, and the stop must be length.
+func TestAnthropicTruncatedToolUseDropped(t *testing.T) {
+	for name, tail := range map[string]string{
+		"never stopped":   "",
+		"stopped invalid": "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := sseServer(t, 200, `event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":1}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"t1","name":"read"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"/a"}}
+
+`+tail+`event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":5}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`, nil, nil)
+			defer srv.Close()
+			a := newAnthropic(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+			calls := 0
+			resp, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 10}, func(e llm.Event) {
+				if e.Type == llm.EventToolCall {
+					calls++
+				}
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls != 0 {
+				t.Fatalf("truncated call emitted %d times", calls)
+			}
+			for _, c := range resp.Message.Content {
+				if c.Type == llm.BlockToolUse {
+					t.Fatalf("truncated tool_use kept: %+v", c)
+				}
+			}
+			if resp.Stop != llm.StopLength {
+				t.Fatalf("stop %s, want length", resp.Stop)
+			}
+		})
+	}
+}
+
+// History that already holds a tool_use with missing or malformed input must
+// still serialize (json.Marshal fails on an invalid RawMessage, which would
+// break every later turn) and must not send `"input":null`.
+func TestAnthropicHistoryToolInputSanitized(t *testing.T) {
+	var body map[string]any
+	srv := sseServer(t, 200, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", &body, nil)
+	defer srv.Close()
+	a := newAnthropic(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	_, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 10, Messages: []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: llm.BlockToolUse, ToolCall: &llm.ToolCall{ID: "a", Name: "ls"}},
+			{Type: llm.BlockToolUse, ToolCall: &llm.ToolCall{ID: "b", Name: "ls", Input: json.RawMessage(`{"path":"/a`)}},
+		}},
+	}}, func(llm.Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := mustJSON(body["messages"])
+	if strings.Contains(got, `"input":null`) || strings.Count(got, `"input":{}`) != 2 {
+		t.Fatalf("tool input not sanitized: %s", got)
+	}
+}

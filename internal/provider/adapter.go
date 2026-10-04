@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/adeotek/moca/internal/llm"
 )
@@ -42,6 +45,13 @@ func post(ctx context.Context, hc *http.Client, url string, hdr http.Header, bod
 	if resp.StatusCode/100 != 2 {
 		defer resp.Body.Close()
 		return nil, newHTTPError(resp)
+	}
+	// A 200 that is not an event stream (gateway error page, wrong endpoint) is
+	// not a truncated turn; surface it instead of retrying it five times.
+	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(strings.ToLower(ct), "text/event-stream") {
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		return nil, fmt.Errorf("unexpected %s response, want text/event-stream: %s", ct, b)
 	}
 	return resp, nil
 }

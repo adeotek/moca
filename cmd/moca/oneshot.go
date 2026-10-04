@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
@@ -49,14 +50,20 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		Effort:    effort,
 		Messages:  []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: o.Prompt}}}},
 	}
+	// stdout is the final message only (§12.5). Text is held back until the
+	// stream ends: a mid-stream retry replays the whole response, and bytes
+	// already written to a pipe cannot be taken back. The retry notice itself
+	// goes to stderr via the registry's notify callback.
+	var text strings.Builder
 	resp, err := adapter.Stream(ctx, req, func(e llm.Event) {
 		switch e.Type {
 		case llm.EventText:
-			io.WriteString(stdout, e.Text)
+			text.WriteString(e.Text)
 		case llm.EventReset:
-			fmt.Fprintln(stderr, "\n[stream interrupted — retrying]")
+			text.Reset()
 		}
 	})
+	io.WriteString(stdout, text.String()) // on failure: whatever the last attempt produced
 	if err != nil {
 		fmt.Fprintln(stderr, "moca:", err)
 		return exitFor(ctx, err)
@@ -64,5 +71,13 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 	io.WriteString(stdout, "\n")
 	u := resp.Usage
 	fmt.Fprintf(stderr, "tokens %d/%d · $%.4f\n", u.Input+u.CacheRead+u.CacheWrite, u.Output, m.CostOf(u))
+	switch resp.Stop {
+	case llm.StopLength:
+		fmt.Fprintln(stderr, "moca: response truncated (token limit reached)")
+		return exitRuntime
+	case llm.StopRefusal:
+		fmt.Fprintln(stderr, "moca: model refused to answer")
+		return exitRuntime
+	}
 	return exitOK
 }

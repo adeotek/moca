@@ -56,18 +56,22 @@ func (a *anthropicAdapter) body(req llm.Request) map[string]any {
 			case llm.BlockText:
 				blocks = append(blocks, map[string]any{"type": "text", "text": c.Text})
 			case llm.BlockThinking:
-				if c.Redacted {
+				switch {
+				case !replaysVerbatim(c, req.Model):
+					// Another model's (or an unsigned) reasoning is a 400 if replayed
+					// as thinking; keep what is worth keeping as labelled text (§3).
+					if t := priorReasoningText(c); t != "" {
+						blocks = append(blocks, map[string]any{"type": "text", "text": t})
+					}
+				case c.Redacted:
 					// Redacted blocks must be echoed back verbatim; filtering
 					// them out (or replaying them as thinking) is a 400.
 					blocks = append(blocks, map[string]any{"type": "redacted_thinking", "data": c.Signature})
-					break
+				default:
+					blocks = append(blocks, map[string]any{"type": "thinking", "thinking": c.Text, "signature": c.Signature})
 				}
-				if c.Text == "" && c.Signature == "" {
-					break // nothing replayable — an empty thinking block is a 400
-				}
-				blocks = append(blocks, map[string]any{"type": "thinking", "thinking": c.Text, "signature": c.Signature})
 			case llm.BlockToolUse:
-				blocks = append(blocks, map[string]any{"type": "tool_use", "id": c.ToolCall.ID, "name": c.ToolCall.Name, "input": c.ToolCall.Input})
+				blocks = append(blocks, map[string]any{"type": "tool_use", "id": c.ToolCall.ID, "name": c.ToolCall.Name, "input": toolInput(c.ToolCall.Input)})
 			case llm.BlockToolResult:
 				blocks = append(blocks, map[string]any{"type": "tool_result", "tool_use_id": c.ToolResult.CallID,
 					"content": c.ToolResult.Content, "is_error": c.ToolResult.IsError})
@@ -101,8 +105,8 @@ func (a *anthropicAdapter) body(req llm.Request) map[string]any {
 		b["thinking"] = map[string]any{"type": "adaptive", "display": "summarized"}
 		b["output_config"] = map[string]any{"effort": a.m.ThinkingLevelMap[req.Effort]}
 	case "budget":
-		if req.Effort != llm.EffortOff {
-			b["thinking"] = map[string]any{"type": "enabled", "budget_tokens": a.m.BudgetTokens(req.MaxTokens)}
+		if n := a.m.BudgetTokens(req.MaxTokens, req.Effort); req.Effort != llm.EffortOff && n > 0 {
+			b["thinking"] = map[string]any{"type": "enabled", "budget_tokens": n}
 		}
 	}
 	return b
@@ -222,6 +226,9 @@ func (a *anthropicAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 				if in == "" {
 					in = "{}"
 				}
+				if !json.Valid([]byte(in)) {
+					return nil // cut off mid-arguments: Input stays nil, dropped below
+				}
 				cb.ToolCall.Input = json.RawMessage(in)
 				emit(llm.Event{Type: llm.EventToolCall, ToolCall: cb.ToolCall})
 			}
@@ -245,8 +252,17 @@ func (a *anthropicAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 		// A clean EOF without the terminal event is a truncated turn.
 		return out, io.ErrUnexpectedEOF
 	}
+	truncated := false
 	for _, i := range order {
-		out.Message.Content = append(out.Message.Content, *blocks[i])
+		cb := blocks[i]
+		if cb.Type == llm.BlockToolUse && cb.ToolCall.Input == nil {
+			truncated = true // never completed, or invalid JSON: not a call
+			continue
+		}
+		out.Message.Content = append(out.Message.Content, *cb)
+	}
+	if truncated {
+		out.Stop = llm.StopLength
 	}
 	return out, nil
 }

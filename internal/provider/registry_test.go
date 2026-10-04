@@ -93,6 +93,18 @@ func TestBuiltinModelNeedsProtocol(t *testing.T) {
 	}
 }
 
+func TestBuiltinProviderNewModelWithModelProtocol(t *testing.T) {
+	// The protocol may be declared on the model itself; the provider has none.
+	r, err := NewRegistry(mustCfg(t, `{"model":"opencode-go/new-model","providers":{"opencode-go":{"auth":"api_key","apiKey":"env:OPENCODE_API_KEY","models":{"new-model":{"protocol":"openai-completions","contextWindow":200000}}}}}`), http.DefaultClient, nil)
+	if err != nil {
+		t.Fatalf("model-level protocol must satisfy the check: %v", err)
+	}
+	m, a, err := r.Resolve("opencode-go/new-model")
+	if err != nil || a == nil || m.Protocol != "openai-completions" {
+		t.Fatalf("%+v %v", m, err)
+	}
+}
+
 func TestOverrideBuiltinModelFields(t *testing.T) {
 	r, _ := NewRegistry(mustCfg(t, `{"providers":{"opencode-go":{"auth":"api_key","apiKey":"env:OPENCODE_API_KEY",
 		"models":{"glm-5.3":{"contextWindow":200000}}}}}`), http.DefaultClient, nil)

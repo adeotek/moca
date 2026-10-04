@@ -139,3 +139,68 @@ data: {"type":"response.incomplete","response":{"status":"incomplete","incomplet
 		}
 	}
 }
+
+func TestResponsesTruncatedFunctionCallDropped(t *testing.T) {
+	srv := sseServer(t, 200, `event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"c1","name":"read","arguments":"{\"path\":\"/a"}}
+
+event: response.incomplete
+data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":1,"output_tokens":1}}}
+
+`, nil, nil)
+	defer srv.Close()
+	a := newOpenAIResponses(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	calls := 0
+	resp, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 1}, func(e llm.Event) {
+		if e.Type == llm.EventToolCall {
+			calls++
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 || resp.Stop != llm.StopLength {
+		t.Fatalf("calls %d stop %s", calls, resp.Stop)
+	}
+	for _, c := range resp.Message.Content {
+		if c.Type == llm.BlockToolUse {
+			t.Fatalf("truncated call kept: %+v", c)
+		}
+	}
+}
+
+// Encrypted reasoning only replays to the model that produced it; anything
+// else (an anthropic signature, a glm summary) degrades to labelled text.
+func TestResponsesForeignThinking(t *testing.T) {
+	var body map[string]any
+	srv := sseServer(t, 200, `event: response.completed
+data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}
+
+`, &body, nil)
+	defer srv.Close()
+	a := newOpenAIResponses(Model{ID: "gpt", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	if _, err := a.Stream(context.Background(), llm.Request{Model: "gpt", MaxTokens: 1, Messages: []llm.Message{
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: llm.BlockThinking, Text: "from claude", Signature: "ANTHROPIC-SIG", Model: "claude"},
+			{Type: llm.BlockThinking, Text: "[Reasoning redacted]", Signature: "ANTHROPIC-DATA", Model: "claude", Redacted: true},
+			{Type: llm.BlockThinking, Text: "from glm", Model: "glm"},
+			{Type: llm.BlockThinking, ThinkingID: "rs_1", Signature: "ENC", Model: "gpt"},
+		}},
+	}}, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	got := mustJSON(body["input"])
+	for _, bad := range []string{"ANTHROPIC-SIG", "ANTHROPIC-DATA", `"id":""`} {
+		if strings.Contains(got, bad) {
+			t.Errorf("foreign reasoning leaked %s: %s", bad, got)
+		}
+	}
+	for _, want := range []string{`"encrypted_content":"ENC"`, "[prior reasoning]\\nfrom claude", "[prior reasoning]\\nfrom glm"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %s: %s", want, got)
+		}
+	}
+	if strings.Count(got, `"type":"reasoning"`) != 1 {
+		t.Errorf("only the gpt-produced item replays as reasoning: %s", got)
+	}
+}

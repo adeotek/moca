@@ -39,13 +39,13 @@ func NewRegistry(cfg config.Config, hc *http.Client, notify func(RetryNotice)) (
 			m, ok := r.models[q]
 			if !ok {
 				m = Model{Provider: pname, ID: mid, Protocol: p.Protocol, ThinkingMode: "none", MaxOutput: 8192}
-				if m.Protocol == "" {
-					return nil, fmt.Errorf("model %q: declare its protocol under providers.%s.models.%s.protocol (%s)",
-						q, pname, mid, strings.Join(config.Protocols, "|"))
-				}
 			}
 			if o.Protocol != "" {
 				m.Protocol = o.Protocol
+			}
+			if m.Protocol == "" {
+				return nil, fmt.Errorf("model %q: declare its protocol under providers.%s.models.%s.protocol (%s)",
+					q, pname, mid, strings.Join(config.Protocols, "|"))
 			}
 			if o.ContextWindow != 0 {
 				m.ContextWindow = o.ContextWindow

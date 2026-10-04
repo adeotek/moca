@@ -35,11 +35,15 @@ func (a *responsesAdapter) body(req llm.Request) map[string]any {
 				input = append(input, map[string]any{"type": "message", "role": string(m.Role),
 					"content": []map[string]any{{"type": typ, "text": c.Text}}})
 			case llm.BlockThinking:
-				if c.Signature == "" {
-					continue // cannot replay reasoning without its encrypted payload
+				if replaysVerbatim(c, req.Model) && !c.Redacted && c.ThinkingID != "" {
+					input = append(input, map[string]any{"type": "reasoning", "id": c.ThinkingID,
+						"encrypted_content": c.Signature, "summary": []any{}})
+				} else if t := priorReasoningText(c); t != "" {
+					// Encrypted reasoning only decrypts for the model that wrote it;
+					// anything else degrades to labelled text (§3).
+					input = append(input, map[string]any{"type": "message", "role": string(llm.RoleAssistant),
+						"content": []map[string]any{{"type": "output_text", "text": t}}})
 				}
-				input = append(input, map[string]any{"type": "reasoning", "id": c.ThinkingID,
-					"encrypted_content": c.Signature, "summary": []any{}})
 			case llm.BlockToolUse:
 				input = append(input, map[string]any{"type": "function_call", "call_id": c.ToolCall.ID,
 					"name": c.ToolCall.Name, "arguments": string(c.ToolCall.Input)})
@@ -133,7 +137,7 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 			text.Reset()
 		}
 	}
-	hasCalls := false
+	hasCalls, truncated := false, false
 	done := false
 	err = readSSE(ctx, resp.Body, stallTimeout, func(_, data string) error {
 		var ev responsesEvent
@@ -178,6 +182,10 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 				if args == "" {
 					args = "{}"
 				}
+				if !json.Valid([]byte(args)) {
+					truncated = true // cut off mid-arguments: not a call
+					return nil
+				}
 				call := &llm.ToolCall{ID: ev.Item.CallID, Name: ev.Item.Name, Input: json.RawMessage(args)}
 				emit(llm.Event{Type: llm.EventToolCall, ToolCall: call})
 				out.Message.Content = append(out.Message.Content, llm.ContentBlock{Type: llm.BlockToolUse, ToolCall: call})
@@ -216,7 +224,10 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 		return out, io.ErrUnexpectedEOF
 	}
 	flushText()
-	if hasCalls && out.Stop == llm.StopEnd {
+	switch {
+	case truncated:
+		out.Stop = llm.StopLength
+	case hasCalls && out.Stop == llm.StopEnd:
 		out.Stop = llm.StopToolUse
 	}
 	return out, nil

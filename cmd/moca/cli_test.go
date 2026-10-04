@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/adeotek/moca/internal/config"
@@ -77,6 +78,47 @@ func TestOneShotStreamsToStdout(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "tokens 3/2") || !strings.Contains(errb.String(), "$") {
 		t.Fatalf("exit summary missing: %q", errb.String())
+	}
+}
+
+func TestOneShotDiscardsStdoutOnReset(t *testing.T) {
+	// A clean mid-stream EOF triggers reset-and-retry. stdout already holds the
+	// first attempt's text, so a pipe would see "The answer isThe answer is 42".
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if calls.Add(1) == 1 {
+			io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"The answer is\"}}]}\n\n")
+			return
+		}
+		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"The answer is 42\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	t.Setenv("MOCA_T_KEY", "k")
+	cfg := writeCfg(t, `{"model":"loc/m","providers":{"loc":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768}}}}}`)
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"--config", cfg, "-p", "x"}, nil, &out, &errb); code != 0 {
+		t.Fatalf("exit %d stderr %q", code, errb.String())
+	}
+	if out.String() != "The answer is 42\n" {
+		t.Fatalf("stdout %q: first attempt's text must be discarded on reset", out.String())
+	}
+}
+
+func TestOneShotNonCompletionStopsExitNonZero(t *testing.T) {
+	for reason, want := range map[string]string{"length": "truncated", "content_filter": "refused"} {
+		srv := fakeCompletions(t, 200, "data: {\"choices\":[{\"delta\":{\"content\":\"part\"},\"finish_reason\":\""+reason+"\"}]}\n\ndata: [DONE]\n\n")
+		t.Setenv("MOCA_T_KEY", "k")
+		cfg := writeCfg(t, `{"model":"loc/m","providers":{"loc":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768}}}}}`)
+		var out, errb bytes.Buffer
+		code := run(context.Background(), []string{"--config", cfg, "-p", "x"}, nil, &out, &errb)
+		srv.Close()
+		if code != 1 || !strings.Contains(errb.String(), want) {
+			t.Errorf("%s: exit %d stderr %q — want exit 1 mentioning %q", reason, code, errb.String(), want)
+		}
+		if !strings.Contains(out.String(), "part") {
+			t.Errorf("%s: partial text must still be printed, got %q", reason, out.String())
+		}
 	}
 }
 

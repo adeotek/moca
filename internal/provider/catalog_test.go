@@ -45,11 +45,17 @@ func TestMaxTokensAndBudget(t *testing.T) {
 	if (Model{MaxOutput: 8192}).MaxTokens(16384) != 8192 {
 		t.Fatal("catalog max wins when smaller")
 	}
-	if m.BudgetTokens(16384) != 16384-4096 {
-		t.Fatal("budget = max − 4K")
+	if got := m.BudgetTokens(16384, llm.EffortHigh); got != 12288 {
+		t.Fatalf("high = 75%% of max_tokens, got %d", got)
 	}
-	if m.BudgetTokens(4096) != 1024 {
-		t.Fatal("budget floor 1024")
+	if got := m.BudgetTokens(16384, llm.EffortMax); got != 16384-1024 {
+		t.Fatalf("max leaves 1024 tokens of answer room, got %d", got)
+	}
+	if got := m.BudgetTokens(4096, llm.EffortLow); got != 1024 {
+		t.Fatalf("budget floor 1024, got %d", got)
+	}
+	if got := m.BudgetTokens(2047, llm.EffortMax); got != 0 {
+		t.Fatalf("no room for a budget → 0 (thinking off), got %d", got)
 	}
 }
 

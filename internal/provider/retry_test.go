@@ -98,6 +98,27 @@ func TestMidStreamFailureResetsAndRetriesOnce(t *testing.T) {
 	}
 }
 
+func TestMidStreamRetryBacksOffAndNotifies(t *testing.T) {
+	// Not silent (§3): the user sees the retry, and an overloaded upstream is
+	// not hit again instantly.
+	var slept []time.Duration
+	var notes []RetryNotice
+	partial := func(emit func(llm.Event)) error {
+		emit(llm.Event{Type: llm.EventText, Text: "par"})
+		return &HTTPError{Status: 529, RetryAfter: 3 * time.Second}
+	}
+	s := &scripted{steps: []func(func(llm.Event)) error{partial, ok}}
+	if _, err := WithRetry(s, testPolicy(&slept, &notes)).Stream(context.Background(), llm.Request{}, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if len(slept) != 1 || slept[0] != 3*time.Second {
+		t.Fatalf("mid-stream retry must back off (honouring retry-after): %v", slept)
+	}
+	if len(notes) != 1 || notes[0].Wait != 3*time.Second {
+		t.Fatalf("mid-stream retry must notify: %+v", notes)
+	}
+}
+
 func TestRetryAfterCapped(t *testing.T) {
 	var slept []time.Duration
 	var notes []RetryNotice
