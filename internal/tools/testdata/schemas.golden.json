@@ -43,5 +43,34 @@
       },
       "additionalProperties": false
     }
+  },
+  {
+    "name": "search",
+    "description": "Search file contents recursively with a regular expression (Go RE2 syntax: no lookahead/lookbehind or backreferences; use (?i) for case-insensitive). Respects .gitignore/.ignore and skips hidden and binary files. Returns `path:line:text`, or only paths with files_only. At most 200 hits.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "RE2 regular expression"
+        },
+        "path": {
+          "type": "string",
+          "description": "Directory or file to search (default: workdir)"
+        },
+        "glob": {
+          "type": "string",
+          "description": "Filename filter, e.g. *.go or src/*.ts"
+        },
+        "files_only": {
+          "type": "boolean",
+          "description": "List matching files only"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "additionalProperties": false
+    }
   }
 ]
