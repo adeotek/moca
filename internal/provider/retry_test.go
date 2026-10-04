@@ -98,6 +98,18 @@ func TestMidStreamFailureResetsAndRetriesOnce(t *testing.T) {
 	}
 }
 
+func TestRetryAfterCapped(t *testing.T) {
+	var slept []time.Duration
+	var notes []RetryNotice
+	s := &scripted{steps: []func(func(llm.Event)) error{fail(&HTTPError{Status: 429, RetryAfter: time.Hour}), ok}}
+	if _, err := WithRetry(s, testPolicy(&slept, &notes)).Stream(context.Background(), llm.Request{}, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if len(slept) != 1 || slept[0] != maxRetryAfter {
+		t.Fatalf("retry-after must be capped at %v, slept %v", maxRetryAfter, slept)
+	}
+}
+
 func TestRetryStopsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := DefaultRetryPolicy(nil)

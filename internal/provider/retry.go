@@ -44,6 +44,9 @@ type retrying struct {
 	p RetryPolicy
 }
 
+// maxRetryAfter caps how long a retry-after header can park the loop.
+const maxRetryAfter = 60 * time.Second
+
 func WithRetry(a Adapter, p RetryPolicy) Adapter { return &retrying{a, p} }
 
 func (r *retrying) Stream(ctx context.Context, req llm.Request, emit func(llm.Event)) (llm.Response, error) {
@@ -74,6 +77,9 @@ func (r *retrying) Stream(ctx context.Context, req llm.Request, emit func(llm.Ev
 		wait := r.p.Jitter(r.p.Delays[attempt])
 		if he, ok := err.(*HTTPError); ok && he.RetryAfter > wait {
 			wait = he.RetryAfter
+		}
+		if wait > maxRetryAfter {
+			wait = maxRetryAfter
 		}
 		attempt++
 		if r.p.Notify != nil {

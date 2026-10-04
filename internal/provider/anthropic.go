@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -47,8 +48,8 @@ func (a *anthropicAdapter) body(req llm.Request) map[string]any {
 			b["tool_choice"] = map[string]string{"type": string(req.ToolChoice)}
 		}
 	}
-	msgs := make([]map[string]any, len(req.Messages))
-	for i, m := range req.Messages {
+	msgs := make([]map[string]any, 0, len(req.Messages))
+	for _, m := range req.Messages {
 		blocks := make([]map[string]any, 0, len(m.Content))
 		for _, c := range m.Content {
 			switch c.Type {
@@ -56,8 +57,13 @@ func (a *anthropicAdapter) body(req llm.Request) map[string]any {
 				blocks = append(blocks, map[string]any{"type": "text", "text": c.Text})
 			case llm.BlockThinking:
 				if c.Redacted {
+					// Redacted blocks must be echoed back verbatim; filtering
+					// them out (or replaying them as thinking) is a 400.
 					blocks = append(blocks, map[string]any{"type": "redacted_thinking", "data": c.Signature})
 					break
+				}
+				if c.Text == "" && c.Signature == "" {
+					break // nothing replayable — an empty thinking block is a 400
 				}
 				blocks = append(blocks, map[string]any{"type": "thinking", "thinking": c.Text, "signature": c.Signature})
 			case llm.BlockToolUse:
@@ -67,10 +73,27 @@ func (a *anthropicAdapter) body(req llm.Request) map[string]any {
 					"content": c.ToolResult.Content, "is_error": c.ToolResult.IsError})
 			}
 		}
-		if cache && i == len(req.Messages)-1 && len(blocks) > 0 {
-			blocks[len(blocks)-1]["cache_control"] = ephemeral
+		if len(blocks) == 0 {
+			continue // empty content is a 400; skip the message
 		}
-		msgs[i] = map[string]any{"role": string(m.Role), "content": blocks}
+		msgs = append(msgs, map[string]any{"role": string(m.Role), "content": blocks})
+	}
+	if cache && len(msgs) > 0 {
+		// Cache breakpoints cannot sit on thinking (or empty text) blocks;
+		// use the last eligible block of the last message, mirroring the
+		// API's automatic-caching walk-back.
+		last := msgs[len(msgs)-1]["content"].([]map[string]any)
+		for i := len(last) - 1; i >= 0; i-- {
+			t, _ := last[i]["type"].(string)
+			if t == "thinking" || t == "redacted_thinking" {
+				continue
+			}
+			if s, _ := last[i]["text"].(string); t == "text" && s == "" {
+				continue
+			}
+			last[i]["cache_control"] = ephemeral
+			break
+		}
 	}
 	b["messages"] = msgs
 	switch a.m.ThinkingMode {
@@ -145,6 +168,7 @@ func (a *anthropicAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 	blocks := map[int]*llm.ContentBlock{}
 	partial := map[int]*strings.Builder{}
 	var order []int
+	sawStop := false
 	err = readSSE(ctx, resp.Body, stallTimeout, func(_, data string) error {
 		var ev anthropicEvent
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
@@ -204,6 +228,8 @@ func (a *anthropicAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 		case "message_delta":
 			out.Usage.Output = ev.Usage.Output
 			out.Stop = anthropicStop(ev.Delta.StopReason)
+		case "message_stop":
+			sawStop = true
 		case "error":
 			if ev.Error.Type == "overloaded_error" {
 				return &HTTPError{Status: 529, Body: ev.Error.Message}
@@ -214,6 +240,10 @@ func (a *anthropicAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 	})
 	if err != nil {
 		return out, err
+	}
+	if !sawStop {
+		// A clean EOF without the terminal event is a truncated turn.
+		return out, io.ErrUnexpectedEOF
 	}
 	for _, i := range order {
 		out.Message.Content = append(out.Message.Content, *blocks[i])

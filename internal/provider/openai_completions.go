@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -123,8 +124,10 @@ func (a *completionsAdapter) Stream(ctx context.Context, req llm.Request, emit f
 	}
 	calls := map[int]*pending{}
 	out := llm.Response{Stop: llm.StopEnd}
+	done := false
 	err = readSSE(ctx, resp.Body, stallTimeout, func(_, data string) error {
 		if data == "[DONE]" {
+			done = true
 			return nil
 		}
 		var ch completionsChunk
@@ -168,11 +171,18 @@ func (a *completionsAdapter) Stream(ctx context.Context, req llm.Request, emit f
 			case "content_filter":
 				out.Stop = llm.StopRefusal
 			}
+			if c.FinishReason != "" {
+				done = true
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		return out, err
+	}
+	if !done {
+		// A clean EOF without [DONE]/finish_reason is a truncated turn.
+		return out, io.ErrUnexpectedEOF
 	}
 	out.Message.Role = llm.RoleAssistant
 	if thinking.Len() > 0 {
@@ -196,7 +206,7 @@ func (a *completionsAdapter) Stream(ctx context.Context, req llm.Request, emit f
 		emit(llm.Event{Type: llm.EventToolCall, ToolCall: p.call})
 		out.Message.Content = append(out.Message.Content, llm.ContentBlock{Type: llm.BlockToolUse, ToolCall: p.call})
 	}
-	if len(calls) > 0 {
+	if len(calls) > 0 && out.Stop == llm.StopEnd {
 		out.Stop = llm.StopToolUse // some servers send finish_reason "stop" with tool calls
 	}
 	return out, nil

@@ -86,6 +86,13 @@ func TestCustomProviderAndLazyMissingKey(t *testing.T) {
 	}
 }
 
+func TestBuiltinModelNeedsProtocol(t *testing.T) {
+	_, err := NewRegistry(mustCfg(t, `{"model":"opencode-go/new-model","providers":{"opencode-go":{"auth":"api_key","apiKey":"env:OPENCODE_API_KEY","models":{"new-model":{"contextWindow":200000}}}}}`), http.DefaultClient, nil)
+	if err == nil || !strings.Contains(err.Error(), "protocol") {
+		t.Fatalf("new model under a built-in provider must declare its protocol: %v", err)
+	}
+}
+
 func TestOverrideBuiltinModelFields(t *testing.T) {
 	r, _ := NewRegistry(mustCfg(t, `{"providers":{"opencode-go":{"auth":"api_key","apiKey":"env:OPENCODE_API_KEY",
 		"models":{"glm-5.3":{"contextWindow":200000}}}}}`), http.DefaultClient, nil)

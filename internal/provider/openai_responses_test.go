@@ -4,6 +4,8 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -98,6 +100,16 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 	th := resp.Message.Content[0]
 	if th.Type != llm.BlockThinking || th.Text != "part1 part2" || th.ThinkingID != "rs_9" || th.Signature != "E2" {
 		t.Fatalf("summary fallback %+v", th)
+	}
+}
+
+func TestResponsesTruncatedStream(t *testing.T) {
+	srv := sseServer(t, 200, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"cut\"}\n\n", nil, nil)
+	defer srv.Close()
+	a := newOpenAIResponses(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	_, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 10}, func(llm.Event) {})
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("clean EOF without response.completed must be an error, got %v", err)
 	}
 }
 

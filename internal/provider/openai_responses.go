@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -133,6 +134,7 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 		}
 	}
 	hasCalls := false
+	done := false
 	err = readSSE(ctx, resp.Body, stallTimeout, func(_, data string) error {
 		var ev responsesEvent
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
@@ -184,6 +186,7 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 				flushText()
 			}
 		case "response.completed", "response.incomplete":
+			done = true
 			u := ev.Response.Usage
 			out.Usage = llm.Usage{Input: u.Input - u.Details.Cached, CacheRead: u.Details.Cached, Output: u.Output}
 			if ev.Response.IncompleteDetails.Reason == "max_output_tokens" {
@@ -207,6 +210,10 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 	})
 	if err != nil {
 		return out, err
+	}
+	if !done {
+		// A clean EOF without response.completed/incomplete is a truncated turn.
+		return out, io.ErrUnexpectedEOF
 	}
 	flushText()
 	if hasCalls && out.Stop == llm.StopEnd {

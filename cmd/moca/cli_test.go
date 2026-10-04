@@ -102,6 +102,16 @@ func TestExitCodes(t *testing.T) {
 	}
 }
 
+func TestSubcommandBeforeConfig(t *testing.T) {
+	// Subcommand stubs must not trip the "no model configured" check on a
+	// fresh install.
+	var out, errb bytes.Buffer
+	code := run(context.Background(), []string{"--config", filepath.Join(t.TempDir(), "none.jsonc"), "login", "anthropic"}, nil, &out, &errb)
+	if code != 2 || !strings.Contains(errb.String(), "login lands in a later phase") {
+		t.Fatalf("code %d stderr %q", code, errb.String())
+	}
+}
+
 func TestProviderErrorExit1(t *testing.T) {
 	srv := fakeCompletions(t, 401, `{"error":{"message":"bad key"}}`)
 	defer srv.Close()

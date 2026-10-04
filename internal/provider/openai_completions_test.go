@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -96,6 +97,32 @@ func TestCompletionsHistoryMapping(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %s in %s", want, got)
 		}
+	}
+}
+
+func TestCompletionsTruncatedToolCall(t *testing.T) {
+	// A call cut off by max_tokens must keep stop=length; the phase-2 loop
+	// turns it into an error result instead of executing broken JSON.
+	srv := sseServer(t, 200, "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"/a\"}}]}}]}\n\n"+
+		"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n", nil, nil)
+	defer srv.Close()
+	a := newOpenAICompletions(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	resp, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 1}, func(llm.Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Stop != llm.StopLength {
+		t.Fatalf("truncated tool call must keep stop=length, got %s", resp.Stop)
+	}
+}
+
+func TestCompletionsTruncatedStream(t *testing.T) {
+	srv := sseServer(t, 200, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"cut\"}}]}\n\n", nil, nil)
+	defer srv.Close()
+	a := newOpenAICompletions(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	_, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 1}, func(llm.Event) {})
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("clean EOF without finish_reason/[DONE] must be an error, got %v", err)
 	}
 }
 

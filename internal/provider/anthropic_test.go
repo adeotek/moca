@@ -268,4 +268,59 @@ func TestAnthropicRedactedThinking(t *testing.T) {
 	}
 }
 
+func TestAnthropicTruncatedStream(t *testing.T) {
+	// A clean EOF without message_stop is a truncated turn, not a success.
+	srv := sseServer(t, 200, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n"+
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"+
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"cut\"}}\n\n", nil, nil)
+	defer srv.Close()
+	a := newAnthropic(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	_, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 10}, func(llm.Event) {})
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("want io.ErrUnexpectedEOF, got %v", err)
+	}
+}
+
+func TestAnthropicBodyHygiene(t *testing.T) {
+	var body map[string]any
+	srv := sseServer(t, 200, "event: message_stop\ndata: {}\n\n", &body, nil)
+	defer srv.Close()
+	a := newAnthropic(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+
+	// A message reduced to nothing (empty thinking block) is skipped, not sent
+	// as `content: []`; the breakpoint lands on the last real message.
+	a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 10, Messages: []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockThinking}}},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "again"}}},
+	}}, func(llm.Event) {})
+	msgs := body["messages"].([]any)
+	if len(msgs) != 2 {
+		t.Fatalf("empty message not skipped: %s", mustJSON(msgs))
+	}
+	last := msgs[1].(map[string]any)["content"].([]any)
+	if last[0].(map[string]any)["cache_control"] == nil {
+		t.Fatalf("breakpoint must land on the last real message: %s", mustJSON(msgs))
+	}
+
+	// Thinking blocks cannot carry cache_control: with a thinking block last,
+	// the breakpoint walks back to the previous eligible block.
+	body = nil
+	a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 10, Messages: []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: llm.BlockText, Text: "done"},
+			{Type: llm.BlockThinking, Text: "t", Signature: "S"},
+		}},
+	}}, func(llm.Event) {})
+	msgs = body["messages"].([]any)
+	last = msgs[len(msgs)-1].(map[string]any)["content"].([]any)
+	if last[0].(map[string]any)["cache_control"] == nil {
+		t.Fatalf("breakpoint must walk back to the text block: %s", mustJSON(last))
+	}
+	if last[1].(map[string]any)["cache_control"] != nil {
+		t.Fatalf("thinking block must not carry cache_control: %s", mustJSON(last))
+	}
+}
+
 func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }

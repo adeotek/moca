@@ -7,12 +7,13 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"github.com/adeotek/moca/internal/config"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	os.Exit(run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
@@ -30,6 +31,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if o.Version {
 		fmt.Fprintln(stdout, "moca", config.Version)
 		return exitOK
+	}
+	if len(o.Sub) > 0 {
+		// Subcommands are stubs in phase 1 and need no config.
+		fmt.Fprintf(stderr, "moca: %s lands in a later phase\n", o.Sub[0])
+		return exitUsage
 	}
 	path := o.ConfigPath
 	if path == "" {
@@ -49,10 +55,6 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if cfg.Model == "" {
 		fmt.Fprintf(stderr, "moca: no model configured — set \"model\" in %s or pass --model provider/model\n", path)
-		return exitUsage
-	}
-	if len(o.Sub) > 0 {
-		fmt.Fprintf(stderr, "moca: %s lands in a later phase\n", o.Sub[0])
 		return exitUsage
 	}
 	if !o.OneShot {

@@ -69,7 +69,7 @@ func TestSSECallbackErrorStops(t *testing.T) {
 }
 
 func TestRetryable(t *testing.T) {
-	yes := []error{&HTTPError{Status: 429}, &HTTPError{Status: 500}, &HTTPError{Status: 529}, ErrStall, io.ErrUnexpectedEOF}
+	yes := []error{&HTTPError{Status: 408}, &HTTPError{Status: 429}, &HTTPError{Status: 500}, &HTTPError{Status: 529}, ErrStall, io.EOF, io.ErrUnexpectedEOF}
 	no := []error{&HTTPError{Status: 400}, &HTTPError{Status: 401}, ErrContextOverflow, context.Canceled}
 	for _, e := range yes {
 		if !retryable(e) {
