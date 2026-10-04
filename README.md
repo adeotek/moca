@@ -4,7 +4,7 @@ Minimal, token-efficient, provider-agnostic coding agent. Single Go binary, Bubb
 
 Inspired by Claude Code, OpenCode, and Pi — deliberately ~10% of their surface area. Competes on **cost per task** and **read-the-whole-codebase-in-an-hour** transparency, not features.
 
-**Status: phase 0 — [DESIGN.md](docs/specs/DESIGN.md) rev 10 (second review's fixes + improvements, yolo mode), awaiting lock.** No code until the doc is signed off. Per-phase implementation plans: [`docs/plans/`](docs/plans/).
+**Status: phase 0 — [DESIGN.md](docs/specs/DESIGN.md) rev 11 (plan review fixes), awaiting lock.** No code until the doc is signed off. Per-phase implementation plans: [`docs/plans/`](docs/plans/).
 
 ## Stack
 

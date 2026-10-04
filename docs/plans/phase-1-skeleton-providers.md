@@ -1,6 +1,6 @@
 # Phase 1 — Skeleton, Protocol Adapters, Streaming, JSONC Config — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `moca -p 'hi'` streams a reply from anthropic, opencode-go (both protocol families) and openai, driven by a validated JSONC config, with uniform retry/backoff and the §12.5 `-p` output contract.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.27.1 (mise), stdlib only (`net/http`, `encoding/json`, `flag`, `net/http/httptest` for tests). No SDKs, no third-party deps in this phase.
 
-**Spec:** `docs/specs/DESIGN.md` (rev 9) — §2, §3, §12, §12.5, phase plan item 1.
+**Spec:** `docs/specs/DESIGN.md` (rev 11) — §2, §3, §12, §12.5, phase plan item 1.
 
 ## Global Constraints
 
@@ -554,7 +554,7 @@ func TestSpecExampleDecodesIntact(t *testing.T) {
 	if c.Providers["anthropic"].APIKey != "env:ANTHROPIC_API_KEY" {
 		t.Fatal("apiKey lost")
 	}
-	if !slices.Contains(c.Shell.Allow, "graphify") || len(c.Shell.Allow) != 31 {
+	if !slices.Contains(c.Shell.Allow, "graphify") || len(c.Shell.Allow) != 32 {
 		t.Fatalf("allow list: %v", c.Shell.Allow)
 	}
 	if c.MCP.IdleTimeout != 600 || c.RetentionDays() != 30 {
@@ -1059,7 +1059,7 @@ Note on the negative-`maxSteps` case: `applyDefaults` replaces only `0`, so `-1`
 - [ ] **Step 6: Run tests**
 
 Run: `go test ./internal/config/ -v`
-Expected: PASS. If `TestSpecExampleDecodesIntact` fails on a count, recount the §12 allow list in DESIGN.md (it has 31 entries) — do not edit the fixture.
+Expected: PASS. If `TestSpecExampleDecodesIntact` fails on a count, recount the §12 allow list in DESIGN.md (it has 32 entries) — do not edit the fixture.
 
 - [ ] **Step 7: Commit**
 

@@ -1,6 +1,6 @@
 # Phase 5 — MCP Lazy Proxy — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The frozen `mcp` tool becomes a real lazy proxy. Configured MCP servers (stdio and streamable HTTP) are discoverable through a persisted name+description index, so **zero servers start at session start**. They start on first `describe`/`call`, stop after the idle timeout, and calls are gated by MCP annotations or a per-server approve list. `moca mcp import` brings existing Claude Code / OpenCode / Pi servers over without copying literal secrets; `moca mcp index` prebuilds the index.
 
@@ -14,7 +14,7 @@
 
 **Tech Stack:** Go 1.27.1 stdlib (`os/exec`, `net/http`, `encoding/json`, `crypto/sha256`). No MCP SDK.
 
-**Spec:** `docs/specs/DESIGN.md` (rev 9) — §4 (`mcp` row), §10.5 (all), §12 (`mcp` config block), §12.5 (`moca mcp import`, `moca mcp index`), §13 (server roster), phase plan item 5.
+**Spec:** `docs/specs/DESIGN.md` (rev 11) — §4 (`mcp` row), §10.5 (all), §12 (`mcp` config block), §12.5 (`moca mcp import`, `moca mcp index`), §13 (server roster), phase plan item 5.
 
 **Builds on:** Phases 1–4. Uses `tools.Tool/Env/Result/Asker/Question/Answer/MCPSpec/Truncate`, `config.MCPServer/MCPConfig/ResolveEnv/AppendString/DataDir/ConfigFile`, `agent.build/Options`, the TUI approval flow, `cmd/moca` `Options.Sub`.
 
@@ -1277,6 +1277,31 @@ func TestIdleStopAndRestart(t *testing.T) {
 	}
 }
 
+// TestCallSurvivesIdleTimer (rev 11): a call landing exactly at idle expiry
+// must not hit a nil client. 1ns idle → every call races the timer; run with
+// -race. The one-critical-section Call (ensure + lookup + busy++ + timer stop
+// under st.mu) closes the old two-section window.
+func TestCallSurvivesIdleTimer(t *testing.T) {
+	s, starts := countingServer(t)
+	ix, _ := LoadIndex(filepath.Join(t.TempDir(), "ix.json"))
+	m := NewManager(map[string]config.MCPServer{"docs": s}, time.Nanosecond, ix, Options{BaseEnv: os.Environ()})
+	defer m.Close()
+	var wg sync.WaitGroup
+	for range 25 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, _, err := m.Call(context.Background(), "docs", "read_doc", nil); err != nil {
+				t.Errorf("call at idle expiry: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if starts() < 1 {
+		t.Fatal("server started at least once:", starts())
+	}
+}
+
 func TestUnknownServerAndTool(t *testing.T) {
 	ix, _ := LoadIndex(filepath.Join(t.TempDir(), "ix.json"))
 	m := NewManager(map[string]config.MCPServer{"docs": fakeServer("")}, time.Minute, ix, Options{BaseEnv: os.Environ()})
@@ -1455,8 +1480,6 @@ func (m *Manager) lookup(ctx context.Context, server, tool string) (*state, Tool
 	if err != nil {
 		return nil, Tool{}, err
 	}
-	st.mu.Lock()
-	defer st.mu.Unlock()
 	if err := m.ensure(ctx, server, st); err != nil {
 		return nil, Tool{}, err
 	}
@@ -1469,17 +1492,50 @@ func (m *Manager) lookup(ctx context.Context, server, tool string) (*state, Tool
 }
 
 func (m *Manager) Describe(ctx context.Context, server, tool string) (Tool, error) {
-	_, t, err := m.lookup(ctx, server, tool)
-	return t, err
+	st, err := m.get(server)
+	if err != nil {
+		return Tool{}, err
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if err := m.ensure(ctx, server, st); err != nil {
+		return Tool{}, err
+	}
+	for _, t := range st.tools {
+		if t.Name == tool {
+			return t, nil
+		}
+	}
+	return Tool{}, fmt.Errorf("server %s has no tool %q; use action=search", server, tool)
 }
 
 func (m *Manager) Call(ctx context.Context, server, tool string, args json.RawMessage) (CallResult, Tool, error) {
 	for attempt := 0; ; attempt++ {
-		st, t, err := m.lookup(ctx, server, tool)
+		// One critical section (rev 11): ensure + tool lookup + busy++ + timer
+		// stop. The old two-section window (lookup unlocked its own lock, then
+		// Call re-locked) let the idle timer fire in between, close the
+		// transport and nil st.cl — a call landing exactly at idle expiry
+		// then panicked on the nil client.
+		st, err := m.get(server)
 		if err != nil {
 			return CallResult{}, Tool{}, err
 		}
 		st.mu.Lock()
+		if err := m.ensure(ctx, server, st); err != nil {
+			st.mu.Unlock()
+			return CallResult{}, Tool{}, err
+		}
+		var t Tool
+		for _, x := range st.tools {
+			if x.Name == tool {
+				t = x
+				break
+			}
+		}
+		if t.Name == "" {
+			st.mu.Unlock()
+			return CallResult{}, Tool{}, fmt.Errorf("server %s has no tool %q; use action=search", server, tool)
+		}
 		st.busy++
 		if st.timer != nil {
 			st.timer.Stop()

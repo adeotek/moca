@@ -1,6 +1,6 @@
 # Phase 4 — Context Manager, Compaction, Resume — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Long sessions never overflow. When the usage-anchored estimate crosses `window − reserve`, older history is replaced by a structured summary, cutting only at valid points; provider overflow triggers one compact-and-retry; `--resume`/`--continue` rebuild the exact request context (stored system prompt + latest summary + kept entries) and repair a session killed mid-tool.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.27.1 stdlib only.
 
-**Spec:** `docs/specs/DESIGN.md` (rev 9) — §6 (all), §8 (compaction entry, request rebuild, transcript repair, resume), §12.5 (`--resume`, `--continue`), phase plan item 4.
+**Spec:** `docs/specs/DESIGN.md` (rev 11) — §6 (all), §8 (compaction entry, request rebuild, transcript repair, resume), §12.5 (`--resume`, `--continue`), phase plan item 4.
 
 **Builds on:** Phases 1–3. Uses `compact.Tokens/MessageChars/RequestChars/UsageTokens` (phase 3), `agent.Agent` (anchor fields, `ContextTokens`, `TransformHistory`, `turn`, `Run`, `Start`), `session.Entry/Compaction/Messages/Repair/Open/ReadFile`, `provider.ErrContextOverflow`.
 
@@ -1288,7 +1288,7 @@ func FindForWorkdir(dir, workdir string) (string, error) {
 - Produces:
   - `func Resume(o StartOptions, path string) (*Agent, error)`. It opens the writer, reads the entries, and appends `session.Repair(entries, session.Interrupted)`. The header's `SystemPrompt` is reused verbatim, and the header's `Workdir` becomes the jail root (`o.Workdir` is ignored). The model and effort are the latest `model_change`, else the header's. When `o.Model` is set, `SetModel(o.Model, effort)` runs after construction and writes a `model_change`. Totals are restored from prior entries, and `NewSnapshots(w, blobDir, entries)` rebuilds the undo stack.
   - `type Resumed struct { ID8 string; Messages int }` event, emitted once (the TUI prints `resumed <id8> (<n> messages)`).
-  - Refactor: `Start` and `Resume` share `build(o StartOptions, jailRoot string, w *session.Writer, system string, model string, effort llm.Effort, prior []session.Entry) (*Agent, error)`. It constructs the registry, jail, shell, env and snapshots.
+  - Refactor: `Start` and `Resume` share `build(o StartOptions, jailRoot string, w *session.Writer, system string, model string, effort llm.Effort, prior []session.Entry, snapshotDir string) (*Agent, error)`. It constructs the registry, jail, shell, env and snapshots (`NewSnapshots(w, snapshotDir, prior)`); `Start` passes `filepath.Join(config.DataDir(), "snapshot")`.
 - Yolo (§7.5) comes **only** from `o.Yolo` (flag/config of the resuming process), never from the header or `permission_mode` entries, which are audit-only. `build` applies it via `applyYolo` when `o.Yolo` is set.
 - A missing provider key does **not** fail `Resume` (keys are lazy). The first `Run` fails with the `EnvError`, and `-p` maps that to exit 2.
 

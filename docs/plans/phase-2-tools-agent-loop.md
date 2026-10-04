@@ -1,6 +1,6 @@
 # Phase 2 — Seven Tools, Agent Loop, Permissions, Skills, Session Schema — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `moca -p "<task>"` runs a real agent loop: the seven frozen tools behind a symlink-resolving path jail and a parsed-shell command analyser, project trust, skills + AGENTS.md in a once-built system prompt, sequential tool execution, maxSteps wrap-up, and every step persisted to an append-only JSONL session with pre-edit snapshots.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.27.1 stdlib + `mvdan.cc/sh/v3/syntax` (the one non-UI third-party dependency, §7). `embed`, `regexp` (RE2), `os/exec`, `crypto/sha256`.
 
-**Spec:** `docs/specs/DESIGN.md` (rev 9) — §2, §4, §5, §7, §8, §9, §9.5, §12.5, §13, phase plan item 2, edit-ladder + shell-analysis ladder.
+**Spec:** `docs/specs/DESIGN.md` (rev 11) — §2, §4, §5, §7, §8, §9, §9.5, §12.5, §13, phase plan item 2, edit-ladder + shell-analysis ladder.
 
 **Builds on:** Phase 1 (`docs/plans/phase-1-skeleton-providers.md`). Uses `llm.*`, `config.Config/EnvRefs/DataDir/ConfigDir/Version`, `provider.Registry/Model/Adapter/RetryNotice`, `cmd/moca` `Options`/exit constants.
 
@@ -2759,7 +2759,7 @@ func TestShellToolRunsAtRoot(t *testing.T) {
 	env.Commands = &fakeCmds{}
 	os.Mkdir(root+"/sub", 0o755)
 	run(t, shellTool{}, env, map[string]any{"command": "cd sub"})
-	r := run(t, shellTool{}, env, map[string]any{"command": "pwd"})
+	r := run(t, shellTool{}, env, map[string]any{"command": "pwd -P"})
 	if !strings.HasPrefix(strings.TrimSpace(r.Content), root+"\n") && !strings.Contains(r.Content, root+"\n[exit") {
 		t.Fatalf("stateless: every call starts at the root, got %q", r.Content)
 	}
@@ -4410,6 +4410,7 @@ git commit -m "feat(session): pre-edit snapshots, undo stack, git-clean skip, pr
 - Produces:
   - `type ServerLine struct { Name, Description string }`
   - `type PromptInput struct { Workdir, OS, Arch, Date, Git, Version string; Skills []skills.Skill; Servers []ServerLine; Instructions []skills.Instruction }`
+  - Skill-list line shape (frozen here; phase-7's shipgate asserts the literal `- rtk:`): one line per skill, exactly `- <name>: <one-line description> (<absolute path>)`.
   - `func BuildSystemPrompt(in PromptInput) string`
   - `func GitState(dir string) string` — `branch <name>[, N uncommitted changes]` / `not a git repository`.
   - `func Platform() (os, arch string)` — `uname -s`/`uname -m` style names from `runtime` (`linux`→`Linux`, `darwin`→`Darwin`, `windows`→`Windows`; `amd64`→`x86_64`, `arm64`→`arm64`).
@@ -4856,7 +4857,7 @@ func TestLengthStopTruncatedToolCall(t *testing.T) {
 		t.Fatal("truncated call must not execute")
 	}
 	for _, e := range *evs {
-		if te, ok := e.(ToolEnd); ok && !strings.Contains(te.Result.Content, "split") {
+		if te, ok := e.(ToolEnd); ok && !strings.Contains(strings.ToLower(te.Result.Content), "split") {
 			t.Fatal(te.Result.Content)
 		}
 	}
