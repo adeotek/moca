@@ -27,20 +27,55 @@
     }
   },
   {
-    "name": "ls",
-    "description": "List one directory level, sorted. Directories end with `/`, symlinks with `@`. Hidden entries only with hidden=true. Use search to find files recursively.",
+    "name": "write",
+    "description": "Create a file or replace its entire content. New files need no prior read; an existing file must have been read in this session and be unchanged on disk since. Parent directories are created. Prefer edit for changes to existing files.",
     "schema": {
       "type": "object",
       "properties": {
         "path": {
           "type": "string",
-          "description": "Directory (default: workdir)"
+          "description": "File path, relative to the workdir or absolute"
         },
-        "hidden": {
-          "type": "boolean",
-          "description": "Include dotfiles (default false)"
+        "content": {
+          "type": "string",
+          "description": "Full file content"
         }
       },
+      "required": [
+        "path",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "edit",
+    "description": "Replace old_string with new_string in a file that was read in this session. old_string must match exactly once (include surrounding lines to disambiguate) unless replace_all is set. If no exact match exists, one whitespace-insensitive match is accepted and new_string is re-indented to fit. Copy text without read's `N|` prefixes. Returns a unified diff.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path"
+        },
+        "old_string": {
+          "type": "string",
+          "description": "Exact text to replace (non-empty)"
+        },
+        "new_string": {
+          "type": "string",
+          "description": "Replacement text"
+        },
+        "replace_all": {
+          "type": "boolean",
+          "description": "Replace every exact occurrence (default false)"
+        }
+      },
+      "required": [
+        "path",
+        "old_string",
+        "new_string"
+      ],
       "additionalProperties": false
     }
   },
@@ -70,6 +105,24 @@
       "required": [
         "pattern"
       ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "ls",
+    "description": "List one directory level, sorted. Directories end with `/`, symlinks with `@`. Hidden entries only with hidden=true. Use search to find files recursively.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Directory (default: workdir)"
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "Include dotfiles (default false)"
+        }
+      },
       "additionalProperties": false
     }
   }
