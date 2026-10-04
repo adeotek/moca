@@ -3663,7 +3663,7 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 }
 ```
 
-**Known phase-1 gap (resolved in phase 2):** an `EventReset` retry re-streams text that is already on stdout. Phase 2 buffers each turn's text and prints only the final message, which removes the duplication.
+**`-p` output:** stdout is the final assistant message text only (§12.5), buffered to the end of the stream — a mid-stream retry replays the whole response, so nothing may be written to a pipe until the turn is settled. The buffer is discarded on `EventReset`; a `length`/`refusal` stop prints a diagnostic and exits 1 (the partial text is still printed).
 
 ```go
 // cmd/moca/main.go
@@ -3755,7 +3755,7 @@ Expected: `moca 0.0.0-dev`. Add `bin/` to `.gitignore` if it isn't already liste
 
 - [ ] **Step 2: Gate — stream via all three providers and both opencode-go protocol families**
 
-With real keys exported (`ANTHROPIC_API_KEY`, `OPENCODE_API_KEY`, `OPENAI_API_KEY`), run each and confirm text streams incrementally on stdout and the exit summary appears on stderr:
+With real keys exported (`ANTHROPIC_API_KEY`, `OPENCODE_API_KEY`, `OPENAI_API_KEY`), run each and confirm the final answer appears on stdout (it is buffered to the end of the stream — §12.5, see Task 11's output contract) and the exit summary appears on stderr:
 
 ```bash
 ./bin/moca -p 'hi' --model anthropic/<a catalog claude id>
@@ -3822,7 +3822,7 @@ git commit -m "docs: phase 1 gate passed"
 - **Task 11 CLI**: subcommand stubs dispatch before the "no model configured" check; SIGTERM cancels like SIGINT.
 - **Second review pass (folded into the phase-1 PR)**:
   - `-p` buffers stdout until the stream ends and discards it on `EventReset`, so a mid-stream retry cannot duplicate text in a pipe; `StopLength` / `StopRefusal` print a diagnostic and exit 1.
-  - Tool calls whose arguments are not valid JSON (cut off by `max_tokens`) are dropped by all three adapters — never emitted, never stored — and the stop reason becomes `length`. History replay also sanitizes a nil/invalid tool `Input` to `{}`.
+  - Tool calls cut off by `max_tokens` are **kept** with their assembled (possibly invalid) arguments and the provider's `length` stop — the phase-2 loop attaches the §6 "cut off — split the work" error result to every call of a `StopLength` turn, and the tool registry rejects invalid JSON itself. History replay sanitizes a nil/invalid tool `Input` to `{}` in all three adapters so the transcript always re-sends.
   - Thinking replays verbatim only to the exact producing model and only with a signature (§3); otherwise it degrades to `[prior reasoning]` text, and redacted/empty blocks are dropped. Shared in `replay.go`.
   - `BudgetTokens(maxTokens, effort)`: low 25% · medium 50% · high 75% · max the rest, floored at 1024 and leaving 1024 for the answer; below 2048 `max_tokens` thinking is omitted.
   - `glmThinking` maps `off` to `"none"` so `--effort off` is explicit on the wire. **Unverified against the live opencode-go endpoint — check in the live smoke gate;** if the server rejects `none`, the fix is a catalog row, not the adapter.

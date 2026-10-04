@@ -117,7 +117,7 @@ Fixed with a failing test first for each item; `go vet`, `gofmt` and `go test -r
 | # | Finding | Resolution |
 |---|---|---|
 | 1 | `-p` duplicates text on retry | stdout buffered, discarded on `EventReset` (`cmd/moca/oneshot.go`) |
-| 2 | Truncated tool calls kept | invalid-JSON calls dropped in all three adapters, stop = `length` |
+| 2 | Truncated tool calls kept | kept with partial arguments + the provider's `length` stop; the phase-2 loop attaches the §6 "cut off — split the work" error result (final design, 2026-10-05 — matches the phase-2 loop contract) |
 | 3 | Early EOF counted as success | fixed in the first round (`io.ErrUnexpectedEOF`) |
 | 4 | Redacted/unsigned/foreign thinking | `replay.go`: verbatim only for the producing model with a signature, else `[prior reasoning]` text or dropped |
 | 5 | Anthropic body hygiene | fixed in the first round |
@@ -127,4 +127,4 @@ Fixed with a failing test first for each item; `go vet`, `gofmt` and `go test -r
 | 9 | Built-in provider model without protocol | check runs after the per-model `protocol` override |
 | 10 | Subcommands / SIGTERM | fixed in the first round |
 
-Second-pass additions: `-p` exits 1 with a diagnostic on `length` / `refusal` stops; a `tool_use` block that never completed is dropped and replayed tool input is sanitized; the mid-stream retry is announced and backs off (it still does not count against the five attempts and is still limited to one).
+Second-pass additions: `-p` exits 1 with a diagnostic on `length` / `refusal` stops; a `tool_use` block that never completed is kept with a nil input (its error result comes from the phase-2 loop); replayed tool input is sanitized in all three adapters; the mid-stream retry is announced and backs off (it still does not count against the five attempts and is still limited to one).
