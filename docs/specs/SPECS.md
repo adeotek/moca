@@ -4,7 +4,7 @@
 >
 > `docs/specs/DESIGN.md` remains the v1 vision/contract (rev 11). Where this file and DESIGN.md disagree, **this file wins for the current state** — the disagreement is then a to-do for the next DESIGN revision.
 >
-> Last updated: 2026-10-05 · phase 1 (PR #2, `phase/1-skeleton-providers`).
+> Last updated: 2026-10-05 · phase 1 (PR #2, `phase/1-skeleton-providers`) + live provider smoke (11/11 green).
 
 ---
 
@@ -114,11 +114,12 @@ moca login|logout|mcp …       stubs: "<cmd> lands in a later phase", exit 2
 - **Default base URLs** — `anthropic` → `https://api.anthropic.com`; `openai` → `https://api.openai.com/v1`; `opencode-go` → anthropic-messages `https://opencode.ai/zen/go`, openai-* `https://opencode.ai/zen/go/v1`. **Precedence**: `baseUrls[protocol]` > `baseUrl` > built-in default.
 - **Model overrides merge, not replace**: a config entry for a catalog model changes only the fields it sets; a new model under a custom provider needs `protocol` + `contextWindow` (config validation); a new model under a **built-in** provider needs `protocol` (model-level or provider-level) — otherwise `NewRegistry` fails fast with the exact key path to add.
 - **Credentials are lazy**: `api_key` resolves `env:VAR` at request time (missing → clear error naming the variable); `oauth` providers error with "run `moca login <provider>`" until phase 7 plugs a `CredentialFunc` in via `Registry.SetOAuth`.
+- **OpenCode Go routing header**: every `opencode-go` request carries a stable per-conversation `x-opencode-session` (a `crypto/rand` string generated per process — one process is one conversation today; phase 3+ sessions must rebind it per conversation) and every request from every provider identifies the client as `User-Agent: moca/<version>`. The Go tier rejects session-less requests with HTTP 400 `MissingSessionID` (verified live 2026-10-05, https://opencode.ai/docs/go/#where-can-i-use-it); zen pay-as-you-go (`/zen/v1`) does not require it.
 - `Resolve("provider/model")` → `(Model, Adapter)`; the adapter is already wrapped in the retry policy. `Models()` returns the catalog sorted (for phase 3's `/model`).
 
 ## 7. Protocol adapters (wire behavior)
 
-All three: `post()` sends JSON with `Content-Type: application/json`, `Accept: text/event-stream`; **a 2xx whose Content-Type is set and not `text/event-stream` is an error** ("unexpected … response, want text/event-stream: <body≤8KiB>", non-retryable) instead of a fake turn. Response bodies are closed on every path; stall timeout 90 s.
+All three: `post()` sends JSON with `Content-Type: application/json`, `Accept: text/event-stream`, `User-Agent: moca/<version>`; **a 2xx whose Content-Type is set and not `text/event-stream` is an error** ("unexpected … response, want text/event-stream: <body≤8KiB>", non-retryable) instead of a fake turn. Response bodies are closed on every path; stall timeout 90 s.
 
 **anthropic-messages** — `POST {base}/v1/messages`; headers `anthropic-version: 2023-06-01`, `x-api-key` (or `Authorization: Bearer` for OAuth tokens).
 - Body: `system` as one text block; `tools` (last tool carries `cache_control`); `tool_choice`; messages; thinking per §5. Cache breakpoints: system end + last tool + **the last eligible block of the last message** (text non-empty / tool_use / tool_result — never thinking/redacted/empty-text; walks back; omitted if none). `NoCacheWrite` (compaction) removes every `cache_control`.
@@ -154,9 +155,10 @@ Builds `llm.Request{Model: catalog id, System: "You are moca, a coding agent." (
 
 ## 10. Verification status & known items
 
-- Unit/integration: `go test ./... -race` — 80 pass events, includes adapter wire-shape pins, SSE framing variants, retry/backoff/retry-after/cancel, registry, CLI exit codes, `-p` buffer-reset and stop-diagnostic tests.
+- Unit/integration: `go test ./... -race` — 84 pass events, includes adapter wire-shape pins, SSE framing variants, retry/backoff/retry-after/cancel, registry, CLI exit codes, `-p` buffer-reset and stop-diagnostic tests.
 - Reproducible local gates: forced-429 backoff (mock server: two 429+`Retry-After: 1` → stderr shows `retry 1/5`, `retry 2/5`, stdout `ok`, exit 0); protocol e2e through the real binary against mock SSE servers for anthropic-messages + openai-responses + stdin prompt; §12 example decodes intact (`TestSpecExampleDecodesIntact`).
-- **Unverified / open**: live provider smoke (needs real keys — checklist in PR #2); `glmThinking[off]="none"` against the live opencode-go endpoint (if rejected, clamp `off`→`low` as a catalog-row fix); the `Model` field stores the **bare** model id, so two providers serving the same id (e.g. `gpt-6-luna` on `openai` and `opencode-go`) are indistinguishable for verbatim thinking replay — pin this before phase 3's cross-provider switch gate.
+- **Live provider smoke (2026-10-05, real OpenCode key, 11/11 green)**: `/zen/go` defaults — minimax-m3 (anthropic-messages), glm-5.3-flash (+ `--effort off`), kimi-k3, gpt-6-luna (responses), grok-4.7; vendor provider rows via `/zen/v1` base-URL overrides — claude-haiku-4-5, claude-opus-5-5 (+ `--effort max`), gpt-6-luna, gpt-6-astra. Found + fixed: the Go tier requires `x-opencode-session` (HTTP 400 `MissingSessionID` otherwise) and a client User-Agent — both now sent, with regression tests. `--effort off` on glm is wire-accepted; the probe shows no hard reasoning suppression (GLM largely inlines reasoning in content) — behavioral verification lands in phase 2.
+- **Still open**: direct `api.anthropic.com` / `api.openai.com` endpoints (no vendor keys — the zen paths validate the same codecs through the override mechanism); verbatim thinking replay across two providers sharing a bare model id (pin before phase 3's cross-provider switch gate); multi-turn thinking replay + prompt caching (only exercised from phase 2 on).
 
 ## 11. Maintenance
 
