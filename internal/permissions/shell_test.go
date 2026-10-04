@@ -52,6 +52,32 @@ func TestShellAnalysisLadder(t *testing.T) {
 		"command -v python":              {},
 		"rm -rf build":                   {every: []string{"rm"}},
 		"/usr/bin/sudo ls":               {deny: "sudo"},
+		// wrapper option-argument parsing (review: env -u ate the command)
+		"env -u ls sudo id":      {deny: "sudo"},
+		"env -u FOO sudo id":     {deny: "sudo"},
+		"env -u FOO rm -rf x":    {every: []string{"rm"}},
+		"env -C /tmp rm -rf x":   {every: []string{"rm"}},
+		"env --unset=FOO rm x":   {every: []string{"rm"}},
+		"env -S 'rm -rf x'":      {deny: "cannot analyse"},
+		"command -p sudo id":     {deny: "sudo"},
+		"command -p rm x":        {every: []string{"rm"}},
+		"timeout -s KILL 5 rm x": {every: []string{"rm"}},
+		"nice -10 rm x":          {every: []string{"rm"}},
+		"time -p go test":        {},
+		// escaped / globbed command names (review: \sudo, sud?)
+		`\sudo id`:      {deny: "non-literal"},
+		`s\udo id`:      {deny: "non-literal"},
+		`$'s\x75do' id`: {deny: "non-literal"},
+		"sud? id":       {deny: "non-literal"},
+		"su* id":        {deny: "non-literal"},
+		"s[ud]o id":     {deny: "cannot parse"}, // array-index syntax → parse-level refusal
+		// redirect hardening (review: cd-relative and <> targets)
+		"cd / && echo hi > etc/moca-test": {deny: "relative redirect"},
+		"cd .. && echo hi > x":            {deny: "relative redirect"},
+		"echo hi 1<> /etc/x":              {deny: "outside"},
+		"echo hi <> out.txt":              {},
+		"cd sub && echo hi > /dev/null":   {},
+		"cd sub && cat a | tee out.log":   {deny: "relative redirect"},
 	}
 	for cmd, want := range cases {
 		need, every, err := s.Check(cmd)

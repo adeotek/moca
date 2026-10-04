@@ -75,20 +75,51 @@ func (s *Shell) classify(name string, v *verdictAcc) error {
 	return nil
 }
 
+// literalSafe reports whether a word part's runtime value is exactly its
+// source text: no backslash escapes (unquoted words decode them; inside
+// double quotes they are escapes) and, unquoted only, no glob
+// metacharacters, which bash expands before the command runs.
+func literalSafe(v string, unquoted bool) bool {
+	if strings.Contains(v, "\\") {
+		return false
+	}
+	if unquoted && strings.ContainsAny(v, "*?") {
+		return false
+	}
+	if unquoted && strings.Contains(v, "[") && strings.Contains(v, "]") {
+		return false
+	}
+	return true
+}
+
 // wordLit returns the literal value of a word made only of literal and
-// quoted-literal parts.
+// quoted-literal parts. Words whose runtime value cannot be known exactly
+// (expansions, escapes, globs, ANSI-C strings) report false so callers fail
+// closed.
 func wordLit(w *syntax.Word) (string, bool) {
 	var sb strings.Builder
 	for _, p := range w.Parts {
 		switch x := p.(type) {
 		case *syntax.Lit:
+			if !literalSafe(x.Value, true) {
+				return "", false
+			}
 			sb.WriteString(x.Value)
 		case *syntax.SglQuoted:
+			if x.Dollar {
+				return "", false // $'…' decodes escapes
+			}
 			sb.WriteString(x.Value)
 		case *syntax.DblQuoted:
+			if x.Dollar {
+				return "", false // $"…" locale quoting
+			}
 			for _, q := range x.Parts {
 				l, ok := q.(*syntax.Lit)
 				if !ok {
+					return "", false
+				}
+				if !literalSafe(l.Value, false) {
 					return "", false
 				}
 				sb.WriteString(l.Value)
@@ -100,85 +131,191 @@ func wordLit(w *syntax.Word) (string, bool) {
 	return sb.String(), true
 }
 
-// unwrap skips wrapper commands and their options/arguments, returning the
-// index of the wrapped command name in args (or -1 if none).
+// optSpec describes a wrapper command's options so unwrap can find the
+// wrapped command without guessing.
+type optSpec struct {
+	bare     map[string]bool // options that take no argument
+	arg      map[string]bool // options whose argument is the next word
+	prefixed []string        // long options accepting --name=value
+	assigns  bool            // consume NAME=VALUE words (env)
+	dashDash bool            // a literal -- ends the options
+	numeric  bool            // accept a bare numeric flag, e.g. nice -10
+}
+
+var (
+	envSpec = optSpec{
+		bare: map[string]bool{"-i": true, "--ignore-environment": true, "-0": true, "--null": true,
+			"-v": true, "--debug": true, "--help": true, "--version": true},
+		arg:      map[string]bool{"-u": true, "--unset": true, "-C": true, "--chdir": true},
+		prefixed: []string{"--unset", "--chdir"},
+		assigns:  true,
+		dashDash: true,
+	}
+	timeSpec = optSpec{
+		bare: map[string]bool{"-p": true, "--portability": true, "-a": true, "--append": true,
+			"-v": true, "--verbose": true, "--help": true, "--version": true},
+		arg:      map[string]bool{"-f": true, "--format": true, "-o": true, "--output": true},
+		prefixed: []string{"--format", "--output"},
+	}
+	niceSpec = optSpec{
+		bare:     map[string]bool{"--help": true, "--version": true},
+		arg:      map[string]bool{"-n": true, "--adjustment": true},
+		prefixed: []string{"--adjustment"},
+		numeric:  true,
+	}
+	timeoutSpec = optSpec{
+		bare: map[string]bool{"-f": true, "--foreground": true, "-p": true, "--preserve-status": true,
+			"-v": true, "--verbose": true, "--help": true, "--version": true},
+		arg:      map[string]bool{"-k": true, "--kill-after": true, "-s": true, "--signal": true},
+		prefixed: []string{"--kill-after", "--signal"},
+	}
+	nohupSpec = optSpec{bare: map[string]bool{"--help": true, "--version": true}}
+)
+
+// skipWrapper consumes a wrapper's options and returns the index of the
+// wrapped command name, or -1 when the wrapper has no wrapped command. It
+// fails closed: an option it cannot model refuses the whole command.
+func skipWrapper(args []*syntax.Word, i int, spec optSpec, wrapper string) (int, error) {
+	j := i + 1
+	for j < len(args) {
+		a, ok := wordLit(args[j])
+		if !ok {
+			return -1, fmt.Errorf("cannot analyse a non-literal %s argument; write the command out", wrapper)
+		}
+		if spec.dashDash && a == "--" {
+			return j + 1, nil
+		}
+		if !strings.HasPrefix(a, "-") {
+			if spec.assigns && strings.Contains(a, "=") {
+				j++
+				continue
+			}
+			return j, nil
+		}
+		if spec.numeric && numericFlag(a) {
+			j++
+			continue
+		}
+		if spec.bare[a] {
+			j++
+			continue
+		}
+		if spec.arg[a] {
+			if j+1 >= len(args) {
+				return -1, fmt.Errorf("cannot analyse `%s %s` without its argument", wrapper, a)
+			}
+			j += 2
+			continue
+		}
+		matched := false
+		for _, p := range spec.prefixed {
+			if strings.HasPrefix(a, p+"=") {
+				j++
+				matched = true
+				break
+			}
+		}
+		if matched {
+			continue
+		}
+		return -1, fmt.Errorf("cannot analyse `%s` option %q; run the wrapped command without the wrapper", wrapper, a)
+	}
+	return -1, nil
+}
+
+func numericFlag(a string) bool {
+	if len(a) < 2 || a[0] != '-' {
+		return false
+	}
+	for _, c := range a[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// skipCommand handles `command [-pVv] cmd`; -v/-V only looks a command up.
+func skipCommand(args []*syntax.Word, i int) (int, error) {
+	j := i + 1
+	for j < len(args) {
+		a, ok := wordLit(args[j])
+		if !ok {
+			return -1, fmt.Errorf("cannot analyse a non-literal `command` argument")
+		}
+		if a == "--" {
+			return j + 1, nil
+		}
+		if !strings.HasPrefix(a, "-") {
+			return j, nil
+		}
+		flags := strings.TrimPrefix(a, "-")
+		if flags == "" || strings.Trim(flags, "pVv") != "" {
+			return -1, fmt.Errorf("cannot analyse `command` option %q", a)
+		}
+		if strings.ContainsAny(flags, "vV") {
+			return -1, nil // lookup only
+		}
+		j++
+	}
+	return -1, nil
+}
+
+// unwrap skips wrapper commands and their options, returning the index of
+// the wrapped command name in args (or -1 if none).
 func unwrap(args []*syntax.Word) (int, error) {
 	i := 0
 	for i < len(args) {
 		name, ok := wordLit(args[i])
 		if !ok {
-			return i, nil
+			return i, nil // a non-literal command name is refused by Check
 		}
+		var (
+			j   int
+			err error
+		)
 		switch filepath.Base(name) {
 		case "env":
-			i++
-			for i < len(args) {
-				a, _ := wordLit(args[i])
-				if strings.HasPrefix(a, "-") || strings.Contains(a, "=") {
-					i++
-					continue
-				}
-				break
-			}
-		case "time", "nohup":
-			i++
-			for i < len(args) {
-				if a, _ := wordLit(args[i]); strings.HasPrefix(a, "-") {
-					i++
-					continue
-				}
-				break
-			}
+			j, err = skipWrapper(args, i, envSpec, "env")
+		case "time":
+			j, err = skipWrapper(args, i, timeSpec, "time")
 		case "nice":
-			i++
-			for i < len(args) {
-				a, _ := wordLit(args[i])
-				if a == "-n" {
-					i += 2
-					continue
-				}
-				if strings.HasPrefix(a, "-") {
-					i++
-					continue
-				}
-				break
-			}
+			j, err = skipWrapper(args, i, niceSpec, "nice")
 		case "timeout":
-			i++
-			for i < len(args) {
-				a, _ := wordLit(args[i])
-				if a == "-s" || a == "-k" || a == "--signal" || a == "--kill-after" {
-					i += 2
-					continue
+			if j, err = skipWrapper(args, i, timeoutSpec, "timeout"); err == nil && j >= 0 && j < len(args) {
+				if _, ok := wordLit(args[j]); !ok {
+					return -1, fmt.Errorf("cannot analyse a non-literal `timeout` duration")
 				}
-				if strings.HasPrefix(a, "-") {
-					i++
-					continue
-				}
-				break
+				j++ // the duration word
 			}
-			i++ // the duration
+		case "nohup":
+			j, err = skipWrapper(args, i, nohupSpec, "nohup")
 		case "command":
-			if i+1 < len(args) {
-				if a, _ := wordLit(args[i+1]); a == "-v" || a == "-V" {
-					return -1, nil // lookup only
-				}
-			}
-			i++
+			j, err = skipCommand(args, i)
 		default:
 			return i, nil
 		}
+		if err != nil {
+			return -1, err
+		}
+		if j < 0 {
+			return -1, nil
+		}
+		i = j
 	}
 	return -1, nil
 }
 
-func (s *Shell) checkTarget(w *syntax.Word) error {
+func (s *Shell) checkTarget(w *syntax.Word, cwdUnknown bool) error {
 	t, ok := wordLit(w)
 	if !ok {
 		return fmt.Errorf("non-literal redirect/tee target refused")
 	}
 	if t == "/dev/null" || t == "/dev/stdout" || t == "/dev/stderr" {
 		return nil
+	}
+	if cwdUnknown && !filepath.IsAbs(t) && t != "~" && !strings.HasPrefix(t, "~/") {
+		return fmt.Errorf("relative redirect target %q after a cd/pushd/popd cannot be resolved; use an absolute path or run the cd separately", t)
 	}
 	if _, err := s.jail.Resolve(t, true); err != nil {
 		return err
@@ -195,6 +332,7 @@ func (s *Shell) Check(command string) ([]string, []string, error) {
 		return nil, nil, fmt.Errorf("cannot parse command (refused, no best-effort guessing): %v", err)
 	}
 	var v verdictAcc
+	var cwdUnknown bool
 	var firstErr error
 	fail := func(e error) {
 		if firstErr == nil {
@@ -209,13 +347,13 @@ func (s *Shell) Check(command string) ([]string, []string, error) {
 		case *syntax.Stmt:
 			for _, r := range x.Redirs {
 				switch r.Op {
-				case syntax.RdrOut, syntax.AppOut, syntax.RdrAll, syntax.AppAll, syntax.ClbOut:
-					if err := s.checkTarget(r.Word); err != nil {
+				case syntax.RdrOut, syntax.AppOut, syntax.RdrAll, syntax.AppAll, syntax.ClbOut, syntax.RdrInOut:
+					if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
 						fail(err)
 					}
 				case syntax.DplOut:
 					if t, ok := wordLit(r.Word); !ok || (t != "-" && strings.Trim(t, "0123456789") != "") {
-						if err := s.checkTarget(r.Word); err != nil {
+						if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
 							fail(err)
 						}
 					}
@@ -225,7 +363,11 @@ func (s *Shell) Check(command string) ([]string, []string, error) {
 			if len(x.Args) == 0 {
 				return true // pure assignment
 			}
-			idx, _ := unwrap(x.Args)
+			idx, uerr := unwrap(x.Args)
+			if uerr != nil {
+				fail(uerr)
+				return false
+			}
 			if idx < 0 {
 				return true // wrappers are transparent; nothing wrapped (or `command -v`)
 			}
@@ -238,12 +380,18 @@ func (s *Shell) Check(command string) ([]string, []string, error) {
 				fail(err)
 				return false
 			}
-			if filepath.Base(name) == "tee" {
+			switch filepath.Base(name) {
+			case "cd", "pushd", "popd":
+				// Relative redirect targets are resolved against the jail
+				// root, which is only correct while the cwd is unchanged;
+				// after a cd only absolute targets can be checked.
+				cwdUnknown = true
+			case "tee":
 				for _, a := range x.Args[idx+1:] {
 					if l, ok := wordLit(a); ok && strings.HasPrefix(l, "-") {
 						continue
 					}
-					if err := s.checkTarget(a); err != nil {
+					if err := s.checkTarget(a, cwdUnknown); err != nil {
 						fail(err)
 					}
 				}

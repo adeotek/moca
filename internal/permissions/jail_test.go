@@ -75,3 +75,37 @@ func TestJailTildeExpands(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestJailDanglingSymlinks(t *testing.T) {
+	root, outside, _ := setup(t)
+	j, _ := NewJail(root, nil)
+	mk := func(target, link string) {
+		t.Helper()
+		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk(filepath.Join(outside, "new.txt"), "dangle-file") // missing file outside
+	mk(filepath.Join(outside, "newdir"), "dangle-dir")   // missing dir outside
+	mk(filepath.Join(root, "chain-2"), "chain-1")        // chain of dangling links ending outside
+	mk(filepath.Join(outside, "new2.txt"), "chain-2")
+	mk(filepath.Join("sub", "fresh.txt"), "rel-inside") // relative, lands inside
+	mk("loop", "loop")                                  // self-loop
+	mk("cyc-2", "cyc-1")                                // two-link cycle
+	mk("cyc-1", "cyc-2")
+
+	for _, p := range []string{"dangle-file", "dangle-dir/new.txt", "chain-1", "loop", "cyc-1"} {
+		for _, write := range []bool{true, false} {
+			if _, err := j.Resolve(p, write); err == nil {
+				t.Errorf("Resolve(%q, write=%v) must be refused (dangling/looping symlink)", p, write)
+			}
+		}
+	}
+	got, err := j.Resolve("rel-inside", true)
+	if err != nil {
+		t.Fatalf("relative dangling link inside the jail must resolve: %v", err)
+	}
+	if want := filepath.Join(j.Root(), "sub", "fresh.txt"); got != want {
+		t.Fatalf("resolved to %q, want %q", got, want)
+	}
+}

@@ -43,10 +43,16 @@ func canonical(p string) (string, error) {
 }
 
 // resolveDeep evaluates symlinks on the deepest existing ancestor and
-// re-appends the non-existent tail (new files, new dirs).
+// re-appends the non-existent tail (new files, new dirs). Dangling symlinks
+// are followed by hand: EvalSymlinks reports ErrNotExist both for a
+// component that does not exist and for a symlink whose target does not
+// exist, and treating the latter as a new file would let a write follow the
+// link out of the jail.
 func resolveDeep(p string) (string, error) {
+	const maxHops = 40
 	var tail []string
 	cur := p
+	hops := 0
 	for {
 		r, err := filepath.EvalSymlinks(cur)
 		if err == nil {
@@ -54,6 +60,25 @@ func resolveDeep(p string) (string, error) {
 		}
 		if !errors.Is(err, fs.ErrNotExist) {
 			return "", err
+		}
+		fi, lerr := os.Lstat(cur)
+		switch {
+		case lerr == nil && fi.Mode()&os.ModeSymlink != 0:
+			hops++
+			if hops > maxHops {
+				return "", fmt.Errorf("%s: too many levels of symbolic links", p)
+			}
+			target, rerr := os.Readlink(cur)
+			if rerr != nil {
+				return "", rerr
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(cur), target)
+			}
+			cur = filepath.Clean(target)
+			continue
+		case lerr != nil && !errors.Is(lerr, fs.ErrNotExist):
+			return "", lerr
 		}
 		parent := filepath.Dir(cur)
 		if parent == cur {
