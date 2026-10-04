@@ -1,0 +1,4 @@
+# Default owners for everything in this repository.
+# With "require review from code owners" branch protection (effective once the
+# repo is public), every PR automatically requests @adeotek as reviewer.
+* @adeotek
