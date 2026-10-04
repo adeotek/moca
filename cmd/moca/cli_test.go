@@ -55,6 +55,13 @@ func writeCfg(t *testing.T, body string) string {
 	return p
 }
 
+// isolate keeps -p runs from writing sessions into the real data dir.
+func isolate(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+}
+
 func fakeCompletions(t *testing.T, status int, body string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -64,6 +71,7 @@ func fakeCompletions(t *testing.T, status int, body string) *httptest.Server {
 }
 
 func TestOneShotStreamsToStdout(t *testing.T) {
+	isolate(t)
 	srv := fakeCompletions(t, 200, "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n"+
 		"data: {\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n"+
 		"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n")
@@ -82,6 +90,7 @@ func TestOneShotStreamsToStdout(t *testing.T) {
 }
 
 func TestOneShotDiscardsStdoutOnReset(t *testing.T) {
+	isolate(t)
 	// A clean mid-stream EOF triggers reset-and-retry. stdout already holds the
 	// first attempt's text, so a pipe would see "The answer isThe answer is 42".
 	var calls atomic.Int32
@@ -106,6 +115,7 @@ func TestOneShotDiscardsStdoutOnReset(t *testing.T) {
 }
 
 func TestOneShotNonCompletionStopsExitNonZero(t *testing.T) {
+	isolate(t)
 	for reason, want := range map[string]string{"length": "truncated", "content_filter": "refused"} {
 		srv := fakeCompletions(t, 200, "data: {\"choices\":[{\"delta\":{\"content\":\"part\"},\"finish_reason\":\""+reason+"\"}]}\n\ndata: [DONE]\n\n")
 		t.Setenv("MOCA_T_KEY", "k")
@@ -123,6 +133,7 @@ func TestOneShotNonCompletionStopsExitNonZero(t *testing.T) {
 }
 
 func TestExitCodes(t *testing.T) {
+	isolate(t)
 	t.Setenv("MOCA_T_KEY", "")
 	cases := []struct {
 		name string
@@ -155,6 +166,7 @@ func TestSubcommandBeforeConfig(t *testing.T) {
 }
 
 func TestProviderErrorExit1(t *testing.T) {
+	isolate(t)
 	srv := fakeCompletions(t, 401, `{"error":{"message":"bad key"}}`)
 	defer srv.Close()
 	t.Setenv("MOCA_T_KEY", "k")
@@ -169,6 +181,7 @@ func TestProviderErrorExit1(t *testing.T) {
 }
 
 func TestInterruptedExit130(t *testing.T) {
+	isolate(t)
 	block := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -184,5 +197,93 @@ func TestInterruptedExit130(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := run(ctx, []string{"--config", cfg, "-p", "x"}, nil, &out, &errb); code != 130 {
 		t.Fatalf("exit %d", code)
+	}
+}
+
+func TestOneShotToolLoopContract(t *testing.T) {
+	turns := []string{
+		"data: {\"choices\":[{\"delta\":{\"content\":\"checking\",\"tool_calls\":[{\"index\":0,\"id\":\"c\",\"function\":{\"name\":\"ls\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n",
+		"data: {\"choices\":[{\"delta\":{\"content\":\"All good.\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+	}
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, turns[min(n, len(turns)-1)])
+		n++
+	}))
+	defer srv.Close()
+	t.Setenv("MOCA_T_KEY", "k")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := writeCfg(t, `{"model":"loc/m","providers":{"loc":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768}}}}}`)
+	var out, errb bytes.Buffer
+	code := run(context.Background(), []string{"--config", cfg, "-p", "check"}, nil, &out, &errb)
+	if code != 0 || out.String() != "All good.\n" {
+		t.Fatalf("code %d stdout %q", code, out.String())
+	}
+	if !strings.Contains(errb.String(), "▸ ls") || !strings.Contains(errb.String(), "checking") || !strings.Contains(errb.String(), "tokens ") {
+		t.Fatalf("stderr %q", errb.String())
+	}
+}
+
+func TestOneShotMaxStepsExit3(t *testing.T) {
+	tool := "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c\",\"function\":{\"name\":\"ls\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"
+	final := "data: {\"choices\":[{\"delta\":{\"content\":\"stopped\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if n < 1 {
+			io.WriteString(w, tool)
+		} else {
+			io.WriteString(w, final)
+		}
+		n++
+	}))
+	defer srv.Close()
+	t.Setenv("MOCA_T_KEY", "k")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := writeCfg(t, `{"model":"loc/m","context":{"maxSteps":1},"providers":{"loc":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768}}}}}`)
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"--config", cfg, "-p", "x"}, nil, &out, &errb); code != 3 || out.String() != "stopped\n" {
+		t.Fatalf("code %d out %q", code, out.String())
+	}
+}
+
+func TestNoApproveSkipsProjectInstructions(t *testing.T) {
+	var sawRules bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		sawRules = strings.Contains(string(b), "PROJECT-RULE-XYZ")
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	t.Setenv("MOCA_T_KEY", "k")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	work := t.TempDir()
+	os.WriteFile(filepath.Join(work, "AGENTS.md"), []byte("PROJECT-RULE-XYZ"), 0o644)
+	t.Chdir(work)
+	cfg := writeCfg(t, `{"model":"loc/m","providers":{"loc":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768}}}}}`)
+	var out, errb bytes.Buffer
+	run(context.Background(), []string{"--config", cfg, "-p", "x"}, nil, &out, &errb)
+	if sawRules {
+		t.Fatal("default -p must not load project AGENTS.md")
+	}
+	run(context.Background(), []string{"--config", cfg, "--approve", "-p", "x"}, nil, &out, &errb)
+	if !sawRules {
+		t.Fatal("--approve loads it")
+	}
+	sawRules = false
+	errb.Reset()
+	run(context.Background(), []string{"--config", cfg, "--yolo", "-p", "x"}, nil, &out, &errb)
+	if !sawRules || !strings.HasPrefix(errb.String(), "yolo mode: all permission checks are off") {
+		t.Fatal("yolo trusts project resources and warns on stderr")
+	}
+	sawRules = true
+	run(context.Background(), []string{"--config", cfg, "--yolo", "--no-approve", "-p", "x"}, nil, &out, &errb)
+	if sawRules {
+		t.Fatal("explicit --no-approve wins over yolo")
 	}
 }
