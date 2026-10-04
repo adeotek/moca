@@ -46,7 +46,7 @@ func (a *responsesAdapter) body(req llm.Request) map[string]any {
 				}
 			case llm.BlockToolUse:
 				input = append(input, map[string]any{"type": "function_call", "call_id": c.ToolCall.ID,
-					"name": c.ToolCall.Name, "arguments": string(c.ToolCall.Input)})
+					"name": c.ToolCall.Name, "arguments": string(toolInput(c.ToolCall.Input))})
 			case llm.BlockToolResult:
 				input = append(input, map[string]any{"type": "function_call_output",
 					"call_id": c.ToolResult.CallID, "output": c.ToolResult.Content})
@@ -137,7 +137,7 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 			text.Reset()
 		}
 	}
-	hasCalls, truncated := false, false
+	hasCalls := false
 	done := false
 	err = readSSE(ctx, resp.Body, stallTimeout, func(_, data string) error {
 		var ev responsesEvent
@@ -182,10 +182,9 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 				if args == "" {
 					args = "{}"
 				}
-				if !json.Valid([]byte(args)) {
-					truncated = true // cut off mid-arguments: not a call
-					return nil
-				}
+				// Kept as assembled, even when cut off mid-JSON: the phase-2
+				// loop attaches a §6 error result for every call of a
+				// StopLength turn; the registry rejects invalid JSON itself.
 				call := &llm.ToolCall{ID: ev.Item.CallID, Name: ev.Item.Name, Input: json.RawMessage(args)}
 				emit(llm.Event{Type: llm.EventToolCall, ToolCall: call})
 				out.Message.Content = append(out.Message.Content, llm.ContentBlock{Type: llm.BlockToolUse, ToolCall: call})
@@ -224,10 +223,7 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 		return out, io.ErrUnexpectedEOF
 	}
 	flushText()
-	switch {
-	case truncated:
-		out.Stop = llm.StopLength
-	case hasCalls && out.Stop == llm.StopEnd:
+	if hasCalls && out.Stop == llm.StopEnd {
 		out.Stop = llm.StopToolUse
 	}
 	return out, nil

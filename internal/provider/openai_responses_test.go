@@ -140,7 +140,10 @@ data: {"type":"response.incomplete","response":{"status":"incomplete","incomplet
 	}
 }
 
-func TestResponsesTruncatedFunctionCallDropped(t *testing.T) {
+func TestResponsesTruncatedFunctionCallKept(t *testing.T) {
+	// Kept with its partial arguments: the phase-2 loop attaches the §6 error
+	// result for every call of a StopLength turn; the registry reports the
+	// invalid JSON if the call ever reaches execution.
 	srv := sseServer(t, 200, `event: response.output_item.done
 data: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"c1","name":"read","arguments":"{\"path\":\"/a"}}
 
@@ -150,22 +153,43 @@ data: {"type":"response.incomplete","response":{"status":"incomplete","incomplet
 `, nil, nil)
 	defer srv.Close()
 	a := newOpenAIResponses(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
-	calls := 0
+	var calls []*llm.ToolCall
 	resp, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 1}, func(e llm.Event) {
 		if e.Type == llm.EventToolCall {
-			calls++
+			calls = append(calls, e.ToolCall)
 		}
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 0 || resp.Stop != llm.StopLength {
-		t.Fatalf("calls %d stop %s", calls, resp.Stop)
+	if resp.Stop != llm.StopLength {
+		t.Fatalf("stop %s, want length", resp.Stop)
 	}
-	for _, c := range resp.Message.Content {
-		if c.Type == llm.BlockToolUse {
-			t.Fatalf("truncated call kept: %+v", c)
-		}
+	if len(calls) != 1 || string(calls[0].Input) != `{"path":"/a` || json.Valid(calls[0].Input) {
+		t.Fatalf("truncated call must be emitted with its partial arguments: %+v", calls)
+	}
+	if len(resp.Message.Content) != 1 || resp.Message.Content[0].Type != llm.BlockToolUse {
+		t.Fatalf("truncated call must be kept for the phase-2 error result: %+v", resp.Message.Content)
+	}
+}
+
+func TestResponsesHistoryToolInputSanitized(t *testing.T) {
+	var body map[string]any
+	srv := sseServer(t, 200, `event: response.completed
+data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}
+
+`, &body, nil)
+	defer srv.Close()
+	a := newOpenAIResponses(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 1, Messages: []llm.Message{
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: llm.BlockToolUse, ToolCall: &llm.ToolCall{ID: "a", Name: "ls"}},
+			{Type: llm.BlockToolUse, ToolCall: &llm.ToolCall{ID: "b", Name: "ls", Input: json.RawMessage(`{"path":"/a`)}},
+		}},
+	}}, func(llm.Event) {})
+	got := mustJSON(body["input"])
+	if strings.Contains(got, `"arguments":""`) || strings.Count(got, `"arguments":"{}"`) != 2 {
+		t.Fatalf("tool input not sanitized: %s", got)
 	}
 }
 

@@ -226,9 +226,10 @@ func (a *anthropicAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 				if in == "" {
 					in = "{}"
 				}
-				if !json.Valid([]byte(in)) {
-					return nil // cut off mid-arguments: Input stays nil, dropped below
-				}
+				// Arguments are kept as assembled, even when the output was
+				// cut off mid-JSON: the phase-2 loop attaches a §6 error
+				// result for every call of a StopLength turn, and the tool
+				// registry rejects invalid JSON with its own error result.
 				cb.ToolCall.Input = json.RawMessage(in)
 				emit(llm.Event{Type: llm.EventToolCall, ToolCall: cb.ToolCall})
 			}
@@ -252,17 +253,8 @@ func (a *anthropicAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 		// A clean EOF without the terminal event is a truncated turn.
 		return out, io.ErrUnexpectedEOF
 	}
-	truncated := false
 	for _, i := range order {
-		cb := blocks[i]
-		if cb.Type == llm.BlockToolUse && cb.ToolCall.Input == nil {
-			truncated = true // never completed, or invalid JSON: not a call
-			continue
-		}
-		out.Message.Content = append(out.Message.Content, *cb)
-	}
-	if truncated {
-		out.Stop = llm.StopLength
+		out.Message.Content = append(out.Message.Content, *blocks[i])
 	}
 	return out, nil
 }

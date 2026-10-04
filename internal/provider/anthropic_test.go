@@ -400,9 +400,11 @@ func TestAnthropicForeignThinking(t *testing.T) {
 	}
 }
 
-// A tool_use cut off by max_tokens (no content_block_stop, or invalid JSON)
-// is not a call: it must not be emitted or kept, and the stop must be length.
-func TestAnthropicTruncatedToolUseDropped(t *testing.T) {
+// A tool_use cut off by max_tokens is kept with its assembled arguments: the
+// phase-2 loop attaches the §6 "cut off — split the work" error result for
+// every call of a StopLength turn, and the tool registry rejects invalid JSON
+// with its own error result. A block that never stopped keeps a nil input.
+func TestAnthropicTruncatedToolUseKept(t *testing.T) {
 	for name, tail := range map[string]string{
 		"never stopped":   "",
 		"stopped invalid": "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
@@ -435,25 +437,36 @@ data: {"type":"message_stop"}
 `, nil, nil)
 			defer srv.Close()
 			a := newAnthropic(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
-			calls := 0
+			var calls []*llm.ToolCall
 			resp, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 10}, func(e llm.Event) {
 				if e.Type == llm.EventToolCall {
-					calls++
+					calls = append(calls, e.ToolCall)
 				}
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if calls != 0 {
-				t.Fatalf("truncated call emitted %d times", calls)
-			}
-			for _, c := range resp.Message.Content {
-				if c.Type == llm.BlockToolUse {
-					t.Fatalf("truncated tool_use kept: %+v", c)
-				}
-			}
 			if resp.Stop != llm.StopLength {
 				t.Fatalf("stop %s, want length", resp.Stop)
+			}
+			var kept []llm.ContentBlock
+			for _, c := range resp.Message.Content {
+				if c.Type == llm.BlockToolUse {
+					kept = append(kept, c)
+				}
+			}
+			if len(kept) != 1 || kept[0].ToolCall.ID != "t1" || kept[0].ToolCall.Name != "read" {
+				t.Fatalf("truncated call must be kept for the phase-2 error result: %+v", resp.Message.Content)
+			}
+			switch name {
+			case "never stopped":
+				if kept[0].ToolCall.Input != nil || len(calls) != 0 {
+					t.Fatalf("never-stopped call: input %q, emitted %d", kept[0].ToolCall.Input, len(calls))
+				}
+			case "stopped invalid":
+				if string(kept[0].ToolCall.Input) != `{"path":"/a` || json.Valid(kept[0].ToolCall.Input) || len(calls) != 1 {
+					t.Fatalf("stopped call: input %q emitted %d", kept[0].ToolCall.Input, len(calls))
+				}
 			}
 		})
 	}

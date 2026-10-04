@@ -38,7 +38,7 @@ func (a *completionsAdapter) body(req llm.Request) map[string]any {
 				text.WriteString(c.Text)
 			case llm.BlockToolUse:
 				calls = append(calls, map[string]any{"id": c.ToolCall.ID, "type": "function",
-					"function": map[string]any{"name": c.ToolCall.Name, "arguments": string(c.ToolCall.Input)}})
+					"function": map[string]any{"name": c.ToolCall.Name, "arguments": string(toolInput(c.ToolCall.Input))}})
 			case llm.BlockToolResult:
 				msgs = append(msgs, map[string]any{"role": "tool", "tool_call_id": c.ToolResult.CallID, "content": c.ToolResult.Content})
 			}
@@ -196,26 +196,20 @@ func (a *completionsAdapter) Stream(ctx context.Context, req llm.Request, emit f
 		idx = append(idx, i)
 	}
 	sort.Ints(idx)
-	kept, truncated := 0, false
 	for _, i := range idx {
 		p := calls[i]
 		in := p.args.String()
 		if in == "" {
 			in = "{}"
 		}
-		if !json.Valid([]byte(in)) {
-			truncated = true // cut off mid-arguments: not a call
-			continue
-		}
+		// Kept as assembled, even when cut off mid-JSON: the phase-2 loop
+		// attaches a §6 error result for every call of a StopLength turn,
+		// and the tool registry rejects invalid JSON itself.
 		p.call.Input = json.RawMessage(in)
 		emit(llm.Event{Type: llm.EventToolCall, ToolCall: p.call})
 		out.Message.Content = append(out.Message.Content, llm.ContentBlock{Type: llm.BlockToolUse, ToolCall: p.call})
-		kept++
 	}
-	switch {
-	case truncated:
-		out.Stop = llm.StopLength
-	case kept > 0 && out.Stop == llm.StopEnd:
+	if len(calls) > 0 && out.Stop == llm.StopEnd {
 		out.Stop = llm.StopToolUse // some servers send finish_reason "stop" with tool calls
 	}
 	return out, nil

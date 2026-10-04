@@ -101,16 +101,17 @@ func TestCompletionsHistoryMapping(t *testing.T) {
 }
 
 func TestCompletionsTruncatedToolCall(t *testing.T) {
-	// A call cut off by max_tokens must keep stop=length; the phase-2 loop
-	// turns it into an error result instead of executing broken JSON.
+	// A call cut off by max_tokens is kept with its partial arguments: the
+	// phase-2 loop attaches the §6 error result for every call of a
+	// StopLength turn, and the registry reports the invalid JSON.
 	srv := sseServer(t, 200, "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"/a\"}}]}}]}\n\n"+
 		"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n", nil, nil)
 	defer srv.Close()
 	a := newOpenAICompletions(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
-	calls := 0
+	var calls []*llm.ToolCall
 	resp, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 1}, func(e llm.Event) {
 		if e.Type == llm.EventToolCall {
-			calls++
+			calls = append(calls, e.ToolCall)
 		}
 	})
 	if err != nil {
@@ -119,15 +120,28 @@ func TestCompletionsTruncatedToolCall(t *testing.T) {
 	if resp.Stop != llm.StopLength {
 		t.Fatalf("truncated tool call must keep stop=length, got %s", resp.Stop)
 	}
-	// The malformed call is neither emitted nor kept: executing it, or replaying
-	// its invalid JSON, would break the session.
-	for _, c := range resp.Message.Content {
-		if c.Type == llm.BlockToolUse {
-			t.Fatalf("truncated call kept in message: %+v", c)
-		}
+	if len(calls) != 1 || string(calls[0].Input) != `{"path":"/a` || json.Valid(calls[0].Input) {
+		t.Fatalf("truncated call must be emitted with its partial arguments: %+v", calls)
 	}
-	if calls != 0 {
-		t.Fatalf("truncated call emitted %d times", calls)
+	if len(resp.Message.Content) != 1 || resp.Message.Content[0].Type != llm.BlockToolUse {
+		t.Fatalf("truncated call must be kept for the phase-2 error result: %+v", resp.Message.Content)
+	}
+}
+
+func TestCompletionsHistoryToolInputSanitized(t *testing.T) {
+	var body map[string]any
+	srv := sseServer(t, 200, "data: [DONE]\n\n", &body, nil)
+	defer srv.Close()
+	a := newOpenAICompletions(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 1, Messages: []llm.Message{
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: llm.BlockToolUse, ToolCall: &llm.ToolCall{ID: "a", Name: "ls"}},
+			{Type: llm.BlockToolUse, ToolCall: &llm.ToolCall{ID: "b", Name: "ls", Input: json.RawMessage(`{"path":"/a`)}},
+		}},
+	}}, func(llm.Event) {})
+	got := mustJSON(body["messages"])
+	if strings.Contains(got, `"arguments":""`) || strings.Count(got, `"arguments":"{}"`) != 2 {
+		t.Fatalf("tool input not sanitized: %s", got)
 	}
 }
 
