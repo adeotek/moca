@@ -1,5 +1,7 @@
 # moca — MO Coding Agent
 
+[![CI](https://github.com/adeotek/moca/actions/workflows/ci.yml/badge.svg)](https://github.com/adeotek/moca/actions/workflows/ci.yml)
+
 Minimal, token-efficient, provider-agnostic coding agent. Single Go binary, Bubble Tea TUI, seven tools, no framework.
 
 Inspired by Claude Code, OpenCode, and Pi — deliberately ~10% of their surface area. Competes on **cost per task** and **read-the-whole-codebase-in-an-hour** transparency, not features.
