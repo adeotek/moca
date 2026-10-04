@@ -4,17 +4,17 @@
 >
 > `docs/specs/DESIGN.md` remains the v1 vision/contract (rev 11). Where this file and DESIGN.md disagree, **this file wins for the current state** — the disagreement is then a to-do for the next DESIGN revision.
 >
-> Last updated: 2026-10-05 · phase 1 (PR #2, `phase/1-skeleton-providers`) + live provider smoke (11/11 green).
+> Last updated: 2026-10-05 · phase 2 (tools, permissions, skills, sessions, agent loop).
 
 ---
 
 ## 1. Overview
 
-moca is a minimal, token-efficient, provider-agnostic coding agent. Go 1.27.1 (pinned via `mise.toml`), **stdlib-only** so far. Module `github.com/adeotek/moca`, binary `moca`.
+moca is a minimal, token-efficient, provider-agnostic coding agent. Go 1.27.1 (pinned via `mise.toml`), stdlib + one parsing dependency (`mvdan.cc/sh/v3`). Module `github.com/adeotek/moca`, binary `moca`.
 
-**Implemented:** phase 1 — one-shot `moca -p` streaming through three hand-rolled protocol codecs (anthropic-messages, openai-completions, openai-responses), JSONC config, built-in model catalog, uniform retry, registry, exit-code contract.
+**Implemented:** phase 1 — streaming via three hand-rolled protocol codecs, JSONC config, catalog, retry, registry. Phase 2 — the seven frozen tools, symlink-resolving path jail + parsed shell analysis, approvals/trust/yolo, skills + AGENTS.md in a once-built system prompt, append-only JSONL sessions with pre-edit snapshots and undo, and the agent loop behind `moca -p`.
 
-**Not implemented yet:** tools/agent loop (phase 2), TUI (phase 3), context compaction/resume (phase 4), MCP (phase 5), rtk/graphify integration (phase 6), OAuth login (phase 7). `moca` without `-p` prints `TUI lands in phase 3; use -p` and exits 2; `login|logout|mcp` print `<cmd> lands in a later phase` and exit 2.
+**Not implemented yet:** TUI (phase 3), context compaction/resume (phase 4), MCP proxy (phase 5, the `mcp` tool is a frozen-schema stub), rtk/graphify integration (phase 6), OAuth login (phase 7). `moca` without `-p` prints `TUI lands in phase 3; use -p` and exits 2; `login|logout|mcp` print `<cmd> lands in a later phase` and exit 2.
 
 ## 2. Build, test, verify
 
@@ -36,23 +36,28 @@ CI (`.github/workflows/ci.yml`) runs the same gate set — the gofmt check, `go 
 ### Package layout (implemented)
 
 ```
-cmd/moca/          main.go (entry, signals), cli.go (flags → Options), oneshot.go (-p path)
+cmd/moca/          main.go (entry, signals), cli.go (flags → Options), oneshot.go (-p agent path)
 internal/llm/      leaf types: Message, ContentBlock, ToolCall, ToolResult, Request, Usage, Event…
 internal/config/   version, paths, JSONC pre-pass, typed config + validation, env indirection
 internal/provider/ SSE reader, error taxonomy, catalog, 3 protocol codecs, replay helpers,
                    retry wrapper, registry
+internal/tools/    Tool interface + registry, the 7 tools, ReadTracker, shell runner, ignore matcher
+internal/permissions/ path jail, parsed shell analysis (+Windows best-effort), trust store, yolo checkers
+internal/skills/   SKILL.md frontmatter/discovery, embedded built-ins, AGENTS.md/CLAUDE.md loader
+internal/session/  JSONL transcript (entry/writer/rebuild/repair), snapshot store + undo
+internal/agent/    system prompt, events, the loop, Start wiring (only package importing all others)
 ```
 
-Dependency direction: `llm` imports nothing internal; `config` imports nothing internal; `provider` imports `llm` + `config`; `cmd/moca` imports all three. No SDKs; HTTP+SSE hand-rolled.
+Dependency direction: `llm`/`config` import nothing internal; `tools`, `permissions`, `session`, `skills` never import each other (`permissions`/`session` satisfy `tools` interfaces structurally); `provider` imports `llm` + `config`; `agent` imports everything; `cmd/moca` imports `agent` + `config`. HTTP+SSE hand-rolled; the one non-stdlib dependency is `mvdan.cc/sh/v3` (shell parsing, phase 2).
 
 ## 3. CLI surface (as implemented)
 
 ```
-moca -p "<prompt>"            one-shot; prompt also on stdin (`-p -`, trailing newlines stripped)
+moca -p "<prompt>"            one-shot agent run; prompt also on stdin (`-p -`, trailing newlines stripped)
   --model <provider/model>    override config model for this run
   --effort <level>            off|minimal|low|medium|high|xhigh|max (validated; clamped per model)
-  --approve | --no-approve    parsed (mutually exclusive); takes effect in phase 2
-  --yolo | --no-yolo          parsed; overrides config `yolo`; takes effect in phase 2
+  --approve | --no-approve    project trust for this run (default: no; `--yolo` implies yes unless --no-approve)
+  --yolo | --no-yolo          override config `yolo`; yolo turns every permission check off (§11)
   --resume <id8|last>         parsed; takes effect in phase 4
   --continue                  parsed; takes effect in phase 4
   --version
@@ -60,9 +65,9 @@ moca -p "<prompt>"            one-shot; prompt also on stdin (`-p -`, trailing n
 moca login|logout|mcp …       stubs: "<cmd> lands in a later phase", exit 2
 ```
 
-**`-p` output contract.** stdout = the final assistant message text only. Text is **buffered until the stream settles** (a mid-stream retry replays the whole response; nothing may reach a pipe twice) and discarded on `EventReset`. The buffer is written on success *and* on failure (last attempt's partial text). A trailing `\n` is appended on success. stderr = one-liners: retry notices (`retry N/M · <wait> (<err>)`), the error itself, the exit summary (`tokens <in+cache>/<out> · $<cost>`), and `length`/`refusal` diagnostics.
+**`-p` output contract.** stdout = the final assistant answer text only, printed once when the run completes (`Outcome.Text + "\n"`); a hard error prints nothing to stdout. stderr carries the live trace: text of turns that called tools (indented two spaces), `▸ <tool> <summary>` per successful call / `✗ <tool> <first error line>` per failed call, `retry N/M · <wait>` notices, the yolo banner, and the exit summary `tokens <in+cache>/<out> · $<cost>`.
 
-**Exit codes.** `0` completed · `1` provider/runtime error, or a `length`/`refusal` stop (`response truncated (token limit reached)` / `model refused to answer`; partial text still printed) · `2` config or usage error (incl. unset `env:` vars) · `3` reserved for maxSteps (phase 2) · `130` interrupted (SIGINT **and** SIGTERM cancel in-flight requests).
+**Exit codes.** `0` completed · `1` provider/runtime error, or a final `length`/`refusal` stop (`response truncated (token limit reached)` / `model refused to answer`; the partial answer is still printed) · `2` config or usage error (incl. unset `env:` vars) · `3` maxSteps reached (the wrap-up summary is still printed) · `130` interrupted (SIGINT **and** SIGTERM cancel in-flight work).
 
 ## 4. Config
 
@@ -151,18 +156,63 @@ All three: `post()` sends JSON with `Content-Type: application/json`, `Accept: t
 - **Stall**: no bytes for 90 s → `ErrStall` (aborts the attempt; retried).
 - **Errors**: `*HTTPError{Status, RetryAfter, Body≤8KiB}`; `ErrStall`; `ErrContextOverflow` (wrapped by adapters); `*config.EnvError`. `cmd` maps: `EnvError`→2, cancellation/ctx→130, everything else→1.
 
-## 9. `-p` one-shot semantics
+## 9. `-p` run semantics
 
-Builds `llm.Request{Model: catalog id, System: "You are moca, a coding agent." (placeholder — real prompt in phase 2), MaxTokens: model-capped reserve, Effort: config default medium clamped (or `--effort` clamped), one user message}` → streams through the registry adapter → buffers text (§3) → prints text, exit summary, and stop diagnostics.
+`-p` builds the full agent (§14): resolves the model, clamps the effort, and runs one conversation whose workdir is the process cwd. Trust for the run: explicit `--approve`/`--no-approve` wins, else yolo → trusted, else **no** (project `.moca/**` and `AGENTS.md`/`CLAUDE.md` are ignored). Session slug = first five words of the prompt. The run ends when the model answers without tool calls; `context.maxSteps` batches trigger one wrap-up request (`tool_choice: none`, tools still listed) and exit 3.
 
-## 10. Verification status & known items
+## 10. Tools (seven, frozen)
 
-- Unit/integration: `go test ./... -race` — 84 pass events, includes adapter wire-shape pins, SSE framing variants, retry/backoff/retry-after/cancel, registry, CLI exit codes, `-p` buffer-reset and stop-diagnostic tests.
-- Reproducible local gates: forced-429 backoff (mock server: two 429+`Retry-After: 1` → stderr shows `retry 1/5`, `retry 2/5`, stdout `ok`, exit 0); protocol e2e through the real binary against mock SSE servers for anthropic-messages + openai-responses + stdin prompt; §12 example decodes intact (`TestSpecExampleDecodesIntact`).
-- **Live provider smoke (2026-10-05, real OpenCode key, 11/11 green)**: `/zen/go` defaults — minimax-m3 (anthropic-messages), glm-5.3-flash (+ `--effort off`), kimi-k3, gpt-6-luna (responses), grok-4.7; vendor provider rows via `/zen/v1` base-URL overrides — claude-haiku-4-5, claude-opus-5-5 (+ `--effort max`), gpt-6-luna, gpt-6-astra. Found + fixed: the Go tier requires `x-opencode-session` (HTTP 400 `MissingSessionID` otherwise) and a client User-Agent — both now sent, with regression tests. `--effort off` on glm is wire-accepted; the probe shows no hard reasoning suppression (GLM largely inlines reasoning in content) — behavioral verification lands in phase 2.
-- **Still open**: direct `api.anthropic.com` / `api.openai.com` endpoints (no vendor keys — the zen paths validate the same codecs through the override mechanism); verbatim thinking replay across two providers sharing a bare model id (pin before phase 3's cross-provider switch gate); multi-turn thinking replay + prompt caching (only exercised from phase 2 on).
+Schemas are frozen since phase 2 (`internal/tools/testdata/schemas.golden.json`; changing one is a v2 discussion): `read, write, edit, shell, search, ls, mcp`. Execution: calls of one turn run **sequentially in emitted order**; a failed call does not cancel the rest; every call gets exactly one `tool_result`. Unknown tool → error listing the available tools; invalid JSON arguments → error telling the model to split the work (§6).
 
-## 11. Maintenance
+- `read` — `N|content` lines + `[lines A-B of TOTAL]` footer (+ `use offset=B+1 to continue` when more remain); caps 2000 lines / 50K chars per call; lines >2000 chars truncated with `[… line truncated]`; NUL in the first 8K → refused with size + MIME guess; a directory → "use ls"; every successful read records mtime/size/sha256 (ReadTracker).
+- `write` — creates files (parents created inside the jail); an existing file needs a prior read **and** must be unchanged on disk since; mode preserved (new files 0644); after writing, the file is recorded so consecutive edits don't need a re-read.
+- `edit` — the edit ladder (§5): exact unique match → replace; several exact matches → error listing the lines + suggests `replace_all`; `replace_all` replaces every exact occurrence (never falls back to fuzzy); no exact match → one whitespace-insensitive match accepted and `new_string` re-indented to the file's indentation; none/ambiguous → model-facing error (mentions `N|` prefixes when the text looks like pasted read output); empty `old_string` → "use write"; identical strings → error; CRLF and BOM preserved; non-UTF-8 refused. Result: unified diff + `changed lines …; file now N lines`; Summary `path [+a −d]`.
+- `shell` — stateless (cwd = jail root every call); `bash -c` (Unix) / `pwsh -NoProfile -Command` → `powershell.exe` fallback; stdin `/dev/null`; stdout+stderr merged; invalid UTF-8 bytes replaced; head+tail truncation at 30K chars with `[… N lines omitted]`; `[exit N]` always reported (`[timed out after Ns — process group killed]` on timeout); timeout 1–300 s (default 30) kills the whole process group; env = inherited minus every `config.EnvRefs` variable, plus `PAGER=cat GIT_PAGER=cat GIT_EDITOR=true GIT_TERMINAL_PROMPT=0`.
+- `search` — RE2 regex; respects `.gitignore`/`.ignore` (gitignore subset: comments, `!`, trailing `/`, `**`); skips hidden + binary; `glob` matched against the basename (or the relative path when it contains `/`); 200-hit cap with a visible note; `files_only`; output `path:line:text` (text cut at 300 chars).
+- `ls` — one directory level, sorted; dirs `/`, symlinks `@`; 1000-entry cap; hidden entries only with `hidden:true`.
+- `mcp` — frozen ~200-token schema (search/describe/call); every action returns "no MCP servers configured". Phase 5 registers the real tool with a byte-identical `tools.MCPSpec()`.
 
-- Update this file at the end of every phase PR, and in any PR that changes implemented behavior (CLI contract, config keys, catalog, wire behavior, retry, exit codes). Keep it **normative for the current state**; note deviations from DESIGN.md explicitly (as §10 does).
+Approvals: allowlisted-but-unapproved → ask (AllowAlways persists via `Commands.Allow`); `rm` → ask every time (`CanAlways:false`, never allowlistable); `Ask == nil` (a `-p` run) = deny.
+
+## 11. Permissions
+
+- **Path jail** — root + read-only roots canonicalized once (abs + symlink resolution); relative paths join the root; `~` expands to `$HOME`; the target resolves symlinks on the deepest existing ancestor and re-appends the non-existent tail; reads are allowed inside the root or a read-only root, writes only inside the root; Windows comparison is case-insensitive and slash-normalized. Refusals name the jail ("outside the workdir … symlinks resolved").
+- **Shell analysis** (Unix; parses with `mvdan.cc/sh` — unparseable input is refused): every command name is classified — **hard-deny** (no override): `sudo su doas dd shred chown` + `mkfs*`; **refused**: `eval source . exec`; builtins: `cd pwd echo printf test [ true false exit`; `rm`: ask every time; anything else: allowlisted or ask-once. Wrapper commands are skipped to find the real command: `env time timeout nice nohup command` (`command -v` is lookup-only). Non-literal command names (`$CMD`) and non-literal redirect/`tee` targets are refused. Redirect targets are jail-checked (`/dev/null|stdout|stderr` exempt; numeric fd dup like `2>&1` exempt). Every segment of `|`, `;`, `&&`, `||`, subshells and command substitutions is visited.
+- **Windows** — best-effort (no PowerShell parser): first token of each `;`/`|`/`&&`/`||` segment, lowercased with `.exe` stripped; ask-list extended with `Remove-Item rm ri del erase rd rmdir`; `Format-Volume` hard-denied. Weaker than Unix, by design.
+- **Trust store** — `~/.local/share/moca/trust.json` (0600, atomic write; keys are canonical paths): `Lookup`/`Set`. Trust gates `<workdir>/.moca/**` and `AGENTS.md`/`CLAUDE.md`. `-p` rule: explicit flag > yolo > **no** (saved decisions are ignored in `-p`; the TUI will use them in phase 3).
+- **Yolo** (§7.5) — swaps the injected checkers (`permissions.Unjailed`, `permissions.AllowAll`, `tools.AutoAllow`) — never `if yolo` branches inside tools. Lifts: jail, shell analysis incl. hard-deny, approvals, trust. Stays on: `maxSteps`, read-before-write + staleness, snapshots, shell env hygiene / timeout / process-group kill / truncation. Recorded in the session header (`yolo`) and a `permission_mode` entry per `SetYolo` (between runs only).
+
+## 12. Skills & project instructions
+
+- **SKILL.md frontmatter** — `---`-delimited YAML subset: top-level scalars; quoted scalars unquoted; `|`/`>` block scalars (folded joins with spaces); nested maps/lists skipped; BOM + CRLF tolerated; missing frontmatter is an error.
+- **Discovery** (`skills.Discover`) — precedence: project `<workdir>/.moca/skills` (trusted runs only), global `~/.config/moca/skills`, builtin `<data>/builtin-skills/<version>`; first source wins a name collision; sorted by name; a skill without a description is skipped and reported.
+- **Built-ins** — `internal/skills/builtin/**` embedded (`embed`); `ExtractBuiltins(dataDir, version)` materializes them atomically so the model can `read` them (the builtin dir is a read-only jail root). Currently: `rtk`.
+- **Instructions** — `LoadInstructions`: global `AGENTS.md`, then (trusted only) `workdir/AGENTS.md`, else `workdir/CLAUDE.md`; each capped at 32K chars with `[… truncated at 32K chars]`.
+- Only name + one-line description + absolute path enter the system prompt; bodies load on demand via `read`.
+
+## 13. Sessions & snapshots
+
+- **Transcript** — append-only JSONL at `~/.local/share/moca/sessions/<date>-<slug>-<id8>.jsonl` (file 0600, dir 0700); every entry has `id`, `parentId` (chain), `type`, `ts`. Types: `session` (header: workdir, provider, model, **effective** effort, startedAt, mocaVersion, the full system prompt, yolo), `message`, `tool_use`, `tool_result`, `snapshot`, `error`, `permission_mode` (`compaction`/`model_change` reserved for phase 4). `Slug`: first five words, lowercase ASCII, ≤32 chars. `ReadFile` tolerates a truncated last line; `Open` continues the chain.
+- **Rebuild** (`session.Messages`) — an assistant `message` + its `tool_use` entries (by `messageId`) form one assistant message (calls after text/thinking); consecutive user-side entries merge into one user message (results first, append order); non-conversation entries are skipped.
+- **Repair** — synthetic error `tool_result`s for every unanswered `tool_use` (`aborted by user` / `interrupted — moca exited before completion`); idempotent. The loop appends them on abort; resume uses them in phase 4.
+- **Snapshots** — pre-edit content stored at `~/.local/share/moca/snapshot/<sha256>` (0600); git-tracked **clean** files are skipped (`git ls-files --error-unmatch` + empty `git status --porcelain`) and recorded `git:true`. `Undo` pops the newest record: git → message telling the user to `git restore -- <path>`; otherwise refuses if the file changed since moca wrote it, then restores content **and mode** (or deletes a file moca created). `Prune(days)` removes blobs older than `snapshot.retentionDays` (0 = keep forever) at startup.
+
+## 14. Agent loop
+
+- **Turn contract** — request = stored system prompt + rebuilt messages + the seven tool specs + `tool_choice` + `maxTokens = Model.MaxTokens(context.reserveTokens)` + clamped effort. The response persists as an assistant `message` entry (text/thinking only) with `usage`/`model`/`cost`, then one `tool_use` entry per call, then a `TurnEnd` event.
+- **Loop** — no tool calls → done (`Outcome.Text`). Calls execute sequentially (§10); a `length`-stopped turn executes nothing — each call gets the §6 "cut off — split the work" error result instead. After `context.maxSteps` tool batches: one wrap-up request (user text "You have reached the step limit…", `tool_choice: none`, tools still listed) → `Outcome{MaxSteps:true}`. Cancellation appends `aborted by user` results for every unanswered call and returns the ctx error.
+- **Events** — `TextDelta`, `ThinkingDelta`, `StreamReset`, `ToolStart`, `ToolEnd{Call,Result}`, `TurnEnd{Message,Usage,Cost,Stop}`, `Retry{Notice}`, `YoloChanged` (the phase-3 TUI builds on these).
+- **System prompt** — built once per run by `agent.Start`, stored in the `session` entry, never rebuilt: environment (workdir, platform, date, git state — **no hostname**), tool rules, working style, token discipline, skills list (`- <name>: <desc> (<abs path>)`), MCP server roster, project instructions. The version stamp ends the core block; core stays ~40 lines.
+- **Start wiring** — jail (root + global/builtin skills read-only) → shell analyser → builtins extraction → skills discovery → instructions → prompt → snapshot prune → session create (with the prompt) → `tools.Env` (jail, shell, ask, ReadTracker, snapshots, shell env with `config.EnvRefs` stripped) → registry → `New`. Yolo applies at construction when requested (header records it).
+
+## 15. Verification status & known items
+
+- Unit/integration: `go test ./... -race` — 156 pass events across 9 packages, including the edit ladder, the shell-analysis ladder, the jail (incl. symlink escape), registry dispatch + frozen schemas, session rebuild/repair, snapshots/undo, the agent loop (scripted provider), CLI contract (exit 0/1/2/3/130, trust flags, yolo banner).
+- Reproducible local gates: forced-429 backoff (mock SSE server); protocol e2e through the real binary for anthropic-messages + openai-responses + stdin; §12 example decodes intact; schema golden.
+- **Live gates (2026-10-05, real OpenCode key)**: gate 1 — a global skill (`~/.config/moca/skills/hello`) is listed in the prompt, the model `read`s its body and answers from it (`▸ read …/hello/SKILL.md`, exact greeting on stdout, exit 0). Gate 2 — a scratch repo with a failing test: the loop ran `go test` → `read` → `search` → `read` → `edit` → `go test` green and reported; exit 0; session file 0600 with a `session` header, every `tool_use` paired with a `tool_result`, parent chain intact, snapshot entry present. Plus the phase-1 provider smoke (11/11, §15 items above).
+- **Still open**: direct `api.anthropic.com` / `api.openai.com` endpoints (no vendor keys — the zen override paths validate the same codecs); verbatim thinking replay across two providers sharing a bare model id (pin before phase 3's cross-provider switch gate); multi-turn thinking replay + prompt caching + compaction (phase 4); `glm --effort off` behavioral verification (wire-accepted, §5 note).
+
+## 16. Maintenance
+
+- Update this file at the end of every phase PR, and in any PR that changes implemented behavior (CLI contract, config keys, catalog, wire behavior, tools, permissions, sessions, agent loop). Keep it **normative for the current state**; note deviations from DESIGN.md explicitly (as §15 does).
 - Keep DESIGN.md as the v1 vision; when the code settles a DESIGN ambiguity, record the decision here first and flag it for the next DESIGN revision.
