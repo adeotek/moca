@@ -1,6 +1,6 @@
 # Phase 5 — MCP Lazy Proxy — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The frozen `mcp` tool becomes a real lazy proxy. Configured MCP servers (stdio and streamable HTTP) are discoverable through a persisted name+description index, so **zero servers start at session start**. They start on first `describe`/`call`, stop after the idle timeout, and calls are gated by MCP annotations or a per-server approve list. `moca mcp import` brings existing Claude Code / OpenCode / Pi servers over without copying literal secrets; `moca mcp index` prebuilds the index.
 
@@ -1218,6 +1218,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1475,22 +1476,6 @@ func (m *Manager) Search(ctx context.Context, query, server string) ([]Hit, erro
 	return hits, nil
 }
 
-func (m *Manager) lookup(ctx context.Context, server, tool string) (*state, Tool, error) {
-	st, err := m.get(server)
-	if err != nil {
-		return nil, Tool{}, err
-	}
-	if err := m.ensure(ctx, server, st); err != nil {
-		return nil, Tool{}, err
-	}
-	for _, t := range st.tools {
-		if t.Name == tool {
-			return st, t, nil
-		}
-	}
-	return nil, Tool{}, fmt.Errorf("server %s has no tool %q; use action=search", server, tool)
-}
-
 func (m *Manager) Describe(ctx context.Context, server, tool string) (Tool, error) {
 	st, err := m.get(server)
 	if err != nil {
@@ -1545,6 +1530,9 @@ func (m *Manager) Call(ctx context.Context, server, tool string, args json.RawMe
 		res, err := cl.callTool(ctx, tool, args)
 		st.mu.Lock()
 		st.busy--
+		// A dead transport is shared: closing it here also fails any other
+		// in-flight call on this server, which then spends its own single
+		// retry. Errors, not panics — acceptable for v1.
 		retry := err != nil && attempt == 0 && (strings.Contains(err.Error(), "session expired") || strings.Contains(err.Error(), "exited"))
 		if retry && st.cl == cl {
 			cl.t.Close()

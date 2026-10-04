@@ -1,6 +1,6 @@
 # Phase 4 — Context Manager, Compaction, Resume — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Long sessions never overflow. When the usage-anchored estimate crosses `window − reserve`, older history is replaced by a structured summary, cutting only at valid points; provider overflow triggers one compact-and-retry; `--resume`/`--continue` rebuild the exact request context (stored system prompt + latest summary + kept entries) and repair a session killed mid-tool.
 

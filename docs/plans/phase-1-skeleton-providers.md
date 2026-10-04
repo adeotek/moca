@@ -1,6 +1,6 @@
 # Phase 1 — Skeleton, Protocol Adapters, Streaming, JSONC Config — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `moca -p 'hi'` streams a reply from anthropic, opencode-go (both protocol families) and openai, driven by a validated JSONC config, with uniform retry/backoff and the §12.5 `-p` output contract.
 

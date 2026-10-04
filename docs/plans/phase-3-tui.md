@@ -1,6 +1,6 @@
 # Phase 3 — TUI Shell, Slash Commands, Status Bar, Steering, Model Switching — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `moca` (no `-p`) opens an inline Bubble Tea TUI: immutable scrollback, a multi-line input with native paste, a one-line status bar below it from the first frame, numbered collapsible tool/thinking items with a pager, steering during runs, interactive trust/approval prompts, `!`/`!!`, and slash commands (`/model /effort /hard /clear /compact /cost /undo /copy /show /help` plus user prompt templates). Switching model mid-session works across providers.
 
@@ -569,7 +569,7 @@ git commit -m "feat(agent): cross-provider history transform, model/effort switc
   - `func (a *Agent) AddNote(text string) error` — appends a user `message` entry without running (the `!` prefix).
   - `func (a *Agent) Undo() (string, error)` — `a.opts.Snapshots.Undo()`.
   - `func (a *Agent) ContextTokens() int` — usage-anchored estimate (§6): if `anchorValid`, `anchorTokens + Tokens(chars of entries appended after anchorEntries)`; else `Tokens(RequestChars(system, specs, transformed messages))`.
-  - `func (a *Agent) Status() Status`, with `type Status struct { Model provider.Model; Effort llm.Effort; ContextTokens, Window int; Usage llm.Usage; Cost float64; Sub bool; Hard bool; Yolo bool }`. `Sub` = the provider's `auth == "oauth"`. (Phase 7's `SetString` builds on the same scanner — see Task 5's `AppendString`.)
+  - `func (a *Agent) Status() Status`, with `type Status struct { Model provider.Model; Effort llm.Effort; ContextTokens, Window int; Usage llm.Usage; Cost float64; Sub bool; Hard bool; Yolo bool }`. `Sub` = the provider's `auth == "oauth"`.
   - `type SteeringApplied struct{ Texts []string }` event, emitted when queued texts are appended.
 - Loop changes in `Run`:
   - After every complete tool batch (before the next request), drain the queue and append each text as a user `message` entry. Rebuild merges them after the tool results.
@@ -765,6 +765,7 @@ git commit -m "feat(agent): steering after tool results, notes, undo, anchored c
 
 **Interfaces:**
 - Produces: `func AppendString(path string, keyPath []string, value string, init []string) error`.
+  - Phase 7's `config.SetString` and phase 5's `config.SetObjectEntry` build on this task's scanner.
   - Missing file → create `{ "<k1>": { … "<kn>": [init…, value] } }` (mode 0600, dirs 0700).
   - Array exists → insert `, "value"` before its closing `]` (or `"value"` if empty); no-op if already present.
   - Some key on the path missing → insert `"<missing>": <nested object/array>` right after the deepest existing object's `{`, with `init` + value as the array.
@@ -837,6 +838,28 @@ func TestAppendStringEmptyArrayAndNoFile(t *testing.T) {
 	AppendString(p2, []string{"shell", "allow"}, "x", nil)
 	if b, _ := os.ReadFile(p2); string(b) != `{"shell":{"allow":[ "x"]}}` {
 		t.Fatal(string(b))
+	}
+}
+
+func TestAppendStringCommentWithComma(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]string{
+		// no trailing comma; the comma lives in the comment and must survive
+		"{\"shell\":{\"allow\":[\"go\" // keep, ok\n]}}": "{\"shell\":{\"allow\":[\"go\", \"x\" // keep, ok\n]}}",
+		// real trailing comma followed by a comment that also has one
+		"{\"shell\":{\"allow\":[\"go\", // a, b\n]}}": "{\"shell\":{\"allow\":[\"go\", \"x\" // a, b\n]}}",
+		// block comment with a comma, no trailing comma
+		"{\"shell\":{\"allow\":[\"go\" /* x, y */]}}": "{\"shell\":{\"allow\":[\"go\", \"x\" /* x, y */]}}",
+	}
+	for in, want := range cases {
+		p := filepath.Join(dir, "c.jsonc")
+		os.WriteFile(p, []byte(in), 0o600)
+		if err := AppendString(p, []string{"shell", "allow"}, "x", nil); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(p); string(got) != want {
+			t.Errorf("in  %q\ngot %q\nwant %q", in, got, want)
+		}
 	}
 }
 ```
@@ -975,6 +998,28 @@ func nested(keys []string, arr []string) string {
 
 func concat(parts ...[]byte) []byte { return slices.Concat(parts...) }
 
+// rawComma returns the index of the first ',' in gap that is outside a
+// comment, or -1. gap holds only whitespace, comments and commas.
+func rawComma(gap []byte) int {
+	for i := 0; i < len(gap); i++ {
+		switch {
+		case gap[i] == ',':
+			return i
+		case gap[i] == '/' && i+1 < len(gap) && gap[i+1] == '/':
+			for i < len(gap) && gap[i] != '\n' {
+				i++
+			}
+		case gap[i] == '/' && i+1 < len(gap) && gap[i+1] == '*':
+			end := strings.Index(string(gap[i+2:]), "*/")
+			if end < 0 {
+				return -1
+			}
+			i += 2 + end + 1
+		}
+	}
+	return -1
+}
+
 func AppendString(path string, keyPath []string, value string, init []string) error {
 	src, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -1007,14 +1052,15 @@ func AppendString(path string, keyPath []string, value string, init []string) er
 		q, _ := json.Marshal(value)
 		closeAt := sp.end - 1 // index of ']'
 		last := closeAt - 1   // last non-space before ']' (comments are spaces in std)
-		for last > sp.start && strings.IndexByte(" 	\r\n", std[last]) >= 0 {
+		for last > sp.start && strings.IndexByte(" \t\r\n", std[last]) >= 0 {
 			last--
 		}
 		// A trailing comma sits in the RAW gap between the last element and ']'.
 		// Standardize blanked it to a space in std, so it is invisible there — and
 		// `last` skips whitespace, so it never points at it either way. Look for the
-		// comma in src (byte indexes match: Standardize preserves length).
-		gapComma := strings.IndexByte(string(src[last+1:closeAt]), ',')
+		// comma in src (byte indexes match: Standardize preserves length), skipping
+		// comments: a ',' inside `// a, b` is the user's text, not a trailing comma.
+		gapComma := rawComma(src[last+1 : closeAt])
 		switch {
 		case len(cur) == 0:
 			out = concat(src[:closeAt], q, src[closeAt:])

@@ -1,6 +1,6 @@
 # Phase 6 — rtk, graphify, Skills Ecosystem Compatibility — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The day-1 external tools work as specified. The shell analyser unwraps `rtk <cmd>`, so `rtk` never launders a non-allowlisted command. The built-in `rtk` skill matches the real rtk CLI and is followed in a real session. graphify's SKILL.md, and SKILL.md / prompt-template files written for pi, Claude Code and OpenCode, load unchanged.
 

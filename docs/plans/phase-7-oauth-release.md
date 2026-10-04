@@ -1,6 +1,6 @@
 # Phase 7 — OAuth Providers, Upstream graphify PR, v0.1 — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `moca login anthropic|openai` works where (and only where) the vendor's current terms permit subscription OAuth from a third-party client. Tokens live in a 0600 store with auto-refresh, and there is an SSH/headless copy-URL + paste-code fallback. `graphify install --platform moca` is contributed upstream. The §14 ship-gate demo passes unattended on `opencode-go`, and `v0.1.0` is tagged.
 
