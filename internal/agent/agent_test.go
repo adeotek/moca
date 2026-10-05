@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/session"
 )
 
@@ -294,5 +295,39 @@ func TestMaxStepsWrapUpRepairsStrayCalls(t *testing.T) {
 	last := entries[len(entries)-1]
 	if last.ToolResult == nil || !strings.Contains(last.ToolResult.Content, "wrap-up") {
 		t.Fatalf("%+v", last)
+	}
+}
+
+func TestMCPNoSchemasInPromptAndZeroStarts(t *testing.T) {
+	// The fake stdio server from internal/mcp is not reachable here; use a
+	// command that would fail loudly if spawned.
+	s := newScript(t, textTurn("ok"))
+	a, _, _ := startTestWith(t, s, `"mcp":{"servers":{"never":{"command":"/nonexistent/should-not-spawn","description":"docs lookup"}}}`, "")
+	defer a.Close()
+	if _, err := a.Run(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	body := s.bodies[0]
+	tools := body["tools"].([]any)
+	if len(tools) != 7 {
+		t.Fatalf("still exactly 7 tools, got %d", len(tools))
+	}
+	sys := body["messages"].([]any)[0].(map[string]any)["content"].(string)
+	if !strings.Contains(sys, "- never: docs lookup") {
+		t.Fatal("roster line present")
+	}
+	// Spawning the server would have produced an error entry; none should exist.
+	entries, _ := session.ReadFile(a.Session().Path())
+	for _, e := range entries {
+		if e.Type == session.TypeError {
+			t.Fatal("no server activity at session start", e.Error.Message)
+		}
+	}
+	// The proxy replaced the stub: a search reaches the manager (and fails on
+	// the unusable command) instead of answering "no MCP servers configured".
+	res := a.opts.Tools.Run(context.Background(), a.opts.Env,
+		llm.ToolCall{Name: "mcp", Input: json.RawMessage(`{"action":"search","query":"x"}`)})
+	if !res.IsError || strings.Contains(res.Content, "no MCP servers configured") {
+		t.Fatalf("mcp proxy must be registered when servers are configured: %+v", res)
 	}
 }

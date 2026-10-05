@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/adeotek/moca/internal/agent"
+	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/tools"
 )
 
@@ -315,6 +316,39 @@ func TestAllowAlwaysPersists(t *testing.T) {
 	_, cmd = m.Update(key("ctrl+a"))
 	if got := <-reply; got != tools.AllowAlways || !strings.Contains(printed(cmd), "not saved") {
 		t.Fatalf("failure line: %q", printed(cmd))
+	}
+}
+
+func TestAllowAlwaysMCPPersists(t *testing.T) {
+	m := newAgentModel(t)
+	m.start.Config.MCP.Servers = map[string]config.MCPServer{"ctx7": {URL: "https://x"}}
+	// A config that parses on its own (the fake provider and the server
+	// definition included), so the result can be validated rather than just
+	// string-matched.
+	if err := os.WriteFile(m.opts.ConfigPath, []byte(`{"model":"fake/m","mcp":{"servers":{"ctx7":{"url":"https://x"}}},`+
+		`"providers":{"fake":{"baseUrl":"http://127.0.0.1:1","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reply := make(chan tools.Answer, 1)
+	m.Update(approvalMsg{q: tools.Question{Kind: "mcp", Subject: "ctx7/create_issue", Detail: `{"title":"x"}`, CanAlways: true}, reply: reply})
+	_, cmd := m.Update(key("ctrl+a"))
+	if got := <-reply; got != tools.AllowAlways {
+		t.Fatal(got)
+	}
+	b, _ := os.ReadFile(m.opts.ConfigPath)
+	c, err := config.Parse(b)
+	if err != nil {
+		t.Fatalf("written config must stay valid (%v):\n%s", err, b)
+	}
+	if s := c.MCP.Servers["ctx7"]; len(s.Approve) != 1 || s.Approve[0] != "create_issue" {
+		t.Fatalf("approve list: %+v", s)
+	}
+	if !strings.Contains(printed(cmd), "always allowing") {
+		t.Fatalf("confirmation line: %q", printed(cmd))
+	}
+	// /clear restarts from m.start.Config: the new session must keep it too.
+	if s := m.start.Config.MCP.Servers["ctx7"]; len(s.Approve) != 1 || s.Approve[0] != "create_issue" {
+		t.Fatalf("/clear copy must learn it: %+v", s)
 	}
 }
 
