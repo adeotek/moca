@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/session"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -357,5 +358,53 @@ func TestResumeUnsetKeyFailsAtFirstRequest(t *testing.T) {
 	errb.Reset()
 	if code := run(context.Background(), []string{"--config", cfg, "--resume", "last", "-p", "again"}, nil, &out, &errb); code != 2 || !strings.Contains(errb.String(), "MOCA_T_KEY") {
 		t.Fatalf("code %d stderr %q", code, errb.String())
+	}
+}
+
+// Review Focus 3's "`--model` can override": resume a session whose stored
+// model's key is gone, overriding to a provider that has one.
+func TestResumeModelOverride(t *testing.T) {
+	isolate(t)
+	t.Chdir(t.TempDir())
+	srv := fakeCompletions(t, 200, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	t.Setenv("MOCA_T_KEY", "k")
+	t.Setenv("MOCA_T_KEY2", "k2")
+	cfg := writeCfg(t, `{"model":"loc/m","providers":{`+
+		`"loc":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768}}},`+
+		`"loc2":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY2","models":{"m2":{"contextWindow":32768}}}}}`)
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"--config", cfg, "-p", "hello"}, nil, &out, &errb); code != 0 {
+		t.Fatalf("seed run: %d %q", code, errb.String())
+	}
+	t.Setenv("MOCA_T_KEY", "") // the stored model's key goes away
+	out.Reset()
+	errb.Reset()
+	if code := run(context.Background(), []string{"--config", cfg, "--resume", "last", "--model", "loc2/m2", "-p", "again"}, nil, &out, &errb); code != 0 || out.String() != "ok\n" {
+		t.Fatalf("override resume: code %d out %q err %q", code, out.String(), errb.String())
+	}
+	// The override is recorded as the newest model_change.
+	dir := filepath.Join(os.Getenv("XDG_DATA_HOME"), "moca", "sessions")
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sess string
+	for _, e := range ents {
+		if strings.HasSuffix(e.Name(), ".jsonl") {
+			sess = filepath.Join(dir, e.Name())
+		}
+	}
+	entries, err := session.ReadFile(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last string
+	for _, en := range entries {
+		if en.Type == session.TypeModelChange {
+			last = en.ModelChange.Model
+		}
+	}
+	if last != "loc2/m2" {
+		t.Fatalf("model_change %q, want loc2/m2", last)
 	}
 }

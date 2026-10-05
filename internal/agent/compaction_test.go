@@ -137,6 +137,10 @@ func TestOverflowCompactsAndRetriesOnce(t *testing.T) {
 	if sums := summaryBodies(s); len(sums) != 2 {
 		t.Fatalf("split-turn overflow recovery issues exactly two summaries, got %d", len(sums))
 	}
+	// Exactly-once: 2 runs × 1 turn + overflow turn + 2 summaries + 1 retry.
+	if n := len(s.bodies); n != 6 {
+		t.Fatalf("request count %d != 6: the compact-and-retry must fire exactly once", n)
+	}
 	entries, _ := session.ReadFile(a.Session().Path())
 	var comps, recovered int
 	for _, e := range entries {
