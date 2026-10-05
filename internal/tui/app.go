@@ -528,9 +528,15 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
 	m.running, m.cancel = false, nil
 	m.toolBusy = ""
+	var cmds []tea.Cmd
+	// The event pipe decouples delivery, so this can run before the final
+	// TurnEnd is processed; flush what the run left over (a clean run's
+	// trailing partial line) instead of dropping it.
+	if msg.err == nil && m.live.Len() > 0 {
+		cmds = append(cmds, println(m.live.String()))
+	}
 	m.live.Reset()
 	m.thinking.Reset()
-	var cmds []tea.Cmd
 	if m.agent != nil {
 		if left := m.agent.TakeSteering(); len(left) > 0 {
 			m.input.Prepend(left)
@@ -625,18 +631,24 @@ func supportedEfforts(mo provider.Model) string {
 func Run(ctx context.Context, o AppOptions) error {
 	var p *tea.Program
 	m := newModel(o, nil)
-	// p is captured by the closures before assignment; events cannot fire
-	// before p.Run() starts, because the agent only runs on user input.
-	o.Start.Emit = func(e agent.Event) { p.Send(agentEventMsg{e}) }
+	// p is captured by the closures before assignment. Events are delivered
+	// through a FIFO pipe so an emit from inside Update (a slash command
+	// toggling yolo, /clear restarting the session) can never block the
+	// event loop on Program.Send (bridge.go). The asker is called from the
+	// agent's run goroutine only, where a direct blocking send is correct.
+	pipe := newEventPipe(func(msg tea.Msg) { p.Send(msg) })
+	o.Start.Emit = pipe.emit
 	o.Start.Ask = newAsker(func(msg tea.Msg) { p.Send(msg) })
 	a, err := agent.Start(o.Start)
 	if err != nil {
+		close(pipe.stop)
 		return err
 	}
 	m.agent, m.start = a, o.Start
 	m.refreshStatus()
 	p = tea.NewProgram(m, tea.WithContext(ctx))
 	_, err = p.Run()
+	close(pipe.stop)
 	a.Session().Close()
 	if errors.Is(err, tea.ErrProgramKilled) {
 		return nil
