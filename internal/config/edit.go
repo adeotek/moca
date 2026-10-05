@@ -135,6 +135,76 @@ func nested(keys []string, arr []string) string {
 
 func concat(parts ...[]byte) []byte { return slices.Concat(parts...) }
 
+// prepEdit resolves the edit target: a config managed by a dotfile tool is a
+// symlink, so the target is edited (the link survives and the managed copy is
+// the one that changes); an existing file's mode is kept.
+func prepEdit(path string) (string, os.FileMode) {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	mode := os.FileMode(0o600)
+	if fi, err := os.Stat(path); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	return path, mode
+}
+
+// writeEdited replaces the file atomically after a .bak copy of src.
+func writeEdited(path string, src, out []byte, mode os.FileMode) error {
+	if err := os.WriteFile(path+".bak", src, 0o600); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, mode); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, mode); err != nil { // WriteFile's mode is masked by umask
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func nestedEntry(keys []string, raw string) string {
+	v := raw
+	for i := len(keys) - 1; i >= 1; i-- {
+		k, _ := json.Marshal(keys[i])
+		v = fmt.Sprintf("{ %s: %s }", k, v)
+	}
+	k, _ := json.Marshal(keys[0])
+	return fmt.Sprintf("%s: %s", k, v)
+}
+
+// objectHasKey reports whether a standardized object's top level contains key.
+func objectHasKey(obj []byte, key string) bool {
+	sc := &scanner{b: obj}
+	sc.i++ // '{'
+	for {
+		sc.ws()
+		if sc.i >= len(sc.b) || sc.b[sc.i] == '}' {
+			return false
+		}
+		if sc.b[sc.i] == ',' {
+			sc.i++
+			continue
+		}
+		k, err := sc.str()
+		if err != nil {
+			return false
+		}
+		if k == key {
+			return true
+		}
+		sc.ws()
+		if sc.i >= len(sc.b) || sc.b[sc.i] != ':' {
+			return false
+		}
+		sc.i++
+		if _, _, err := sc.value(nil); err != nil {
+			return false
+		}
+	}
+}
+
 // rawComma returns the index of the first ',' in gap that is outside a
 // comment, or -1. gap holds only whitespace, comments and commas.
 func rawComma(gap []byte) int {
@@ -164,15 +234,7 @@ func rawComma(gap []byte) int {
 // atomically after a .bak copy, and a
 // value already present is a no-op.
 func AppendString(path string, keyPath []string, value string, init []string) error {
-	// A config managed by a dotfile tool is a symlink: edit the target, so the
-	// link survives and the managed copy is the one that changes.
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		path = real
-	}
-	mode := os.FileMode(0o600)
-	if fi, err := os.Stat(path); err == nil {
-		mode = fi.Mode().Perm()
-	}
+	path, mode := prepEdit(path)
 	src, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -234,15 +296,64 @@ func AppendString(path string, keyPath []string, value string, init []string) er
 		}
 		out = concat(src[:sp.start+1], []byte(ins), src[sp.start+1:])
 	}
-	if err := os.WriteFile(path+".bak", src, 0o600); err != nil {
-		return err
+	return writeEdited(path, src, out, mode)
+}
+
+// SetObjectEntry inserts "key": rawJSON into the object at keyPath, creating
+// missing intermediate objects like AppendString (and the file itself when
+// absent). An existing key is left untouched (added=false). Same .bak, atomic
+// write, comment and formatting preservation.
+func SetObjectEntry(path string, keyPath []string, key string, rawJSON string) (bool, error) {
+	if !json.Valid([]byte(rawJSON)) {
+		return false, fmt.Errorf("%s: value for %q is not valid JSON", path, key)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, mode); err != nil {
-		return err
+	path, mode := prepEdit(path)
+	src, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return false, err
+		}
+		entry := nestedEntry(slices.Concat(keyPath, []string{key}), rawJSON)
+		return true, os.WriteFile(path, []byte("{\n  "+entry+"\n}\n"), 0o600)
 	}
-	if err := os.Chmod(tmp, mode); err != nil { // WriteFile's mode is masked by umask
-		return err
+	if err != nil {
+		return false, err
 	}
-	return os.Rename(tmp, path)
+	std, err := Standardize(src)
+	if err != nil {
+		return false, err
+	}
+	sc := &scanner{b: std}
+	sp, depth, err := sc.value(keyPath)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", path, err)
+	}
+	if std[sp.start] != '{' {
+		at := keyPath
+		if depth < len(keyPath) {
+			at = keyPath[:depth]
+		}
+		return false, fmt.Errorf("%s: %s is not an object", path, strings.Join(at, "."))
+	}
+	var out []byte
+	if depth == len(keyPath) {
+		if objectHasKey(std[sp.start:sp.end], key) {
+			return false, nil
+		}
+		// Insert right after the object's '{', comma-separated unless empty.
+		q, _ := json.Marshal(key)
+		val := rawJSON
+		if strings.TrimSpace(string(std[sp.start+1:sp.end-1])) != "" {
+			val += ","
+		}
+		ins := "\n  " + string(q) + ": " + val
+		out = concat(src[:sp.start+1], []byte(ins), src[sp.start+1:])
+	} else {
+		ins := "\n  " + nestedEntry(slices.Concat(keyPath[depth:], []string{key}), rawJSON)
+		if strings.TrimSpace(string(std[sp.start+1:sp.end-1])) != "" {
+			ins += ","
+		}
+		out = concat(src[:sp.start+1], []byte(ins), src[sp.start+1:])
+	}
+	return true, writeEdited(path, src, out, mode)
 }
