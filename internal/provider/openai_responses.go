@@ -35,12 +35,13 @@ func (a *responsesAdapter) body(req llm.Request) map[string]any {
 				input = append(input, map[string]any{"type": "message", "role": string(m.Role),
 					"content": []map[string]any{{"type": typ, "text": c.Text}}})
 			case llm.BlockThinking:
-				if replaysVerbatim(c, req.Model) && !c.Redacted && c.ThinkingID != "" {
+				if replaysVerbatim(c, a.m.Qualified()) && !c.Redacted && c.ThinkingID != "" {
 					input = append(input, map[string]any{"type": "reasoning", "id": c.ThinkingID,
 						"encrypted_content": c.Signature, "summary": []any{}})
 				} else if t := priorReasoningText(c); t != "" {
 					// Encrypted reasoning only decrypts for the model that wrote it;
-					// anything else degrades to labelled text (§3).
+					// anything else degrades to labelled text (§3). Compared by
+					// qualified id: bare ids can repeat across providers.
 					input = append(input, map[string]any{"type": "message", "role": string(llm.RoleAssistant),
 						"content": []map[string]any{{"type": "output_text", "text": t}}})
 				}

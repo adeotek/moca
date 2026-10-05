@@ -57,9 +57,11 @@ func (a *anthropicAdapter) body(req llm.Request) map[string]any {
 				blocks = append(blocks, map[string]any{"type": "text", "text": c.Text})
 			case llm.BlockThinking:
 				switch {
-				case !replaysVerbatim(c, req.Model):
+				case !replaysVerbatim(c, a.m.Qualified()):
 					// Another model's (or an unsigned) reasoning is a 400 if replayed
 					// as thinking; keep what is worth keeping as labelled text (§3).
+					// Blocks are compared by their qualified id: two providers can
+					// share a bare model id while their thinking is vendor-bound.
 					if t := priorReasoningText(c); t != "" {
 						blocks = append(blocks, map[string]any{"type": "text", "text": t})
 					}

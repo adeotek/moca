@@ -3,9 +3,9 @@ package tui
 import (
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 )
 
 // API notes — verified against charm.land/bubbletea v2.0.10, bubbles v2.2.1,

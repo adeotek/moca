@@ -83,6 +83,21 @@ func (r *Registry) Models() []Model {
 	return out
 }
 
+// CheckCredential resolves a model's provider credential once (env lookup or
+// token-store read; no network) and verifies the model exists, so a TUI model
+// switch fails fast before anything changes.
+func (r *Registry) CheckCredential(qualified string) error {
+	pname, _, err := config.SplitModel(qualified)
+	if err != nil {
+		return err
+	}
+	if _, ok := r.models[qualified]; !ok {
+		return fmt.Errorf("unknown model %q", qualified)
+	}
+	_, err = r.credential(pname)(context.Background())
+	return err
+}
+
 func (r *Registry) baseURL(provider, protocol string) string {
 	p := r.cfg.Providers[provider]
 	if u := p.BaseURLs[protocol]; u != "" {

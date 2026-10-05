@@ -62,15 +62,39 @@ func newScript(t *testing.T, turns ...string) *scriptServer {
 	return s
 }
 
+func (s *scriptServer) bodyCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.bodies)
+}
+
 func startTest(t *testing.T, s *scriptServer, maxSteps int, mods ...func(*StartOptions)) (*Agent, string, *[]Event) {
+	t.Helper()
+	return startWith(t, s, maxSteps, "", "", mods...)
+}
+
+// startTestWith splices extraTop into the top-level config object and
+// extraModels into the fake provider's models map (model-switch tests).
+func startTestWith(t *testing.T, s *scriptServer, extraTop, extraModels string) (*Agent, string, *[]Event) {
+	t.Helper()
+	return startWith(t, s, 40, extraTop, extraModels)
+}
+
+func startWith(t *testing.T, s *scriptServer, maxSteps int, extraTop, extraModels string, mods ...func(*StartOptions)) (*Agent, string, *[]Event) {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("MOCA_T_KEY", "k")
 	work := t.TempDir()
-	cfg, err := config.Parse([]byte(fmt.Sprintf(`{"model":"fake/m","context":{"maxSteps":%d},
+	if extraTop != "" {
+		extraTop = "," + extraTop
+	}
+	if extraModels != "" {
+		extraModels = "," + extraModels
+	}
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`{"model":"fake/m"%s,"context":{"maxSteps":%d},
 		"providers":{"fake":{"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY",
-		"models":{"m":{"contextWindow":65536}}}}}`, maxSteps, s.srv.URL)))
+		"models":{"m":{"contextWindow":65536}%s}}}}`, extraTop, maxSteps, s.srv.URL, extraModels)))
 	if err != nil {
 		t.Fatal(err)
 	}
