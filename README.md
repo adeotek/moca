@@ -6,7 +6,7 @@ Minimal, token-efficient, provider-agnostic coding agent. Single Go binary, Bubb
 
 Inspired by Claude Code, OpenCode, and Pi — deliberately ~10% of their surface area. Competes on **cost per task** and **read-the-whole-codebase-in-an-hour** transparency, not features.
 
-**Status: phase 2 done — `moca -p` runs the full tool loop: seven frozen tools behind a symlink-resolving path jail and a parsed-shell analyser, permissions/trust/yolo, skills + AGENTS.md in a once-built system prompt, JSONL sessions with pre-edit snapshots.** Next: phase 3 (TUI). Specs: [`docs/specs/SPECS.md`](docs/specs/SPECS.md) (current state) · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) (v1 vision) · Plans: [`docs/plans/`](docs/plans/).
+**Status: phase 3 done — `moca` opens the interactive TUI: inline immutable scrollback with numbered tool/thinking items and a pager, multi-line input with native paste + chips, a live status bar, steering during runs, `!`/`!!`, interactive approvals, and slash commands (`/model` `/effort` `/hard` `/yolo` `/clear` `/cost` `/undo` `/copy` `/show` `/help`) with cross-provider model switching.** Next: phase 4 (context manager + compaction + resume). Specs: [`docs/specs/SPECS.md`](docs/specs/SPECS.md) (current state) · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) (v1 vision) · Plans: [`docs/plans/`](docs/plans/).
 
 ## Stack
 
