@@ -59,6 +59,9 @@ func (s *scanner) value(path []string) (span, int, error) {
 		best, depth := span{start, -1}, 0
 		for {
 			s.ws()
+			if s.i >= len(s.b) {
+				return span{}, 0, errors.New("unexpected end of input")
+			}
 			if s.b[s.i] == '}' {
 				s.i++
 				if depth == 0 {
@@ -75,7 +78,10 @@ func (s *scanner) value(path []string) (span, int, error) {
 				return span{}, 0, err
 			}
 			s.ws()
-			s.i++ // ':'
+			if s.i >= len(s.b) || s.b[s.i] != ':' {
+				return span{}, 0, errors.New("expected ':'")
+			}
+			s.i++
 			if len(path) > 0 && k == path[0] {
 				sp, d, err := s.value(path[1:])
 				if err != nil {
@@ -90,6 +96,9 @@ func (s *scanner) value(path []string) (span, int, error) {
 		s.i++
 		for {
 			s.ws()
+			if s.i >= len(s.b) {
+				return span{}, 0, errors.New("unexpected end of input")
+			}
 			if s.b[s.i] == ']' {
 				s.i++
 				return span{start, s.i}, 0, nil

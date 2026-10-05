@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -106,5 +107,27 @@ func TestPasteDoesNotSend(t *testing.T) {
 	m.Update(tea.PasteMsg{Content: strings.Repeat("x\n", 80)})
 	if m.running || m.input.Display() != "[paste 80 lines #1]" {
 		t.Fatal(m.input.Display())
+	}
+}
+
+// A run that dies mid-retry must not leave the retry transient in the bar.
+func TestRunDoneClearsTransient(t *testing.T) {
+	m := newTestModel()
+	m.status.Transient = "retry 5/5 · 16s"
+	m.handleRunDone(runDoneMsg{err: context.Canceled})
+	if m.status.Transient != "" {
+		t.Fatal("transient stuck after a failed run")
+	}
+}
+
+// The approval prompt is model-supplied text: it must be sanitized like every
+// other untrusted surface, and only the first detail line is shown.
+func TestApprovalPromptSanitized(t *testing.T) {
+	got := approvalPrompt(tools.Question{Subject: "seq", Detail: "seq 'x\x1b[2Jy'\nsecond line"})
+	if strings.ContainsRune(got, 0x1b) || !strings.Contains(got, "^[[2J") {
+		t.Fatalf("unescaped control byte in prompt: %q", got)
+	}
+	if strings.Contains(got, "second line") {
+		t.Fatal("only the first detail line is shown")
 	}
 }

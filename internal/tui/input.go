@@ -12,6 +12,7 @@ type paste struct {
 	marker, content string
 	unsafe          bool // contains control bytes: never expanded into the buffer
 	expanded        bool
+	at              int // buffer offset of the expanded content; -1 when collapsed
 }
 
 // Input is the pure input state machine (no Bubble Tea types). The buffer is
@@ -48,9 +49,28 @@ func (in *Input) Paste(s string) {
 	if n == 1 {
 		unit = "line"
 	}
-	p := &paste{marker: fmt.Sprintf("[paste %d %s #%d]", n, unit, len(in.pastes)+1), content: s, unsafe: unsafe}
+	// The marker must not collide with text the user typed (or quoted) or
+	// with another paste's marker: Text()/ToggleChips map markers to content
+	// by string matching, and a collision would expand the wrong occurrence.
+	var marker string
+	for k := len(in.pastes) + 1; ; k++ {
+		marker = fmt.Sprintf("[paste %d %s #%d]", n, unit, k)
+		if !strings.Contains(in.buf, marker) && !in.markerExists(marker) {
+			break
+		}
+	}
+	p := &paste{marker: marker, content: s, unsafe: unsafe, at: -1}
 	in.pastes = append(in.pastes, p)
 	in.buf += p.marker
+}
+
+func (in *Input) markerExists(m string) bool {
+	for _, p := range in.pastes {
+		if p.marker == m {
+			return true
+		}
+	}
+	return false
 }
 
 // Text is what gets sent: intact markers replaced by their full content.
@@ -67,7 +87,10 @@ func (in *Input) Text() string {
 func (in *Input) Display() string { return Sanitize(in.buf) }
 
 // ToggleChips expands every intact marker into the buffer, or collapses the
-// expanded contents back. Control-byte pastes never expand.
+// expanded contents back. Control-byte pastes never expand. Collapse prefers
+// the remembered expansion offset (the first string occurrence may be
+// identical typed text), falling back to string matching when the buffer was
+// edited under it.
 func (in *Input) ToggleChips() {
 	anyCollapsed := false
 	for _, p := range in.pastes {
@@ -79,9 +102,16 @@ func (in *Input) ToggleChips() {
 		switch {
 		case p.unsafe:
 		case anyCollapsed && !p.expanded && strings.Contains(in.buf, p.marker):
-			in.buf, p.expanded = strings.Replace(in.buf, p.marker, p.content, 1), true
-		case !anyCollapsed && p.expanded && strings.Contains(in.buf, p.content):
-			in.buf, p.expanded = strings.Replace(in.buf, p.content, p.marker, 1), false
+			idx := strings.Index(in.buf, p.marker)
+			in.buf = strings.Replace(in.buf, p.marker, p.content, 1)
+			p.expanded, p.at = true, idx
+		case !anyCollapsed && p.expanded:
+			if p.at >= 0 && p.at+len(p.content) <= len(in.buf) && in.buf[p.at:p.at+len(p.content)] == p.content {
+				in.buf = in.buf[:p.at] + p.marker + in.buf[p.at+len(p.content):]
+				p.expanded, p.at = false, -1
+			} else if strings.Contains(in.buf, p.content) {
+				in.buf, p.expanded, p.at = strings.Replace(in.buf, p.content, p.marker, 1), false, -1
+			}
 		}
 	}
 }

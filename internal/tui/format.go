@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/adeotek/moca/internal/llm"
 )
@@ -52,11 +54,15 @@ func AbbrevHome(p, home string) string {
 }
 
 // GitBranch reports the branch, dirty flag and whether dir is a git repo.
+// The git calls are bounded: a hanging git (credential prompt, stalled NFS)
+// must not leave the status bar stale forever.
 func GitBranch(dir string) (string, bool, bool) {
-	b, err := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	b, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
 		return "", false, false
 	}
-	st, _ := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
+	st, _ := exec.CommandContext(ctx, "git", "-C", dir, "status", "--porcelain").Output()
 	return strings.TrimSpace(string(b)), len(strings.TrimSpace(string(st))) > 0, true
 }

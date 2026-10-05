@@ -15,7 +15,8 @@ import (
 func TestEventPipeNonBlockingAndFIFO(t *testing.T) {
 	release := make(chan struct{})
 	rec := make(chan string, 3)
-	p := newEventPipe(func(msg tea.Msg) {
+	p := newEventPipe()
+	p.start(func(msg tea.Msg) {
 		<-release // downstream blocked: emit must still not block
 		rec <- msg.(agentEventMsg).e.(agent.TextDelta).Text
 	})
@@ -37,4 +38,23 @@ func TestEventPipeNonBlockingAndFIFO(t *testing.T) {
 	}
 	close(p.stop)
 	p.emit(agent.TextDelta{Text: "4"}) // after stop: no-op, never blocks
+}
+
+// Events emitted before the program exists (agent.Start warnings) must be
+// buffered and delivered after start — calling Send on a not-yet-created
+// Program panics, so the forwarder must not run before start.
+func TestEventPipeBuffersUntilStarted(t *testing.T) {
+	p := newEventPipe()
+	p.emit(agent.Warning{Text: "early"}) // must neither block nor panic
+	rec := make(chan string, 1)
+	p.start(func(msg tea.Msg) { rec <- msg.(agentEventMsg).e.(agent.Warning).Text })
+	select {
+	case got := <-rec:
+		if got != "early" {
+			t.Fatalf("got %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("pre-program event was not delivered after start")
+	}
+	close(p.stop)
 }

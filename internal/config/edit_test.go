@@ -83,3 +83,30 @@ func TestAppendStringCommentWithComma(t *testing.T) {
 		}
 	}
 }
+
+// A truncated config (crash mid-write, manual edit) must come back as an
+// error, never a panic: the scanner is total.
+func TestAppendStringTruncatedConfig(t *testing.T) {
+	cases := []string{
+		`{`,
+		`{"shell"`,
+		`{"shell":`,
+		`{"shell": {`,
+		`{"shell": {"allow"`,
+		`{"shell": {"allow":`,
+		`{"shell": {"allow": [`,
+		`{"shell": {"allow": ["go"`,
+		`{"shell": {"allow": ["go",`,
+		`{"shell": {"allow": ["go"]`,
+	}
+	for _, in := range cases {
+		p := filepath.Join(t.TempDir(), "c.jsonc")
+		os.WriteFile(p, []byte(in), 0o600)
+		if err := AppendString(p, []string{"shell", "allow"}, "x", nil); err == nil {
+			t.Errorf("input %q: want an error, got nil", in)
+		}
+		if got, _ := os.ReadFile(p); string(got) != in {
+			t.Errorf("input %q: file must be untouched", in)
+		}
+	}
+}

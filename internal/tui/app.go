@@ -31,8 +31,8 @@ type AppOptions struct {
 type hintCheckMsg struct{}
 
 type model struct {
-	opts     AppOptions
-	start    agent.StartOptions // Emit/Ask wired; /clear restarts from this
+	opts     AppOptions         // Workdir/ConfigPath/Prompts/Home for rendering and commands
+	start    agent.StartOptions // opts.Start with Emit/Ask wired; /clear restarts from this copy
 	agent    *agent.Agent
 	input    *Input
 	ta       textarea.Model
@@ -304,8 +304,16 @@ func (m *model) submit() tea.Cmd {
 		return m.startRun(parsed.Text)
 	case KindCommand:
 		return m.runCommand(parsed)
-	case KindShell, KindShellLocal:
-		return m.shellCmd(parsed.Kind == KindShellLocal, parsed.Text)
+	case KindShell:
+		if m.running {
+			// `!` output enters the transcript; appending it between a tool
+			// batch's results would diverge from the wire ordering the
+			// rebuild guarantees. `!!` (local-only) stays available.
+			return printlnContent("finish or interrupt the run first (esc) — !! runs locally now")
+		}
+		return m.shellCmd(false, parsed.Text)
+	case KindShellLocal:
+		return m.shellCmd(true, parsed.Text)
 	}
 	return nil
 }
@@ -425,20 +433,23 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 }
 
 func (m *model) restartSession() tea.Cmd {
-	if m.agent != nil {
-		m.agent.Session().Close()
-	}
+	// Start the replacement first: on failure the old session must stay
+	// open and wired, or the next submit appends onto a closed writer.
 	a, err := agent.Start(m.start)
 	if err != nil {
 		return printlnContent("error: " + err.Error())
+	}
+	if m.agent != nil {
+		m.agent.Session().Close()
 	}
 	m.agent = a
 	m.items = Items{}
 	m.live.Reset()
 	m.thinking.Reset()
-	m.status = StatusInfo{}
+	m.status.Transient = ""
 	m.refreshStatus()
-	return println(fmt.Sprintf("new session %s (previous stays resumable)", a.Session().ID8()))
+	// The bar's branch survives /clear; re-resolve it for the new session.
+	return tea.Sequence(println(fmt.Sprintf("new session %s (previous stays resumable)", a.Session().ID8())), m.branchCmd())
 }
 
 func (m *model) shellCmd(local bool, cmd string) tea.Cmd {
@@ -537,13 +548,19 @@ func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
 	m.toolBusy = ""
 	var cmds []tea.Cmd
 	// The event pipe decouples delivery, so this can run before the final
-	// TurnEnd is processed; flush what the run left over (a clean run's
-	// trailing partial line) instead of dropping it.
-	if msg.err == nil && m.live.Len() > 0 {
+	// TurnEnd is processed. Flush the trailing partial line unconditionally:
+	// on an errored/interrupted run it is the visible tail of what the model
+	// streamed (display-only; the transcript holds the persisted text) —
+	// leaving it in the live region would freeze it there and the next run
+	// would silently drop it.
+	if m.live.Len() > 0 {
 		cmds = append(cmds, printlnContent(m.live.String()))
 	}
 	m.live.Reset()
 	m.thinking.Reset()
+	// A run that dies mid-retry (/clear aside) must not leave the transient
+	// in the cost field.
+	m.status.Transient = ""
 	if m.agent != nil {
 		if left := m.agent.TakeSteering(); len(left) > 0 {
 			m.input.Prepend(left)
@@ -602,10 +619,11 @@ func (m *model) statusLine() string {
 }
 
 func approvalPrompt(q tools.Question) string {
+	subject, detail := Sanitize(q.Subject), Sanitize(firstLineOf(q.Detail))
 	if q.CanAlways {
-		return fmt.Sprintf("allow `%s`?  [a] once  [A] always  [d] deny   — %s", q.Subject, firstLineOf(q.Detail))
+		return fmt.Sprintf("allow `%s`?  [a] once  [A] always  [d] deny   — %s", subject, detail)
 	}
-	return fmt.Sprintf("allow `%s` (asks every time)?  [a] once  [d] deny   — %s", q.Subject, firstLineOf(q.Detail))
+	return fmt.Sprintf("allow `%s` (asks every time)?  [a] once  [d] deny   — %s", subject, detail)
 }
 
 func firstLineOf(s string) string { l, _, _ := strings.Cut(s, "\n"); return l }
@@ -638,12 +656,13 @@ func supportedEfforts(mo provider.Model) string {
 func Run(ctx context.Context, o AppOptions) error {
 	var p *tea.Program
 	m := newModel(o, nil)
-	// p is captured by the closures before assignment. Events are delivered
-	// through a FIFO pipe so an emit from inside Update (a slash command
-	// toggling yolo, /clear restarting the session) can never block the
-	// event loop on Program.Send (bridge.go). The asker is called from the
+	// p is captured by the closures below. Events are delivered through a
+	// FIFO pipe so an emit from inside Update (a slash command toggling
+	// yolo, /clear restarting the session) can never block the event loop on
+	// Program.Send (bridge.go); the pipe buffers events emitted before the
+	// program exists (agent.Start warnings). The asker is called from the
 	// agent's run goroutine only, where a direct blocking send is correct.
-	pipe := newEventPipe(func(msg tea.Msg) { p.Send(msg) })
+	pipe := newEventPipe()
 	o.Start.Emit = pipe.emit
 	o.Start.Ask = newAsker(func(msg tea.Msg) { p.Send(msg) })
 	a, err := agent.Start(o.Start)
@@ -654,6 +673,7 @@ func Run(ctx context.Context, o AppOptions) error {
 	m.agent, m.start = a, o.Start
 	m.refreshStatus()
 	p = tea.NewProgram(m, tea.WithContext(ctx))
+	pipe.start(func(msg tea.Msg) { p.Send(msg) })
 	_, err = p.Run()
 	close(pipe.stop)
 	a.Session().Close()

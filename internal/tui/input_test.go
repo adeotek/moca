@@ -128,3 +128,35 @@ func TestHistoryRecallChipsUnsafeContent(t *testing.T) {
 		t.Fatal(in2.Buffer())
 	}
 }
+
+// A typed (or quoted) marker literal must not be expanded by a later paste's
+// chip: the marker counter skips collisions.
+func TestMarkerNeverCollidesWithTypedText(t *testing.T) {
+	in := NewInput()
+	in.SetBuffer("[paste 60 lines #1] ")
+	big := strings.Repeat("z\n", 60)
+	in.Paste(big)
+	if !strings.Contains(in.Buffer(), "[paste 60 lines #2]") {
+		t.Fatalf("marker must be bumped on collision: %q", in.Buffer())
+	}
+	if got := in.Text(); got != "[paste 60 lines #1] "+big {
+		t.Fatal("typed marker stays literal; only the paste expands")
+	}
+}
+
+// Collapse re-chips the paste's own occurrence, not an identical earlier copy
+// (typed text or a recalled entry).
+func TestCollapseUsesExactOffset(t *testing.T) {
+	in := NewInput()
+	big := strings.Repeat("q\n", 60)
+	in.Insert(big)   // an earlier identical copy (e.g. recalled history)
+	in.Paste(big)    // the chip
+	in.ToggleChips() // expand → copy + big
+	in.ToggleChips() // collapse → the paste's copy becomes a marker again
+	if want := big + "[paste 60 lines #1]"; in.Buffer() != want {
+		t.Fatalf("buffer %q", in.Buffer())
+	}
+	if in.Text() != big+big {
+		t.Fatal("text round-trip")
+	}
+}
