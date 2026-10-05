@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/adeotek/moca/internal/compact"
@@ -49,15 +49,19 @@ type Agent struct {
 	// mu guards the fields the TUI reads while a run is in progress from
 	// another goroutine: the steering queue, the transcript mirror, the
 	// usage/cost totals and the estimate anchor (Status/ContextTokens/
-	// TakeSteering). Writers: append, turn, Steer. Everything else is
-	// called between runs only.
+	// TakeSteering). Writers: append, turn, Steer, Compact. Everything else
+	// is called between runs only.
 	mu            sync.Mutex
 	entries       []session.Entry // full transcript (in-memory mirror)
 	steer         []string
 	anchorTokens  int
 	anchorEntries int
 	anchorValid   bool
-	strict        struct {
+	// lastOverflow is the error behind the most recent errOverflow turn
+	// (provider overflow, or a length stop with the context full); the
+	// compact-and-retry surfaces it when recovery is impossible.
+	lastOverflow error
+	strict       struct {
 		paths tools.PathChecker
 		cmds  tools.CommandChecker
 		ask   tools.Asker
@@ -95,6 +99,10 @@ func (a *Agent) Model() provider.Model        { return a.model }
 func (a *Agent) Effort() llm.Effort           { return a.effort }
 func (a *Agent) Totals() (llm.Usage, float64) { return a.usage, a.cost }
 func (a *Agent) Session() *session.Writer     { return a.opts.Session }
+
+// Workdir is the session's jail root — the workdir the session was started
+// in; a resumed session keeps its original one.
+func (a *Agent) Workdir() string { return a.opts.Env.Root }
 func (a *Agent) emit(e Event) {
 	if a.opts.Emit != nil {
 		a.opts.Emit(e)
@@ -133,7 +141,9 @@ func (a *Agent) request(choice llm.ToolChoice) llm.Request {
 }
 
 // turn streams one model response and persists it. It returns the response
-// and the persisted tool calls.
+// and the persisted tool calls. A context overflow (or a length stop with the
+// input within reserve of the window) becomes errOverflow and nothing is
+// persisted: Run compacts once and repeats the turn (§6).
 func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, []llm.ToolCall, error) {
 	resp, err := a.adapter.Stream(ctx, a.request(choice), func(e llm.Event) {
 		switch e.Type {
@@ -145,6 +155,17 @@ func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, 
 			a.emit(StreamReset{})
 		}
 	})
+	if errors.Is(err, provider.ErrContextOverflow) ||
+		(err == nil && resp.Stop == llm.StopLength &&
+			resp.Usage.Input+resp.Usage.CacheRead+resp.Usage.CacheWrite >= a.model.ContextWindow-a.Budget().Reserve) {
+		a.lastOverflow = err
+		if a.lastOverflow == nil {
+			a.lastOverflow = fmt.Errorf("response hit the length limit with the context full (%d input tokens)",
+				resp.Usage.Input+resp.Usage.CacheRead+resp.Usage.CacheWrite)
+		}
+		a.emit(StreamReset{})
+		return resp, nil, errOverflow
+	}
 	if err != nil {
 		a.append(session.Entry{Type: session.TypeError, Error: &session.ErrorInfo{Message: err.Error()}})
 		return resp, nil, err
@@ -197,16 +218,6 @@ func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, 
 	return resp, calls, nil
 }
 
-func textOf(m llm.Message) string {
-	var sb strings.Builder
-	for _, c := range m.Content {
-		if c.Type == llm.BlockText {
-			sb.WriteString(c.Text)
-		}
-	}
-	return sb.String()
-}
-
 func (a *Agent) result(call llm.ToolCall, r tools.Result) error {
 	_, err := a.append(session.Entry{Type: session.TypeToolResult,
 		ToolResult: &llm.ToolResult{CallID: call.ID, Content: r.Content, IsError: r.IsError}})
@@ -235,14 +246,39 @@ func (a *Agent) abort(reason string) {
 	}
 }
 
+// turnWithRecovery runs one turn; on overflow it compacts once and retries.
+// A failed compaction, or a second overflow, surfaces the original error;
+// a cancelled one surfaces the cancellation (esc must read as an interrupt).
+func (a *Agent) turnWithRecovery(ctx context.Context, choice llm.ToolChoice) (llm.Response, []llm.ToolCall, error) {
+	resp, calls, err := a.turn(ctx, choice)
+	if !errors.Is(err, errOverflow) {
+		return resp, calls, err
+	}
+	orig := a.lastOverflow
+	if cerr := a.Compact(ctx); cerr != nil {
+		if ctx.Err() != nil || errors.Is(cerr, context.Canceled) {
+			return resp, nil, cerr
+		}
+		return resp, nil, orig
+	}
+	resp, calls, err = a.turn(ctx, choice)
+	if errors.Is(err, errOverflow) {
+		return resp, nil, orig
+	}
+	return resp, calls, err
+}
+
 func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
+	if err := a.maybeCompact(ctx); err != nil {
+		return Outcome{}, err
+	}
 	if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(prompt)}); err != nil {
 		return Outcome{}, err
 	}
 	for step := 0; ; step++ {
 		if step == a.opts.Config.Context.MaxSteps {
 			a.append(session.Entry{Type: session.TypeMessage, Message: userText(wrapUpText)})
-			resp, calls, err := a.turn(ctx, llm.ToolChoiceNone)
+			resp, calls, err := a.turnWithRecovery(ctx, llm.ToolChoiceNone)
 			if err != nil {
 				return Outcome{}, err
 			}
@@ -251,9 +287,9 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 				// exactly one result (§10).
 				a.abort("the wrap-up turn must not call tools; this call was not executed")
 			}
-			return Outcome{Text: textOf(resp.Message), MaxSteps: true}, nil
+			return Outcome{Text: llm.TextOf(resp.Message), MaxSteps: true}, nil
 		}
-		resp, calls, err := a.turn(ctx, llm.ToolChoiceAuto)
+		resp, calls, err := a.turnWithRecovery(ctx, llm.ToolChoiceAuto)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -265,7 +301,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 			if queued {
 				continue
 			}
-			return Outcome{Text: textOf(resp.Message)}, nil
+			return Outcome{Text: llm.TextOf(resp.Message)}, nil
 		}
 		for _, call := range calls {
 			if ctx.Err() != nil {
@@ -291,6 +327,9 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 		// Steering lands after the complete tool batch (never between a call
 		// and its result — no provider accepts that, §11).
 		if _, err := a.applySteering(); err != nil {
+			return Outcome{}, err
+		}
+		if err := a.maybeCompact(ctx); err != nil {
 			return Outcome{}, err
 		}
 	}

@@ -60,6 +60,11 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 		fmt.Fprintln(stderr, "moca:", err)
 		return exitRuntime
 	}
+	resumePath, err := resolveResume(o, wd)
+	if err != nil {
+		fmt.Fprintln(stderr, "moca:", err)
+		return exitUsage
+	}
 	yolo := o.YoloOn(cfg)
 	trusted, err := decideTrust(ctx, o, wd, yolo)
 	if err != nil {
@@ -75,8 +80,9 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 	pdirs = append(pdirs, skills.Dir{Path: filepath.Join(config.ConfigDir(), "prompts"), Source: "global"})
 	home, _ := os.UserHomeDir()
 	err = tui.Run(ctx, tui.AppOptions{
-		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Trusted: trusted, Yolo: yolo, Slug: "tui"},
+		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Yolo: yolo, Slug: "tui"},
 		ConfigPath: cfgPath, Prompts: skills.LoadPrompts(pdirs), Home: home,
+		ResumePath: resumePath,
 	})
 	if err != nil {
 		if ctx.Err() == nil { // SIGINT/SIGTERM: no message, just 130

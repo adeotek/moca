@@ -18,6 +18,11 @@ import (
 	"time"
 )
 
+// ErrInUse means another moca process holds the session file open for
+// writing: two writers would interleave histories, and a resume would "repair"
+// the other process's in-flight tool calls with synthetic results.
+var ErrInUse = errors.New("session is open in another moca process")
+
 type Writer struct {
 	mu   sync.Mutex
 	f    *os.File
@@ -68,6 +73,10 @@ func Create(dir string, h Header, slug string) (*Writer, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := lockFile(f); err != nil {
+			f.Close()
+			return nil, err
+		}
 		w := &Writer{f: f, path: p, id8: id8}
 		if _, err := w.Append(Entry{Type: TypeSession, Session: &h}); err != nil {
 			f.Close()
@@ -78,16 +87,27 @@ func Create(dir string, h Header, slug string) (*Writer, error) {
 	return nil, errors.New("could not allocate a unique session id")
 }
 
+// Open reopens a session file for appending and returns its entries. The
+// writer lock is taken first: trimming a "partial" last line or repairing
+// calls while another process is mid-write would damage its session.
 func Open(path string) (*Writer, []Entry, error) {
-	entries, err := ReadFile(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := trimPartialLine(path); err != nil {
-		return nil, nil, err
-	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := lockFile(f); err != nil {
+		f.Close()
+		if errors.Is(err, ErrInUse) {
+			return nil, nil, fmt.Errorf("%s: %w", path, err)
+		}
+		return nil, nil, err
+	}
+	entries, err := ReadFile(path)
+	if err == nil {
+		err = trimPartialLine(path)
+	}
+	if err != nil {
+		f.Close()
 		return nil, nil, err
 	}
 	base := strings.TrimSuffix(filepath.Base(path), ".jsonl")
