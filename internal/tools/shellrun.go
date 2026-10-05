@@ -51,7 +51,7 @@ func RunShell(ctx context.Context, dir string, env []string, command string, tim
 	cmd.Stdin = devnull
 	w := &boundedWriter{max: shellCaptureMax}
 	cmd.Stdout, cmd.Stderr = w, w
-	setProcessGroup(cmd)
+	SetProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		return ShellOutput{}, err
 	}
@@ -61,7 +61,7 @@ func RunShell(ctx context.Context, dir string, env []string, command string, tim
 	select {
 	case werr = <-done:
 	case <-ctx.Done():
-		killProcessGroup(cmd)
+		KillProcessGroup(cmd)
 		werr = <-done
 	}
 	out := ShellOutput{Output: strings.ToValidUTF8(w.String(), "\uFFFD")}
