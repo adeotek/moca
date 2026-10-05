@@ -121,10 +121,10 @@ data: {"type":"response.incomplete","response":{"status":"incomplete","incomplet
 
 `, &body, nil)
 	defer srv.Close()
-	a := newOpenAIResponses(Model{ID: "gpt", ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning}, srv.URL, keyCred("K"), srv.Client())
+	a := newOpenAIResponses(Model{Provider: "p", ID: "gpt", ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning}, srv.URL, keyCred("K"), srv.Client())
 	resp, err := a.Stream(context.Background(), llm.Request{Model: "gpt", MaxTokens: 1, Effort: llm.EffortLow, Messages: []llm.Message{
 		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
-			{Type: llm.BlockThinking, ThinkingID: "rs_1", Signature: "ENC", Model: "gpt"},
+			{Type: llm.BlockThinking, ThinkingID: "rs_1", Signature: "ENC", Model: "p/gpt"},
 			{Type: llm.BlockText, Text: "ok"},
 			{Type: llm.BlockToolUse, ToolCall: &llm.ToolCall{ID: "c1", Name: "ls", Input: json.RawMessage(`{}`)}}}},
 		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockToolResult, ToolResult: &llm.ToolResult{CallID: "c1", Content: "x"}}}},
@@ -203,24 +203,25 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 
 `, &body, nil)
 	defer srv.Close()
-	a := newOpenAIResponses(Model{ID: "gpt", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	a := newOpenAIResponses(Model{Provider: "p", ID: "gpt", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
 	if _, err := a.Stream(context.Background(), llm.Request{Model: "gpt", MaxTokens: 1, Messages: []llm.Message{
 		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
 			{Type: llm.BlockThinking, Text: "from claude", Signature: "ANTHROPIC-SIG", Model: "claude"},
 			{Type: llm.BlockThinking, Text: "[Reasoning redacted]", Signature: "ANTHROPIC-DATA", Model: "claude", Redacted: true},
 			{Type: llm.BlockThinking, Text: "from glm", Model: "glm"},
-			{Type: llm.BlockThinking, ThinkingID: "rs_1", Signature: "ENC", Model: "gpt"},
+			{Type: llm.BlockThinking, Text: "same bare id, other provider", ThinkingID: "rs_x", Signature: "OTHER-ENC", Model: "other/gpt"},
+			{Type: llm.BlockThinking, ThinkingID: "rs_1", Signature: "ENC", Model: "p/gpt"},
 		}},
 	}}, func(llm.Event) {}); err != nil {
 		t.Fatal(err)
 	}
 	got := mustJSON(body["input"])
-	for _, bad := range []string{"ANTHROPIC-SIG", "ANTHROPIC-DATA", `"id":""`} {
+	for _, bad := range []string{"ANTHROPIC-SIG", "ANTHROPIC-DATA", "OTHER-ENC", `"id":""`} {
 		if strings.Contains(got, bad) {
 			t.Errorf("foreign reasoning leaked %s: %s", bad, got)
 		}
 	}
-	for _, want := range []string{`"encrypted_content":"ENC"`, "[prior reasoning]\\nfrom claude", "[prior reasoning]\\nfrom glm"} {
+	for _, want := range []string{`"encrypted_content":"ENC"`, "[prior reasoning]\\nfrom claude", "[prior reasoning]\\nfrom glm", "[prior reasoning]\\nsame bare id, other provider"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %s: %s", want, got)
 		}

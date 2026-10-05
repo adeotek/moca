@@ -2709,3 +2709,51 @@ Build: `go build -o bin/moca ./cmd/moca`. Run each check and tick it only when o
 - [ ] **`/copy`**: over SSH into a terminal that supports OSC 52, paste the clipboard locally and it matches the last answer.
 
 - [ ] **Commit**: update the README status (`phase 3 done — TUI`) and commit `docs: phase 3 gate passed`.
+
+---
+
+## Implementation notes (added after implementation + gate runs)
+
+Deviations from the task snippets, all deliberate; the plan's intent is kept.
+
+1. **Adapter thinking-replay comparison is qualified (`m.Qualified()`)** — the plan says "adapters set the bare id; the agent owns qualification", but its `replaysVerbatim(c, req.Model)` still compared the *bare* id while `turn()` stamps the *qualified* one, which would degrade every same-model thinking block to `[prior reasoning]` on the next request. The agent still stamps qualified at persist time (belt and braces); the adapters compare against their own qualified model. Pinned by `TestAnthropicForeignThinking` / `TestResponsesForeignThinking` ("same bare id, other provider" must not replay) and `TestTransformSameBareIDDifferentProvider`.
+2. **`/model`, `/effort`, `/hard` are refused while a run is in progress** (same "finish or interrupt the run first (esc)" message as `/yolo`/`/clear`): they mutate model/adapter/effort that the run goroutine reads, and a mid-run switch would silently change the model between turns of one run.
+3. **The agent has a mutex** (`mu`) around the steering queue, the transcript mirror, usage/cost and the estimate anchor; `append`, `turn`, `request`, `abort`, `Status` and `ContextTokens` use it. The TUI polls `Status()` from the event-loop goroutine while the agent runs in another goroutine — without this, `-race` in a real session is a data race.
+4. **Bridge: agent events are delivered through a FIFO pipe (`eventPipe`), not a direct `Program.Send`** — found by the phase gate: `/yolo` calls `agent.SetYolo` from inside `Update`, which emitted `YoloChanged` synchronously; `Program.Send` is a blocking send on an unbuffered channel and `Update` runs on the event-loop goroutine, so the program deadlocked (reproduced in tmux, fixed in `8abca34`). `emit` now only enqueues (order preserved, `TestEventPipeNonBlockingAndFIFO`); the asker still uses a direct send because it is only called from the agent's run goroutine.
+5. **`println` no longer sanitizes; `printlnContent` stays for untrusted text** — also found by the gate: sanitizing a lipgloss-styled line (`red.Render(...)`) printed the escape codes as literal `^[[1;31m` text. Styled/trusted lines use `println`, content (model output, user input, tool output, error strings) uses `printlnContent`; the status bar sanitizes its content before styling. Also found: recalling a submission that contained control bytes put them raw into the textarea — history recall now re-chips such entries (`setFromHistory`, tested).
+6. **Small adaptations:** `startTestWith(t, s, extraTop, extraModels)` wraps the phase-2 `startTest` (which takes `maxSteps` + modifiers); the `TestAppendStringMissingKeys` fixture uses a real provider's model id (`anthropic/claude-x`) because `config.Parse` validates providers; the multi-call abort test steers once (abort's synthetic ToolEnds re-fire any Emit hook); `handleRunDone` flushes a clean run's trailing live line (the pipe decouples delivery order from `TurnEnd`).
+
+Gate evidence (2026-10-05): mock-driven session in tmux — status bar from the first frame, streaming commit, `⋯`/`▸` items, `/help /cost /model /effort /hard /copy /show /compact`, missing-key refusal, no-enhanced-keyboard hint + `alt+enter`, 120-line paste chip → expand → send (transcript intact), steering after tool results (verified in the captured request payload), approvals (`a`, `A` persisting `python3` with comments + trailing comma intact, `rm` without `[A]` → deny), `/yolo` on/off + 60-col bar, `!`/`!!`, `/undo`, esc-interrupt, `/clear`. Live (opencode-go key): minimax-m3 (anthropic-messages, thinking + tool calls) → glm-5.3-flash (completions) → back to minimax-m3, both continuations clean (no 400), qualified thinking stamps + signatures in the transcript, 2 `model_change` entries, real usage/cost in the bar.
+
+## Review fixes (2026-10-05, two independent subagent reviews)
+
+Verdicts: pass 1 (`docs/reviews/2026-10-05-phase-3-tui.md`) Approve with fixes (0H/1M/3L); pass 2 (`docs/reviews/2026-10-05-phase-3-tui-pass-2.md`) Approve with fixes (1H/2M/6L). All fixed in `640be8e` with regression tests, except the three noted below.
+
+- **H1 (pass 2, reproduced)** — `eventPipe` gates its forwarder until `start()`: events emitted before the program exists (agent.Start skill warnings) are buffered, not sent through a nil `*Program` (a malformed `SKILL.md` in `~/.config/moca/skills/` panicked the TUI). `TestEventPipeBuffersUntilStarted`.
+- **M1 (pass 1; folded in by pass 2)** — `/clear` starts the replacement session before closing the old one and re-resolves the branch: the bar no longer regresses to `-`, and a failed restart leaves the old session usable.
+- **M2 (pass 2, reproduced)** — the `AppendString` scanner is bounds-total; truncated configs return `unexpected end of input` / `expected ':'` instead of an index-out-of-range panic (`TestAppendStringTruncatedConfig`).
+- **L2 (pass 1) / L8 (pass 2)** — chip markers skip collisions with typed text (`TestMarkerNeverCollidesWithTypedText`); collapse re-chips the remembered expansion offset, falling back to string matching (`TestCollapseUsesExactOffset`).
+- **L4 (both)** — `handleRunDone` flushes the trailing live line unconditionally (the visible tail of an interrupted stream) and clears the retry transient (`TestRunDoneClearsTransient`).
+- **L5 (pass 2)** — `!` is refused while a run is in progress (a note appended between a batch's tool results would diverge from the rebuild order); `!!` (local-only) still runs.
+- **L6/L7 (pass 2)** — the approval prompt sanitizes its subject/detail (`TestApprovalPromptSanitized`); `GitBranch` calls are bounded to 3s each.
+- Not changed, recorded: **M3 (pass 2)** — allow-always still answers before the config write (per plan; the failure path prints and the command still runs); **L3 (pass 1)** — `eventPipe` keeps deliberate backpressure at a full 1024-slot queue (dropping streamed deltas corrupts the answer); the comment now states the bound; **L9 (pass 2)** — `textOf`/`messageText` dedupe deferred to phase 4, comments corrected.
+
+## Review fixes, pass 3 (2026-10-05, `docs/reviews/2026-10-05-phase-3-tui-pass-3.md`)
+
+Verdict was Approve with fixes (0H/9M/7L); all sixteen are fixed with regression tests (219 top-level tests, race-clean). New test scaffolding: `internal/tui/helpers_test.go` builds a `model` around a real agent (mock completions server) so glue paths — `/clear`, steering return, `!`, allow-always — run against real code.
+
+- **M1** output printed while the pager is open is held (`hold`/`release`) and flushed on close. **M2** `a`/`A`/`d` need a 700 ms typing pause (superseded for `A` by pass 4 — allow-always moved to `ctrl+a`); `enter`/`ctrl+c` fall through during a prompt. **M3** `shellBusy` blocks runs and `/clear` while a `!` executes.
+- **M4/M5** `runResult` maps cancellation to the context error (exit 130) and keeps panics as errors; the program runs with `tea.WithoutSignalHandler()` (verified: 20/20 SIGTERM runs exit 130, previously ~40% hung). **L13** quit cancels the run and waits (2 s) for its abort before closing the *current* session.
+- **M6/M7** `Input.Prepare`: CR/CRLF → LF, insertion at the cursor via the textarea. **M8** C1 controls sanitised. **M9** `AppendString` resolves symlinks and keeps the file mode.
+- **L10** redacted foreign thinking dropped by the transform. **L11** ctrl+c/esc at the trust prompt cancels (130) instead of saving "no". **L12** `git --no-optional-locks status`. **L14** `/clear` carries model/effort (`Agent.Carry`) and `[A]` approvals. **L15** the missing tests. **L16** status width in terminal cells; a response with zero usage no longer anchors the estimate.
+
+## Review fixes, pass 4 (2026-10-05, `docs/reviews/2026-10-05-phase-3-tui-pass-4.md`)
+
+Re-review of the pass-3 commits (verdict: approve with fixes; no blocking findings, six small items). All six fixed in `a2b091c` with tests; 220 top-level tests, race-clean.
+
+- **P4-1** allow-always moved from `A` to `ctrl+a`: a stray capital `A` (first letter of "Add…") after a typing pause could still persist a `shell.allow` entry; a modified key cannot come from prose, so plain letters now always go to the draft. `a`/`d` keep the 700 ms pause (allow-once/deny stay bounded and recoverable — recorded in SPECS). `TestAllowAlwaysRequiresCtrl`.
+- **P4-2** the trust prompt takes the caller's signal context and runs with `tea.WithoutSignalHandler()` + `tea.WithContext` — the shutdown rule from pass 3 (a second handler races the first); SIGINT/SIGTERM during the prompt exit 130 quietly, nothing saved.
+- **P4-3** the PR #4 description refreshed with the pass-3/4 review state.
+- **P4-4** SPECS approvals bullet: new config files are written 0600, existing files keep their mode — the bullet read self-contradictory.
+- **P4-5** the model gets an injectable clock (`m.now`, default `time.Now`): the approval-timing tests are deterministic instead of "the typing loop is faster than 700 ms".
+- **P4-6** fixed the inverted failure message in `TestEnterAndCtrlCDuringApproval`.
