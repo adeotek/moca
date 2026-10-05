@@ -2,12 +2,42 @@ package session
 
 import "github.com/adeotek/moca/internal/llm"
 
-// Messages rebuilds request messages from transcript entries (no
-// compaction handling yet — phase 4 adds it).
+// LatestCompaction returns the newest compaction entry and its index, or
+// (nil, -1). Request rebuilds and further compactions start from its
+// FirstKeptEntryID.
+func LatestCompaction(entries []Entry) (*Compaction, int) {
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Type == TypeCompaction {
+			return entries[i].Compaction, i
+		}
+	}
+	return nil, -1
+}
+
+// Messages rebuilds request messages: the latest compaction summary (if any),
+// then entries from its firstKeptEntryId onward (§8). Without a compaction
+// the whole transcript is used, unchanged.
 func Messages(entries []Entry) []llm.Message {
 	var out []llm.Message
+	start := 0
+	if c, idx := LatestCompaction(entries); c != nil {
+		found := false
+		for i, e := range entries {
+			if e.ID == c.FirstKeptEntryID {
+				start, found = i, true
+				break
+			}
+		}
+		if !found {
+			// The kept boundary is gone (trimmed file?): keep from the
+			// compaction entry itself rather than replaying summarized
+			// history as if the summary did not exist.
+			start = idx
+		}
+		appendUser(&out, llm.ContentBlock{Type: llm.BlockText, Text: "[Summary of earlier conversation]\n" + c.Summary})
+	}
 	assistantIdx := map[string]int{}
-	for _, e := range entries {
+	for _, e := range entries[start:] {
 		switch e.Type {
 		case TypeMessage:
 			if e.Message.Role == llm.RoleAssistant {

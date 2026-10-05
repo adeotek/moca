@@ -36,6 +36,30 @@ func TestMessagesRebuild(t *testing.T) {
 	}
 }
 
+func TestMessagesFromCompaction(t *testing.T) {
+	es := []Entry{
+		{ID: "u1", Type: TypeMessage, Message: txt(llm.RoleUser, "old")},
+		{ID: "a1", Type: TypeMessage, Message: txt(llm.RoleAssistant, "old answer")},
+		{ID: "u2", Type: TypeMessage, Message: txt(llm.RoleUser, "kept question")},
+		{ID: "a2", Type: TypeMessage, Message: txt(llm.RoleAssistant, "kept answer")},
+		{ID: "cp", Type: TypeCompaction, Compaction: &Compaction{Summary: "S", FirstKeptEntryID: "u2"}},
+		{ID: "u3", Type: TypeMessage, Message: txt(llm.RoleUser, "new")},
+	}
+	m := Messages(es)
+	if len(m) != 3 || m[0].Content[0].Text != "[Summary of earlier conversation]\nS" || m[0].Content[1].Text != "kept question" {
+		t.Fatalf("%+v", m)
+	}
+	if m[2].Content[0].Text != "new" {
+		t.Fatalf("entries after the cut rebuild unchanged: %+v", m[2])
+	}
+	if c, i := LatestCompaction(es); c == nil || i != 4 || c.Summary != "S" {
+		t.Fatal("latest compaction")
+	}
+	if c, i := LatestCompaction(es[:3]); c != nil || i != -1 {
+		t.Fatal("no compaction → nil, -1")
+	}
+}
+
 func TestRepair(t *testing.T) {
 	es := []Entry{
 		{ID: "a1", Type: TypeMessage, Message: txt(llm.RoleAssistant, "")},

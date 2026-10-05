@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -49,15 +50,19 @@ type Agent struct {
 	// mu guards the fields the TUI reads while a run is in progress from
 	// another goroutine: the steering queue, the transcript mirror, the
 	// usage/cost totals and the estimate anchor (Status/ContextTokens/
-	// TakeSteering). Writers: append, turn, Steer. Everything else is
-	// called between runs only.
+	// TakeSteering). Writers: append, turn, Steer, Compact. Everything else
+	// is called between runs only.
 	mu            sync.Mutex
 	entries       []session.Entry // full transcript (in-memory mirror)
 	steer         []string
 	anchorTokens  int
 	anchorEntries int
 	anchorValid   bool
-	strict        struct {
+	// lastOverflow is the error behind the most recent errOverflow turn
+	// (provider overflow, or a length stop with the context full); the
+	// compact-and-retry surfaces it when recovery is impossible.
+	lastOverflow error
+	strict       struct {
 		paths tools.PathChecker
 		cmds  tools.CommandChecker
 		ask   tools.Asker
@@ -133,7 +138,9 @@ func (a *Agent) request(choice llm.ToolChoice) llm.Request {
 }
 
 // turn streams one model response and persists it. It returns the response
-// and the persisted tool calls.
+// and the persisted tool calls. A context overflow (or a length stop with the
+// input within reserve of the window) becomes errOverflow and nothing is
+// persisted: Run compacts once and repeats the turn (§6).
 func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, []llm.ToolCall, error) {
 	resp, err := a.adapter.Stream(ctx, a.request(choice), func(e llm.Event) {
 		switch e.Type {
@@ -145,6 +152,17 @@ func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, 
 			a.emit(StreamReset{})
 		}
 	})
+	if errors.Is(err, provider.ErrContextOverflow) ||
+		(err == nil && resp.Stop == llm.StopLength &&
+			resp.Usage.Input+resp.Usage.CacheRead+resp.Usage.CacheWrite >= a.model.ContextWindow-a.Budget().Reserve) {
+		a.lastOverflow = err
+		if a.lastOverflow == nil {
+			a.lastOverflow = fmt.Errorf("response hit the length limit with the context full (%d input tokens)",
+				resp.Usage.Input+resp.Usage.CacheRead+resp.Usage.CacheWrite)
+		}
+		a.emit(StreamReset{})
+		return resp, nil, errOverflow
+	}
 	if err != nil {
 		a.append(session.Entry{Type: session.TypeError, Error: &session.ErrorInfo{Message: err.Error()}})
 		return resp, nil, err
@@ -235,14 +253,35 @@ func (a *Agent) abort(reason string) {
 	}
 }
 
+// turnWithRecovery runs one turn; on overflow it compacts once and retries.
+// A failed compaction, or a second overflow, surfaces the original error.
+func (a *Agent) turnWithRecovery(ctx context.Context, choice llm.ToolChoice) (llm.Response, []llm.ToolCall, error) {
+	resp, calls, err := a.turn(ctx, choice)
+	if !errors.Is(err, errOverflow) {
+		return resp, calls, err
+	}
+	orig := a.lastOverflow
+	if cerr := a.Compact(ctx); cerr != nil {
+		return resp, nil, orig
+	}
+	resp, calls, err = a.turn(ctx, choice)
+	if errors.Is(err, errOverflow) {
+		return resp, nil, orig
+	}
+	return resp, calls, err
+}
+
 func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
+	if err := a.maybeCompact(ctx); err != nil {
+		return Outcome{}, err
+	}
 	if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(prompt)}); err != nil {
 		return Outcome{}, err
 	}
 	for step := 0; ; step++ {
 		if step == a.opts.Config.Context.MaxSteps {
 			a.append(session.Entry{Type: session.TypeMessage, Message: userText(wrapUpText)})
-			resp, calls, err := a.turn(ctx, llm.ToolChoiceNone)
+			resp, calls, err := a.turnWithRecovery(ctx, llm.ToolChoiceNone)
 			if err != nil {
 				return Outcome{}, err
 			}
@@ -253,7 +292,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 			}
 			return Outcome{Text: textOf(resp.Message), MaxSteps: true}, nil
 		}
-		resp, calls, err := a.turn(ctx, llm.ToolChoiceAuto)
+		resp, calls, err := a.turnWithRecovery(ctx, llm.ToolChoiceAuto)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -291,6 +330,9 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 		// Steering lands after the complete tool batch (never between a call
 		// and its result — no provider accepts that, §11).
 		if _, err := a.applySteering(); err != nil {
+			return Outcome{}, err
+		}
+		if err := a.maybeCompact(ctx); err != nil {
 			return Outcome{}, err
 		}
 	}
