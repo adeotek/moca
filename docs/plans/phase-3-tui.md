@@ -2737,3 +2737,12 @@ Verdicts: pass 1 (`docs/reviews/2026-10-05-phase-3-tui.md`) Approve with fixes (
 - **L5 (pass 2)** — `!` is refused while a run is in progress (a note appended between a batch's tool results would diverge from the rebuild order); `!!` (local-only) still runs.
 - **L6/L7 (pass 2)** — the approval prompt sanitizes its subject/detail (`TestApprovalPromptSanitized`); `GitBranch` calls are bounded to 3s each.
 - Not changed, recorded: **M3 (pass 2)** — allow-always still answers before the config write (per plan; the failure path prints and the command still runs); **L3 (pass 1)** — `eventPipe` keeps deliberate backpressure at a full 1024-slot queue (dropping streamed deltas corrupts the answer); the comment now states the bound; **L9 (pass 2)** — `textOf`/`messageText` dedupe deferred to phase 4, comments corrected.
+
+## Review fixes, pass 3 (2026-10-05, `docs/reviews/2026-10-05-phase-3-tui-pass-3.md`)
+
+Verdict was Approve with fixes (0H/9M/7L); all sixteen are fixed with regression tests (219 top-level tests, race-clean). New test scaffolding: `internal/tui/helpers_test.go` builds a `model` around a real agent (mock completions server) so glue paths — `/clear`, steering return, `!`, allow-always — run against real code.
+
+- **M1** output printed while the pager is open is held (`hold`/`release`) and flushed on close. **M2** `a`/`A`/`d` need a 700 ms typing pause; `enter`/`ctrl+c` fall through during a prompt. **M3** `shellBusy` blocks runs and `/clear` while a `!` executes.
+- **M4/M5** `runResult` maps cancellation to the context error (exit 130) and keeps panics as errors; the program runs with `tea.WithoutSignalHandler()` (verified: 20/20 SIGTERM runs exit 130, previously ~40% hung). **L13** quit cancels the run and waits (2 s) for its abort before closing the *current* session.
+- **M6/M7** `Input.Prepare`: CR/CRLF → LF, insertion at the cursor via the textarea. **M8** C1 controls sanitised. **M9** `AppendString` resolves symlinks and keeps the file mode.
+- **L10** redacted foreign thinking dropped by the transform. **L11** ctrl+c/esc at the trust prompt cancels (130) instead of saving "no". **L12** `git --no-optional-locks status`. **L14** `/clear` carries model/effort (`Agent.Carry`) and `[A]` approvals. **L15** the missing tests. **L16** status width in terminal cells; a response with zero usage no longer anchors the estimate.
