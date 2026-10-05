@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -51,8 +52,41 @@ func TestCompactingBlocksRun(t *testing.T) {
 	if m.agent != old {
 		t.Fatal("/clear must wait for the compaction")
 	}
+	// A `!` note would race the compaction (excluded from its summary, or
+	// dropped by the rebuilt context behind its cut boundary).
+	m.input.SetBuffer("!ls")
+	m.syncTextarea()
+	_, cmd = m.Update(key("enter"))
+	if m.shellBusy || !strings.Contains(printed(cmd), "/compact") {
+		t.Fatalf("`!` must be refused while compacting: %q", printed(cmd))
+	}
 	m.Update(compactDoneMsg{err: nil})
 	if m.compacting {
 		t.Fatal("done clears the flag")
+	}
+}
+
+// esc cancels an in-flight /compact; a cancelled compaction reports itself
+// instead of looking like an error.
+func TestCompactEscapeCancels(t *testing.T) {
+	m := newAgentModel(t)
+	m.input.SetBuffer("/compact")
+	m.syncTextarea()
+	m.Update(key("enter"))
+	if !m.compacting || m.compactCancel == nil {
+		t.Fatal("compact must be cancellable")
+	}
+	cancelled := false
+	m.compactCancel = func() { cancelled = true }
+	m.Update(key("esc"))
+	if !cancelled {
+		t.Fatal("esc must cancel the compaction")
+	}
+	_, cmd := m.Update(compactDoneMsg{err: context.Canceled})
+	if m.compacting || m.compactCancel != nil {
+		t.Fatal("cancel clears the busy state")
+	}
+	if !strings.Contains(printed(cmd), "compaction cancelled") {
+		t.Fatalf("cancelled compaction note: %q", printed(cmd))
 	}
 }

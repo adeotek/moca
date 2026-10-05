@@ -69,6 +69,9 @@ type model struct {
 	// compacting: a /compact request is in flight; runs and state-changing
 	// commands must wait for it (it appends to the transcript).
 	compacting bool
+	// compactCancel aborts an in-flight /compact (esc, quit): the summary
+	// request inherits the provider's full retry ladder otherwise.
+	compactCancel context.CancelFunc
 	// held: scrollback output produced while the alt-screen pager is open.
 	// tea.Println is lost there, so it is released when the pager closes.
 	held []tea.Cmd
@@ -231,8 +234,12 @@ func (m *model) release() tea.Cmd {
 	return c
 }
 
-// quit cancels an in-flight run (its abort is appended before exit) and exits.
+// quit cancels an in-flight run or compaction (its abort/return is recorded
+// before exit) and exits.
 func (m *model) quit() tea.Cmd {
+	if m.compactCancel != nil {
+		m.compactCancel()
+	}
 	if m.cancel != nil {
 		m.cancel()
 	}
@@ -288,6 +295,10 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		m.pullTextarea()
 		return nil
 	case "esc":
+		if m.compacting && m.compactCancel != nil {
+			m.compactCancel()
+			return nil
+		}
 		if m.running && m.cancel != nil {
 			m.cancel()
 		}
@@ -413,6 +424,12 @@ func (m *model) submit() tea.Cmd {
 			// batch's results would diverge from the wire ordering the
 			// rebuild guarantees. `!!` (local-only) stays available.
 			return printlnContent("finish or interrupt the run first (esc) — !! runs locally now")
+		}
+		if m.compacting {
+			// A note appended while a compaction summarizes could be excluded
+			// from the summary (and land before the cut boundary, vanishing
+			// from the rebuilt context).
+			return println("a /compact is still running — wait for it to finish")
 		}
 		if m.shellBusy {
 			return m.refuseBusy()
@@ -556,21 +573,26 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 
 // compactCmd runs a manual compaction off the event loop. The Compacted
 // event (through the pipe) prints the result; the done message only reports
-// refusals and errors.
+// refusals and errors. esc/quit cancel it through compactCancel.
 func (m *model) compactCmd() tea.Cmd {
 	a := m.agent
+	ctx, cancel := context.WithCancel(context.Background())
+	m.compactCancel = cancel
 	return func() tea.Msg {
-		return compactDoneMsg{err: a.Compact(context.Background())}
+		return compactDoneMsg{err: a.Compact(ctx)}
 	}
 }
 
 func (m *model) handleCompactDone(msg compactDoneMsg) tea.Cmd {
 	m.compacting = false
+	m.compactCancel = nil
 	m.status.Transient = ""
 	m.refreshStatus()
 	switch {
 	case msg.err == nil:
 		return nil // the Compacted event line reports the result
+	case errors.Is(msg.err, context.Canceled):
+		return println("compaction cancelled")
 	case errors.Is(msg.err, agent.ErrNothingToCompact):
 		return println("nothing to compact")
 	default:
@@ -678,7 +700,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 			cmds = append(cmds, println(it.Line))
 		}
 		m.thinking.Reset()
-		m.lastAssistant = messageText(e.Message)
+		m.lastAssistant = llm.TextOf(e.Message)
 		m.status.Transient = ""
 		m.refreshStatus()
 		cmds = append(cmds, m.branchCmd())
@@ -790,16 +812,6 @@ func approvalPrompt(q tools.Question) string {
 }
 
 func firstLineOf(s string) string { l, _, _ := strings.Cut(s, "\n"); return l }
-
-func messageText(m llm.Message) string {
-	var sb strings.Builder
-	for _, c := range m.Content {
-		if c.Type == llm.BlockText {
-			sb.WriteString(c.Text)
-		}
-	}
-	return sb.String()
-}
 
 // supportedEfforts lists a model's supported effort levels for /effort.
 func supportedEfforts(mo provider.Model) string {
