@@ -1604,3 +1604,7 @@ Approve with fixes — 0 High / 3 Medium / 6 Low; all fixed with regression test
 - **L7 — hard mode not restored on resume.** `restoreHard` (default model at default effort as the saved pair). `TestResumeRestoresHardMode`.
 - **L8 — untested behaviours.** Model/effort restore now tested on catalog models (custom models clamp every effort to `off`): `TestResumeRestoresModelAndEffortFromModelChange`; two compactions end to end: `TestRepeatedCompactionBuildsOnThePreviousOne`.
 - **L9 — `Start` repeated `build`'s setup.** `prepare()` (config override, registry, builtin skills, jail) runs once and is passed to `build`.
+
+### Cross-verification (2026-10-06)
+
+Re-ran the full gate on `5a89963` (`gofmt`/`vet` clean; `go test ./... -race` → 272 green — the count matches SPECS §15) and read every code hunk of the pass-3 commit against its claims: all nine fixes are present with regression tests. Beyond the unit suite, the single-writer lock was probed **cross-process** with the built binary and util-linux `flock(1)`: resuming a session held by another process exits 1 with `<path>: session is open in another moca process` and leaves the file byte-identical (no repair entries); once the holder exits, the same resume succeeds and serves a live request. One consistency fix on top: `provider.Registry.CheckCredential` now wraps `ErrUnknownModel` like `Resolve` does (same message text; `errors.Is` holds on both paths). No further issues found.
