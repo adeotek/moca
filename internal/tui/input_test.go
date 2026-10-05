@@ -1,0 +1,181 @@
+package tui
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestPasteChipKeepsContent(t *testing.T) {
+	in := NewInput()
+	in.Insert("see: ")
+	big := strings.Repeat("line\n", 120)
+	in.Paste(big)
+	if in.Text() != "see: "+big {
+		t.Fatal("full content sent verbatim")
+	}
+	if in.Display() != "see: [paste 120 lines #1]" {
+		t.Fatalf("%q", in.Display())
+	}
+	in.ToggleChips()
+	if in.Buffer() != "see: "+big {
+		t.Fatal("alt+p expands into the buffer")
+	}
+	in.ToggleChips()
+	if in.Display() != "see: [paste 120 lines #1]" {
+		t.Fatal("alt+p collapses again")
+	}
+	small := NewInput()
+	small.Paste("a\nb\n")
+	if small.Display() != "a\nb\n" {
+		t.Fatal("small clean pastes go inline")
+	}
+}
+
+func TestPasteWithControlBytesIsChipped(t *testing.T) {
+	in := NewInput()
+	in.Paste("x\x1b[201~y")
+	if in.Text() != "x\x1b[201~y" || in.Display() != "[paste 1 line #1]" {
+		t.Fatalf("text %q display %q", in.Text(), in.Display())
+	}
+	in.ToggleChips()
+	if in.Display() != "[paste 1 line #1]" {
+		t.Fatal("control-byte pastes never expand into the buffer")
+	}
+}
+
+func TestEditedMarkerSentLiterally(t *testing.T) {
+	in := NewInput()
+	in.Paste(strings.Repeat("z\n", 60))
+	in.SetBuffer(strings.Replace(in.Buffer(), "#1]", "#1", 1)) // user broke the marker
+	if strings.Contains(in.Text(), "z\nz") {
+		t.Fatal("a broken marker no longer expands")
+	}
+}
+
+func TestHistory(t *testing.T) {
+	in := NewInput()
+	in.Insert("one")
+	in.Submit()
+	in.Insert("two")
+	in.Submit()
+	in.HistoryPrev()
+	if in.Text() != "two" {
+		t.Fatal(in.Text())
+	}
+	in.HistoryPrev()
+	if in.Text() != "one" {
+		t.Fatal(in.Text())
+	}
+	in.HistoryNext()
+	in.HistoryNext()
+	if in.Text() != "" {
+		t.Fatal("past the newest → the saved draft (empty)")
+	}
+	in.Insert("multi\nline")
+	if in.HistoryPrev() {
+		t.Fatal("multi-line buffer: textarea handles ↑")
+	}
+}
+
+func TestCtrlC(t *testing.T) {
+	in := NewInput()
+	now := time.Now()
+	in.Insert("draft")
+	if in.CtrlC(now) || in.Text() != "" {
+		t.Fatal("non-empty: clear")
+	}
+	if in.CtrlC(now.Add(100 * time.Millisecond)) {
+		t.Fatal("first empty ctrl+c arms")
+	}
+	if !in.CtrlC(now.Add(600 * time.Millisecond)) {
+		t.Fatal("second within 1s quits")
+	}
+	in2 := NewInput()
+	in2.CtrlC(now)
+	if in2.CtrlC(now.Add(1500 * time.Millisecond)) {
+		t.Fatal("outside 1s re-arms")
+	}
+}
+
+func TestPrependSteering(t *testing.T) {
+	in := NewInput()
+	in.Insert("draft")
+	in.Prepend([]string{"s1", "s2"})
+	if in.Text() != "s1\ns2\ndraft" {
+		t.Fatal(in.Text())
+	}
+}
+
+// Recalling a submission that carried control bytes must re-chip it: raw
+// control bytes must never reach the editable buffer (and the terminal).
+func TestHistoryRecallChipsUnsafeContent(t *testing.T) {
+	in := NewInput()
+	in.Paste("x\x1b[201~y")
+	in.Submit()
+	if !in.HistoryPrev() {
+		t.Fatal("recall")
+	}
+	if in.Buffer() != "[paste 1 line #1]" || in.Text() != "x\x1b[201~y" {
+		t.Fatalf("buffer %q text %q", in.Buffer(), in.Text())
+	}
+	// Clean entries are recalled expanded (explicit user action, §11).
+	in2 := NewInput()
+	in2.Insert("plain text")
+	in2.Submit()
+	in2.HistoryPrev()
+	if in2.Buffer() != "plain text" {
+		t.Fatal(in2.Buffer())
+	}
+}
+
+// A typed (or quoted) marker literal must not be expanded by a later paste's
+// chip: the marker counter skips collisions.
+func TestMarkerNeverCollidesWithTypedText(t *testing.T) {
+	in := NewInput()
+	in.SetBuffer("[paste 60 lines #1] ")
+	big := strings.Repeat("z\n", 60)
+	in.Paste(big)
+	if !strings.Contains(in.Buffer(), "[paste 60 lines #2]") {
+		t.Fatalf("marker must be bumped on collision: %q", in.Buffer())
+	}
+	if got := in.Text(); got != "[paste 60 lines #1] "+big {
+		t.Fatal("typed marker stays literal; only the paste expands")
+	}
+}
+
+// Collapse re-chips the paste's own occurrence, not an identical earlier copy
+// (typed text or a recalled entry).
+func TestCollapseUsesExactOffset(t *testing.T) {
+	in := NewInput()
+	big := strings.Repeat("q\n", 60)
+	in.Insert(big)   // an earlier identical copy (e.g. recalled history)
+	in.Paste(big)    // the chip
+	in.ToggleChips() // expand → copy + big
+	in.ToggleChips() // collapse → the paste's copy becomes a marker again
+	if want := big + "[paste 60 lines #1]"; in.Buffer() != want {
+		t.Fatalf("buffer %q", in.Buffer())
+	}
+	if in.Text() != big+big {
+		t.Fatal("text round-trip")
+	}
+}
+
+// Terminals and Windows sources deliver CR or CRLF newlines; they are text,
+// not control bytes, and must stay expandable chips / plain lines.
+func TestPasteNormalizesLineEndings(t *testing.T) {
+	in := NewInput()
+	in.Paste("a\r\nb\r\nc")
+	if in.Buffer() != "a\nb\nc" {
+		t.Fatalf("%q", in.Buffer())
+	}
+	in = NewInput()
+	in.Paste(strings.Repeat("l\r\n", 60))
+	if in.Display() != "[paste 60 lines #1]" {
+		t.Fatal(in.Display())
+	}
+	in.ToggleChips()
+	if !strings.HasPrefix(in.Buffer(), "l\nl\n") || strings.Contains(in.Buffer(), "\r") {
+		t.Fatal("chip must expand, with normalized newlines")
+	}
+}

@@ -181,11 +181,11 @@ func TestAnthropicHistoryMapping(t *testing.T) {
 	var body map[string]any
 	srv := sseServer(t, 200, "event: message_stop\ndata: {}\n\n", &body, nil)
 	defer srv.Close()
-	a := newAnthropic(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	a := newAnthropic(Model{Provider: "p", ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
 	msgs := []llm.Message{
 		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}},
 		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
-			{Type: llm.BlockThinking, Text: "t", Signature: "S", Model: "m"},
+			{Type: llm.BlockThinking, Text: "t", Signature: "S", Model: "p/m"},
 			{Type: llm.BlockToolUse, ToolCall: &llm.ToolCall{ID: "c1", Name: "ls", Input: json.RawMessage(`{}`)}}}},
 		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockToolResult, ToolResult: &llm.ToolResult{CallID: "c1", Content: "x/", IsError: true}}}},
 	}
@@ -241,7 +241,7 @@ func TestAnthropicRedactedThinking(t *testing.T) {
 	var body map[string]any
 	srv := sseServer(t, 200, anthropicRedactedStream, &body, nil)
 	defer srv.Close()
-	a := newAnthropic(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	a := newAnthropic(Model{Provider: "p", ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
 	resp, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 100,
 		Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}}}}, func(llm.Event) {})
 	if err != nil {
@@ -251,6 +251,8 @@ func TestAnthropicRedactedThinking(t *testing.T) {
 	if th.Type != llm.BlockThinking || !th.Redacted || th.Signature != "OPAQUE-PAYLOAD" || th.Model != "m" {
 		t.Fatalf("redacted capture %+v", th)
 	}
+	// The agent stamps the qualified producing model before persisting (§3).
+	th.Model = "p/m"
 	body = nil
 	if _, err := a.Stream(context.Background(), llm.Request{Model: "m", MaxTokens: 100,
 		Messages: []llm.Message{
@@ -285,7 +287,7 @@ func TestAnthropicBodyHygiene(t *testing.T) {
 	var body map[string]any
 	srv := sseServer(t, 200, "event: message_stop\ndata: {}\n\n", &body, nil)
 	defer srv.Close()
-	a := newAnthropic(Model{ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	a := newAnthropic(Model{Provider: "p", ID: "m", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
 
 	// A message reduced to nothing (empty thinking block) is skipped, not sent
 	// as `content: []`; the breakpoint lands on the last real message.
@@ -310,7 +312,7 @@ func TestAnthropicBodyHygiene(t *testing.T) {
 		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}},
 		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
 			{Type: llm.BlockText, Text: "done"},
-			{Type: llm.BlockThinking, Text: "t", Signature: "S", Model: "m"},
+			{Type: llm.BlockThinking, Text: "t", Signature: "S", Model: "p/m"},
 		}},
 	}}, func(llm.Event) {})
 	msgs = body["messages"].([]any)
@@ -370,27 +372,28 @@ func TestAnthropicForeignThinking(t *testing.T) {
 	var body map[string]any
 	srv := sseServer(t, 200, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", &body, nil)
 	defer srv.Close()
-	a := newAnthropic(Model{ID: "claude", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
+	a := newAnthropic(Model{Provider: "p", ID: "claude", ThinkingMode: "none"}, srv.URL, keyCred("K"), srv.Client())
 	if _, err := a.Stream(context.Background(), llm.Request{Model: "claude", MaxTokens: 10, Messages: []llm.Message{
 		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}},
 		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
 			{Type: llm.BlockThinking, Text: "from glm", Model: "glm"},                               // other model, unsigned
 			{Type: llm.BlockThinking, Text: "from other", Signature: "FOREIGN-SIG", Model: "other"}, // other model, signed
+			{Type: llm.BlockThinking, Text: "same bare id, other provider", Signature: "SAME-ID-SIG", Model: "other/claude"},
 			{Type: llm.BlockThinking, Text: "[Reasoning redacted]", Signature: "FOREIGN-DATA", Model: "other", Redacted: true},
-			{Type: llm.BlockThinking, Text: "unsigned same model", Model: "claude"},       // cannot replay
-			{Type: llm.BlockThinking, Text: "mine", Signature: "MY-SIG", Model: "claude"}, // replayable
+			{Type: llm.BlockThinking, Text: "unsigned same model", Model: "p/claude"},       // cannot replay
+			{Type: llm.BlockThinking, Text: "mine", Signature: "MY-SIG", Model: "p/claude"}, // replayable
 			{Type: llm.BlockText, Text: "answer"},
 		}},
 	}}, func(llm.Event) {}); err != nil {
 		t.Fatal(err)
 	}
 	got := mustJSON(body["messages"])
-	for _, bad := range []string{`"signature":""`, "FOREIGN-SIG", "FOREIGN-DATA", "redacted_thinking"} {
+	for _, bad := range []string{`"signature":""`, "FOREIGN-SIG", "FOREIGN-DATA", "SAME-ID-SIG", "redacted_thinking"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("foreign thinking leaked %s: %s", bad, got)
 		}
 	}
-	for _, want := range []string{`"signature":"MY-SIG"`, "[prior reasoning]\\nfrom glm", "[prior reasoning]\\nfrom other", "[prior reasoning]\\nunsigned same model"} {
+	for _, want := range []string{`"signature":"MY-SIG"`, "[prior reasoning]\\nfrom glm", "[prior reasoning]\\nfrom other", "[prior reasoning]\\nsame bare id, other provider", "[prior reasoning]\\nunsigned same model"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %s: %s", want, got)
 		}

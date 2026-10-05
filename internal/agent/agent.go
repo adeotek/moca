@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
+	"github.com/adeotek/moca/internal/compact"
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/provider"
@@ -40,11 +42,22 @@ type Agent struct {
 	model   provider.Model
 	adapter provider.Adapter
 	effort  llm.Effort
-	entries []session.Entry // full transcript (in-memory mirror)
 	usage   llm.Usage
 	cost    float64
 	yolo    bool
-	strict  struct {
+	hard    *savedModel
+	// mu guards the fields the TUI reads while a run is in progress from
+	// another goroutine: the steering queue, the transcript mirror, the
+	// usage/cost totals and the estimate anchor (Status/ContextTokens/
+	// TakeSteering). Writers: append, turn, Steer. Everything else is
+	// called between runs only.
+	mu            sync.Mutex
+	entries       []session.Entry // full transcript (in-memory mirror)
+	steer         []string
+	anchorTokens  int
+	anchorEntries int
+	anchorValid   bool
+	strict        struct {
 		paths tools.PathChecker
 		cmds  tools.CommandChecker
 		ask   tools.Asker
@@ -89,6 +102,8 @@ func (a *Agent) emit(e Event) {
 }
 
 func (a *Agent) append(e session.Entry) (session.Entry, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	e, err := a.opts.Session.Append(e)
 	if err == nil {
 		a.entries = append(a.entries, e)
@@ -101,10 +116,15 @@ func userText(s string) *llm.Message {
 }
 
 func (a *Agent) request(choice llm.ToolChoice) llm.Request {
+	// Snapshot the transcript under the lock: the TUI may append a `!` note
+	// from another goroutine while a run is in progress.
+	a.mu.Lock()
+	msgs := session.Messages(a.entries)
+	a.mu.Unlock()
 	return llm.Request{
 		Model:      a.model.ID,
 		System:     a.opts.System,
-		Messages:   session.Messages(a.entries),
+		Messages:   TransformHistory(msgs, a.model.Qualified()),
 		Tools:      a.opts.Tools.Specs(),
 		ToolChoice: choice,
 		MaxTokens:  a.model.MaxTokens(a.opts.Config.Context.ReserveTokens),
@@ -135,11 +155,17 @@ func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, 
 		if c.Type == llm.BlockToolUse {
 			calls = append(calls, *c.ToolCall)
 		} else {
+			if c.Type == llm.BlockThinking {
+				// Adapters stamp the bare id; the agent owns qualification (§3).
+				c.Model = a.model.Qualified()
+			}
 			body = append(body, c)
 		}
 	}
 	cost := a.model.CostOf(resp.Usage)
+	a.mu.Lock()
 	a.usage, a.cost = a.usage.Add(resp.Usage), a.cost+cost
+	a.mu.Unlock()
 	u := resp.Usage
 	msgEntry, err := a.append(session.Entry{Type: session.TypeMessage, Model: a.model.Qualified(), Usage: &u, Cost: cost,
 		Message: &llm.Message{Role: llm.RoleAssistant, Content: body}})
@@ -159,6 +185,14 @@ func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, 
 			return resp, nil, err
 		}
 	}
+	// Anchor the §6 estimate after everything this turn appended: UsageTokens
+	// covers the request plus this response (text and calls).
+	// A provider that reports no usage (an endpoint ignoring include_usage)
+	// cannot anchor anything: leave the chars/4 fallback in charge.
+	a.mu.Lock()
+	n := compact.UsageTokens(resp.Usage)
+	a.anchorTokens, a.anchorEntries, a.anchorValid = n, len(a.entries), n > 0
+	a.mu.Unlock()
 	a.emit(TurnEnd{Message: resp.Message, Usage: resp.Usage, Cost: cost, Stop: resp.Stop})
 	return resp, calls, nil
 }
@@ -183,12 +217,15 @@ func (a *Agent) result(call llm.ToolCall, r tools.Result) error {
 // abort appends synthetic results for every unanswered call and reports them
 // like real tool ends.
 func (a *Agent) abort(reason string) {
-	for _, fix := range session.Repair(a.entries, reason) {
+	a.mu.Lock()
+	entries := append([]session.Entry(nil), a.entries...)
+	a.mu.Unlock()
+	for _, fix := range session.Repair(entries, reason) {
 		if _, err := a.append(fix); err != nil || fix.ToolResult == nil {
 			continue
 		}
 		call := llm.ToolCall{ID: fix.ToolResult.CallID}
-		for _, e := range a.entries {
+		for _, e := range entries {
 			if e.Type == session.TypeToolUse && e.ToolUse != nil && e.ToolUse.Call.ID == call.ID {
 				call = e.ToolUse.Call
 				break
@@ -221,6 +258,13 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 			return Outcome{}, err
 		}
 		if len(calls) == 0 {
+			queued, err := a.applySteering()
+			if err != nil {
+				return Outcome{}, err
+			}
+			if queued {
+				continue
+			}
 			return Outcome{Text: textOf(resp.Message)}, nil
 		}
 		for _, call := range calls {
@@ -243,6 +287,11 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 		if ctx.Err() != nil {
 			a.abort(session.AbortedByUser)
 			return Outcome{}, ctx.Err()
+		}
+		// Steering lands after the complete tool batch (never between a call
+		// and its result — no provider accepts that, §11).
+		if _, err := a.applySteering(); err != nil {
+			return Outcome{}, err
 		}
 	}
 }

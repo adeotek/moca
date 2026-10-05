@@ -58,8 +58,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return exitUsage
 	}
 	if !o.OneShot {
-		fmt.Fprintln(stderr, "moca: TUI lands in phase 3; use -p")
-		return exitUsage
+		return runTUI(ctx, o, cfg, path, stderr)
 	}
 	return runOneShot(ctx, o, cfg, stdout, stderr)
 }
