@@ -5,6 +5,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 type Role string
@@ -55,6 +56,17 @@ type ToolResult struct {
 type Message struct {
 	Role    Role           `json:"role"`
 	Content []ContentBlock `json:"content"`
+}
+
+// TextOf concatenates a message's text blocks (no thinking, no tool data).
+func TextOf(m Message) string {
+	var sb strings.Builder
+	for _, c := range m.Content {
+		if c.Type == BlockText {
+			sb.WriteString(c.Text)
+		}
+	}
+	return sb.String()
 }
 
 type ToolSpec struct {

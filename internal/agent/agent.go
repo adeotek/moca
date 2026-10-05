@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/adeotek/moca/internal/compact"
@@ -219,16 +218,6 @@ func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, 
 	return resp, calls, nil
 }
 
-func textOf(m llm.Message) string {
-	var sb strings.Builder
-	for _, c := range m.Content {
-		if c.Type == llm.BlockText {
-			sb.WriteString(c.Text)
-		}
-	}
-	return sb.String()
-}
-
 func (a *Agent) result(call llm.ToolCall, r tools.Result) error {
 	_, err := a.append(session.Entry{Type: session.TypeToolResult,
 		ToolResult: &llm.ToolResult{CallID: call.ID, Content: r.Content, IsError: r.IsError}})
@@ -294,7 +283,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 				// exactly one result (§10).
 				a.abort("the wrap-up turn must not call tools; this call was not executed")
 			}
-			return Outcome{Text: textOf(resp.Message), MaxSteps: true}, nil
+			return Outcome{Text: llm.TextOf(resp.Message), MaxSteps: true}, nil
 		}
 		resp, calls, err := a.turnWithRecovery(ctx, llm.ToolChoiceAuto)
 		if err != nil {
@@ -308,7 +297,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 			if queued {
 				continue
 			}
-			return Outcome{Text: textOf(resp.Message)}, nil
+			return Outcome{Text: llm.TextOf(resp.Message)}, nil
 		}
 		for _, call := range calls {
 			if ctx.Err() != nil {
