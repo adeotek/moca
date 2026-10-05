@@ -96,7 +96,7 @@ func (r *Registry) CheckCredential(qualified string) error {
 		return err
 	}
 	if _, ok := r.models[qualified]; !ok {
-		return fmt.Errorf("unknown model %q", qualified)
+		return fmt.Errorf("%w %q", ErrUnknownModel, qualified)
 	}
 	_, err = r.credential(pname)(context.Background())
 	return err
