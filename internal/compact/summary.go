@@ -42,7 +42,9 @@ type Result struct {
 }
 
 // Compact summarizes the part of es before the cut point. ok=false means
-// there is nothing to summarize; no summarizer call happens then. A cut
+// there is nothing to summarize; no summarizer call happens then. On error the
+// Result still carries the usage of the calls that did run (they were billed).
+// A cut
 // inside a turn produces two summaries (prior history + the turn prefix)
 // merged into one.
 func Compact(ctx context.Context, es []Entry, prev Prev, keepRecent, inputCapChars int, sum Summarizer) (Result, bool, error) {
@@ -68,16 +70,16 @@ func Compact(ctx context.Context, es []Entry, prev Prev, keepRecent, inputCapCha
 		var a, b string
 		if turnStart > 0 || prevBlock != "" {
 			if a, err = call(prevBlock + Serialize(es[:turnStart])); err != nil {
-				return Result{}, false, err
+				return Result{Usage: usage}, false, err
 			}
 		}
 		if b, err = call(currentTurnNote + Serialize(es[turnStart:cut])); err != nil {
-			return Result{}, false, err
+			return Result{Usage: usage}, false, err
 		}
 		summary = strings.TrimSpace(a + "\n\n## Current turn (in progress)\n" + b)
 	}
 	if err != nil {
-		return Result{}, false, err
+		return Result{Usage: usage}, false, err
 	}
 	read, mod := TrackFiles(es[:cut], prev.Read, prev.Modified)
 	summary += "\n\n<read-files>\n" + strings.Join(read, "\n") + "\n</read-files>\n<modified-files>\n" +

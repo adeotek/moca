@@ -247,7 +247,8 @@ func (a *Agent) abort(reason string) {
 }
 
 // turnWithRecovery runs one turn; on overflow it compacts once and retries.
-// A failed compaction, or a second overflow, surfaces the original error.
+// A failed compaction, or a second overflow, surfaces the original error;
+// a cancelled one surfaces the cancellation (esc must read as an interrupt).
 func (a *Agent) turnWithRecovery(ctx context.Context, choice llm.ToolChoice) (llm.Response, []llm.ToolCall, error) {
 	resp, calls, err := a.turn(ctx, choice)
 	if !errors.Is(err, errOverflow) {
@@ -255,6 +256,9 @@ func (a *Agent) turnWithRecovery(ctx context.Context, choice llm.ToolChoice) (ll
 	}
 	orig := a.lastOverflow
 	if cerr := a.Compact(ctx); cerr != nil {
+		if ctx.Err() != nil || errors.Is(cerr, context.Canceled) {
+			return resp, nil, cerr
+		}
 		return resp, nil, orig
 	}
 	resp, calls, err = a.turn(ctx, choice)

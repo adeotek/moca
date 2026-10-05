@@ -74,6 +74,18 @@ func (a *Agent) SetEffort(e llm.Effort) (llm.Effort, error) {
 
 func (a *Agent) HardOn() bool { return a.hard != nil }
 
+// restoreHard re-enters hard mode after a resume: the saved pair is not in
+// the transcript, so it is the configured default model at its default effort
+// (what /hard would have saved). A default that no longer resolves leaves hard
+// mode off.
+func (a *Agent) restoreHard() {
+	m, _, err := a.opts.Providers.Resolve(a.opts.Config.Model)
+	if err != nil {
+		return
+	}
+	a.hard = &savedModel{m.Qualified(), m.DefaultEffort()}
+}
+
 // Carry is the model and effort a replacement session (/clear) should start
 // with: the current pair, or the saved pair while hard mode is on (the new
 // session starts outside hard mode, so /hard restores correctly).

@@ -3,10 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/session"
 )
@@ -125,5 +129,200 @@ func TestResumeMissingWorkdir(t *testing.T) {
 	after, _ := session.ReadFile(path)
 	if len(after) != len(before) {
 		t.Fatalf("no repair entries may be appended: before=%d after=%d", len(before), len(after))
+	}
+}
+
+// catalogConfig declares two catalog models (which support efforts, unlike
+// custom ones that clamp everything to "off") against the script server.
+func catalogConfig(t *testing.T, s *scriptServer, top string) config.Config {
+	t.Helper()
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("MOCA_T_KEY", "k")
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`{"model":"opencode-go/glm-5.3-flash"%s,"providers":{"opencode-go":{
+		"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY",
+		"models":{"glm-5.3-flash":{},"glm-5.3":{}}}}}`, top, s.srv.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func startCatalog(t *testing.T, s *scriptServer, cfg config.Config) *Agent {
+	t.Helper()
+	a, err := Start(StartOptions{Config: cfg, Workdir: t.TempDir(), HTTP: s.srv.Client(), Slug: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+func lastModelChange(t *testing.T, path string) *session.ModelChange {
+	t.Helper()
+	entries, err := session.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mc *session.ModelChange
+	for _, e := range entries {
+		if e.Type == session.TypeModelChange {
+			mc = e.ModelChange
+		}
+	}
+	return mc
+}
+
+// §8: "model_change … resume restores both". The custom test models clamp
+// every effort to "off", so this runs on catalog models where the restored
+// values can differ from the defaults.
+func TestResumeRestoresModelAndEffortFromModelChange(t *testing.T) {
+	s := newScript(t)
+	cfg := catalogConfig(t, s, "")
+	a := startCatalog(t, s, cfg)
+	if err := a.SetModel("opencode-go/glm-5.3", llm.EffortHigh); err != nil {
+		t.Fatal(err)
+	}
+	a.SetEffort(llm.EffortLow)
+	path := a.Session().Path()
+	a.Session().Close()
+	b, err := Resume(StartOptions{Config: cfg, HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Session().Close()
+	if b.Model().Qualified() != "opencode-go/glm-5.3" || b.Effort() != llm.EffortLow {
+		t.Fatalf("restored %s/%s, want opencode-go/glm-5.3/low", b.Model().Qualified(), b.Effort())
+	}
+}
+
+// §12.5: --effort overrides the effort for this session — on resume too.
+func TestResumeEffortFlagOverridesStored(t *testing.T) {
+	s := newScript(t)
+	cfg := catalogConfig(t, s, "")
+	a := startCatalog(t, s, cfg)
+	a.SetEffort(llm.EffortLow)
+	path := a.Session().Path()
+	a.Session().Close()
+	b, err := Resume(StartOptions{Config: cfg, Effort: "high", HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Effort() != llm.EffortHigh {
+		t.Fatalf("effort %s, want high", b.Effort())
+	}
+	b.Session().Close()
+	if mc := lastModelChange(t, path); mc == nil || mc.Effort != "high" {
+		t.Fatalf("the override must be recorded: %+v", mc)
+	}
+	c, err := Resume(StartOptions{Config: cfg, HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Session().Close()
+	if c.Effort() != llm.EffortHigh {
+		t.Fatalf("a later plain resume restores the recorded override, got %s", c.Effort())
+	}
+	if _, err := Resume(StartOptions{Config: cfg, Effort: "bogus", HTTP: s.srv.Client()}, path); err == nil {
+		t.Fatal("a bad effort is an error, not ignored")
+	}
+}
+
+// A stored model that is no longer configured must not strand the session:
+// --model replaces it, and without --model the error names the cause and the
+// way out — before any repair entry is written.
+func TestResumeStoredModelNoLongerConfigured(t *testing.T) {
+	s := newScript(t)
+	a, _, _ := startTestWith(t, s, "", "")
+	m, _ := a.append(session.Entry{Type: session.TypeMessage, Message: &llm.Message{Role: llm.RoleAssistant}})
+	a.append(session.Entry{Type: session.TypeToolUse, ToolUse: &session.ToolUse{MessageID: m.ID, Call: llm.ToolCall{ID: "c1", Name: "shell"}}})
+	path := a.Session().Path()
+	a.Session().Close()
+	before, _ := session.ReadFile(path)
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`{"model":"other/x","providers":{"other":{"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"x":{"contextWindow":65536}}}}}`, s.srv.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Resume(StartOptions{Config: cfg, HTTP: s.srv.Client()}, path)
+	if err == nil || !strings.Contains(err.Error(), "not configured") || !strings.Contains(err.Error(), "--model") || strings.Contains(err.Error(), "workdir") {
+		t.Fatalf("want a clear model error, got: %v", err)
+	}
+	if after, _ := session.ReadFile(path); len(after) != len(before) {
+		t.Fatalf("a failed resume must not append repair entries: %d → %d", len(before), len(after))
+	}
+	b, err := Resume(StartOptions{Config: cfg, Model: "other/x", HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatalf("--model must rescue the session: %v", err)
+	}
+	defer b.Session().Close()
+	if b.Model().Qualified() != "other/x" {
+		t.Fatalf("model %s", b.Model().Qualified())
+	}
+	if mc := lastModelChange(t, path); mc == nil || mc.Model != "other/x" {
+		t.Fatalf("the override must be recorded: %+v", mc)
+	}
+}
+
+// Two writers on one session would interleave histories, and the second
+// process would "repair" the first one's in-flight tool call, leaving two
+// results for one call.
+func TestResumeRefusesSessionHeldByAnotherProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no advisory file locks on windows")
+	}
+	s := newScript(t)
+	a, _, _ := startTestWith(t, s, "", "")
+	m, _ := a.append(session.Entry{Type: session.TypeMessage, Message: &llm.Message{Role: llm.RoleAssistant}})
+	a.append(session.Entry{Type: session.TypeToolUse, ToolUse: &session.ToolUse{MessageID: m.ID, Call: llm.ToolCall{ID: "c1", Name: "shell"}}})
+	path := a.Session().Path()
+	before, _ := session.ReadFile(path)
+	_, err := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client()}, path)
+	var se *StartError
+	if !errors.Is(err, session.ErrInUse) || !errors.As(err, &se) {
+		t.Fatalf("resume of a live session must be refused as a runtime error: %v", err)
+	}
+	if after, _ := session.ReadFile(path); len(after) != len(before) {
+		t.Fatal("a refused resume must not repair the other process's in-flight call")
+	}
+	a.Session().Close()
+	b, err := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatalf("once the holder is gone the session resumes (and is repaired): %v", err)
+	}
+	b.Session().Close()
+}
+
+// Hard mode is not in the transcript as a pair: a session that ended on
+// modelHard must resume with /hard able to leave it again.
+func TestResumeRestoresHardMode(t *testing.T) {
+	s := newScript(t)
+	cfg := catalogConfig(t, s, `,"modelHard":"opencode-go/glm-5.3"`)
+	a := startCatalog(t, s, cfg)
+	if on, err := a.ToggleHard(); err != nil || !on {
+		t.Fatal(on, err)
+	}
+	path := a.Session().Path()
+	a.Session().Close()
+	b, err := Resume(StartOptions{Config: cfg, HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Session().Close()
+	if !b.HardOn() || b.Model().Qualified() != "opencode-go/glm-5.3" {
+		t.Fatalf("hard mode must survive resume: hard=%v model=%s", b.HardOn(), b.Model().Qualified())
+	}
+	if on, err := b.ToggleHard(); err != nil || on || b.Model().Qualified() != "opencode-go/glm-5.3-flash" {
+		t.Fatalf("/hard must return to the default model: on=%v model=%s err=%v", on, b.Model().Qualified(), err)
+	}
+	// A session that never used hard mode stays out of it.
+	c := startCatalog(t, s, cfg)
+	cpath := c.Session().Path()
+	c.Session().Close()
+	d, err := Resume(StartOptions{Config: cfg, HTTP: s.srv.Client()}, cpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Session().Close()
+	if d.HardOn() {
+		t.Fatal("a normal session must not resume in hard mode")
 	}
 }

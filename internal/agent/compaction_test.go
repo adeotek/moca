@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -289,5 +291,161 @@ func TestManualCompactWritesEntryUsageAndRebuild(t *testing.T) {
 	last, _ := json.Marshal(s.bodies[len(s.bodies)-1])
 	if !strings.Contains(string(last), "[Summary of earlier conversation]") {
 		t.Fatalf("the next request must start from the summary: %s", last)
+	}
+}
+
+const overflowBody = "HTTP400:" + `{"error":{"code":"context_length_exceeded","message":"maximum context length"}}`
+
+// esc during the recovery compaction is an interrupt, not the provider error
+// the recovery was trying to get past.
+func TestOverflowRecoveryCancelSurfacesCancellation(t *testing.T) {
+	s := newScript(t, textTurn("a1"), textTurn("a2"), overflowBody, textTurn("## Goal\ns"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a, _, _ := startWith(t, s, 40, "", "", func(o *StartOptions) {
+		// StreamReset is emitted right as the overflow is detected, before
+		// the recovery compaction starts.
+		o.Emit = func(e Event) {
+			if _, ok := e.(StreamReset); ok {
+				cancel()
+			}
+		}
+	})
+	for _, p := range []string{strings.Repeat("q", 80000), strings.Repeat("r", 80000)} {
+		if _, err := a.Run(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := a.Run(ctx, "third")
+	if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "maximum context length") {
+		t.Fatalf("a cancelled recovery must surface the cancellation, got: %v", err)
+	}
+}
+
+// Tokens a summary spent before the compaction failed were billed: the first
+// of the two split-turn calls succeeds, the second fails.
+func TestFailedCompactionStillCountsSpentUsage(t *testing.T) {
+	s := newScript(t, textTurn("a1"), textTurn("a2"), overflowBody,
+		textTurnUsage("## Goal\nA", 1234, 56), "HTTP400:"+`{"error":{"message":"nope"}}`)
+	a, _, _ := startTestWith(t, s, "", "")
+	for _, p := range []string{strings.Repeat("q", 80000), strings.Repeat("r", 80000)} {
+		if _, err := a.Run(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	u0, _ := a.Totals()
+	if _, err := a.Run(context.Background(), "third"); err == nil {
+		t.Fatal("recovery fails: the original overflow error surfaces")
+	}
+	u1, c1 := a.Totals()
+	if u1.Input-u0.Input != 1234 || u1.Output-u0.Output != 56 {
+		t.Fatalf("the first summary call's usage must be counted: %+v → %+v", u0, u1)
+	}
+	entries, _ := session.ReadFile(a.Session().Path())
+	var booked bool
+	for _, e := range entries {
+		if e.Type == session.TypeError && e.Usage != nil && e.Usage.Input == 1234 {
+			booked = true
+		}
+	}
+	if !booked {
+		t.Fatal("the spent usage must be in the session file so a resume restores it")
+	}
+	_ = c1
+}
+
+// The input cap is an estimate: a summarizer that still overflows gets the
+// newer half of the payload once instead of failing the compaction.
+func TestSummarizerOverflowRetriesWithHalfThePayload(t *testing.T) {
+	s := newScript(t, textTurn("a1"), textTurn("a2"), overflowBody,
+		overflowBody, textTurn("## Goal\nA"), textTurn("## Turn\nB"), textTurn("recovered"))
+	a, _, _ := startTestWith(t, s, "", "")
+	for _, p := range []string{strings.Repeat("q", 80000), strings.Repeat("r", 80000)} {
+		if _, err := a.Run(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := a.Run(context.Background(), "third")
+	if err != nil || out.Text != "recovered" {
+		t.Fatalf("%q %v", out.Text, err)
+	}
+	sums := summaryBodies(s)
+	if len(sums) != 3 {
+		t.Fatalf("overflowed attempt + halved retry + split-turn part = 3 summary requests, got %d", len(sums))
+	}
+	userLen := func(b map[string]any) int {
+		msgs := b["messages"].([]any)
+		c, _ := msgs[len(msgs)-1].(map[string]any)["content"].(string)
+		return len(c)
+	}
+	if userLen(sums[1]) >= userLen(sums[0]) {
+		t.Fatalf("the retry must send less: %d then %d", userLen(sums[0]), userLen(sums[1]))
+	}
+}
+
+// Repeated compactions (Global Constraint): the second one summarizes from the
+// first one's kept boundary, is fed the first summary, and the file lists
+// accumulate even though the call that read the file is long out of the window.
+func TestRepeatedCompactionBuildsOnThePreviousOne(t *testing.T) {
+	const bigModel = `"m":{"contextWindow":100000,"maxOutputTokens":4096}`
+	var turns []string
+	turns = append(turns, toolTurn([2]string{"read", `{"path":"a.txt"}`}))
+	turns = append(turns, bigToolTurns(5)...)
+	turns = append(turns, textTurn("r1 done"), textTurn("## Goal\nS1marker"))
+	turns = append(turns, bigToolTurns(5)...)
+	turns = append(turns, textTurn("r2 done"), textTurn("## Goal\nS2marker"), textTurn("## Turn\nS2b"))
+	s := newScript(t, turns...)
+	a, work, _ := startTestWith(t, s, "", bigModel)
+	a.opts.Env.Commands = allowAll{}
+	if err := os.WriteFile(filepath.Join(work, "a.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Run(context.Background(), "FIRSTPROMPT read a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Compact(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Run(context.Background(), "SECONDPROMPT"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Compact(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sums := summaryBodies(s)
+	// The first compaction cuts between turns (one request); the second cuts
+	// inside the SECONDPROMPT turn (history + turn prefix = two requests).
+	if len(sums) != 3 {
+		t.Fatalf("1 + 2 summary requests expected, got %d", len(sums))
+	}
+	payload := func(b map[string]any) string {
+		msgs := b["messages"].([]any)
+		c, _ := msgs[len(msgs)-1].(map[string]any)["content"].(string)
+		return c
+	}
+	if !strings.Contains(payload(sums[0]), "FIRSTPROMPT") {
+		t.Fatal("the first compaction summarizes the opening of the session")
+	}
+	second := payload(sums[1])
+	if !strings.Contains(second, "Previous summary") || !strings.Contains(second, "S1marker") {
+		t.Fatal("the second compaction must be fed the first summary")
+	}
+	if strings.Contains(second, "FIRSTPROMPT") {
+		t.Fatal("the second compaction must start at the first one's kept boundary, not re-serialize old history")
+	}
+	entries, _ := session.ReadFile(a.Session().Path())
+	var comps []*session.Compaction
+	var idx = map[string]int{}
+	for i, e := range entries {
+		idx[e.ID] = i
+		if e.Type == session.TypeCompaction {
+			comps = append(comps, e.Compaction)
+		}
+	}
+	if len(comps) != 2 || idx[comps[1].FirstKeptEntryID] <= idx[comps[0].FirstKeptEntryID] {
+		t.Fatalf("the kept boundary must advance: %+v", comps)
+	}
+	if !slices.Contains(comps[1].ReadFiles, "a.txt") {
+		t.Fatalf("read-file list must accumulate across compactions: %v", comps[1].ReadFiles)
 	}
 }

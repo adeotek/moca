@@ -97,12 +97,22 @@ func (a *Agent) summarizer() (compact.Summarizer, int, provider.Model, error) {
 		return nil, 0, provider.Model{}, fmt.Errorf("%w: %v", errSummarizerConfig, err)
 	}
 	maxTok := min(4096, m.MaxOutput)
-	capChars := max(0, (m.ContextWindow-maxTok-len(compact.SummarySystem)/4-512)*4)
-	fn := func(ctx context.Context, system, user string) (string, llm.Usage, error) {
-		resp, err := ad.Stream(ctx, llm.Request{Model: m.ID, System: system, MaxTokens: maxTok,
+	// 3 chars per token, not the estimator's 4: code, JSON and non-Latin text
+	// run denser, and the summary request must fit the window.
+	capChars := max(0, (m.ContextWindow-maxTok-len(compact.SummarySystem)/4-512)*3)
+	stream := func(ctx context.Context, system, user string) (llm.Response, error) {
+		return ad.Stream(ctx, llm.Request{Model: m.ID, System: system, MaxTokens: maxTok,
 			Effort: m.ClampEffort(llm.EffortMinimal), NoCacheWrite: true,
 			Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: user}}}}},
 			func(llm.Event) {})
+	}
+	fn := func(ctx context.Context, system, user string) (string, llm.Usage, error) {
+		resp, err := stream(ctx, system, user)
+		if errors.Is(err, provider.ErrContextOverflow) && len(user) > 1 {
+			// The cap is only an estimate: if the summarizer still overflows,
+			// keep the newer half of the payload and try once more.
+			resp, err = stream(ctx, system, compact.CapChars(user, len(user)/2))
+		}
 		if err != nil {
 			return "", resp.Usage, err
 		}
@@ -123,6 +133,7 @@ func (a *Agent) Compact(ctx context.Context) error {
 	before := a.ContextTokens()
 	r, ok, err := compact.Compact(ctx, live, prev, a.Budget().KeepRecent, capChars, sum)
 	if err != nil {
+		a.recordFailedCompaction(r.Usage, cheap, err)
 		return fmt.Errorf("compaction failed: %w", err)
 	}
 	if !ok {
@@ -144,6 +155,23 @@ func (a *Agent) Compact(ctx context.Context) error {
 	a.mu.Unlock()
 	a.emit(Compacted{TokensBefore: before, TokensAfter: a.ContextTokens()})
 	return nil
+}
+
+// recordFailedCompaction books the tokens a failed summary spent (e.g. the
+// first of two split-turn calls): they were billed, so totals and the session
+// file (which restores totals on resume) must show them.
+func (a *Agent) recordFailedCompaction(u llm.Usage, cheap provider.Model, cause error) {
+	if u == (llm.Usage{}) {
+		return
+	}
+	cost := cheap.CostOf(u)
+	if _, err := a.append(session.Entry{Type: session.TypeError, Usage: &u, Cost: cost,
+		Error: &session.ErrorInfo{Message: "compaction failed: " + cause.Error()}}); err != nil {
+		return
+	}
+	a.mu.Lock()
+	a.usage, a.cost = a.usage.Add(u), a.cost+cost
+	a.mu.Unlock()
 }
 
 // maybeCompact compacts when the estimate crosses the trigger and enforces

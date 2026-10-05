@@ -1590,3 +1590,17 @@ Pass 1 (`docs/reviews/2026-10-05-phase-4-context-compaction-resume.md`): Approve
 - **Pass-2 Low — `Find` mtime ties resolved nondeterministically.** `SortStableFunc` with a documented name-order tiebreak. `TestFindMtimeTieDeterministic`.
 - **Pass-2 Low — the overflow test pinned exactly-once indirectly.** Added the direct request-count assertion (`len(s.bodies) == 6`).
 - Not changed, recorded: **pass-2 L1** — `largestEntries` renders call inputs as raw JSON (`read("path":"…")`) rather than the plan's illustrative `read(path=…)`; cosmetic, pinned by the existing assertion, left as-is. The remaining byte-slices (tool-side caps like the 50K `read` limit) are outside this phase; every compaction-payload path is now rune-safe.
+
+## Review fixes, pass 3 (2026-10-06, `docs/reviews/2026-10-06-phase-4-context-compaction-resume.md`)
+
+Approve with fixes — 0 High / 3 Medium / 6 Low; all fixed with regression tests (272 top-level tests, race-clean).
+
+- **M1 — stored model no longer configured made the session unresumable (and `--model` could not rescue it; the error blamed the workdir).** `Resume` now resolves the model it will use (`--model` wins) before the writer opens; `provider.ErrUnknownModel` yields `resume: the session's model is not configured … pass --model`. `TestResumeStoredModelNoLongerConfigured` (also asserts no repair entries on a failed resume).
+- **M2 — `--effort` ignored on resume.** `--effort` replaces the stored effort and is recorded as a `model_change`; a bad value is an error. `TestResumeEffortFlagOverridesStored`.
+- **M3 — resuming a session another process is writing to corrupted it (duplicate `tool_result`s).** Session files are single-writer: `flock` taken in `Create`/`Open` (before the partial-line trim), `session.ErrInUse` → `StartError` (exit 1). `TestOpenRefusesWhileAnotherWriterHoldsTheFile`, `TestResumeRefusesSessionHeldByAnotherProcess`.
+- **L4 — esc during overflow recovery printed the provider error.** `turnWithRecovery` returns the cancellation. `TestOverflowRecoveryCancelSurfacesCancellation`.
+- **L5 — usage of a failed compaction was never counted.** `compact.Compact` returns the spent usage with the error; the agent books it on an `error` entry. `TestFailedCompactionStillCountsSpentUsage`.
+- **L6 — summarizer cap had no tokenizer margin.** 3 chars/token, plus one halved retry on a summarizer overflow. `TestSummarizerOverflowRetriesWithHalfThePayload`.
+- **L7 — hard mode not restored on resume.** `restoreHard` (default model at default effort as the saved pair). `TestResumeRestoresHardMode`.
+- **L8 — untested behaviours.** Model/effort restore now tested on catalog models (custom models clamp every effort to `off`): `TestResumeRestoresModelAndEffortFromModelChange`; two compactions end to end: `TestRepeatedCompactionBuildsOnThePreviousOne`.
+- **L9 — `Start` repeated `build`'s setup.** `prepare()` (config override, registry, builtin skills, jail) runs once and is passed to `build`.

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/adeotek/moca/internal/config"
 )
+
+// ErrUnknownModel: the qualified model is not in the catalog or the config.
+var ErrUnknownModel = errors.New("unknown model")
 
 var defaultBaseURLs = map[string]map[string]string{
 	"anthropic": {"anthropic-messages": "https://api.anthropic.com"},
@@ -161,7 +165,7 @@ func (r *Registry) Resolve(qualified string) (Model, Adapter, error) {
 	}
 	m, ok := r.models[qualified]
 	if !ok {
-		return Model{}, nil, fmt.Errorf("unknown model %q", qualified)
+		return Model{}, nil, fmt.Errorf("%w %q", ErrUnknownModel, qualified)
 	}
 	if _, ok := r.cfg.Providers[pname]; !ok {
 		return Model{}, nil, fmt.Errorf("unknown provider %q", pname)
