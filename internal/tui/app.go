@@ -52,10 +52,14 @@ type model struct {
 	kbdEnhanced   bool
 	hintShown     bool
 	lastAssistant string
-	// lastTyped is when a key last edited the draft; approval keys are ignored
-	// shortly after, so a user mid-sentence does not answer a prompt that pops
-	// up under their fingers.
+	// lastTyped is when a key last edited the draft; `a`/`d` are ignored
+	// shortly after, so a user mid-sentence does not answer a prompt that
+	// pops up under their fingers (allow-always is ctrl+a — prose can never
+	// trigger it).
 	lastTyped time.Time
+	// now is the model's clock; tests inject it so approval timing is
+	// deterministic.
+	now func() time.Time
 	// shellBusy: a `!` command is in flight; its note must not land in the
 	// middle of a run (or in the session /clear is about to replace).
 	shellBusy bool
@@ -67,7 +71,7 @@ type model struct {
 	runDone chan struct{}
 }
 
-// approvalIdle is the typing pause required before a/A/d answer a prompt.
+// approvalIdle is the typing pause required before `a`/`d` answer a prompt.
 const approvalIdle = 700 * time.Millisecond
 
 var (
@@ -81,7 +85,7 @@ func newModel(o AppOptions, a *agent.Agent) *model {
 	ta.Prompt = "› "
 	ta.SetHeight(3)
 	ta.Focus()
-	m := &model{opts: o, start: o.Start, agent: a, input: NewInput(), ta: ta}
+	m := &model{opts: o, start: o.Start, agent: a, input: NewInput(), ta: ta, now: time.Now}
 	m.refreshStatus()
 	return m
 }
@@ -179,7 +183,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Insert at the cursor like typed text; a chip's marker goes there too.
 			m.ta.InsertString(m.input.Prepare(msg.Content))
 			m.pullTextarea()
-			m.lastTyped = time.Now()
+			m.lastTyped = m.now()
 		}
 		return m, nil
 	case tea.KeyPressMsg:
@@ -242,7 +246,7 @@ func (m *model) forward(k tea.KeyPressMsg) tea.Cmd {
 	ta, cmd := m.ta.Update(k)
 	m.ta = ta
 	m.pullTextarea()
-	m.lastTyped = time.Now()
+	m.lastTyped = m.now()
 	return cmd
 }
 
@@ -311,9 +315,11 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	return m.forward(k)
 }
 
-// approvalKey answers the shown prompt. a/A/d only count after a typing pause
-// (a user mid-sentence must not answer — or persist an allow-always — with
-// letters meant for the draft); esc always denies. handled=false lets the key
+// approvalKey answers the shown prompt. `a`/`d` count only after a typing
+// pause (a user mid-sentence must not answer with letters meant for the
+// draft); allow-always is `ctrl+a` — it is persistent, so a plain letter (a
+// stray capital `A`, the first letter of "Add…") always goes to the draft and
+// can never write the config. esc always denies. handled=false lets the key
 // fall through to normal input handling.
 func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch k.String() {
@@ -321,8 +327,8 @@ func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.approval.reply <- tools.Deny
 		m.approval = nil
 		return nil, true
-	case "a", "A", "d":
-		if time.Since(m.lastTyped) < approvalIdle {
+	case "a", "d":
+		if m.now().Sub(m.lastTyped) < approvalIdle {
 			return nil, false
 		}
 	}
@@ -335,7 +341,7 @@ func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.approval.reply <- tools.Deny
 		m.approval = nil
 		return nil, true
-	case "A":
+	case "ctrl+a":
 		if !m.approval.q.CanAlways {
 			return nil, true // not offered for ask-every-time commands
 		}
@@ -729,7 +735,7 @@ func (m *model) statusLine() string {
 func approvalPrompt(q tools.Question) string {
 	subject, detail := Sanitize(q.Subject), Sanitize(firstLineOf(q.Detail))
 	if q.CanAlways {
-		return fmt.Sprintf("allow `%s`?  [a] once  [A] always  [d] deny   — %s", subject, detail)
+		return fmt.Sprintf("allow `%s`?  [a] once  [ctrl+a] always  [d] deny   — %s", subject, detail)
 	}
 	return fmt.Sprintf("allow `%s` (asks every time)?  [a] once  [d] deny   — %s", subject, detail)
 }

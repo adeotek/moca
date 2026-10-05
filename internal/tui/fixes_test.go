@@ -41,6 +41,8 @@ func TestPagerDefersScrollbackOutput(t *testing.T) {
 
 func TestApprovalKeysIgnoredWhileTyping(t *testing.T) {
 	m := newAgentModel(t)
+	fixed := time.Now()
+	m.now = func() time.Time { return fixed } // keystrokes land "instantly"
 	for _, r := range "Please " {
 		m.Update(keyMsg(string(r)))
 	}
@@ -64,12 +66,47 @@ func TestApprovalKeysIgnoredWhileTyping(t *testing.T) {
 
 func TestApprovalKeysAnswerAfterPause(t *testing.T) {
 	m := newAgentModel(t)
-	m.lastTyped = time.Now().Add(-5 * time.Second)
+	fixed := time.Now()
+	m.now = func() time.Time { return fixed }
+	m.lastTyped = fixed.Add(-5 * time.Second)
 	reply := make(chan tools.Answer, 1)
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, reply: reply})
 	m.Update(key("a"))
 	if got := <-reply; got != tools.AllowOnce {
 		t.Fatal(got)
+	}
+}
+
+// Allow-always is persistent: prose must never trigger it. A stray capital
+// `A` (even after a typing pause) goes to the draft; only ctrl+a persists.
+func TestAllowAlwaysRequiresCtrl(t *testing.T) {
+	m := newAgentModel(t)
+	fixed := time.Now()
+	m.now = func() time.Time { return fixed }
+	m.lastTyped = fixed.Add(-time.Second) // a pause: `a` would answer now
+	reply := make(chan tools.Answer, 1)
+	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, reply: reply})
+	m.Update(keyMsg("A"))
+	select {
+	case a := <-reply:
+		t.Fatalf("a plain capital A answered the prompt: %v", a)
+	default:
+	}
+	if !strings.Contains(m.input.Buffer(), "A") {
+		t.Fatalf("the A belongs to the draft: %q", m.input.Buffer())
+	}
+	if b, _ := os.ReadFile(m.opts.ConfigPath); strings.Contains(string(b), "python3") {
+		t.Fatal("a typed A must not persist allow-always")
+	}
+	_, cmd := m.Update(key("ctrl+a"))
+	if got := <-reply; got != tools.AllowAlways {
+		t.Fatalf("ctrl+a is the allow-always key: %v", got)
+	}
+	if !strings.Contains(printed(cmd), "always allowing") {
+		t.Fatalf("confirmation line: %q", printed(cmd))
+	}
+	if b, _ := os.ReadFile(m.opts.ConfigPath); !strings.Contains(string(b), `"python3"`) {
+		t.Fatalf("ctrl+a must persist: %s", b)
 	}
 }
 
@@ -83,7 +120,7 @@ func TestEnterAndCtrlCDuringApproval(t *testing.T) {
 	m.syncTextarea()
 	m.Update(key("enter"))
 	if strings.Contains(m.ta.Value(), "\n") || m.input.Buffer() != "" {
-		t.Fatalf("enter submitted the draft, not a newline: %q", m.ta.Value())
+		t.Fatalf("enter must submit the draft as steering (ta %q, buf %q)", m.ta.Value(), m.input.Buffer())
 	}
 	if got := m.agent.TakeSteering(); len(got) != 1 || got[0] != "steer me" {
 		t.Fatalf("steering %v", got)
@@ -212,7 +249,7 @@ func TestRestartSessionKeepsModelAndAllowed(t *testing.T) {
 	reply := make(chan tools.Answer, 1)
 	m.lastTyped = time.Time{}
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, reply: reply})
-	m.Update(key("A"))
+	m.Update(key("ctrl+a"))
 	old := m.agent
 	cmd := m.restartSession()
 	if cmd == nil || m.agent == old {
@@ -262,7 +299,7 @@ func TestAllowAlwaysPersists(t *testing.T) {
 	m := newAgentModel(t)
 	reply := make(chan tools.Answer, 1)
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, reply: reply})
-	_, cmd := m.Update(key("A"))
+	_, cmd := m.Update(key("ctrl+a"))
 	if got := <-reply; got != tools.AllowAlways {
 		t.Fatal(got)
 	}
@@ -275,7 +312,7 @@ func TestAllowAlwaysPersists(t *testing.T) {
 	// A failing write is reported, but the command is still allowed.
 	m.opts.ConfigPath = t.TempDir() // a directory: unwritable as a file
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "node", CanAlways: true}, reply: reply})
-	_, cmd = m.Update(key("A"))
+	_, cmd = m.Update(key("ctrl+a"))
 	if got := <-reply; got != tools.AllowAlways || !strings.Contains(printed(cmd), "not saved") {
 		t.Fatalf("failure line: %q", printed(cmd))
 	}

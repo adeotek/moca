@@ -48,11 +48,18 @@ func (m *trustModel) result() (bool, error) {
 	return m.answer, nil
 }
 
-// RunTrustPrompt asks once; the caller saves the decision (trust.json). ctrl+c
-// or esc cancels startup with an error wrapping context.Canceled.
-func RunTrustPrompt(dir string) (bool, error) {
+// RunTrustPrompt asks once; the caller saves the decision (trust.json). The
+// prompt runs on the caller's signal context with Bubble Tea's own signal
+// handler off — the same shutdown rule as the main program (a second handler
+// races the first and can hang the exit). ctrl+c/esc cancel, as does the
+// context; every cancel is an error wrapping context.Canceled (quiet 130)
+// and nothing is saved.
+func RunTrustPrompt(ctx context.Context, dir string) (bool, error) {
 	m := &trustModel{dir: dir}
-	if _, err := tea.NewProgram(m).Run(); err != nil {
+	if _, err := tea.NewProgram(m, tea.WithContext(ctx), tea.WithoutSignalHandler()).Run(); err != nil {
+		if ctx.Err() != nil {
+			return false, fmt.Errorf("trust prompt interrupted: %w", context.Canceled)
+		}
 		return false, err
 	}
 	return m.result()

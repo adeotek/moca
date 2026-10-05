@@ -26,8 +26,9 @@ func hasProjectResources(dir string) bool {
 
 // decideTrust resolves project trust (§7): an explicit flag wins; else yolo
 // trusts; else the saved decision; else, when the workdir has project
-// resources, ask once and save the answer.
-func decideTrust(o Options, wd string, yolo bool) (bool, error) {
+// resources, ask once (on ctx — a signal during the prompt cancels startup
+// quietly) and save the answer.
+func decideTrust(ctx context.Context, o Options, wd string, yolo bool) (bool, error) {
 	if o.Approve != nil {
 		return *o.Approve, nil
 	}
@@ -44,7 +45,7 @@ func decideTrust(o Options, wd string, yolo bool) (bool, error) {
 	if !hasProjectResources(wd) {
 		return false, nil
 	}
-	ans, err := tui.RunTrustPrompt(wd)
+	ans, err := tui.RunTrustPrompt(ctx, wd)
 	if err != nil {
 		return false, err
 	}
@@ -60,7 +61,7 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 		return exitRuntime
 	}
 	yolo := o.YoloOn(cfg)
-	trusted, err := decideTrust(o, wd, yolo)
+	trusted, err := decideTrust(ctx, o, wd, yolo)
 	if err != nil {
 		if !errors.Is(err, context.Canceled) { // ctrl+c at the trust prompt: quiet 130
 			fmt.Fprintln(stderr, "moca:", err)

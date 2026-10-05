@@ -77,10 +77,10 @@ func TestApprovalPreservesDraft(t *testing.T) {
 		t.Fatal("draft untouched by approval keys")
 	}
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "rm"}, reply: reply})
-	m.Update(key("A"))
+	m.Update(key("ctrl+a"))
 	select {
 	case <-reply:
-		t.Fatal("A is not offered for ask-every-time commands")
+		t.Fatal("ctrl+a is not offered for ask-every-time commands")
 	default:
 	}
 	m.Update(key("esc"))
