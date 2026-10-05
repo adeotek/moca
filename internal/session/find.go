@@ -19,6 +19,9 @@ type fileInfo struct {
 	mod  int64
 }
 
+// listNewestFirst orders session files by mtime, newest first. The sort is
+// stable so equal mtimes (coarse filesystems, tmpfs ticks) keep the
+// deterministic directory-name order instead of an arbitrary permutation.
 func listNewestFirst(dir string) []fileInfo {
 	ents, _ := os.ReadDir(dir)
 	var fs []fileInfo
@@ -30,7 +33,7 @@ func listNewestFirst(dir string) []fileInfo {
 			fs = append(fs, fileInfo{filepath.Join(dir, e.Name()), fi.ModTime().UnixNano()})
 		}
 	}
-	slices.SortFunc(fs, func(a, b fileInfo) int { return cmp.Compare(b.mod, a.mod) })
+	slices.SortStableFunc(fs, func(a, b fileInfo) int { return cmp.Compare(b.mod, a.mod) })
 	return fs
 }
 

@@ -53,3 +53,24 @@ func TestFindNoSessions(t *testing.T) {
 		t.Fatal("no session for this workdir:", err)
 	}
 }
+
+// Equal mtimes must resolve deterministically (stable sort + name order),
+// not by directory-iteration chance.
+func TestFindMtimeTieDeterministic(t *testing.T) {
+	dir := t.TempDir()
+	w1, _ := Create(dir, Header{Workdir: "/a"}, "one")
+	w1.Close()
+	w2, _ := Create(dir, Header{Workdir: "/b"}, "two")
+	w2.Close()
+	ts := time.Now()
+	for _, p := range []string{w1.Path(), w2.Path()} {
+		if err := os.Chtimes(p, ts, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Stable sort keeps directory-name order among ties: "one" wins.
+	p, err := Find(dir, "last")
+	if err != nil || p != w1.Path() {
+		t.Fatalf("mtime ties must resolve by name order: %s (%v)", p, err)
+	}
+}
