@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,9 @@ func TestParseArgs(t *testing.T) {
 	}
 	if _, err := parseArgs([]string{"--yolo", "--no-yolo", "-p", "x"}, nil); err == nil {
 		t.Fatal("yolo flags are exclusive")
+	}
+	if _, err := parseArgs([]string{"--resume", "last", "--continue", "-p", "x"}, nil); err == nil {
+		t.Fatal("resume/continue are exclusive")
 	}
 	o, _ = parseArgs([]string{"--no-yolo", "-p", "x"}, nil)
 	if o.Yolo == nil || *o.Yolo || o.YoloOn(config.Config{Yolo: true}) {
@@ -300,5 +304,58 @@ func TestNoApproveSkipsProjectInstructions(t *testing.T) {
 	run(context.Background(), []string{"--config", cfg, "--yolo", "--no-approve", "-p", "x"}, nil, &out, &errb)
 	if sawRules {
 		t.Fatal("explicit --no-approve wins over yolo")
+	}
+}
+
+func TestResumeAndContinueOneShot(t *testing.T) {
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		answer := "first"
+		if n > 0 && strings.Contains(string(b), "remember 42") {
+			answer = "you said 42"
+		}
+		n++
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", answer)
+	}))
+	defer srv.Close()
+	t.Setenv("MOCA_T_KEY", "k")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	cfg := writeCfg(t, `{"model":"loc/m","providers":{"loc":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768}}}}}`)
+	var out, errb bytes.Buffer
+	run(context.Background(), []string{"--config", cfg, "-p", "remember 42"}, nil, &out, &errb)
+	out.Reset()
+	if code := run(context.Background(), []string{"--config", cfg, "--continue", "-p", "what did I say?"}, nil, &out, &errb); code != 0 || out.String() != "you said 42\n" {
+		t.Fatalf("code %d out %q err %q", code, out.String(), errb.String())
+	}
+	if code := run(context.Background(), []string{"--config", cfg, "--resume", "zzzzzzzz", "-p", "x"}, nil, &out, &errb); code != 2 {
+		t.Fatal("bad id → exit 2")
+	}
+	if code := run(context.Background(), []string{"--config", cfg, "--resume", "last", "--continue", "-p", "x"}, nil, &out, &errb); code != 2 {
+		t.Fatal("exclusive flags")
+	}
+}
+
+func TestResumeUnsetKeyFailsAtFirstRequest(t *testing.T) {
+	isolate(t)
+	t.Chdir(t.TempDir())
+	// A session created while the key existed...
+	t.Setenv("MOCA_T_KEY", "k")
+	srv := fakeCompletions(t, 200, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	cfg := writeCfg(t, `{"model":"loc/m","providers":{"loc":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768}}}}}`)
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"--config", cfg, "-p", "hello"}, nil, &out, &errb); code != 0 {
+		t.Fatalf("seed run: %d %q", code, errb.String())
+	}
+	// ...and resumed after the key went away: resume itself succeeds, the
+	// first request fails with the env-var error (exit 2).
+	t.Setenv("MOCA_T_KEY", "")
+	out.Reset()
+	errb.Reset()
+	if code := run(context.Background(), []string{"--config", cfg, "--resume", "last", "-p", "again"}, nil, &out, &errb); code != 2 || !strings.Contains(errb.String(), "MOCA_T_KEY") {
+		t.Fatalf("code %d stderr %q", code, errb.String())
 	}
 }
