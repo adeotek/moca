@@ -98,6 +98,9 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 	if o.OneShot && strings.TrimSpace(o.Prompt) == "" {
 		return o, usageError{errors.New("-p needs a non-empty prompt")}
 	}
+	if o.Resume != "" && o.Continue {
+		return o, usageError{errors.New("--resume and --continue are mutually exclusive")}
+	}
 	o.Sub = fs.Args()
 	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp") {
 		return o, usageError{fmt.Errorf("unknown command %q", o.Sub[0])}

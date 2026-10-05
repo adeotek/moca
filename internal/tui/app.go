@@ -27,6 +27,9 @@ type AppOptions struct {
 	ConfigPath string
 	Prompts    []skills.Prompt
 	Home       string
+	// ResumePath opens this session file (--resume/--continue) instead of
+	// starting a new one.
+	ResumePath string
 }
 
 type hintCheckMsg struct{}
@@ -63,6 +66,12 @@ type model struct {
 	// shellBusy: a `!` command is in flight; its note must not land in the
 	// middle of a run (or in the session /clear is about to replace).
 	shellBusy bool
+	// compacting: a /compact request is in flight; runs and state-changing
+	// commands must wait for it (it appends to the transcript).
+	compacting bool
+	// compactCancel aborts an in-flight /compact (esc, quit): the summary
+	// request inherits the provider's full retry ladder otherwise.
+	compactCancel context.CancelFunc
 	// held: scrollback output produced while the alt-screen pager is open.
 	// tea.Println is lost there, so it is released when the pager closes.
 	held []tea.Cmd
@@ -200,6 +209,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case shellDoneMsg:
 		return m, m.hold(m.handleShellDone(msg))
+	case compactDoneMsg:
+		return m, m.hold(m.handleCompactDone(msg))
 	}
 	return m, nil
 }
@@ -223,8 +234,12 @@ func (m *model) release() tea.Cmd {
 	return c
 }
 
-// quit cancels an in-flight run (its abort is appended before exit) and exits.
+// quit cancels an in-flight run or compaction (its abort/return is recorded
+// before exit) and exits.
 func (m *model) quit() tea.Cmd {
+	if m.compactCancel != nil {
+		m.compactCancel()
+	}
 	if m.cancel != nil {
 		m.cancel()
 	}
@@ -280,6 +295,10 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		m.pullTextarea()
 		return nil
 	case "esc":
+		if m.compacting && m.compactCancel != nil {
+			m.compactCancel()
+			return nil
+		}
 		if m.running && m.cancel != nil {
 			m.cancel()
 		}
@@ -390,6 +409,9 @@ func (m *model) submit() tea.Cmd {
 			}
 			return printlnContent("↳ queued: " + firstLineOf(parsed.Text))
 		}
+		if m.compacting {
+			return println("a /compact is still running — wait for it to finish")
+		}
 		if m.shellBusy {
 			return m.refuseBusy()
 		}
@@ -402,6 +424,12 @@ func (m *model) submit() tea.Cmd {
 			// batch's results would diverge from the wire ordering the
 			// rebuild guarantees. `!!` (local-only) stays available.
 			return printlnContent("finish or interrupt the run first (esc) — !! runs locally now")
+		}
+		if m.compacting {
+			// A note appended while a compaction summarizes could be excluded
+			// from the summary (and land before the cut boundary, vanishing
+			// from the rebuilt context).
+			return println("a /compact is still running — wait for it to finish")
 		}
 		if m.shellBusy {
 			return m.refuseBusy()
@@ -418,6 +446,9 @@ func (m *model) submit() tea.Cmd {
 func (m *model) refuseRunning() tea.Cmd {
 	if m.shellBusy {
 		return m.refuseBusy()
+	}
+	if m.compacting {
+		return println("a /compact is still running — wait for it to finish")
 	}
 	if !m.running {
 		return nil
@@ -503,7 +534,12 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		}
 		return m.restartSession()
 	case "compact":
-		return println("compaction lands in phase 4")
+		if cmd := m.refuseRunning(); cmd != nil {
+			return cmd
+		}
+		m.compacting = true
+		m.status.Transient = "compacting…"
+		return m.compactCmd()
 	case "cost":
 		u := st.Usage
 		return println(fmt.Sprintf("in %d · out %d · cache read %d · cache write %d · $%.4f", u.Input, u.Output, u.CacheRead, u.CacheWrite, st.Cost))
@@ -533,6 +569,35 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		return printlnContent(HelpText(m.opts.Prompts))
 	}
 	return println("unknown command /" + c.Name)
+}
+
+// compactCmd runs a manual compaction off the event loop. The Compacted
+// event (through the pipe) prints the result; the done message only reports
+// refusals and errors. esc/quit cancel it through compactCancel.
+func (m *model) compactCmd() tea.Cmd {
+	a := m.agent
+	ctx, cancel := context.WithCancel(context.Background())
+	m.compactCancel = cancel
+	return func() tea.Msg {
+		return compactDoneMsg{err: a.Compact(ctx)}
+	}
+}
+
+func (m *model) handleCompactDone(msg compactDoneMsg) tea.Cmd {
+	m.compacting = false
+	m.compactCancel = nil
+	m.status.Transient = ""
+	m.refreshStatus()
+	switch {
+	case msg.err == nil:
+		return nil // the Compacted event line reports the result
+	case errors.Is(msg.err, context.Canceled):
+		return println("compaction cancelled")
+	case errors.Is(msg.err, agent.ErrNothingToCompact):
+		return println("nothing to compact")
+	default:
+		return printlnContent("error: " + msg.err.Error())
+	}
 }
 
 func (m *model) restartSession() tea.Cmd {
@@ -635,7 +700,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 			cmds = append(cmds, println(it.Line))
 		}
 		m.thinking.Reset()
-		m.lastAssistant = messageText(e.Message)
+		m.lastAssistant = llm.TextOf(e.Message)
 		m.status.Transient = ""
 		m.refreshStatus()
 		cmds = append(cmds, m.branchCmd())
@@ -645,6 +710,12 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		return nil
 	case agent.Warning:
 		return printlnContent("warning: " + e.Text)
+	case agent.Compacted:
+		m.status.Transient = ""
+		m.refreshStatus()
+		return println(fmt.Sprintf("⋯ compacted: %d → %d tokens", e.TokensBefore, e.TokensAfter))
+	case agent.Resumed:
+		return printlnContent(fmt.Sprintf("resumed %s (%d messages) — earlier output is in the session file", e.ID8, e.Messages))
 	case agent.SteeringApplied:
 		return printlnContent("↳ sent: " + strings.Join(e.Texts, " · "))
 	case agent.YoloChanged:
@@ -742,16 +813,6 @@ func approvalPrompt(q tools.Question) string {
 
 func firstLineOf(s string) string { l, _, _ := strings.Cut(s, "\n"); return l }
 
-func messageText(m llm.Message) string {
-	var sb strings.Builder
-	for _, c := range m.Content {
-		if c.Type == llm.BlockText {
-			sb.WriteString(c.Text)
-		}
-	}
-	return sb.String()
-}
-
 // supportedEfforts lists a model's supported effort levels for /effort.
 func supportedEfforts(mo provider.Model) string {
 	if mo.ThinkingMode == "none" || len(mo.ThinkingLevelMap) == 0 {
@@ -769,22 +830,33 @@ func supportedEfforts(mo provider.Model) string {
 // Run creates the program in inline mode and runs it until quit.
 func Run(ctx context.Context, o AppOptions) error {
 	var p *tea.Program
-	m := newModel(o, nil)
 	// p is captured by the closures below. Events are delivered through a
 	// FIFO pipe so an emit from inside Update (a slash command toggling
 	// yolo, /clear restarting the session) can never block the event loop on
 	// Program.Send (bridge.go); the pipe buffers events emitted before the
-	// program exists (agent.Start warnings). The asker is called from the
-	// agent's run goroutine only, where a direct blocking send is correct.
+	// program exists (agent.Start warnings, Resume's Resumed line). The
+	// asker is called from the agent's run goroutine only, where a direct
+	// blocking send is correct.
 	pipe := newEventPipe()
 	o.Start.Emit = pipe.emit
 	o.Start.Ask = newAsker(func(msg tea.Msg) { p.Send(msg) })
-	a, err := agent.Start(o.Start)
+	var a *agent.Agent
+	var err error
+	if o.ResumePath != "" {
+		a, err = agent.Resume(o.Start, o.ResumePath)
+	} else {
+		a, err = agent.Start(o.Start)
+	}
 	if err != nil {
 		close(pipe.stop)
 		return err
 	}
-	m.agent, m.start = a, o.Start
+	if o.ResumePath != "" {
+		// The session's own workdir (not the invoking cwd) drives the status
+		// bar, `!` commands and the branch lookup.
+		o.Start.Workdir = a.Workdir()
+	}
+	m := newModel(o, a)
 	m.refreshStatus()
 	// main's signal context already delivers SIGINT/SIGTERM; Bubble Tea's own
 	// handler would race it at shutdown (and can deadlock Program.Run).

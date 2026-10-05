@@ -50,6 +50,12 @@ func newScript(t *testing.T, turns ...string) *scriptServer {
 		var m map[string]any
 		json.Unmarshal(b, &m)
 		s.bodies = append(s.bodies, m)
+		if len(s.turns) > 0 && strings.HasPrefix(s.turns[0], "HTTP400:") {
+			w.WriteHeader(400)
+			io.WriteString(w, strings.TrimPrefix(s.turns[0], "HTTP400:"))
+			s.turns = s.turns[1:]
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		if len(s.turns) == 0 {
 			io.WriteString(w, textTurn("(script exhausted)"))
@@ -61,6 +67,13 @@ func newScript(t *testing.T, turns ...string) *scriptServer {
 	t.Cleanup(s.srv.Close)
 	return s
 }
+
+// allowAll lets every shell command through (token-compaction tests drive
+// big outputs through the shell tool without the permission ladder).
+type allowAll struct{}
+
+func (allowAll) Check(string) ([]string, []string, error) { return nil, nil, nil }
+func (allowAll) Allow(string)                             {}
 
 func (s *scriptServer) bodyCount() int {
 	s.mu.Lock()

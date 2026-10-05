@@ -28,6 +28,9 @@ type shellDoneMsg struct {
 	out   tools.ShellOutput
 	err   error
 }
+type compactDoneMsg struct {
+	err error
+}
 
 // newAsker bridges the agent's blocking approval callback to the TUI: the
 // question is sent to the program, the answer comes back on a channel (ctx

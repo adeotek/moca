@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -112,4 +113,30 @@ func TestOpenKeepsCompleteLineWithoutNewline(t *testing.T) {
 	if err != nil || len(got) != 3 || got[2].Error.Message != "two" {
 		t.Fatalf("complete last line must survive: %v, %d entries", err, len(got))
 	}
+}
+
+// Two writers on one file would interleave histories, and a resume would
+// repair the other process's in-flight tool calls: Open must refuse while the
+// file is held, and work again once the holder closes.
+func TestOpenRefusesWhileAnotherWriterHoldsTheFile(t *testing.T) {
+	if !lockSupported {
+		t.Skip("no advisory file locks on this platform")
+	}
+	w, err := Create(t.TempDir(), Header{Workdir: "/w"}, "lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(w.Path())
+	if _, _, err := Open(w.Path()); !errors.Is(err, ErrInUse) {
+		t.Fatalf("second writer must be refused: %v", err)
+	}
+	if after, _ := os.ReadFile(w.Path()); string(after) != string(before) {
+		t.Fatal("a refused Open must not touch the file")
+	}
+	w.Close()
+	w2, _, err := Open(w.Path())
+	if err != nil {
+		t.Fatalf("lock must be released by Close: %v", err)
+	}
+	w2.Close()
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/adeotek/moca/internal/agent"
@@ -31,11 +32,29 @@ func firstLine(s string) string {
 	return s
 }
 
+// resolveResume maps --resume <id8|last> / --continue to a session file path;
+// "" means a fresh session.
+func resolveResume(o Options, wd string) (string, error) {
+	if o.Resume == "" && !o.Continue {
+		return "", nil
+	}
+	dir := filepath.Join(config.DataDir(), "sessions")
+	if o.Continue {
+		return session.FindForWorkdir(dir, wd)
+	}
+	return session.Find(dir, o.Resume)
+}
+
 func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stderr io.Writer) int {
 	wd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(stderr, "moca:", err)
 		return exitRuntime
+	}
+	resumePath, err := resolveResume(o, wd)
+	if err != nil {
+		fmt.Fprintln(stderr, "moca:", err)
+		return exitUsage
 	}
 	var turnText strings.Builder
 	var lastStop llm.StopReason
@@ -71,8 +90,14 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 	if yolo {
 		fmt.Fprintln(stderr, "yolo mode: all permission checks are off")
 	}
-	a, err := agent.Start(agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort,
-		Trusted: trusted, Yolo: yolo, Emit: emit, Slug: session.Slug(o.Prompt)})
+	var a *agent.Agent
+	so := agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model,
+		Trusted: trusted, Yolo: yolo, Emit: emit, Slug: session.Slug(o.Prompt)}
+	if resumePath != "" {
+		a, err = agent.Resume(so, resumePath)
+	} else {
+		a, err = agent.Start(so)
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, "moca:", err)
 		var se *agent.StartError

@@ -38,7 +38,17 @@ type StartOptions struct {
 	Slug    string
 }
 
-func Start(o StartOptions) (*Agent, error) {
+// setup is what Start and Resume need before a session exists: the config
+// with the --model override applied, the provider registry, the built-in
+// skills dir and the path jail. It is built once and handed to build.
+type setup struct {
+	cfg        config.Config
+	reg        *provider.Registry
+	builtinDir string
+	jail       *permissions.Jail
+}
+
+func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	cfg := o.Config
 	if o.Model != "" {
 		cfg.Model = o.Model
@@ -47,7 +57,7 @@ func Start(o StartOptions) (*Agent, error) {
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	var emit func(Event) = o.Emit
+	emit := o.Emit
 	reg, err := provider.NewRegistry(cfg, hc, func(n provider.RetryNotice) {
 		if emit != nil {
 			emit(Retry{n})
@@ -61,11 +71,42 @@ func Start(o StartOptions) (*Agent, error) {
 		return nil, &StartError{err}
 	}
 	globalSkills := filepath.Join(config.ConfigDir(), "skills")
-	projectSkills := filepath.Join(o.Workdir, ".moca", "skills")
-	jail, err := permissions.NewJail(o.Workdir, []string{globalSkills, builtinDir})
+	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir})
 	if err != nil {
 		return nil, &StartError{err}
 	}
+	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail}, nil
+}
+
+// build constructs everything Start and Resume share past setup: shell
+// checker, tool env, snapshot store and the agent itself. Start pre-computes
+// the system prompt and passes nil prior entries; Resume passes the stored
+// prompt verbatim and the transcript it read back.
+func build(o StartOptions, st *setup, w *session.Writer, system, model string, effort llm.Effort, prior []session.Entry, snapshotDir string) (*Agent, error) {
+	cfg, jail := st.cfg, st.jail
+	snaps := session.NewSnapshots(w, snapshotDir, prior)
+	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(cfg.Shell.Allow, jail, runtime.GOOS),
+		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
+		ShellEnv: tools.ShellEnv(os.Environ(), config.EnvRefs(cfg))}
+	a, err := New(Options{Config: cfg, Providers: st.reg, Tools: tools.NewRegistry(tools.Builtins()...), Env: env,
+		Session: w, Snapshots: snaps, System: system, Model: model, Effort: effort, Emit: o.Emit, Prior: prior})
+	if err != nil {
+		return nil, err
+	}
+	if o.Yolo {
+		a.applyYolo(true)
+	}
+	return a, nil
+}
+
+func Start(o StartOptions) (*Agent, error) {
+	st, err := prepare(o, o.Workdir)
+	if err != nil {
+		return nil, err
+	}
+	cfg, reg, jail, builtinDir, emit := st.cfg, st.reg, st.jail, st.builtinDir, o.Emit
+	globalSkills := filepath.Join(config.ConfigDir(), "skills")
+	projectSkills := filepath.Join(o.Workdir, ".moca", "skills")
 	var dirs []skills.Dir
 	if o.Trusted {
 		dirs = append(dirs, skills.Dir{Path: projectSkills, Source: "project"})
@@ -111,17 +152,5 @@ func Start(o StartOptions) (*Agent, error) {
 	if err != nil {
 		return nil, &StartError{err}
 	}
-	snaps := session.NewSnapshots(w, filepath.Join(config.DataDir(), "snapshot"), nil)
-	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(cfg.Shell.Allow, jail, runtime.GOOS),
-		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
-		ShellEnv: tools.ShellEnv(os.Environ(), config.EnvRefs(cfg))}
-	a, err := New(Options{Config: cfg, Providers: reg, Tools: tools.NewRegistry(tools.Builtins()...), Env: env,
-		Session: w, Snapshots: snaps, System: system, Model: cfg.Model, Effort: effort, Emit: o.Emit})
-	if err != nil {
-		return nil, err
-	}
-	if o.Yolo {
-		a.applyYolo(true)
-	}
-	return a, nil
+	return build(o, st, w, system, cfg.Model, effort, nil, filepath.Join(config.DataDir(), "snapshot"))
 }
