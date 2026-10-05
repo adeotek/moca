@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/adeotek/moca/internal/llm"
 )
@@ -43,6 +44,21 @@ func TestTrackFiles(t *testing.T) {
 	}
 }
 
+// Path spellings are normalized: a file read as "./c.go" and edited as
+// "c.go" must not end up in both lists.
+func TestTrackFilesNormalizesPaths(t *testing.T) {
+	es := []Entry{
+		{Kind: KindToolUse, Call: &llm.ToolCall{Name: "read", Input: json.RawMessage(`{"path":"./c.go"}`)}},
+		{Kind: KindToolUse, Call: &llm.ToolCall{Name: "read", Input: json.RawMessage(`{"path":"src/x.go"}`)}},
+		{Kind: KindToolUse, Call: &llm.ToolCall{Name: "edit", Input: json.RawMessage(`{"path":"c.go","old_string":"a","new_string":"b"}`)}},
+		{Kind: KindToolUse, Call: &llm.ToolCall{Name: "edit", Input: json.RawMessage(`{"path":"src/../src/x.go","old_string":"a","new_string":"b"}`)}},
+	}
+	read, mod := TrackFiles(es, nil, nil)
+	if len(read) != 0 || !slices.Equal(mod, []string{"c.go", "src/x.go"}) {
+		t.Fatal(read, mod)
+	}
+}
+
 func TestCapChars(t *testing.T) {
 	s := strings.Repeat("old line\n", 100) + "newest"
 	got := CapChars(s, 100)
@@ -51,5 +67,38 @@ func TestCapChars(t *testing.T) {
 	}
 	if CapChars("short", 100) != "short" {
 		t.Fatal("no-op")
+	}
+}
+
+// A byte cut must never strand a partial rune at the seam (newline-free CJK).
+func TestCapCharsRuneSafe(t *testing.T) {
+	got := CapChars(strings.Repeat("あ", 50), 10)
+	if !strings.HasPrefix(got, "[… earlier history omitted]\n") || !utf8.ValidString(got) {
+		t.Fatalf("%q", got)
+	}
+	got = CapChars("prefix\n"+strings.Repeat("é", 200), 101)
+	if !utf8.ValidString(got) {
+		t.Fatalf("newline-snapped tail splits a rune: %q", got)
+	}
+}
+
+// Truncation of tool results and tool-call argument values is rune-safe too,
+// and empty assistant text blocks do not emit bare lines.
+func TestSerializeRuneSafeAndEmptyText(t *testing.T) {
+	es := []Entry{
+		{ID: "a1", Kind: KindAssistant, Msg: &llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: llm.BlockText, Text: ""}, {Type: llm.BlockText, Text: "kept"}}}},
+		{ID: "c1", Kind: KindToolUse, Call: &llm.ToolCall{Name: "shell", Input: json.RawMessage(`{"command":"` + strings.Repeat("あ", 150) + `"}`)}},
+		{ID: "r1", Kind: KindToolResult, Result: &llm.ToolResult{Content: strings.Repeat("い", 3000)}},
+	}
+	s := Serialize(es)
+	if strings.Contains(s, "[Assistant]: \n") {
+		t.Fatal("empty assistant text must be skipped")
+	}
+	if !utf8.ValidString(s) {
+		t.Fatal("serialized payload must stay valid UTF-8")
+	}
+	if strings.Count(s, "い") != 2000/3 {
+		t.Fatalf("2K byte cap kept %d chars", strings.Count(s, "い"))
 	}
 }

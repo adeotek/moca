@@ -3,13 +3,32 @@ package compact
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/adeotek/moca/internal/llm"
 )
 
 const resultCap = 2000
+
+// safeTail trims a byte-sliced string back to a rune boundary so a cut can
+// never leave a stranded partial rune at the seam (payloads are valid UTF-8;
+// a cut lands at most one rune inside it).
+func safeTail(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	i := len(s)
+	for i > 0 && !utf8.RuneStart(s[i-1]) {
+		i--
+	}
+	if i == 0 {
+		return s
+	}
+	return s[:i-1]
+}
 
 func callLine(c *llm.ToolCall) string {
 	var m map[string]json.RawMessage
@@ -27,7 +46,7 @@ func callLine(c *llm.ToolCall) string {
 			v = s
 		}
 		if len(v) > 200 {
-			v = v[:200] + "…"
+			v = safeTail(v[:200]) + "…"
 		}
 		parts[i] = k + "=" + strings.ReplaceAll(v, "\n", "⏎")
 	}
@@ -56,7 +75,11 @@ func Serialize(es []Entry) string {
 						fmt.Fprintf(&sb, "[Assistant thinking]: %s\n", c.Text)
 					}
 				case llm.BlockText:
-					fmt.Fprintf(&sb, "[Assistant]: %s\n", c.Text)
+					// Tool-only turns carry an empty text block; a bare
+					// "[Assistant]: " line is noise for the summarizer.
+					if c.Text != "" {
+						fmt.Fprintf(&sb, "[Assistant]: %s\n", c.Text)
+					}
 				}
 			}
 		case KindToolUse:
@@ -64,7 +87,7 @@ func Serialize(es []Entry) string {
 		case KindToolResult:
 			body := e.Result.Content
 			if len(body) > resultCap {
-				body = body[:resultCap] + "[… truncated]"
+				body = safeTail(body[:resultCap]) + "[… truncated]"
 			}
 			label := "Tool result"
 			if e.Result.IsError {
@@ -97,6 +120,10 @@ func TrackFiles(es []Entry, prevRead, prevMod []string) ([]string, []string) {
 		if json.Unmarshal(e.Call.Input, &a) != nil || a.Path == "" {
 			continue
 		}
+		// Normalize spellings ("a.go", "./a.go", "src/../a.go") so one path
+		// cannot sit in both lists at once. Absolute vs relative spellings of
+		// the same file stay distinct: compact works on raw tool inputs.
+		a.Path = filepath.Clean(a.Path)
 		switch e.Call.Name {
 		case "read":
 			if !mod[a.Path] {
@@ -122,7 +149,7 @@ const omitted = "[… earlier history omitted]\n"
 
 // CapChars bounds a serialized payload to max chars by dropping the oldest
 // whole lines, so the summary request itself can never overflow the
-// summarizer model's window.
+// summarizer model's window. The byte cut is snapped to a rune boundary.
 func CapChars(s string, max int) string {
 	if len(s) <= max {
 		return s
@@ -130,6 +157,11 @@ func CapChars(s string, max int) string {
 	tail := s[len(s)-max:]
 	if i := strings.IndexByte(tail, '\n'); i >= 0 {
 		tail = tail[i+1:]
+	}
+	// The seam (or the newline search) can land mid-rune: skip continuation
+	// bytes so the retained tail starts at a complete character.
+	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+		tail = tail[1:]
 	}
 	return omitted + tail
 }
