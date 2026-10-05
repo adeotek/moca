@@ -2742,7 +2742,18 @@ Verdicts: pass 1 (`docs/reviews/2026-10-05-phase-3-tui.md`) Approve with fixes (
 
 Verdict was Approve with fixes (0H/9M/7L); all sixteen are fixed with regression tests (219 top-level tests, race-clean). New test scaffolding: `internal/tui/helpers_test.go` builds a `model` around a real agent (mock completions server) so glue paths — `/clear`, steering return, `!`, allow-always — run against real code.
 
-- **M1** output printed while the pager is open is held (`hold`/`release`) and flushed on close. **M2** `a`/`A`/`d` need a 700 ms typing pause; `enter`/`ctrl+c` fall through during a prompt. **M3** `shellBusy` blocks runs and `/clear` while a `!` executes.
+- **M1** output printed while the pager is open is held (`hold`/`release`) and flushed on close. **M2** `a`/`A`/`d` need a 700 ms typing pause (superseded for `A` by pass 4 — allow-always moved to `ctrl+a`); `enter`/`ctrl+c` fall through during a prompt. **M3** `shellBusy` blocks runs and `/clear` while a `!` executes.
 - **M4/M5** `runResult` maps cancellation to the context error (exit 130) and keeps panics as errors; the program runs with `tea.WithoutSignalHandler()` (verified: 20/20 SIGTERM runs exit 130, previously ~40% hung). **L13** quit cancels the run and waits (2 s) for its abort before closing the *current* session.
 - **M6/M7** `Input.Prepare`: CR/CRLF → LF, insertion at the cursor via the textarea. **M8** C1 controls sanitised. **M9** `AppendString` resolves symlinks and keeps the file mode.
 - **L10** redacted foreign thinking dropped by the transform. **L11** ctrl+c/esc at the trust prompt cancels (130) instead of saving "no". **L12** `git --no-optional-locks status`. **L14** `/clear` carries model/effort (`Agent.Carry`) and `[A]` approvals. **L15** the missing tests. **L16** status width in terminal cells; a response with zero usage no longer anchors the estimate.
+
+## Review fixes, pass 4 (2026-10-05, `docs/reviews/2026-10-05-phase-3-tui-pass-4.md`)
+
+Re-review of the pass-3 commits (verdict: approve with fixes; no blocking findings, six small items). All six fixed in `a2b091c` with tests; 220 top-level tests, race-clean.
+
+- **P4-1** allow-always moved from `A` to `ctrl+a`: a stray capital `A` (first letter of "Add…") after a typing pause could still persist a `shell.allow` entry; a modified key cannot come from prose, so plain letters now always go to the draft. `a`/`d` keep the 700 ms pause (allow-once/deny stay bounded and recoverable — recorded in SPECS). `TestAllowAlwaysRequiresCtrl`.
+- **P4-2** the trust prompt takes the caller's signal context and runs with `tea.WithoutSignalHandler()` + `tea.WithContext` — the shutdown rule from pass 3 (a second handler races the first); SIGINT/SIGTERM during the prompt exit 130 quietly, nothing saved.
+- **P4-3** the PR #4 description refreshed with the pass-3/4 review state.
+- **P4-4** SPECS approvals bullet: new config files are written 0600, existing files keep their mode — the bullet read self-contradictory.
+- **P4-5** the model gets an injectable clock (`m.now`, default `time.Now`): the approval-timing tests are deterministic instead of "the typing loop is faster than 700 ms".
+- **P4-6** fixed the inverted failure message in `TestEnterAndCtrlCDuringApproval`.
