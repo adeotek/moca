@@ -100,6 +100,18 @@ func (in *Input) Submit() string {
 	return t
 }
 
+// setFromHistory puts a recalled entry into the buffer. Entries are stored
+// expanded; one carrying control bytes is re-chipped rather than put into the
+// editable buffer raw (control bytes must never reach the terminal).
+func (in *Input) setFromHistory(s string) {
+	in.clear()
+	if hasControl(s) {
+		in.Paste(s)
+		return
+	}
+	in.buf = s
+}
+
 // HistoryPrev recalls the previous entry; the glue calls it only when the
 // cursor is on the first line and the buffer is single-line.
 func (in *Input) HistoryPrev() bool {
@@ -110,8 +122,7 @@ func (in *Input) HistoryPrev() bool {
 		in.draft = in.Text()
 	}
 	in.hpos--
-	in.clear()
-	in.buf = in.history[in.hpos]
+	in.setFromHistory(in.history[in.hpos])
 	return true
 }
 
@@ -120,11 +131,11 @@ func (in *Input) HistoryNext() bool {
 		return false
 	}
 	in.hpos++
-	in.clear()
 	if in.hpos == len(in.history) {
+		in.clear()
 		in.buf = in.draft
 	} else {
-		in.buf = in.history[in.hpos]
+		in.setFromHistory(in.history[in.hpos])
 	}
 	return true
 }

@@ -72,7 +72,14 @@ func newModel(o AppOptions, a *agent.Agent) *model {
 func (m *model) syncTextarea() { m.ta.SetValue(m.input.Buffer()) }
 func (m *model) pullTextarea() { m.input.SetBuffer(m.ta.Value()) }
 
-func println(s string) tea.Cmd { return tea.Println(Sanitize(s)) }
+// println prints a trusted or already-styled line into the scrollback.
+func println(s string) tea.Cmd { return tea.Println(s) }
+
+// printlnContent is println for untrusted content (model output, tool output,
+// user input, error strings): control bytes are neutralized so the terminal
+// never interprets them. Styled lines must use println — running lipgloss
+// output through Sanitize would display the escape codes as text.
+func printlnContent(s string) tea.Cmd { return tea.Println(Sanitize(s)) }
 
 func (m *model) refreshStatus() {
 	if m.agent == nil {
@@ -123,7 +130,7 @@ func (m *model) startRun(text string) tea.Cmd {
 	m.thinking.Reset()
 	m.toolBusy = ""
 	a := m.agent
-	return tea.Sequence(println("› "+text), func() tea.Msg {
+	return tea.Sequence(printlnContent("› "+text), func() tea.Msg {
 		out, err := a.Run(ctx, text)
 		return runDoneMsg{out: out, err: err}
 	})
@@ -210,9 +217,9 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 					path = config.ConfigFile()
 				}
 				if err := config.AppendString(path, []string{"shell", "allow"}, q.Subject, config.DefaultShellAllow); err != nil {
-					return println("error: allow-always not saved: " + err.Error())
+					return printlnContent("error: allow-always not saved: " + err.Error())
 				}
-				return println(fmt.Sprintf("always allowing %q (saved to %s)", q.Subject, path))
+				return printlnContent(fmt.Sprintf("always allowing %q (saved to %s)", q.Subject, path))
 			}
 		case "d", "esc":
 			m.approval.reply <- tools.Deny
@@ -284,7 +291,7 @@ func (m *model) submit() tea.Cmd {
 	m.input.Submit()
 	m.syncTextarea()
 	if err != nil {
-		return println("error: " + err.Error())
+		return printlnContent("error: " + err.Error())
 	}
 	switch parsed.Kind {
 	case KindText, KindPrompt:
@@ -292,7 +299,7 @@ func (m *model) submit() tea.Cmd {
 			if m.agent != nil {
 				m.agent.Steer(parsed.Text)
 			}
-			return println("↳ queued: " + firstLineOf(parsed.Text))
+			return printlnContent("↳ queued: " + firstLineOf(parsed.Text))
 		}
 		return m.startRun(parsed.Text)
 	case KindCommand:
@@ -327,52 +334,52 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 				}
 				lines = append(lines, mark+mo.Qualified())
 			}
-			return println(strings.Join(lines, "\n"))
+			return printlnContent(strings.Join(lines, "\n"))
 		}
 		if cmd := m.refuseRunning(); cmd != nil {
 			return cmd
 		}
 		if err := m.agent.SetModel(c.Args, ""); err != nil {
-			return println("error: " + err.Error())
+			return printlnContent("error: " + err.Error())
 		}
 		m.refreshStatus()
 		s := m.agent.Status()
-		return println(fmt.Sprintf("switched to %s · effort %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
+		return printlnContent(fmt.Sprintf("switched to %s · effort %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
 	case "effort":
 		if c.Args == "" {
-			return println(fmt.Sprintf("effort %s — supported: %s", AbbrevEffort(st.Effort), supportedEfforts(st.Model)))
+			return printlnContent(fmt.Sprintf("effort %s — supported: %s", AbbrevEffort(st.Effort), supportedEfforts(st.Model)))
 		}
 		if cmd := m.refuseRunning(); cmd != nil {
 			return cmd
 		}
 		want, err := llm.ParseEffort(c.Args)
 		if err != nil {
-			return println("error: " + err.Error())
+			return printlnContent("error: " + err.Error())
 		}
 		got, err := m.agent.SetEffort(want)
 		if err != nil {
-			return println("error: " + err.Error())
+			return printlnContent("error: " + err.Error())
 		}
 		m.refreshStatus()
 		note := ""
 		if got != want {
 			note = fmt.Sprintf(" (clamped from %s)", want)
 		}
-		return println("effort " + AbbrevEffort(got) + note)
+		return printlnContent("effort " + AbbrevEffort(got) + note)
 	case "hard":
 		if cmd := m.refuseRunning(); cmd != nil {
 			return cmd
 		}
 		on, err := m.agent.ToggleHard()
 		if err != nil {
-			return println("error: " + err.Error())
+			return printlnContent("error: " + err.Error())
 		}
 		m.refreshStatus()
 		s := m.agent.Status()
 		if on {
-			return println(fmt.Sprintf("hard mode on: %s · %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
+			return printlnContent(fmt.Sprintf("hard mode on: %s · %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
 		}
-		return println(fmt.Sprintf("hard mode off: back to %s · %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
+		return printlnContent(fmt.Sprintf("hard mode off: back to %s · %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
 	case "yolo":
 		if cmd := m.refuseRunning(); cmd != nil {
 			return cmd
@@ -392,9 +399,9 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 	case "undo":
 		msg, err := m.agent.Undo()
 		if err != nil {
-			return println("error: " + err.Error())
+			return printlnContent("error: " + err.Error())
 		}
-		return println(msg)
+		return printlnContent(msg)
 	case "copy":
 		if m.lastAssistant == "" {
 			return println("nothing to copy yet")
@@ -412,7 +419,7 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		m.openPager(it)
 		return nil
 	case "help":
-		return println(HelpText(m.opts.Prompts))
+		return printlnContent(HelpText(m.opts.Prompts))
 	}
 	return println("unknown command /" + c.Name)
 }
@@ -423,7 +430,7 @@ func (m *model) restartSession() tea.Cmd {
 	}
 	a, err := agent.Start(m.start)
 	if err != nil {
-		return println("error: " + err.Error())
+		return printlnContent("error: " + err.Error())
 	}
 	m.agent = a
 	m.items = Items{}
@@ -473,7 +480,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 	case agent.TextDelta:
 		m.live.WriteString(e.Text)
 		if lines := m.commitLive(); len(lines) > 0 {
-			return println(strings.Join(lines, "\n"))
+			return printlnContent(strings.Join(lines, "\n"))
 		}
 		return nil
 	case agent.ThinkingDelta:
@@ -495,7 +502,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.toolBusy = ""
 		var cmds []tea.Cmd
 		if rest := m.live.String(); rest != "" {
-			cmds = append(cmds, println(rest))
+			cmds = append(cmds, printlnContent(rest))
 		}
 		m.live.Reset()
 		if m.thinking.Len() > 0 {
@@ -512,9 +519,9 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.status.Transient = fmt.Sprintf("retry %d/%d · %s", e.Notice.Attempt, e.Notice.Max, e.Notice.Wait.Round(1e8))
 		return nil
 	case agent.Warning:
-		return println("warning: " + e.Text)
+		return printlnContent("warning: " + e.Text)
 	case agent.SteeringApplied:
-		return println("↳ sent: " + strings.Join(e.Texts, " · "))
+		return printlnContent("↳ sent: " + strings.Join(e.Texts, " · "))
 	case agent.YoloChanged:
 		m.refreshStatus()
 		if e.On {
@@ -533,7 +540,7 @@ func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
 	// TurnEnd is processed; flush what the run left over (a clean run's
 	// trailing partial line) instead of dropping it.
 	if msg.err == nil && m.live.Len() > 0 {
-		cmds = append(cmds, println(m.live.String()))
+		cmds = append(cmds, printlnContent(m.live.String()))
 	}
 	m.live.Reset()
 	m.thinking.Reset()
@@ -547,7 +554,7 @@ func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
 		if errors.Is(msg.err, context.Canceled) {
 			cmds = append(cmds, println("[interrupted]"))
 		} else {
-			cmds = append(cmds, println("error: "+msg.err.Error()))
+			cmds = append(cmds, printlnContent("error: "+msg.err.Error()))
 		}
 	}
 	m.refreshStatus()
@@ -589,9 +596,9 @@ func (m *model) View() tea.View {
 func (m *model) statusLine() string {
 	w := max(20, m.width)
 	if m.agent != nil && m.agent.Yolo() {
-		return red.Render("YOLO") + dim.Render(" · "+RenderStatus(m.status, w-7))
+		return red.Render("YOLO") + dim.Render(" · "+Sanitize(RenderStatus(m.status, w-7)))
 	}
-	return dim.Render(RenderStatus(m.status, w))
+	return dim.Render(Sanitize(RenderStatus(m.status, w)))
 }
 
 func approvalPrompt(q tools.Question) string {

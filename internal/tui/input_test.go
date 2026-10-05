@@ -106,3 +106,25 @@ func TestPrependSteering(t *testing.T) {
 		t.Fatal(in.Text())
 	}
 }
+
+// Recalling a submission that carried control bytes must re-chip it: raw
+// control bytes must never reach the editable buffer (and the terminal).
+func TestHistoryRecallChipsUnsafeContent(t *testing.T) {
+	in := NewInput()
+	in.Paste("x\x1b[201~y")
+	in.Submit()
+	if !in.HistoryPrev() {
+		t.Fatal("recall")
+	}
+	if in.Buffer() != "[paste 1 line #1]" || in.Text() != "x\x1b[201~y" {
+		t.Fatalf("buffer %q text %q", in.Buffer(), in.Text())
+	}
+	// Clean entries are recalled expanded (explicit user action, §11).
+	in2 := NewInput()
+	in2.Insert("plain text")
+	in2.Submit()
+	in2.HistoryPrev()
+	if in2.Buffer() != "plain text" {
+		t.Fatal(in2.Buffer())
+	}
+}
