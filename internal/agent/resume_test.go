@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -100,5 +101,29 @@ func TestResumeHonoursCompaction(t *testing.T) {
 func TestResumeNotASession(t *testing.T) {
 	if _, err := Resume(StartOptions{}, t.TempDir()+"/nope.jsonl"); err == nil {
 		t.Fatal("missing file must fail")
+	}
+}
+
+// A session whose workdir no longer exists must fail with a clear message
+// and must not append repair entries for a resume that never became usable.
+func TestResumeMissingWorkdir(t *testing.T) {
+	s := newScript(t)
+	a, work, _ := startTestWith(t, s, "", "")
+	// Make it a crash: an unanswered tool_use that a resume would repair.
+	m, _ := a.append(session.Entry{Type: session.TypeMessage, Message: &llm.Message{Role: llm.RoleAssistant}})
+	a.append(session.Entry{Type: session.TypeToolUse, ToolUse: &session.ToolUse{MessageID: m.ID, Call: llm.ToolCall{ID: "c1", Name: "shell"}}})
+	path := a.Session().Path()
+	a.Session().Close()
+	before, _ := session.ReadFile(path)
+	if err := os.RemoveAll(work); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client()}, path)
+	if err == nil || !strings.Contains(err.Error(), "workdir") || !strings.Contains(err.Error(), work) {
+		t.Fatalf("%v", err)
+	}
+	after, _ := session.ReadFile(path)
+	if len(after) != len(before) {
+		t.Fatalf("no repair entries may be appended: before=%d after=%d", len(before), len(after))
 	}
 }

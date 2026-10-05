@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/adeotek/moca/internal/config"
@@ -25,13 +27,26 @@ func (Resumed) isEvent() {}
 // Interrupted results before anything else. Yolo is never restored from the
 // file — it comes from the resuming process's flag/config (§7.5).
 func Resume(o StartOptions, path string) (*Agent, error) {
-	w, entries, err := session.Open(path)
+	// Validate before opening the writer: a session whose workdir is gone
+	// must fail with a clear message and without appending repair entries
+	// for a resume that never became usable.
+	head, err := session.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	if len(entries) == 0 || entries[0].Session == nil {
-		w.Close()
+	if len(head) == 0 || head[0].Session == nil {
 		return nil, fmt.Errorf("%s: not a moca session", path)
+	}
+	h := head[0].Session
+	if fi, err := os.Stat(h.Workdir); err != nil || !fi.IsDir() {
+		if err == nil {
+			err = errors.New("not a directory")
+		}
+		return nil, fmt.Errorf("session workdir %s is not available: %w", h.Workdir, err)
+	}
+	w, entries, err := session.Open(path)
+	if err != nil {
+		return nil, err
 	}
 	for _, fix := range session.Repair(entries, session.Interrupted) {
 		e, err := w.Append(fix)
@@ -41,7 +56,6 @@ func Resume(o StartOptions, path string) (*Agent, error) {
 		}
 		entries = append(entries, e)
 	}
-	h := entries[0].Session
 	model, effort := h.Model, llm.Effort(h.Effort)
 	for _, e := range entries {
 		if e.Type == session.TypeModelChange {
@@ -52,7 +66,7 @@ func Resume(o StartOptions, path string) (*Agent, error) {
 		filepath.Join(config.DataDir(), "snapshot"))
 	if err != nil {
 		w.Close()
-		return nil, err
+		return nil, fmt.Errorf("resume: session workdir %s: %w", h.Workdir, err)
 	}
 	if o.Model != "" && o.Model != model {
 		if err := a.SetModel(o.Model, effort); err != nil {
