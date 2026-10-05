@@ -3,11 +3,13 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/session"
 )
@@ -29,6 +31,13 @@ func bigToolTurns(n int) []string {
 		turns = append(turns, toolTurn([2]string{"shell", "{\"command\":\"head -c 20000 /dev/zero | tr '\\\\0' x\"}"}))
 	}
 	return turns
+}
+
+// textTurnUsage is textTurn with an explicit usage report: tests use it to
+// plant a chosen anchored estimate.
+func textTurnUsage(text string, prompt, completion int) string {
+	b, _ := json.Marshal(text)
+	return fmt.Sprintf("data: {\"choices\":[{\"delta\":{\"content\":%s},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":%d,\"completion_tokens\":%d}}\n\ndata: [DONE]\n\n", b, prompt, completion)
 }
 
 func summaryBodies(s *scriptServer) []map[string]any {
@@ -167,6 +176,83 @@ func TestManualCompactNothing(t *testing.T) {
 	n := len(s.bodies)
 	if err := a.Compact(context.Background()); err != ErrNothingToCompact || len(s.bodies) != n {
 		t.Fatal(err)
+	}
+}
+
+// A cheap model whose credential is missing must not kill a run the active
+// model handles fine: the automatic checkpoint warns and skips; a real
+// overflow would still surface it (turnWithRecovery path).
+func TestAutoCompactionSkipsWhenSummarizerUnavailable(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("MOCA_T_KEY", "k")   // working provider
+	t.Setenv("MOCA_T_BROKEN", "") // missing key for the configured cheap model
+	s := newScript(t, append(bigToolTurns(5), textTurn("done"))...)
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`{"model":"broken/x","context":{"maxSteps":40},
+		"providers":{
+		  "fake":{"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768,"maxOutputTokens":4096}}},
+		  "broken":{"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_BROKEN","models":{"x":{"contextWindow":32768,"maxOutputTokens":4096}}}}}`,
+		s.srv.URL, s.srv.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var evs []Event
+	a, err := Start(StartOptions{Config: cfg, Workdir: t.TempDir(), Emit: func(e Event) { evs = append(evs, e) }, HTTP: s.srv.Client(), Slug: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.opts.Env.Commands = allowAll{}
+	if err := a.SetModel("fake/m", ""); err != nil { // active model: the keyed one
+		t.Fatal(err)
+	}
+	out, err := a.Run(context.Background(), "make output")
+	if err != nil || out.Text != "done" {
+		t.Fatalf("the run must continue when the summarizer is unusable: %v %q", err, out.Text)
+	}
+	var warned bool
+	for _, e := range evs {
+		if w, ok := e.(Warning); ok && strings.Contains(w.Text, "auto-compaction skipped") && strings.Contains(w.Text, "MOCA_T_BROKEN") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatal("a warning must report the skipped auto-compaction")
+	}
+	entries, _ := session.ReadFile(a.Session().Path())
+	if c, _ := session.LatestCompaction(entries); c != nil {
+		t.Fatal("no compaction entry may be written when the summarizer is unusable")
+	}
+}
+
+// When the estimate is over the trigger but the transcript is tiny, the loop
+// guard must blame the fixed overhead, not near-empty entries.
+func TestLoopGuardReportsFixedOverhead(t *testing.T) {
+	s := newScript(t, textTurnUsage("hi", 26000, 15))
+	a, _, _ := startTestWith(t, s, "", smallModel)
+	if out, err := a.Run(context.Background(), "one"); err != nil || out.Text != "hi" {
+		t.Fatal(out, err)
+	}
+	_, err := a.Run(context.Background(), "two")
+	if err == nil || !strings.Contains(err.Error(), "still over budget") ||
+		!strings.Contains(err.Error(), "fixed overhead") || !strings.Contains(err.Error(), "26k tokens") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// A compaction whose firstKeptEntryID is gone (trimmed file) must not make
+// the next compaction re-serialize already-summarized history.
+func TestLiveEntriesMissingFirstKeptFallback(t *testing.T) {
+	s := newScript(t)
+	a, _, _ := startTestWith(t, s, "", "")
+	a.append(session.Entry{Type: session.TypeMessage, Message: userText("old")})
+	a.append(session.Entry{Type: session.TypeCompaction, Compaction: &session.Compaction{Summary: "S", FirstKeptEntryID: "gone"}})
+	a.append(session.Entry{Type: session.TypeMessage, Message: userText("kept")})
+	live, prev := a.liveEntries()
+	if prev.Summary != "S" {
+		t.Fatalf("%+v", prev)
+	}
+	if len(live) != 1 || live[0].Msg == nil || live[0].Msg.Content[0].Text != "kept" {
+		t.Fatalf("live window must start after the compaction entry: %+v", live)
 	}
 }
 

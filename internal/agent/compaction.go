@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/adeotek/moca/internal/compact"
+	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
@@ -22,7 +23,20 @@ func (Compacted) isEvent() {}
 var (
 	ErrNothingToCompact = errors.New("nothing to compact")
 	errOverflow         = errors.New("context overflow")
+	// errSummarizerConfig marks a summarizer that cannot be used at all
+	// (unknown cheap model): auto-compaction skips those instead of killing
+	// a run the active model handles fine.
+	errSummarizerConfig = errors.New("summarizer unavailable")
 )
+
+// summarizerUnavailable reports whether a compaction failure is a
+// configuration problem — the cheap model or its credential is unusable —
+// rather than a stream failure. Auto-compaction skips these; only the
+// overflow path (which must compact or fail) surfaces them.
+func summarizerUnavailable(err error) bool {
+	var ee *config.EnvError
+	return errors.As(err, &ee) || errors.Is(err, errSummarizerConfig)
+}
 
 // Budget is the current model's token budget (§6).
 func (a *Agent) Budget() compact.Budget {
@@ -38,13 +52,20 @@ func (a *Agent) liveEntries() ([]compact.Entry, compact.Prev) {
 	a.mu.Unlock()
 	var prev compact.Prev
 	start := 0
-	if c, _ := session.LatestCompaction(entries); c != nil {
+	if c, idx := session.LatestCompaction(entries); c != nil {
 		prev = compact.Prev{Summary: c.Summary, Read: c.ReadFiles, Modified: c.ModifiedFiles}
+		found := false
 		for i, e := range entries {
 			if e.ID == c.FirstKeptEntryID {
-				start = i
+				start, found = i, true
 				break
 			}
+		}
+		if !found {
+			// The kept boundary is gone (trimmed file): resume from the
+			// compaction entry itself, as session.Messages does, instead of
+			// re-serializing already-summarized history.
+			start = idx
 		}
 	}
 	var out []compact.Entry
@@ -73,7 +94,7 @@ func (a *Agent) liveEntries() ([]compact.Entry, compact.Prev) {
 func (a *Agent) summarizer() (compact.Summarizer, int, provider.Model, error) {
 	m, ad, err := a.opts.Providers.Resolve(a.opts.Config.Model)
 	if err != nil {
-		return nil, 0, provider.Model{}, err
+		return nil, 0, provider.Model{}, fmt.Errorf("%w: %v", errSummarizerConfig, err)
 	}
 	maxTok := min(4096, m.MaxOutput)
 	capChars := max(0, (m.ContextWindow-maxTok-len(compact.SummarySystem)/4-512)*4)
@@ -128,19 +149,45 @@ func (a *Agent) Compact(ctx context.Context) error {
 // maybeCompact compacts when the estimate crosses the trigger and enforces
 // the loop guard: if the context is still over budget afterwards, the run
 // stops with an error naming the largest entries instead of compacting on.
+// A summarizer that cannot run at all (missing cheap-model credential,
+// unknown cheap model) only skips the automatic checkpoint — the active
+// model may handle the context fine, and a real provider overflow still
+// reports the problem through the compact-and-retry path.
 func (a *Agent) maybeCompact(ctx context.Context) error {
 	b := a.Budget()
 	if !b.Over(a.ContextTokens()) {
 		return nil
 	}
-	if err := a.Compact(ctx); err != nil && !errors.Is(err, ErrNothingToCompact) {
+	err := a.Compact(ctx)
+	switch {
+	case err == nil, errors.Is(err, ErrNothingToCompact):
+		// Fall through to the loop guard.
+	case summarizerUnavailable(err):
+		a.emit(Warning{Text: "auto-compaction skipped: " + err.Error()})
+		return nil
+	default:
 		return err
 	}
 	if now := a.ContextTokens(); b.Over(now) {
-		return fmt.Errorf("context still over budget after compaction (%d > %d tokens); largest entries: %s",
-			now, b.Trigger(), a.largestEntries(3))
+		return fmt.Errorf("context still over budget after compaction (%d > %d tokens); largest entries: %s%s",
+			now, b.Trigger(), a.largestEntries(3), a.fixedOverheadNote(now))
 	}
 	return nil
+}
+
+// fixedOverheadNote names the system-prompt + tool-schema overhead when it
+// dominates the estimate: largestEntries then points at near-empty transcript
+// entries, which would misattribute the overage to the history.
+func (a *Agent) fixedOverheadNote(estimate int) string {
+	live, _ := a.liveEntries()
+	n := 0
+	for _, e := range live {
+		n += compact.EntryTokens(e)
+	}
+	if ovh := estimate - n; ovh > 0 && ovh >= estimate/4 {
+		return fmt.Sprintf("; fixed overhead (system prompt + tools) ≈ %dk tokens", ovh/1000)
+	}
+	return ""
 }
 
 // largestEntries describes the n biggest live entries for the loop-guard
