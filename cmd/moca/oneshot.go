@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
+	"os"
 	"strings"
 
+	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
-	"github.com/adeotek/moca/internal/provider"
+	"github.com/adeotek/moca/internal/session"
 )
 
 func exitFor(ctx context.Context, err error) int {
@@ -25,53 +26,76 @@ func exitFor(ctx context.Context, err error) int {
 	}
 }
 
+func firstLine(s string) string {
+	s, _, _ = strings.Cut(s, "\n")
+	return s
+}
+
 func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stderr io.Writer) int {
-	reg, err := provider.NewRegistry(cfg, http.DefaultClient, func(n provider.RetryNotice) {
-		fmt.Fprintf(stderr, "retry %d/%d · %s (%v)\n", n.Attempt, n.Max, n.Wait.Round(100_000_000), n.Err)
-	})
+	wd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(stderr, "moca:", err)
-		return exitUsage
+		return exitRuntime
 	}
-	m, adapter, err := reg.Resolve(cfg.Model)
-	if err != nil {
-		fmt.Fprintln(stderr, "moca:", err)
-		return exitUsage
-	}
-	effort := m.DefaultEffort()
-	if o.Effort != "" {
-		e, _ := llm.ParseEffort(o.Effort)
-		effort = m.ClampEffort(e)
-	}
-	req := llm.Request{
-		Model:     m.ID,
-		System:    "You are moca, a coding agent.",
-		MaxTokens: m.MaxTokens(cfg.Context.ReserveTokens),
-		Effort:    effort,
-		Messages:  []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: o.Prompt}}}},
-	}
-	// stdout is the final message only (§12.5). Text is held back until the
-	// stream ends: a mid-stream retry replays the whole response, and bytes
-	// already written to a pipe cannot be taken back. The retry notice itself
-	// goes to stderr via the registry's notify callback.
-	var text strings.Builder
-	resp, err := adapter.Stream(ctx, req, func(e llm.Event) {
-		switch e.Type {
-		case llm.EventText:
-			text.WriteString(e.Text)
-		case llm.EventReset:
-			text.Reset()
+	var turnText strings.Builder
+	var lastStop llm.StopReason
+	emit := func(e agent.Event) {
+		switch e := e.(type) {
+		case agent.TextDelta:
+			turnText.WriteString(e.Text)
+		case agent.StreamReset:
+			turnText.Reset()
+		case agent.TurnEnd:
+			lastStop = e.Stop
+			if e.Stop == llm.StopToolUse && turnText.Len() > 0 {
+				fmt.Fprintln(stderr, "  "+strings.ReplaceAll(strings.TrimSpace(turnText.String()), "\n", "\n  "))
+			}
+			turnText.Reset()
+		case agent.ToolEnd:
+			if e.Result.IsError {
+				fmt.Fprintf(stderr, "✗ %s %s\n", e.Call.Name, firstLine(e.Result.Content))
+			} else {
+				fmt.Fprintf(stderr, "▸ %s %s\n", e.Call.Name, e.Result.Summary)
+			}
+		case agent.Retry:
+			fmt.Fprintf(stderr, "retry %d/%d · %s\n", e.Notice.Attempt, e.Notice.Max, e.Notice.Wait.Round(1e8))
+		case agent.Warning:
+			fmt.Fprintf(stderr, "warning: %s\n", e.Text)
 		}
-	})
-	io.WriteString(stdout, text.String()) // on failure: whatever the last attempt produced
+	}
+	yolo := o.YoloOn(cfg)
+	trusted := yolo
+	if o.Approve != nil {
+		trusted = *o.Approve
+	}
+	if yolo {
+		fmt.Fprintln(stderr, "yolo mode: all permission checks are off")
+	}
+	a, err := agent.Start(agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort,
+		Trusted: trusted, Yolo: yolo, Emit: emit, Slug: session.Slug(o.Prompt)})
+	if err != nil {
+		fmt.Fprintln(stderr, "moca:", err)
+		var se *agent.StartError
+		if errors.As(err, &se) {
+			return exitRuntime
+		}
+		return exitUsage
+	}
+	defer a.Session().Close()
+	out, err := a.Run(ctx, o.Prompt)
+	u, cost := a.Totals()
+	defer fmt.Fprintf(stderr, "tokens %d/%d · $%.4f\n", u.Input+u.CacheRead+u.CacheWrite, u.Output, cost)
 	if err != nil {
 		fmt.Fprintln(stderr, "moca:", err)
 		return exitFor(ctx, err)
 	}
-	io.WriteString(stdout, "\n")
-	u := resp.Usage
-	fmt.Fprintf(stderr, "tokens %d/%d · $%.4f\n", u.Input+u.CacheRead+u.CacheWrite, u.Output, m.CostOf(u))
-	switch resp.Stop {
+	fmt.Fprintln(stdout, out.Text)
+	if out.MaxSteps {
+		return exitMaxSteps
+	}
+	// Phase-1 contract kept: a final turn cut off at the token limit or
+	// refused by the model is not a success (the partial text is printed).
+	switch lastStop {
 	case llm.StopLength:
 		fmt.Fprintln(stderr, "moca: response truncated (token limit reached)")
 		return exitRuntime
