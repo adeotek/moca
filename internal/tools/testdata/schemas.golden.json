@@ -1,0 +1,187 @@
+[
+  {
+    "name": "read",
+    "description": "Read a text file. Returns lines as `N|content` plus a `[lines A-B of TOTAL]` footer. At most 2000 lines or 50K chars per call; use offset/limit to page through large files instead of re-reading them whole. Lines longer than 2000 chars are truncated. Binary files are refused. A file must be read before write/edit may change it.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path, relative to the workdir or absolute"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based first line (default 1)"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Max lines to return (default/max 2000)"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "write",
+    "description": "Create a file or replace its entire content. New files need no prior read; an existing file must have been read in this session and be unchanged on disk since. Parent directories are created. Prefer edit for changes to existing files.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path, relative to the workdir or absolute"
+        },
+        "content": {
+          "type": "string",
+          "description": "Full file content"
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "edit",
+    "description": "Replace old_string with new_string in a file that was read in this session. old_string must match exactly once (include surrounding lines to disambiguate) unless replace_all is set. If no exact match exists, one whitespace-insensitive match is accepted and new_string is re-indented to fit. Copy text without read's `N|` prefixes. Returns a unified diff.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path"
+        },
+        "old_string": {
+          "type": "string",
+          "description": "Exact text to replace (non-empty)"
+        },
+        "new_string": {
+          "type": "string",
+          "description": "Replacement text"
+        },
+        "replace_all": {
+          "type": "boolean",
+          "description": "Replace every exact occurrence (default false)"
+        }
+      },
+      "required": [
+        "path",
+        "old_string",
+        "new_string"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "shell",
+    "description": "Run a shell command (bash -c on Unix, PowerShell on Windows). Stateless: every call starts in the workdir, so use `cd dir \u0026\u0026 cmd` within one call. stdin is empty; stdout and stderr are merged; output over 30K chars keeps head and tail. Commands are checked against an allowlist; some need user approval and some are never allowed.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The command line"
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300,
+          "description": "Seconds (default 30)"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "search",
+    "description": "Search file contents recursively with a regular expression (Go RE2 syntax: no lookahead/lookbehind or backreferences; use (?i) for case-insensitive). Respects .gitignore/.ignore and skips hidden and binary files. Returns `path:line:text`, or only paths with files_only. At most 200 hits.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "RE2 regular expression"
+        },
+        "path": {
+          "type": "string",
+          "description": "Directory or file to search (default: workdir)"
+        },
+        "glob": {
+          "type": "string",
+          "description": "Filename filter, e.g. *.go or src/*.ts"
+        },
+        "files_only": {
+          "type": "boolean",
+          "description": "List matching files only"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "ls",
+    "description": "List one directory level, sorted. Directories end with `/`, symlinks with `@`. Hidden entries only with hidden=true. Use search to find files recursively.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Directory (default: workdir)"
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "Include dotfiles (default false)"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "mcp",
+    "description": "Use tools from configured MCP servers (listed in the system prompt). action=search finds tools by keyword (query, optional server); action=describe returns one tool's input schema (server, tool); action=call runs it (server, tool, args). Describe before the first call of a tool.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "search",
+            "describe",
+            "call"
+          ]
+        },
+        "server": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object",
+          "description": "Tool arguments for call"
+        },
+        "query": {
+          "type": "string",
+          "description": "Keywords for search"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    }
+  }
+]
