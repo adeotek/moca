@@ -140,7 +140,33 @@ var (
 	secretValue = regexp.MustCompile(`^(?:(?:Bearer|Basic) \S+|(?:sk-|ghp_|gho_|github_pat_|glpat-|xox[abp]-|AKIA)\S+)`)
 	varRef      = regexp.MustCompile(`^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$`)
 	nonAlnum    = regexp.MustCompile(`[^A-Z0-9]+`)
+	// userinfo matches URL credentials like https://user:token@host/mcp.
+	userinfo = regexp.MustCompile(`://[^/@\s:]+:[^/@\s]+@`)
+	// tokenish matches credential-shaped tokens anywhere in a value, with a
+	// length floor so benign strings ("sk-1") do not trip it: the same
+	// prefixes as secretValue plus scheme-style header values.
+	tokenish = regexp.MustCompile(`(?:(?:sk-|ghp_|gho_|github_pat_|glpat-|xox[abp]-|AKIA)[A-Za-z0-9_-]{8,}|(?:Bearer|Basic)\s+\S{8,})`)
 )
+
+// literalSecretFields lists the fields of a server carrying a
+// credential-shaped literal that RewriteSecrets does not rewrite (it only
+// touches env/headers): command, args, or URL userinfo. Such a server is
+// skipped by Plan rather than imported with the secret copied verbatim.
+func literalSecretFields(s config.MCPServer) []string {
+	var fields []string
+	if tokenish.MatchString(s.Command) {
+		fields = append(fields, "command")
+	}
+	for i, a := range s.Args {
+		if tokenish.MatchString(a) {
+			fields = append(fields, fmt.Sprintf("args[%d]", i))
+		}
+	}
+	if s.URL != "" && (userinfo.MatchString(s.URL) || tokenish.MatchString(s.URL)) {
+		fields = append(fields, "url")
+	}
+	return fields
+}
 
 func envName(server, key string) string {
 	return "MOCA_MCP_" + strings.Trim(nonAlnum.ReplaceAllString(strings.ToUpper(server), "_"), "_") + "_" +
@@ -180,13 +206,17 @@ func RewriteSecrets(server string, s config.MCPServer) (config.MCPServer, []EnvV
 }
 
 // Plan merges every source into the servers to add: first source wins on a
-// name conflict, names already in moca's config are skipped. The secret
-// rewrite runs on the winners only.
+// name conflict, names already in moca's config are skipped, servers whose
+// command line or URL embeds a literal secret are skipped (never imported
+// with the secret copied), and so are servers whose env/headers keys would
+// collide on one export variable name. The secret rewrite runs on the
+// winners only.
 func Plan(sources []Source, existing map[string]config.MCPServer, cwd string) (map[string]config.MCPServer, []EnvVar, []string) {
 	adds := map[string]config.MCPServer{}
 	var vars []EnvVar
 	var notes []string
 	origin := map[string]string{}
+	usedVars := map[string]bool{}
 	for _, src := range sources {
 		servers, n, err := ParseSource(src, cwd)
 		notes = append(notes, n...)
@@ -203,9 +233,27 @@ func Plan(sources []Source, existing map[string]config.MCPServer, cwd string) (m
 				notes = append(notes, fmt.Sprintf("skipped %s from %s: already taken from %s", name, src.Tool, o))
 				continue
 			}
+			if fields := literalSecretFields(s); len(fields) > 0 {
+				notes = append(notes, fmt.Sprintf("skipped %s: a literal secret appears in %s — replace it with an env: reference (or ${VAR}) in the source config first", name, strings.Join(fields, ", ")))
+				continue
+			}
 			s2, v := RewriteSecrets(name, s)
+			seen := map[string]bool{}
+			dup := ""
+			for _, e := range v {
+				if seen[e.Name] || usedVars[e.Name] {
+					dup = e.Name
+					break
+				}
+				seen[e.Name] = true
+			}
+			if dup != "" {
+				notes = append(notes, fmt.Sprintf("skipped %s: two secrets map to the export variable %s — rename one key so the names stay unique", name, dup))
+				continue
+			}
 			for i := range v {
 				v[i].Tool = src.Tool
+				usedVars[v[i].Name] = true
 			}
 			adds[name], origin[name] = s2, src.Tool
 			vars = append(vars, v...)

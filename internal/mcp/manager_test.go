@@ -3,6 +3,10 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,5 +104,112 @@ func TestUnknownServerAndTool(t *testing.T) {
 	}
 	if _, _, err := m.Call(context.Background(), "docs", "nope", nil); err == nil || !strings.Contains(err.Error(), "action=search") {
 		t.Fatal(err)
+	}
+}
+
+// A server-supplied error message containing "exited" must NOT restart the
+// server: the retry predicate keys on the transport sentinels, never on error
+// text (pass-1 M1 — a false restart also kills healthy in-flight siblings).
+func TestServerErrorTextDoesNotRestart(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "starts")
+	s := fakeServer("errtext")
+	s.Env["MOCA_FAKE_STARTS"] = f
+	ix, _ := LoadIndex(filepath.Join(t.TempDir(), "ix.json"))
+	m := NewManager(map[string]config.MCPServer{"docs": s}, time.Minute, ix, Options{BaseEnv: os.Environ()})
+	defer m.Close()
+	_, _, err := m.Call(context.Background(), "docs", "read_doc", nil)
+	if err == nil || !strings.Contains(err.Error(), "job exited") {
+		t.Fatalf("server error must surface: %v", err)
+	}
+	if b, _ := os.ReadFile(f); len(b) != 1 {
+		t.Fatalf("server error text must not restart the server (%d starts)", len(b))
+	}
+}
+
+// A 404 after a session exists is a dead session: the manager must close the
+// transport, restart the server and retry exactly once (pass-2 M3/L5).
+func TestHTTPRestartOnSessionExpired(t *testing.T) {
+	var mu sync.Mutex
+	sessions, inits := 0, 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(200)
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		var req struct {
+			ID     *int64 `json:"id"`
+			Method string `json:"method"`
+		}
+		json.Unmarshal(b, &req)
+		if req.ID == nil {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		var result any = map[string]any{}
+		switch req.Method {
+		case "initialize":
+			mu.Lock()
+			sessions++
+			inits++
+			sid := fmt.Sprintf("sess-%d", sessions)
+			mu.Unlock()
+			w.Header().Set("Mcp-Session-Id", sid)
+			result = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{}}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{"name": "echo", "description": "Echo",
+				"inputSchema": map[string]any{"type": "object"}, "annotations": map[string]any{"readOnlyHint": true}}}}
+		case "tools/call":
+			if r.Header.Get("Mcp-Session-Id") == "sess-1" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			result = map[string]any{"content": []map[string]any{{"type": "text", "text": "ok"}}}
+		}
+		resp, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(resp)
+	}))
+	t.Cleanup(srv.Close)
+	ix, _ := LoadIndex(filepath.Join(t.TempDir(), "ix.json"))
+	m := NewManager(map[string]config.MCPServer{"web": {URL: srv.URL}}, time.Minute, ix, Options{HTTP: srv.Client()})
+	defer m.Close()
+	res, _, err := m.Call(context.Background(), "web", "echo", nil)
+	if err != nil || len(res.Content) != 1 || res.Content[0].Text != "ok" {
+		t.Fatalf("expired session must self-heal: %v %v", res, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if inits != 2 {
+		t.Fatalf("expected exactly one restart (2 initializes), got %d", inits)
+	}
+}
+
+// Without an injected client, HTTP MCP calls must get a bounded client: the
+// TUI's run context is unbounded, so a wedged SSE response would otherwise
+// hang a call until the user interrupts (pass-2 M1).
+func TestDefaultHTTPClientHasTimeout(t *testing.T) {
+	ix, _ := LoadIndex(filepath.Join(t.TempDir(), "ix.json"))
+	m := NewManager(map[string]config.MCPServer{"web": {URL: "https://x"}}, time.Minute, ix, Options{})
+	if m.o.HTTP == nil || m.o.HTTP.Timeout != defaultHTTPTimeout {
+		t.Fatalf("HTTP MCP calls need a bounded client: %+v", m.o.HTTP)
+	}
+}
+
+// After Close, a call must fail rather than start a server nothing will stop
+// (pass-2 L4).
+func TestClosedManagerDoesNotRespawn(t *testing.T) {
+	s, starts := countingServer(t)
+	ix, _ := LoadIndex(filepath.Join(t.TempDir(), "ix.json"))
+	m := NewManager(map[string]config.MCPServer{"docs": s}, time.Minute, ix, Options{BaseEnv: os.Environ()})
+	if _, _, err := m.Call(context.Background(), "docs", "read_doc", nil); err != nil {
+		t.Fatal(err)
+	}
+	m.Close()
+	if _, _, err := m.Call(context.Background(), "docs", "read_doc", nil); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("calls after Close must fail, not respawn: %v", err)
+	}
+	if starts() != 1 {
+		t.Fatalf("no server may start after Close (%d starts)", starts())
 	}
 }

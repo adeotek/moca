@@ -6,7 +6,19 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
+	"strconv"
+)
+
+// errTransportDead and errSessionExpired are the transport-dead sentinels:
+// Manager.Call retries exactly once on these, never on server-supplied error
+// text (a server error message containing "exited" must not restart a healthy
+// server).
+var (
+	errTransportDead  = errors.New("MCP transport is dead")
+	errSessionExpired = errors.New("session expired")
 )
 
 type request struct {
@@ -30,6 +42,30 @@ type rpcError struct {
 }
 
 func (e *rpcError) Error() string { return fmt.Sprintf("MCP error %d: %s", e.Code, e.Message) }
+
+// responseID parses a JSON-RPC response id. moca sends int64 ids; a server
+// that echoes them as strings ("12") is still understood. null, fractions
+// and arbitrary strings do not parse.
+func responseID(raw *json.RawMessage) (int64, bool) {
+	if raw == nil {
+		return 0, false
+	}
+	var v any
+	if json.Unmarshal(*raw, &v) != nil {
+		return 0, false
+	}
+	switch id := v.(type) {
+	case float64:
+		if id == math.Trunc(id) {
+			return int64(id), true
+		}
+	case string:
+		if n, err := strconv.ParseInt(id, 10, 64); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
 
 // transport is one in-flight-capable message pipe: Call blocks for the
 // response, Notify does not.

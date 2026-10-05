@@ -82,7 +82,7 @@ func (t *httpTransport) Call(ctx context.Context, method string, params any) (js
 	expired := resp.StatusCode == http.StatusNotFound && t.session != ""
 	t.mu.Unlock()
 	if expired {
-		return nil, fmt.Errorf("mcp server %s: session expired", t.name)
+		return nil, fmt.Errorf("mcp server %s: %w", t.name, errSessionExpired)
 	}
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -94,8 +94,7 @@ func (t *httpTransport) Call(ctx context.Context, method string, params any) (js
 		if json.Unmarshal([]byte(data), &m) != nil || m.Method != "" || m.ID == nil {
 			return nil
 		}
-		var got int64
-		if json.Unmarshal(*m.ID, &got) == nil && got == id {
+		if got, ok := responseID(m.ID); ok && got == id {
 			out = m
 			return errFound
 		}
@@ -104,17 +103,19 @@ func (t *httpTransport) Call(ctx context.Context, method string, params any) (js
 	ct, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if ct == "text/event-stream" {
 		if err := readEvents(resp.Body, match); err != nil && !errors.Is(err, errFound) {
-			return nil, fmt.Errorf("mcp server %s: %w", t.name, err)
+			return nil, fmt.Errorf("mcp server %s: %w (%w)", t.name, err, errTransportDead)
 		}
 	} else {
 		b, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("mcp server %s: %w (%w)", t.name, err, errTransportDead)
 		}
 		match(string(b))
 	}
 	if out.ID == nil {
-		return nil, fmt.Errorf("mcp server %s: no response for %s", t.name, method)
+		// The response ended without our id (aborted SSE stream, empty body):
+		// the session is no longer trustworthy — restart and retry once.
+		return nil, fmt.Errorf("mcp server %s: no response for %s: %w", t.name, method, errTransportDead)
 	}
 	if out.Error != nil {
 		return nil, out.Error
@@ -131,13 +132,25 @@ func (t *httpTransport) Call(ctx context.Context, method string, params any) (js
 	return out.Result, nil
 }
 
+// Notify posts a notification (no id). The status is checked: a session
+// dropped between initialize and notifications/initialized must not read as
+// success.
 func (t *httpTransport) Notify(ctx context.Context, method string, params any) error {
 	resp, err := t.post(ctx, request{JSONRPC: "2.0", Method: method, Params: params})
 	if err != nil {
-		return err
+		return fmt.Errorf("mcp server %s: %w", t.name, err)
 	}
+	defer resp.Body.Close()
 	io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)) //nolint:errcheck // keep the connection reusable
-	resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		t.mu.Lock()
+		expired := resp.StatusCode == http.StatusNotFound && t.session != ""
+		t.mu.Unlock()
+		if expired {
+			return fmt.Errorf("mcp server %s: %w", t.name, errSessionExpired)
+		}
+		return fmt.Errorf("mcp server %s: HTTP %d for %s", t.name, resp.StatusCode, method)
+	}
 	return nil
 }
 

@@ -7,11 +7,23 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/tools"
 )
+
+// cutRunes returns s shortened to at most n bytes on a rune boundary.
+func cutRunes(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
 
 // ProxyTool is the `mcp` tool (§10.5): a fixed ~200-token schema in front of
 // every configured server's tools, which are never injected into the prompt.
@@ -78,7 +90,7 @@ func (p *ProxyTool) Run(ctx context.Context, env *tools.Env, input json.RawMessa
 		for _, h := range hits {
 			d := h.Description
 			if len(d) > 160 {
-				d = d[:157] + "..."
+				d = cutRunes(d, 157) + "..."
 			}
 			fmt.Fprintf(&sb, "%s/%s — %s\n", h.Server, h.Tool, strings.Join(strings.Fields(d), " "))
 		}

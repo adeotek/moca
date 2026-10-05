@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/tools"
@@ -110,7 +111,7 @@ func startStdio(_ context.Context, name string, s config.MCPServer, baseEnv []st
 	go t.readLoop(stdout)
 	go func() {
 		werr := cmd.Wait()
-		t.fail(fmt.Errorf("server %s exited (%v): %s", name, werr, logs.tail()))
+		t.fail(fmt.Errorf("%w: server %s exited (%v): %s", errTransportDead, name, werr, logs.tail()))
 		close(t.done)
 	}()
 	return t, nil
@@ -151,8 +152,8 @@ func (t *stdioTransport) readLoop(r io.Reader) {
 		if m.ID == nil {
 			continue
 		}
-		var id int64
-		if json.Unmarshal(*m.ID, &id) != nil {
+		id, ok := responseID(m.ID)
+		if !ok {
 			continue
 		}
 		t.mu.Lock()
@@ -190,19 +191,24 @@ func (t *stdioTransport) Call(ctx context.Context, method string, params any) (j
 	if err := t.write(request{JSONRPC: "2.0", ID: &id, Method: method, Params: params}); err != nil {
 		t.mu.Lock()
 		delete(t.pending, id)
+		dead := t.dead
 		t.mu.Unlock()
-		// The pipe is gone: the server died. Wait for the exit to be seen so
-		// the caller gets the exit error (with the stderr tail) rather than a
-		// bare EPIPE.
-		select {
-		case <-t.done:
+		if dead == nil {
+			// The pipe is gone: the server died. Wait for the exit to be
+			// observed so the caller gets the recorded error (with the stderr
+			// tail) rather than a bare EPIPE or a context error.
+			select {
+			case <-t.done:
+			case <-ctx.Done():
+			}
 			t.mu.Lock()
-			dead := t.dead
+			dead = t.dead
 			t.mu.Unlock()
-			return nil, dead
-		case <-ctx.Done():
-			return nil, ctx.Err()
 		}
+		if dead != nil {
+			return nil, dead
+		}
+		return nil, ctx.Err()
 	}
 	select {
 	case <-ctx.Done():
@@ -223,10 +229,15 @@ func (t *stdioTransport) Notify(_ context.Context, method string, params any) er
 }
 
 // Close kills the whole process group (a server may spawn children) and
-// waits for the exit to be observed. It is idempotent.
+// waits for the exit to be observed. It is idempotent, and the wait is
+// bounded: a child stuck in uninterruptible sleep must not hang shutdown
+// (Agent.Close runs it at session end).
 func (t *stdioTransport) Close() error {
 	t.stdin.Close()
 	tools.KillProcessGroup(t.cmd)
-	<-t.done
+	select {
+	case <-t.done:
+	case <-time.After(5 * time.Second):
+	}
 	return nil
 }

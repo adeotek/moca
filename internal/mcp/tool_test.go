@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/tools"
@@ -86,5 +87,33 @@ func TestProxyArgErrors(t *testing.T) {
 	}
 	if r := runP(p, &tools.Env{}, map[string]any{"action": "search", "server": "zzz"}); !r.IsError || !strings.Contains(r.Content, "configured: docs") {
 		t.Fatal(r.Content)
+	}
+}
+
+func TestCutRunesSafe(t *testing.T) {
+	if got := cutRunes("hello", 10); got != "hello" {
+		t.Fatal(got)
+	}
+	if got := cutRunes("é"+strings.Repeat("x", 200), 1); got != "" {
+		t.Fatalf("a cut inside a rune must back off: %q", got)
+	}
+	if got := cutRunes("日本語", 4); got != "日" {
+		t.Fatalf("%q", got)
+	}
+}
+
+// A long multibyte description must not be cut mid-rune in search output
+// (pass-1 L4 / pass-2 L3).
+func TestProxySearchDescriptionRuneSafe(t *testing.T) {
+	s := fakeServer("")
+	servers := map[string]config.MCPServer{"docs": s}
+	ix, _ := LoadIndex(filepath.Join(t.TempDir(), "ix.json"))
+	ix.Put("docs", ConfigHash(s), []Tool{{Name: "read_doc", Description: strings.Repeat("é", 100) + strings.Repeat("x", 100)}})
+	m := NewManager(servers, time.Minute, ix, Options{BaseEnv: os.Environ()})
+	t.Cleanup(m.Close)
+	p := NewTool(m, servers)
+	r := runP(p, &tools.Env{}, map[string]any{"action": "search"})
+	if r.IsError || !utf8.ValidString(r.Content) || !strings.Contains(r.Content, "...") {
+		t.Fatalf("search output must stay valid UTF-8 and truncate: %q", r.Content)
 	}
 }

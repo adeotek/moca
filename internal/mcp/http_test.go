@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -94,5 +95,39 @@ func TestHTTPTransport(t *testing.T) {
 			t.Fatalf("headers: %v", last)
 		}
 		tr.Close()
+	}
+}
+
+// Notify must check the HTTP status: a session dropped between initialize and
+// notifications/initialized surfaces as session-expired, not success
+// (pass-2 L1).
+func TestHTTPNotifyStatusChecked(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(200)
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		var req struct {
+			ID *int64 `json:"id"`
+		}
+		json.Unmarshal(b, &req)
+		if req.ID == nil {
+			w.WriteHeader(http.StatusNotFound) // the session is gone
+			return
+		}
+		w.Header().Set("Mcp-Session-Id", "sess-1")
+		resp, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"protocolVersion": "2025-06-18"}})
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(resp)
+	}))
+	t.Cleanup(srv.Close)
+	tr, err := startHTTP("web", config.MCPServer{URL: srv.URL}, srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = initialize(context.Background(), tr)
+	if err == nil || !errors.Is(err, errSessionExpired) {
+		t.Fatalf("a 404 on notifications/initialized must surface as session-expired: %v", err)
 	}
 }

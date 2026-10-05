@@ -40,11 +40,14 @@ type Index struct {
 }
 
 // LoadIndex never fails on a missing or corrupt file: both mean "no index
-// yet" and the servers will be indexed on demand.
+// yet" and the servers will be indexed on demand. A corrupt file that parses
+// a prefix must not serve a half-index, so an unmarshal error resets to empty.
 func LoadIndex(path string) (*Index, error) {
 	ix := &Index{path: path, Servers: map[string]IndexEntry{}}
 	if b, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(b, ix)
+		if json.Unmarshal(b, ix) != nil {
+			ix.Servers = map[string]IndexEntry{}
+		}
 		if ix.Servers == nil {
 			ix.Servers = map[string]IndexEntry{}
 		}

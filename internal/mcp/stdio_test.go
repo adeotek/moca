@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -71,6 +72,10 @@ func TestHelperProcess(t *testing.T) {
 				result = map[string]any{"tools": page1}
 			}
 		case "tools/call":
+			if mode == "errtext" {
+				out.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{"code": -32000, "message": "job exited"}})
+				continue
+			}
 			var p struct {
 				Name      string         `json:"name"`
 				Arguments map[string]any `json:"arguments"`
@@ -148,5 +153,26 @@ func TestFilterEnv(t *testing.T) {
 	env, err := serverEnv([]string{"PATH=/bin"}, map[string]string{"TOKEN": "env:MOCA_T_TOK", "MODE": "x"})
 	if err != nil || !slices.Contains(env, "TOKEN=sekret") || !slices.Contains(env, "MODE=x") {
 		t.Fatal(env, err)
+	}
+}
+
+// The write-error branch must surface the recorded exit error with its stderr
+// tail (wrapping errTransportDead), never a bare EPIPE or a ctx error — the
+// manager's restart-once predicate keys on the sentinel (pass-1 M2).
+func TestStdioWriteEPIPE(t *testing.T) {
+	tr, err := startStdio(context.Background(), "fake", fakeServer("die"), os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := tr.(*stdioTransport)
+	st.stdin.Close() // the pipe is gone: write() must fail
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = tr.Call(ctx, "initialize", nil)
+	if err == nil || !strings.Contains(err.Error(), "missing API token") {
+		t.Fatalf("write failure must surface the exit error: %v", err)
+	}
+	if !errors.Is(err, errTransportDead) {
+		t.Fatalf("the exit error must wrap errTransportDead: %v", err)
 	}
 }

@@ -3,15 +3,23 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/adeotek/moca/internal/config"
 )
+
+// defaultHTTPTimeout bounds a whole HTTP MCP request (connect + body). The
+// transport has no per-read stall timeout (ctx bounds it), so without this a
+// server that accepts a POST, answers text/event-stream and wedges would hang
+// a call until the user interrupts; the TUI's run context is unbounded.
+const defaultHTTPTimeout = 15 * time.Minute
 
 type Options struct {
 	HTTP    *http.Client
@@ -40,11 +48,14 @@ type Manager struct {
 	ix      *Index
 	o       Options
 	servers map[string]*state
+	// closed is set by Close: a call failing during shutdown must not respawn
+	// a server nothing would ever stop.
+	closed atomic.Bool
 }
 
 func NewManager(servers map[string]config.MCPServer, idle time.Duration, ix *Index, o Options) *Manager {
 	if o.HTTP == nil {
-		o.HTTP = http.DefaultClient
+		o.HTTP = &http.Client{Timeout: defaultHTTPTimeout}
 	}
 	m := &Manager{idle: idle, ix: ix, o: o, servers: map[string]*state{}}
 	for n, s := range servers {
@@ -75,6 +86,9 @@ func (m *Manager) get(name string) (*state, error) {
 func (m *Manager) ensure(ctx context.Context, name string, st *state) error {
 	if st.cl != nil {
 		return nil
+	}
+	if m.closed.Load() {
+		return errors.New("mcp manager is closed")
 	}
 	var tr transport
 	var err error
@@ -227,7 +241,13 @@ func (m *Manager) Call(ctx context.Context, server, tool string, args json.RawMe
 		// A dead transport is shared: closing it here also fails any other
 		// in-flight call on this server, which then spends its own single
 		// retry. Errors, not panics — acceptable for v1.
-		retry := err != nil && attempt == 0 && (strings.Contains(err.Error(), "session expired") || strings.Contains(err.Error(), "exited"))
+		// The retry keys on the transport's own sentinels, never on
+		// server-supplied error text (a server error containing "exited"
+		// must not restart a healthy server), and never during shutdown.
+		retry := err != nil && attempt == 0 && (errors.Is(err, errSessionExpired) || errors.Is(err, errTransportDead))
+		if retry && m.closed.Load() {
+			retry = false
+		}
 		if retry && st.cl == cl {
 			cl.t.Close()
 			st.cl = nil
@@ -262,6 +282,7 @@ func (m *Manager) IndexAll(ctx context.Context) (map[string]int, map[string]erro
 }
 
 func (m *Manager) Close() {
+	m.closed.Store(true)
 	for _, st := range m.servers {
 		st.mu.Lock()
 		if st.timer != nil {

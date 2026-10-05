@@ -1,11 +1,30 @@
 package mcp
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/adeotek/moca/internal/config"
 )
+
+// A corrupt index file must never serve a half-parsed map (pass-1 L2).
+func TestLoadIndexCorruptResets(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "ix.json")
+	// "a" decodes before "b" fails: pre-fix this left a usable-looking entry.
+	os.WriteFile(p, []byte(`{"servers":{"a":{"configHash":"h","tools":[{"name":"x"}]},"b":"bad"}}`), 0o600)
+	ix, err := LoadIndex(p)
+	if err != nil || len(ix.Servers) != 0 {
+		t.Fatalf("%v %v", ix.Servers, err)
+	}
+	if _, ok := ix.Valid("a", "h"); ok {
+		t.Fatal("a half-parsed entry must not be served")
+	}
+	os.WriteFile(p, []byte(`not json`), 0o600)
+	if ix, _ := LoadIndex(p); len(ix.Servers) != 0 {
+		t.Fatal("a garbage file must yield an empty index")
+	}
+}
 
 func TestIndexPersistAndHash(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "mcp-index.json")

@@ -78,22 +78,30 @@ func runMCPImport(o Options, cfg config.Config, cfgPath string, stdin io.Reader,
 		fmt.Fprintln(stdout, "aborted")
 		return exitOK
 	}
+	added, kept := 0, 0
 	for _, name := range names {
 		b, err := json.Marshal(adds[name])
 		if err != nil {
 			fmt.Fprintln(stdout, "moca:", err)
 			return exitRuntime
 		}
-		added, err := config.SetObjectEntry(cfgPath, []string{"mcp", "servers"}, name, string(b))
+		ok, err := config.SetObjectEntry(cfgPath, []string{"mcp", "servers"}, name, string(b))
 		if err != nil {
 			fmt.Fprintf(stdout, "moca: %s: %v\n", name, err)
 			return exitRuntime
 		}
-		if !added {
+		if ok {
+			added++
+		} else {
+			kept++
 			fmt.Fprintf(stdout, "  %s: already present, kept\n", name)
 		}
 	}
-	fmt.Fprintf(stdout, "wrote %d server(s) to %s\n", len(names), cfgPath)
+	if kept > 0 {
+		fmt.Fprintf(stdout, "wrote %d server(s) to %s (%d already present, kept)\n", added, cfgPath, kept)
+	} else {
+		fmt.Fprintf(stdout, "wrote %d server(s) to %s\n", added, cfgPath)
+	}
 	return exitOK
 }
 
