@@ -106,7 +106,7 @@ func (a *Agent) summarizer() (compact.Summarizer, int, provider.Model, error) {
 		if err != nil {
 			return "", resp.Usage, err
 		}
-		return textOf(resp.Message), resp.Usage, nil
+		return llm.TextOf(resp.Message), resp.Usage, nil
 	}
 	return fn, capChars, m, nil
 }
