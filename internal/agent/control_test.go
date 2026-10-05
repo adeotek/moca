@@ -136,3 +136,36 @@ func TestContextTokensAnchored(t *testing.T) {
 		t.Fatalf("anchor + delta: %d", a.ContextTokens())
 	}
 }
+
+// A provider that reports no usage must not anchor the estimate at ~0.
+func TestContextTokensZeroUsageFallsBack(t *testing.T) {
+	s := newScript(t, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	a, _, _ := startTestWith(t, s, "", "")
+	a.Run(context.Background(), strings.Repeat("x", 4000))
+	if got := a.ContextTokens(); got < 1000 {
+		t.Fatalf("no usage reported: expected the chars/4 fallback, got %d", got)
+	}
+}
+
+// /clear carries the model; hard mode exits (its saved pair is carried).
+func TestCarryModel(t *testing.T) {
+	s := newScript(t)
+	a, _, _ := startTestWith(t, s, `"modelHard":"fake/m2"`, `"m2":{"contextWindow":65536}`)
+	if m, e := a.Carry(); m != "fake/m" || e != a.Effort() {
+		t.Fatalf("carry %s %s", m, e)
+	}
+	if err := a.SetModel("fake/m2", llm.EffortLow); err != nil {
+		t.Fatal(err)
+	}
+	if m, e := a.Carry(); m != "fake/m2" || e != a.Effort() {
+		t.Fatalf("carry after switch %s %s", m, e)
+	}
+	a2, _, _ := startTestWith(t, newScript(t), `"modelHard":"fake/m2"`, `"m2":{"contextWindow":65536}`)
+	before, beforeE := a2.Carry()
+	if _, err := a2.ToggleHard(); err != nil {
+		t.Fatal(err)
+	}
+	if m, e := a2.Carry(); m != before || e != beforeE {
+		t.Fatalf("hard mode carries the saved pair, got %s %s", m, e)
+	}
+}

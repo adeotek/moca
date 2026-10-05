@@ -53,6 +53,12 @@ func AbbrevHome(p, home string) string {
 	return p
 }
 
+// gitStatusArgs: --no-optional-locks keeps the status bar's refresh from
+// taking index.lock while the agent's own git commands run.
+func gitStatusArgs(dir string) []string {
+	return []string{"--no-optional-locks", "-C", dir, "status", "--porcelain"}
+}
+
 // GitBranch reports the branch, dirty flag and whether dir is a git repo.
 // The git calls are bounded: a hanging git (credential prompt, stalled NFS)
 // must not leave the status bar stale forever.
@@ -63,6 +69,6 @@ func GitBranch(dir string) (string, bool, bool) {
 	if err != nil {
 		return "", false, false
 	}
-	st, _ := exec.CommandContext(ctx, "git", "-C", dir, "status", "--porcelain").Output()
+	st, _ := exec.CommandContext(ctx, "git", gitStatusArgs(dir)...).Output()
 	return strings.TrimSpace(string(b)), len(strings.TrimSpace(string(st))) > 0, true
 }

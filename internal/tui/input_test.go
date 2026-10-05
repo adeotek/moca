@@ -160,3 +160,22 @@ func TestCollapseUsesExactOffset(t *testing.T) {
 		t.Fatal("text round-trip")
 	}
 }
+
+// Terminals and Windows sources deliver CR or CRLF newlines; they are text,
+// not control bytes, and must stay expandable chips / plain lines.
+func TestPasteNormalizesLineEndings(t *testing.T) {
+	in := NewInput()
+	in.Paste("a\r\nb\r\nc")
+	if in.Buffer() != "a\nb\nc" {
+		t.Fatalf("%q", in.Buffer())
+	}
+	in = NewInput()
+	in.Paste(strings.Repeat("l\r\n", 60))
+	if in.Display() != "[paste 60 lines #1]" {
+		t.Fatal(in.Display())
+	}
+	in.ToggleChips()
+	if !strings.HasPrefix(in.Buffer(), "l\nl\n") || strings.Contains(in.Buffer(), "\r") {
+		t.Fatal("chip must expand, with normalized newlines")
+	}
+}

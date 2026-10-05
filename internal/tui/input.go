@@ -36,13 +36,20 @@ func (in *Input) Insert(s string)    { in.buf += s }
 
 func lineCount(s string) int { return strings.Count(strings.TrimSuffix(s, "\n"), "\n") + 1 }
 
-// Paste inserts verbatim; a paste over the line threshold or with control
-// bytes becomes a chip (the full content is kept until send).
-func (in *Input) Paste(s string) {
+// Paste appends the paste at the end of the buffer (see Prepare for the
+// cursor-relative form the glue uses).
+func (in *Input) Paste(s string) { in.buf += in.Prepare(s) }
+
+// Prepare registers a paste and returns the text to insert at the cursor:
+// the content verbatim, or a chip marker for a paste over the line threshold
+// or with control bytes (the full content is kept until send). CR and CRLF
+// newlines (Windows sources, some terminals) are normalized to LF first —
+// they are text, not control bytes.
+func (in *Input) Prepare(s string) string {
+	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
 	unsafe := hasControl(s)
 	if !unsafe && lineCount(s) <= chipThreshold {
-		in.buf += s
-		return
+		return s
 	}
 	n := lineCount(s)
 	unit := "lines"
@@ -61,7 +68,7 @@ func (in *Input) Paste(s string) {
 	}
 	p := &paste{marker: marker, content: s, unsafe: unsafe, at: -1}
 	in.pastes = append(in.pastes, p)
-	in.buf += p.marker
+	return p.marker
 }
 
 func (in *Input) markerExists(m string) bool {

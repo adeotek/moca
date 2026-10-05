@@ -110,3 +110,28 @@ func TestAppendStringTruncatedConfig(t *testing.T) {
 		}
 	}
 }
+
+// A config managed by a dotfile tool is a symlink: the edit must go through
+// it, not replace it, and an existing file's mode is kept.
+func TestAppendStringThroughSymlinkKeepsLinkAndMode(t *testing.T) {
+	d := t.TempDir()
+	real := filepath.Join(d, "real.jsonc")
+	link := filepath.Join(d, "link.jsonc")
+	os.WriteFile(real, []byte(`{"a":1}`), 0o644)
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	if err := AppendString(link, []string{"shell", "allow"}, "python3", nil); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the symlink was replaced by a regular file")
+	}
+	b, _ := os.ReadFile(real)
+	if !strings.Contains(string(b), `"python3"`) {
+		t.Fatalf("target not updated: %s", b)
+	}
+	if fi, _ := os.Stat(real); fi.Mode().Perm() != 0o644 {
+		t.Fatalf("mode changed to %v", fi.Mode().Perm())
+	}
+}

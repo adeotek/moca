@@ -187,8 +187,11 @@ func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, 
 	}
 	// Anchor the §6 estimate after everything this turn appended: UsageTokens
 	// covers the request plus this response (text and calls).
+	// A provider that reports no usage (an endpoint ignoring include_usage)
+	// cannot anchor anything: leave the chars/4 fallback in charge.
 	a.mu.Lock()
-	a.anchorTokens, a.anchorEntries, a.anchorValid = compact.UsageTokens(resp.Usage), len(a.entries), true
+	n := compact.UsageTokens(resp.Usage)
+	a.anchorTokens, a.anchorEntries, a.anchorValid = n, len(a.entries), n > 0
 	a.mu.Unlock()
 	a.emit(TurnEnd{Message: resp.Message, Usage: resp.Usage, Cost: cost, Stop: resp.Stop})
 	return resp, calls, nil

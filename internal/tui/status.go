@@ -3,7 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"unicode/utf8"
+
+	"charm.land/lipgloss/v2"
 
 	"github.com/adeotek/moca/internal/llm"
 )
@@ -23,7 +24,8 @@ type StatusInfo struct {
 	Transient    string
 }
 
-// RenderStatus renders the bar; it is never wider than width and never wraps.
+// RenderStatus renders the bar; it is never wider than width terminal cells
+// (wide runes count 2) and never wraps.
 // Shrink order: drop cwd, then branch, then in/out, then truncate the model.
 func RenderStatus(s StatusInfo, width int) string {
 	branch := "-"
@@ -63,21 +65,35 @@ func RenderStatus(s StatusInfo, width int) string {
 		}
 		return strings.Join(parts, " · ")
 	}
-	for drop := 1; drop <= 3 && utf8.RuneCountInString(render()) > width; drop++ {
+	for drop := 1; drop <= 3 && lipgloss.Width(render()) > width; drop++ {
 		for i := range fields {
 			if fields[i].drop == drop {
 				fields[i].text = ""
 			}
 		}
 	}
-	if over := utf8.RuneCountInString(render()) - width; over > 0 {
-		r := []rune(model)
-		keep := max(1, len(r)-over-1)
-		fields[2].text = string(r[:keep]) + "…"
+	if over := lipgloss.Width(render()) - width; over > 0 {
+		// Shorten the model by `over` cells plus one for the ellipsis.
+		fields[2].text = truncCells(model, max(1, lipgloss.Width(model)-over-1)) + "…"
 	}
 	out := render()
-	if r := []rune(out); len(r) > width {
-		out = string(r[:max(0, width-1)]) + "…"
+	if lipgloss.Width(out) > width {
+		out = truncCells(out, max(0, width-1)) + "…"
 	}
 	return out
+}
+
+// truncCells cuts s to at most w terminal cells (wide runes count 2).
+func truncCells(s string, w int) string {
+	var sb strings.Builder
+	used := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if used+rw > w {
+			break
+		}
+		sb.WriteRune(r)
+		used += rw
+	}
+	return sb.String()
 }

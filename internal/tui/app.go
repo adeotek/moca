@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -51,7 +52,23 @@ type model struct {
 	kbdEnhanced   bool
 	hintShown     bool
 	lastAssistant string
+	// lastTyped is when a key last edited the draft; approval keys are ignored
+	// shortly after, so a user mid-sentence does not answer a prompt that pops
+	// up under their fingers.
+	lastTyped time.Time
+	// shellBusy: a `!` command is in flight; its note must not land in the
+	// middle of a run (or in the session /clear is about to replace).
+	shellBusy bool
+	// held: scrollback output produced while the alt-screen pager is open.
+	// tea.Println is lost there, so it is released when the pager closes.
+	held []tea.Cmd
+	// runDone closes when the run goroutine returns (quit waits for the abort
+	// to reach the transcript).
+	runDone chan struct{}
 }
+
+// approvalIdle is the typing pause required before a/A/d answer a prompt.
+const approvalIdle = 700 * time.Millisecond
 
 var (
 	dim = lipgloss.NewStyle().Faint(true)
@@ -126,11 +143,14 @@ func (m *model) startRun(text string) tea.Cmd {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.running, m.cancel = true, cancel
+	done := make(chan struct{})
+	m.runDone = done
 	m.live.Reset()
 	m.thinking.Reset()
 	m.toolBusy = ""
 	a := m.agent
 	return tea.Sequence(printlnContent("› "+text), func() tea.Msg {
+		defer close(done)
 		out, err := a.Run(ctx, text)
 		return runDoneMsg{out: out, err: err}
 	})
@@ -151,21 +171,23 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case hintCheckMsg:
 		if !m.kbdEnhanced && !m.hintShown {
 			m.hintShown = true
-			return m, println("hint: this terminal can't report shift+enter; use alt+enter or ctrl+j for a newline")
+			return m, m.hold(println("hint: this terminal can't report shift+enter; use alt+enter or ctrl+j for a newline"))
 		}
 		return m, nil
 	case tea.PasteMsg:
 		if m.pager == nil {
-			m.input.Paste(msg.Content)
-			m.syncTextarea()
+			// Insert at the cursor like typed text; a chip's marker goes there too.
+			m.ta.InsertString(m.input.Prepare(msg.Content))
+			m.pullTextarea()
+			m.lastTyped = time.Now()
 		}
 		return m, nil
 	case tea.KeyPressMsg:
 		return m, m.handleKey(msg)
 	case agentEventMsg:
-		return m, m.handleAgent(msg.e)
+		return m, m.hold(m.handleAgent(msg.e))
 	case runDoneMsg:
-		return m, m.handleRunDone(msg)
+		return m, m.hold(m.handleRunDone(msg))
 	case approvalMsg:
 		m.approval = &msg
 		return m, nil
@@ -173,15 +195,54 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status.Branch, m.status.Dirty, m.status.Git = msg.branch, msg.dirty, msg.git
 		return m, nil
 	case shellDoneMsg:
-		return m, m.handleShellDone(msg)
+		return m, m.hold(m.handleShellDone(msg))
 	}
 	return m, nil
+}
+
+// hold defers a scrollback print while the pager (alt-screen) is open.
+func (m *model) hold(cmd tea.Cmd) tea.Cmd {
+	if m.pager == nil || cmd == nil {
+		return cmd
+	}
+	m.held = append(m.held, cmd)
+	return nil
+}
+
+// release returns the held output as one ordered command.
+func (m *model) release() tea.Cmd {
+	if len(m.held) == 0 {
+		return nil
+	}
+	c := tea.Sequence(m.held...)
+	m.held = nil
+	return c
+}
+
+// quit cancels an in-flight run (its abort is appended before exit) and exits.
+func (m *model) quit() tea.Cmd {
+	if m.cancel != nil {
+		m.cancel()
+	}
+	return tea.Quit
+}
+
+// waitRun gives the cancelled run goroutine a moment to record its abort.
+func (m *model) waitRun(d time.Duration) {
+	if m.runDone == nil {
+		return
+	}
+	select {
+	case <-m.runDone:
+	case <-time.After(d):
+	}
 }
 
 func (m *model) forward(k tea.KeyPressMsg) tea.Cmd {
 	ta, cmd := m.ta.Update(k)
 	m.ta = ta
 	m.pullTextarea()
+	m.lastTyped = time.Now()
 	return cmd
 }
 
@@ -189,47 +250,23 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	if m.pager != nil {
 		if k.String() == "ctrl+c" {
 			if m.input.CtrlC(time.Now()) {
-				return tea.Quit
+				return m.quit()
 			}
 			return nil
 		}
 		open, cmd := m.pager.update(k)
 		if !open {
 			m.pager = nil
+			return tea.Batch(cmd, m.release())
 		}
 		return cmd
 	}
 	if m.approval != nil {
-		switch k.String() {
-		case "a":
-			m.approval.reply <- tools.AllowOnce
-			m.approval = nil
-		case "A":
-			if !m.approval.q.CanAlways {
-				return nil // not offered for ask-every-time commands
-			}
-			q, reply := m.approval.q, m.approval.reply
-			m.approval = nil
-			reply <- tools.AllowAlways
-			if q.Kind == "shell" {
-				path := m.opts.ConfigPath
-				if path == "" {
-					path = config.ConfigFile()
-				}
-				if err := config.AppendString(path, []string{"shell", "allow"}, q.Subject, config.DefaultShellAllow); err != nil {
-					return printlnContent("error: allow-always not saved: " + err.Error())
-				}
-				return printlnContent(fmt.Sprintf("always allowing %q (saved to %s)", q.Subject, path))
-			}
-		case "d", "esc":
-			m.approval.reply <- tools.Deny
-			m.approval = nil
-		default:
-			// The approval keys go to the prompt (or nowhere); any other key
-			// still edits the draft — the input box is never dead.
-			return m.forward(k)
+		if cmd, handled := m.approvalKey(k); handled {
+			return cmd
 		}
-		return nil
+		// Anything else (typing, enter, ctrl+c…) behaves as usual: the input
+		// box is never dead while a prompt is shown.
 	}
 	switch k.String() {
 	case "enter":
@@ -245,10 +282,7 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "ctrl+c":
 		if m.input.CtrlC(time.Now()) {
-			if m.cancel != nil {
-				m.cancel()
-			}
-			return tea.Quit
+			return m.quit()
 		}
 		m.syncTextarea()
 		return nil
@@ -277,6 +311,55 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	return m.forward(k)
 }
 
+// approvalKey answers the shown prompt. a/A/d only count after a typing pause
+// (a user mid-sentence must not answer — or persist an allow-always — with
+// letters meant for the draft); esc always denies. handled=false lets the key
+// fall through to normal input handling.
+func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
+	switch k.String() {
+	case "esc":
+		m.approval.reply <- tools.Deny
+		m.approval = nil
+		return nil, true
+	case "a", "A", "d":
+		if time.Since(m.lastTyped) < approvalIdle {
+			return nil, false
+		}
+	}
+	switch k.String() {
+	case "a":
+		m.approval.reply <- tools.AllowOnce
+		m.approval = nil
+		return nil, true
+	case "d":
+		m.approval.reply <- tools.Deny
+		m.approval = nil
+		return nil, true
+	case "A":
+		if !m.approval.q.CanAlways {
+			return nil, true // not offered for ask-every-time commands
+		}
+		q, reply := m.approval.q, m.approval.reply
+		m.approval = nil
+		reply <- tools.AllowAlways
+		if q.Kind != "shell" {
+			return nil, true
+		}
+		// The running session (and a /clear restart) honours it now; the file
+		// makes it permanent.
+		m.start.Config.Shell.Allow = append(slices.Clone(m.start.Config.Shell.Allow), q.Subject)
+		path := m.opts.ConfigPath
+		if path == "" {
+			path = config.ConfigFile()
+		}
+		if err := config.AppendString(path, []string{"shell", "allow"}, q.Subject, config.DefaultShellAllow); err != nil {
+			return printlnContent("error: allow-always not saved: " + err.Error()), true
+		}
+		return printlnContent(fmt.Sprintf("always allowing %q (saved to %s)", q.Subject, path)), true
+	}
+	return nil, false
+}
+
 func (m *model) openPager(it Item) {
 	m.pager = newPager(it, max(20, m.width), max(6, m.height))
 }
@@ -301,6 +384,9 @@ func (m *model) submit() tea.Cmd {
 			}
 			return printlnContent("↳ queued: " + firstLineOf(parsed.Text))
 		}
+		if m.shellBusy {
+			return m.refuseBusy()
+		}
 		return m.startRun(parsed.Text)
 	case KindCommand:
 		return m.runCommand(parsed)
@@ -311,6 +397,10 @@ func (m *model) submit() tea.Cmd {
 			// rebuild guarantees. `!!` (local-only) stays available.
 			return printlnContent("finish or interrupt the run first (esc) — !! runs locally now")
 		}
+		if m.shellBusy {
+			return m.refuseBusy()
+		}
+		m.shellBusy = true
 		return m.shellCmd(false, parsed.Text)
 	case KindShellLocal:
 		return m.shellCmd(true, parsed.Text)
@@ -320,10 +410,17 @@ func (m *model) submit() tea.Cmd {
 
 // refuseRunning guards commands that mutate the running conversation.
 func (m *model) refuseRunning() tea.Cmd {
+	if m.shellBusy {
+		return m.refuseBusy()
+	}
 	if !m.running {
 		return nil
 	}
 	return println("finish or interrupt the run first (esc)")
+}
+
+func (m *model) refuseBusy() tea.Cmd {
+	return println("a ! command is still running — wait for it to finish")
 }
 
 func (m *model) runCommand(c Parsed) tea.Cmd {
@@ -435,7 +532,14 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 func (m *model) restartSession() tea.Cmd {
 	// Start the replacement first: on failure the old session must stay
 	// open and wired, or the next submit appends onto a closed writer.
-	a, err := agent.Start(m.start)
+	// The replacement keeps the model/effort in use (hard mode exits to its
+	// saved pair); m.start.Config already holds the commands approved with [A].
+	opts := m.start
+	if m.agent != nil {
+		mo, ef := m.agent.Carry()
+		opts.Model, opts.Effort = mo, string(ef)
+	}
+	a, err := agent.Start(opts)
 	if err != nil {
 		return printlnContent("error: " + err.Error())
 	}
@@ -443,6 +547,7 @@ func (m *model) restartSession() tea.Cmd {
 		m.agent.Session().Close()
 	}
 	m.agent = a
+	m.start = opts
 	m.items = Items{}
 	m.live.Reset()
 	m.thinking.Reset()
@@ -462,6 +567,9 @@ func (m *model) shellCmd(local bool, cmd string) tea.Cmd {
 }
 
 func (m *model) handleShellDone(msg shellDoneMsg) tea.Cmd {
+	if !msg.local {
+		m.shellBusy = false
+	}
 	var lines []string
 	lines = append(lines, "$ "+Sanitize(msg.cmd))
 	if msg.err != nil {
@@ -672,13 +780,34 @@ func Run(ctx context.Context, o AppOptions) error {
 	}
 	m.agent, m.start = a, o.Start
 	m.refreshStatus()
-	p = tea.NewProgram(m, tea.WithContext(ctx))
+	// main's signal context already delivers SIGINT/SIGTERM; Bubble Tea's own
+	// handler would race it at shutdown (and can deadlock Program.Run).
+	p = tea.NewProgram(m, tea.WithContext(ctx), tea.WithoutSignalHandler())
 	pipe.start(func(msg tea.Msg) { p.Send(msg) })
 	_, err = p.Run()
+	// Cancel any run still going and let it record its abort before the
+	// session closes (the program is done, so the model is ours alone).
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.waitRun(2 * time.Second)
 	close(pipe.stop)
-	a.Session().Close()
-	if errors.Is(err, tea.ErrProgramKilled) {
+	m.agent.Session().Close()
+	return runResult(ctx, err)
+}
+
+// runResult maps Program.Run's error to the caller's: a clean quit is nil;
+// SIGINT/SIGTERM (the parent context) surface as cancellation so the CLI exits
+// 130; a recovered panic stays an error. Bubble Tea reports all of these
+// wrapped in ErrProgramKilled, so that sentinel alone says nothing.
+func runResult(ctx context.Context, err error) error {
+	switch {
+	case err == nil:
 		return nil
+	case errors.Is(err, tea.ErrProgramPanic):
+		return err
+	case ctx.Err() != nil:
+		return ctx.Err()
 	}
 	return err
 }

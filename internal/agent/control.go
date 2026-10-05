@@ -74,6 +74,16 @@ func (a *Agent) SetEffort(e llm.Effort) (llm.Effort, error) {
 
 func (a *Agent) HardOn() bool { return a.hard != nil }
 
+// Carry is the model and effort a replacement session (/clear) should start
+// with: the current pair, or the saved pair while hard mode is on (the new
+// session starts outside hard mode, so /hard restores correctly).
+func (a *Agent) Carry() (string, llm.Effort) {
+	if a.hard != nil {
+		return a.hard.model, a.hard.effort
+	}
+	return a.model.Qualified(), a.effort
+}
+
 // ToggleHard switches to modelHard at high effort (clamped) and back to the
 // saved pair on the next call (§11).
 func (a *Agent) ToggleHard() (bool, error) {

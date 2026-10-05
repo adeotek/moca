@@ -69,3 +69,21 @@ func TestNormalizeToolID(t *testing.T) {
 		t.Fatal("deterministic and bounded")
 	}
 }
+
+// Redacted reasoning from another model has nothing worth keeping: its
+// placeholder text must not reach the new model as "[prior reasoning]".
+func TestTransformDropsRedactedForeignThinking(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: llm.BlockThinking, Text: "[Reasoning redacted]", Signature: "OPAQUE", Model: "anthropic/claude-x", Redacted: true},
+			{Type: llm.BlockText, Text: "answer"}}},
+	}
+	if got := TransformHistory(msgs, "anthropic/claude-x")[1].Content; len(got) != 2 || !got[0].Redacted {
+		t.Fatal("same model keeps the redacted block verbatim")
+	}
+	got := TransformHistory(msgs, "opencode-go/glm-5.3")[1].Content
+	if len(got) != 1 || got[0].Text != "answer" {
+		t.Fatalf("foreign redacted thinking must be dropped: %+v", got)
+	}
+}

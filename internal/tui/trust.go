@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
@@ -9,9 +10,10 @@ import (
 // trustModel is the one-time project-trust prompt on first open of an
 // untrusted workdir that has project resources (§7).
 type trustModel struct {
-	dir    string
-	answer bool
-	done   bool
+	dir       string
+	answer    bool
+	done      bool
+	cancelled bool // ctrl+c / esc: abort startup, decide nothing
 }
 
 func (m *trustModel) Init() tea.Cmd { return nil }
@@ -22,8 +24,11 @@ func (m *trustModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "y", "Y":
 			m.answer, m.done = true, true
 			return m, tea.Quit
-		case "n", "N", "enter", "esc", "ctrl+c":
+		case "n", "N", "enter":
 			m.done = true
+			return m, tea.Quit
+		case "esc", "ctrl+c":
+			m.done, m.cancelled = true, true
 			return m, tea.Quit
 		}
 	}
@@ -31,14 +36,24 @@ func (m *trustModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *trustModel) View() tea.View {
-	return tea.NewView(fmt.Sprintf("Trust project resources in %s? (.moca/, AGENTS.md/CLAUDE.md can steer the agent) [y/N] ", m.dir))
+	return tea.NewView(fmt.Sprintf("Trust project resources in %s? (.moca/, AGENTS.md/CLAUDE.md can steer the agent) [y/N] ", Sanitize(m.dir)))
 }
 
-// RunTrustPrompt asks once; the caller saves the decision (trust.json).
+// result maps the finished prompt to the decision; a cancel is reported as
+// context.Canceled (exit 130) and must not be saved as an answer.
+func (m *trustModel) result() (bool, error) {
+	if m.cancelled {
+		return false, fmt.Errorf("trust prompt cancelled: %w", context.Canceled)
+	}
+	return m.answer, nil
+}
+
+// RunTrustPrompt asks once; the caller saves the decision (trust.json). ctrl+c
+// or esc cancels startup with an error wrapping context.Canceled.
 func RunTrustPrompt(dir string) (bool, error) {
 	m := &trustModel{dir: dir}
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		return false, err
 	}
-	return m.answer, nil
+	return m.result()
 }

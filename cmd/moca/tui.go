@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -61,8 +62,10 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 	yolo := o.YoloOn(cfg)
 	trusted, err := decideTrust(o, wd, yolo)
 	if err != nil {
-		fmt.Fprintln(stderr, "moca:", err)
-		return exitRuntime
+		if !errors.Is(err, context.Canceled) { // ctrl+c at the trust prompt: quiet 130
+			fmt.Fprintln(stderr, "moca:", err)
+		}
+		return exitFor(ctx, err)
 	}
 	var pdirs []skills.Dir
 	if trusted {
@@ -75,7 +78,9 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 		ConfigPath: cfgPath, Prompts: skills.LoadPrompts(pdirs), Home: home,
 	})
 	if err != nil {
-		fmt.Fprintln(stderr, "moca:", err)
+		if ctx.Err() == nil { // SIGINT/SIGTERM: no message, just 130
+			fmt.Fprintln(stderr, "moca:", err)
+		}
 		return exitFor(ctx, err)
 	}
 	return exitOK

@@ -23,8 +23,8 @@ func NormalizeToolID(id string) string {
 
 // TransformHistory adapts stored history for the target model (§3): thinking
 // blocks replay unchanged only to the exact (qualified) model that produced
-// them, everything else becomes a "[prior reasoning]" text block (empty ones
-// are dropped); tool-call ids are normalized consistently on both sides. The
+// them, everything else becomes a "[prior reasoning]" text block (empty and
+// redacted ones are dropped); tool-call ids are normalized consistently on both sides. The
 // input is never mutated — the transcript keeps the originals.
 func TransformHistory(msgs []llm.Message, target string) []llm.Message {
 	var out []llm.Message
@@ -35,7 +35,7 @@ func TransformHistory(msgs []llm.Message, target string) []llm.Message {
 			case llm.BlockThinking:
 				if c.Model == target {
 					blocks = append(blocks, c)
-				} else if c.Text != "" {
+				} else if c.Text != "" && !c.Redacted {
 					blocks = append(blocks, llm.ContentBlock{Type: llm.BlockText, Text: "[prior reasoning]\n" + c.Text})
 				}
 			case llm.BlockToolUse:

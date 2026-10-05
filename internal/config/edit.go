@@ -160,9 +160,19 @@ func rawComma(gap []byte) int {
 // AppendString appends value to the string array at keyPath, creating the
 // file and any missing intermediate objects as needed ("allow-always"
 // persistence, §7). Comments, formatting and everything else stay
-// byte-identical; the file is written atomically after a .bak copy, and a
+// byte-identical; the file (through a symlink, keeping its mode) is written
+// atomically after a .bak copy, and a
 // value already present is a no-op.
 func AppendString(path string, keyPath []string, value string, init []string) error {
+	// A config managed by a dotfile tool is a symlink: edit the target, so the
+	// link survives and the managed copy is the one that changes.
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	mode := os.FileMode(0o600)
+	if fi, err := os.Stat(path); err == nil {
+		mode = fi.Mode().Perm()
+	}
 	src, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -228,7 +238,10 @@ func AppendString(path string, keyPath []string, value string, init []string) er
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o600); err != nil {
+	if err := os.WriteFile(tmp, out, mode); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, mode); err != nil { // WriteFile's mode is masked by umask
 		return err
 	}
 	return os.Rename(tmp, path)
