@@ -38,6 +38,52 @@ type StartOptions struct {
 	Slug    string
 }
 
+// build constructs everything Start and Resume share: registry, jail, shell
+// checker, tool env, snapshot store and the agent itself. Start pre-computes
+// the system prompt and passes nil prior entries; Resume passes the stored
+// prompt verbatim and the transcript it read back.
+func build(o StartOptions, jailRoot string, w *session.Writer, system, model string, effort llm.Effort, prior []session.Entry, snapshotDir string) (*Agent, error) {
+	cfg := o.Config
+	if o.Model != "" {
+		cfg.Model = o.Model
+	}
+	hc := o.HTTP
+	if hc == nil {
+		hc = http.DefaultClient
+	}
+	emit := o.Emit
+	reg, err := provider.NewRegistry(cfg, hc, func(n provider.RetryNotice) {
+		if emit != nil {
+			emit(Retry{n})
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	builtinDir, err := skills.ExtractBuiltins(config.DataDir())
+	if err != nil {
+		return nil, &StartError{err}
+	}
+	globalSkills := filepath.Join(config.ConfigDir(), "skills")
+	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir})
+	if err != nil {
+		return nil, &StartError{err}
+	}
+	snaps := session.NewSnapshots(w, snapshotDir, prior)
+	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(cfg.Shell.Allow, jail, runtime.GOOS),
+		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
+		ShellEnv: tools.ShellEnv(os.Environ(), config.EnvRefs(cfg))}
+	a, err := New(Options{Config: cfg, Providers: reg, Tools: tools.NewRegistry(tools.Builtins()...), Env: env,
+		Session: w, Snapshots: snaps, System: system, Model: model, Effort: effort, Emit: emit, Prior: prior})
+	if err != nil {
+		return nil, err
+	}
+	if o.Yolo {
+		a.applyYolo(true)
+	}
+	return a, nil
+}
+
 func Start(o StartOptions) (*Agent, error) {
 	cfg := o.Config
 	if o.Model != "" {
@@ -111,17 +157,5 @@ func Start(o StartOptions) (*Agent, error) {
 	if err != nil {
 		return nil, &StartError{err}
 	}
-	snaps := session.NewSnapshots(w, filepath.Join(config.DataDir(), "snapshot"), nil)
-	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(cfg.Shell.Allow, jail, runtime.GOOS),
-		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
-		ShellEnv: tools.ShellEnv(os.Environ(), config.EnvRefs(cfg))}
-	a, err := New(Options{Config: cfg, Providers: reg, Tools: tools.NewRegistry(tools.Builtins()...), Env: env,
-		Session: w, Snapshots: snaps, System: system, Model: cfg.Model, Effort: effort, Emit: o.Emit})
-	if err != nil {
-		return nil, err
-	}
-	if o.Yolo {
-		a.applyYolo(true)
-	}
-	return a, nil
+	return build(o, jail.Root(), w, system, cfg.Model, effort, nil, filepath.Join(config.DataDir(), "snapshot"))
 }

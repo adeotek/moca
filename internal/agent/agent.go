@@ -100,6 +100,10 @@ func (a *Agent) Model() provider.Model        { return a.model }
 func (a *Agent) Effort() llm.Effort           { return a.effort }
 func (a *Agent) Totals() (llm.Usage, float64) { return a.usage, a.cost }
 func (a *Agent) Session() *session.Writer     { return a.opts.Session }
+
+// Workdir is the session's jail root — the workdir the session was started
+// in; a resumed session keeps its original one.
+func (a *Agent) Workdir() string { return a.opts.Env.Root }
 func (a *Agent) emit(e Event) {
 	if a.opts.Emit != nil {
 		a.opts.Emit(e)
