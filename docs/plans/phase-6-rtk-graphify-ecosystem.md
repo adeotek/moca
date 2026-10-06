@@ -555,3 +555,24 @@ re-check-on-bump contract.
   parser revision) and pass-2 L8 (rtk `smart --model` future risk — the
   table's re-check-on-bump contract covers it).
 
+## Review fixes (2026-10-06 — review pass 3)
+
+Pass 3 (`docs/reviews/2026-10-06-phase-6-rtk-graphify-ecosystem-pass-3.md`,
+Approve with fixes: 1H/0M/2L). All three fixed with tests that fail against
+the pre-fix sources:
+
+- **H1 — `rtkSelf` waved native-binary proxies through.** `rtk find -exec …`
+  executes (probed on rtk 0.51.0), so with `shell.allow: ["rtk","git"]` it ran
+  arbitrary programs unprompted; `rg --pre`, `ast-grep -U` and `tree -o` are the
+  same shape. `rtkSelf` now holds only rtk's own read-only machinery; `ls tree
+  find grep rg ast-grep wc diff` fall through to the default branch (the sub
+  word is classified as the wrapped command), on Unix and the Windows mirror.
+  `TestRtkUnwrap` gained a narrow-allowlist ladder. On the default allowlist
+  only `rtk tree` / `rtk ast-grep` newly ask. (`wc`/`diff` were moved
+  conservatively: both are allowlisted by default, so it costs nothing.)
+- **L2 — config-mutating subcommands ran silently.** `init config trust
+  untrust learn telemetry` now classify the sub word (so they ask once as
+  `init`, `config`, …); docs no longer call them read-only.
+- **L3 — frontmatter block headers.** `>+`, `|+`, `>2`, `> # note` are
+  recognised block scalars; a trailing ` # comment` after a plain or quoted
+  value is dropped as in YAML (`TestFrontmatterBlockIndicatorsAndComments`).

@@ -24,7 +24,7 @@ func TestRtkUnwrap(t *testing.T) {
 		"env rtk git status":             {}, // rtk under a transparent wrapper
 		"rtk proxy rtk git status":       {}, // nested rtk stays unwrapped
 		"rtk read big.log":               {},
-		"rtk ls src":                     {},
+		"rtk ls src":                     {need: []string{"ls"}}, // native proxy: ls must be allowlisted
 		"rtk gain":                       {},
 		"rtk test":                       {}, // bare: rtk errors with "command is required"
 		"rtk test -- go test ./...":      {},
@@ -81,6 +81,42 @@ func TestRtkUnwrap(t *testing.T) {
 		}
 		if !slices.Equal(need, want.need) || !slices.Equal(every, want.every) {
 			t.Errorf("%q: need=%v every=%v, want need=%v every=%v", cmd, need, every, want.need, want.every)
+		}
+	}
+	// Native-binary proxies forward their flags to the real tool, so they must
+	// pass the allowlist exactly as when run directly (review pass 3): with a
+	// narrow allowlist `rtk find -exec` must not run programs for free. rtk's
+	// own read-only machinery stays plain `rtk`; the config-mutating
+	// subcommands ask once.
+	narrow := NewShell([]string{"rtk", "git"}, j, "linux")
+	narrowCases := map[string][]string{
+		"rtk find . -exec python3 x ;":        {"find"},
+		"rtk find . -delete":                  {"find"},
+		"rtk rg --pre ./x pat .":              {"rg"},
+		"rtk grep -r pat .":                   {"grep"},
+		"rtk ls":                              {"ls"},
+		"rtk tree -o out.txt":                 {"tree"},
+		"rtk ast-grep run -p a -r b -U .":     {"ast-grep"},
+		"rtk wc -l x":                         {"wc"},
+		"rtk diff a b":                        {"diff"},
+		"rtk -v find . -name x":               {"find"},
+		"RTK Find . -name x":                  {"RTK", "Find"},
+		"rtk init -g":                         {"init"},
+		"rtk trust -y":                        {"trust"},
+		"rtk config":                          {"config"},
+		"rtk learn --write-rules":             {"learn"},
+		"rtk telemetry disable":               {"telemetry"},
+		"rtk read big.log":                    nil,
+		"rtk gain":                            nil,
+		"rtk json j.json":                     nil,
+		"rtk smart f.go":                      nil,
+		"rtk env":                             nil,
+		"rtk git status | rtk find . -type f": {"find"},
+	}
+	for cmd, want := range narrowCases {
+		need, every, err := narrow.Check(cmd)
+		if err != nil || len(every) != 0 || !slices.Equal(need, want) {
+			t.Errorf("narrow %q: need=%v every=%v err=%v; want need=%v", cmd, need, every, err, want)
 		}
 	}
 	noRtk := NewShell([]string{"git"}, j, "linux")

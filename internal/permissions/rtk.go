@@ -28,20 +28,23 @@ import (
 // that must be allowlisted.
 
 var (
-	// rtkSelf: rtk runs no user-named program — either its own machinery or a
-	// fixed read-only utility used with flags and paths only (the same trust
-	// the analyser gives those utilities when run directly). Allowed as
-	// plain `rtk`.
+	// rtkSelf: rtk's own read-only machinery — it runs no other program and
+	// changes no configuration. Allowed as plain `rtk`.
+	//
+	// Deliberately NOT here, so the sub word is classified as a wrapped
+	// command name like any other (review pass 3):
+	//   - native-binary proxies — ls, tree, find, grep, rg, ast-grep, wc,
+	//     diff. rtk forwards their flags to the real tool (`rtk find … -exec
+	//     …` executes, `rg --pre`, `ast-grep -U`, `tree -o` write or run), so
+	//     they must pass the user's allowlist exactly as when run directly;
+	//   - rtk subcommands that write configuration or other agents' hook
+	//     files — init, config, trust, untrust, learn, telemetry — so they
+	//     ask once instead of running silently.
 	rtkSelf = map[string]bool{
-		// rtk's own machinery (stats, config, hooks, history analysis).
-		"gain": true, "init": true, "config": true, "help": true, "telemetry": true,
-		"trust": true, "untrust": true, "verify": true, "learn": true, "discover": true,
+		"gain": true, "help": true, "verify": true, "discover": true,
 		"session": true, "cc-economics": true, "hook": true, "hook-audit": true,
 		"recall": true, "rewrite": true, "pipe": true,
-		// fixed read-only utilities — flags and paths only.
-		"read": true, "ls": true, "tree": true, "find": true, "grep": true, "rg": true,
-		"ast-grep": true, "json": true, "deps": true, "diff": true, "log": true,
-		"wc": true, "env": true, "smart": true,
+		"read": true, "json": true, "deps": true, "log": true, "env": true, "smart": true,
 	}
 
 	// rtkRun: the first positional word (or the word after `--`) is a command

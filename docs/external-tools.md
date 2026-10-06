@@ -24,8 +24,17 @@ command:
   are refused — the analyser cannot see inside them; on rtk 0.51.0 the
   string form is the option-*before*-command shape, which is the refused
   one (a later `--shell …` is literal argv — spy-probed).
-- rtk's own read-only subcommands (`rtk read`, `rtk ls`, `rtk tree`,
-  `rtk find`, `rtk grep`, `rtk gain`, …) are allowed as plain `rtk`.
+- rtk's own read-only machinery (`rtk read`, `rtk gain`, `rtk json`,
+  `rtk deps`, `rtk log`, `rtk smart`, …) is allowed as plain `rtk`.
+- Subcommands that proxy a native binary (`rtk ls`, `rtk tree`, `rtk find`,
+  `rtk grep`, `rtk rg`, `rtk ast-grep`, `rtk wc`, `rtk diff`) are checked as
+  that binary too: rtk forwards the tool's flags (`rtk find … -exec …` runs
+  the command, `rg --pre`, `ast-grep -U`, `tree -o` run or write), so they
+  must pass the allowlist exactly as when run directly. On the default
+  allowlist only `tree` and `ast-grep` ask.
+- Subcommands that write configuration or other agents' hook files
+  (`rtk init`, `config`, `trust`, `untrust`, `learn`, `telemetry`) ask once
+  (as `init`, `config`, …) instead of running silently.
 
 The subcommand classes are captured from the real CLI (rtk 0.51.0) in
 `internal/permissions/rtk.go` — re-check them when the documented rtk

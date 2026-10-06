@@ -148,4 +148,12 @@ func TestWindowsBestEffort(t *testing.T) {
 	if need, every, err := s2.Check("rtk docker ps"); err != nil || len(need) != 0 || len(every) != 0 {
 		t.Fatal("rtk docker:", need, every, err)
 	}
+	// Native proxies and config-mutating subcommands are classified as the
+	// wrapped command on Windows too (review pass 3).
+	if need, _, _ := s2.Check("rtk find . -exec x ;"); !slices.Equal(need, []string{"find"}) {
+		t.Fatal("rtk find:", need)
+	}
+	if need, _, _ := s2.Check("rtk init -g"); !slices.Equal(need, []string{"init"}) {
+		t.Fatal("rtk init:", need)
+	}
 }
