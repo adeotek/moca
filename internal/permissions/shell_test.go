@@ -170,6 +170,12 @@ func TestShellBraceExpansionAndCaseVariants(t *testing.T) {
 		"{1..3}":               {deny: "non-literal"},
 		"echo > {a,b}":         {deny: "non-literal"},
 		"env {rm,x} y":         {deny: "non-literal"},
+		`{"sudo",ls}`:          {deny: "non-literal"}, // quotes split the brace group across parts
+		`{r'm',x} y`:           {deny: "non-literal"},
+		`r{"m",} y`:            {deny: "non-literal"},
+		`/bin/r["m"] x`:        {deny: "non-literal"},
+		`{rm","x}`:             {need: []string{"{rm,x}"}}, // a quoted comma does not expand
+		`'{rm,x}' y`:           {need: []string{"{rm,x}"}}, // fully quoted: literal
 		"SUDO ls":              {deny: "hard-deny"},
 		"Sudo ls":              {deny: "hard-deny"},
 		"MKFS.ext4 /dev/x":     {deny: "hard-deny"},

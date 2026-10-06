@@ -111,7 +111,7 @@ func literalSafe(v string, unquoted bool) bool {
 // (expansions, escapes, globs, ANSI-C strings) report false so callers fail
 // closed.
 func wordLit(w *syntax.Word) (string, bool) {
-	var sb strings.Builder
+	var sb, unq strings.Builder // unq: the unquoted text only, across all parts
 	for _, p := range w.Parts {
 		switch x := p.(type) {
 		case *syntax.Lit:
@@ -119,6 +119,7 @@ func wordLit(w *syntax.Word) (string, bool) {
 				return "", false
 			}
 			sb.WriteString(x.Value)
+			unq.WriteString(x.Value)
 		case *syntax.SglQuoted:
 			if x.Dollar {
 				return "", false // $'…' decodes escapes
@@ -142,7 +143,23 @@ func wordLit(w *syntax.Word) (string, bool) {
 			return "", false
 		}
 	}
+	// Brace and bracket patterns can span parts — `{"rm",x}` is the unquoted
+	// text `{,x}` around a quoted word, and bash still expands it — so they
+	// are judged on the word's whole unquoted text, not part by part.
+	if !patternSafe(unq.String()) {
+		return "", false
+	}
 	return sb.String(), true
+}
+
+// patternSafe reports whether the unquoted text of a word contains no brace
+// expansion (`{a,b}`, `{1..3}`) or bracket glob (`[ab]`).
+func patternSafe(u string) bool {
+	if strings.Contains(u, "{") && strings.Contains(u, "}") &&
+		(strings.Contains(u, ",") || strings.Contains(u, "..")) {
+		return false
+	}
+	return !(strings.Contains(u, "[") && strings.Contains(u, "]"))
 }
 
 // optSpec describes a wrapper command's options so unwrap can find the

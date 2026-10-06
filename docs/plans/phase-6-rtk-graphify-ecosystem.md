@@ -583,4 +583,10 @@ the pre-fix sources:
   `classify` matched hard-deny / refused / ask-every-time case-sensitively, so
   `SUDO`/`RM` slipped past on case-insensitive filesystems — it now lowercases
   for those classes (`TestShellBraceExpansionAndCaseVariants`).
+  A follow-up security review of that fix found a parser differential: the
+  brace/bracket check ran per literal part, so a quote-split group such as
+  `{"sudo",ls}` or `/bin/r["m"]` (unquoted text `{,ls}` / `[]` around a quoted
+  word, still expanded by bash) passed. `wordLit` now judges the whole
+  unquoted text of the word (`patternSafe`); rows added to
+  `TestShellBraceExpansionAndCaseVariants`.
 
