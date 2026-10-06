@@ -2349,3 +2349,10 @@ Pass 3 (`docs/reviews/2026-10-06-phase-5-mcp-lazy-proxy-pass-3.md`, post-fix re-
 - **L8** — the stdio env filter compares names case-insensitively on Windows and keeps the variables Windows needs to run a process (`SystemRoot`, `USERPROFILE`, `APPDATA`, …). `TestKeepNameWindows` (logic only; not run on Windows).
 - **L9** — SPECS §10.5: the garbled zero-start sentence and the `glpat-` prefix are corrected, and the new behaviours are documented.
 - **Not changed, recorded:** `Describe` on an already-running server does not reset the idle timer (the timer arms at start and after every call, as documented); a stdout line longer than 64 MiB ends the reader (a bounded edge, noted in pass 1).
+
+## Review fixes — pass 4 (2026-10-06)
+
+Pass 4 (`docs/reviews/2026-10-06-phase-5-mcp-lazy-proxy-pass-4.md`, maintainer re-review of the pass-3 fix commit `9179ee0`): **Approve with fixes — 0 High / 0 Medium / 2 Low.** All pass-3 findings verified as fixed in code with their tests; the reworked exit path re-checked for new races (concurrent `pr.Close()`/reader, single-sender channel discipline, bounded `Close`); suite green (325 tests, race-clean, `internal/mcp` stable over `-count=4`), CI green on `9179ee0`. Both new Lows fixed:
+
+- **L1** — the `mcp.idleTimeout` validation message said "must be > 0 seconds" while only negative values are rejected (0 = the default 600). Message corrected.
+- **L2** — `serverEnv` appended the server's explicit `env` entries after the inherited ones, so an explicit `PATH`/`HOME`/`TERM`/`XDG_*` override produced a duplicate name — and duplicate env names resolve platform-dependently (glibc keeps the first), silently defeating the override. The inherited entry is now removed first (case-insensitive on Windows). `TestServerEnvExplicitEntryReplacesInherited` fails against the pre-fix code and passes after.

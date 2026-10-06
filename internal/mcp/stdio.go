@@ -55,6 +55,16 @@ func serverEnv(base []string, extra map[string]string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		// An explicit entry replaces the inherited one of the same name:
+		// duplicate names resolve platform-dependently (glibc keeps the
+		// first), so appending an override would be silently ignored.
+		env = slices.DeleteFunc(env, func(kv string) bool {
+			bk, _, _ := strings.Cut(kv, "=")
+			if runtime.GOOS == "windows" {
+				return strings.EqualFold(bk, k)
+			}
+			return bk == k
+		})
 		env = append(env, k+"="+r)
 	}
 	return env, nil
