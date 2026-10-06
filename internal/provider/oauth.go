@@ -8,7 +8,6 @@ package provider
 // 30-day refresh tokens. Anthropic ships api_key only by policy.
 
 import (
-	"bufio"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -61,8 +60,12 @@ type OAuthConfig struct {
 // pasted code comes from, how to open a browser, and whether the local
 // callback is unreachable (SSH/container/WSL/no display).
 type LoginIO struct {
-	Out             io.Writer
-	In              io.Reader
+	Out io.Writer
+	In  io.Reader
+	// Lines, when set, is the paste source instead of In. A caller that
+	// prompts again after Login (moca login's "switch auth?") shares one
+	// LineReader so an unanswered paste read never swallows that answer.
+	Lines           *LineReader
 	OpenURL         func(string) error // nil → don't try
 	Headless        bool
 	WaitBeforePaste time.Duration // default 120s
@@ -116,7 +119,12 @@ func Login(ctx context.Context, c OAuthConfig, saved *Token, lio LoginIO, hc *ht
 			res = pastedResult{Err: errors.New("the login callback carried no authorization code")}
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		io.WriteString(w, "<html><body>Login complete — you can close this tab.</body></html>")
+		if res.Err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, "<html><body>Login failed — return to the terminal for details.</body></html>")
+		} else {
+			io.WriteString(w, "<html><body>Login complete — you can close this tab.</body></html>")
+		}
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
@@ -128,8 +136,12 @@ func Login(ctx context.Context, c OAuthConfig, saved *Token, lio LoginIO, hc *ht
 	go srv.Serve(ln)
 	defer srv.Close()
 
-	if lio.In != nil {
-		go pasteReader(lio, state, resCh, done)
+	lines := lio.Lines
+	if lines == nil && lio.In != nil {
+		lines = NewLineReader(lio.In)
+	}
+	if lines != nil {
+		go pasteReader(lio, lines, state, resCh, done)
 	}
 
 	if lio.Headless {
@@ -193,10 +205,10 @@ func Login(ctx context.Context, c OAuthConfig, saved *Token, lio LoginIO, hc *ht
 	return tok, nil
 }
 
-// pasteReader reads one line from lio.In and forwards the parsed result.
+// pasteReader reads one line from lines and forwards the parsed result.
 // In headless mode it starts immediately (the prompt is already printed);
 // otherwise it waits WaitBeforePaste for the callback first.
-func pasteReader(lio LoginIO, state string, ch chan<- pastedResult, done <-chan struct{}) {
+func pasteReader(lio LoginIO, lines *LineReader, state string, ch chan<- pastedResult, done <-chan struct{}) {
 	if !lio.Headless {
 		select {
 		case <-time.After(lio.WaitBeforePaste):
@@ -205,9 +217,9 @@ func pasteReader(lio LoginIO, state string, ch chan<- pastedResult, done <-chan 
 		}
 		fmt.Fprintln(lio.Out, "Still waiting for the browser — paste the code (or the full redirect URL) here:")
 	}
-	line, err := bufio.NewReader(lio.In).ReadString('\n')
+	line, err := lines.Next(done)
 	if err != nil && strings.TrimSpace(line) == "" {
-		return
+		return // EOF, or Login finished first: the read stays for the next consumer
 	}
 	res, perr := parsePasted(line, state)
 	if perr != nil {
@@ -326,7 +338,9 @@ func tokenFrom(resp *http.Response) (Token, error) {
 		if body.ErrorDesc != "" {
 			msg = strings.TrimSpace(msg + ": " + body.ErrorDesc)
 		}
-		return Token{}, fmt.Errorf("token endpoint: HTTP %d %s", resp.StatusCode, msg)
+		// An *HTTPError so the retry layer treats a 429/5xx from the token
+		// endpoint like one from the inference endpoint.
+		return Token{}, fmt.Errorf("token endpoint: %w", &HTTPError{Status: resp.StatusCode, Body: msg, RetryAfter: retryAfter(resp.Header)})
 	}
 	t := Token{Access: body.Access, Refresh: body.Refresh, IDToken: body.IDToken,
 		Expiry: time.Now().Add(time.Duration(body.Expires) * time.Second)}

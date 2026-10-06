@@ -213,3 +213,109 @@ func TestRefreshRotates(t *testing.T) {
 		t.Fatal("rotation not stored", tok)
 	}
 }
+
+// A caller waiting for the store lock gives up when its context is done: a
+// blocking flock could not be interrupted, so Ctrl-C would hang behind another
+// process's refresh.
+func TestCredentialForLockWaitHonoursContext(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "auth.json")
+	s := NewStore(p)
+	if err := s.Put("x", Token{Access: "a", Refresh: "r", Expiry: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := lockFile(context.Background(), p+".lock") // another moca process, mid-refresh
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	res := make(chan error, 1)
+	go func() { _, err := s.CredentialFor("x", nil)(ctx); res <- err }()
+	select {
+	case err := <-res:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("want the context error, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CredentialFor stayed blocked on the store lock after its context ended")
+	}
+}
+
+// The lock is released and re-acquirable once the holder lets go.
+func TestLockFileWaitsThenAcquires(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "x.lock")
+	unlock, err := lockFile(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan error, 1)
+	go func() {
+		u, err := lockFile(context.Background(), p)
+		if err == nil {
+			u()
+		}
+		got <- err
+	}()
+	time.Sleep(60 * time.Millisecond)
+	select {
+	case <-got:
+		t.Fatal("second locker must wait while the lock is held")
+	default:
+	}
+	unlock()
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second locker never acquired the released lock")
+	}
+}
+
+// A stalled token endpoint cannot hold the store lock past refreshTimeout.
+func TestRefreshIsTimeBounded(t *testing.T) {
+	old := refreshTimeout
+	refreshTimeout = 50 * time.Millisecond
+	defer func() { refreshTimeout = old }()
+	p := filepath.Join(t.TempDir(), "auth.json")
+	s := NewStore(p)
+	if err := s.Put("x", Token{Access: "old", Refresh: "r", Expiry: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	stall := func(ctx context.Context, _ Token) (Token, error) { <-ctx.Done(); return Token{}, ctx.Err() }
+	start := time.Now()
+	_, err := s.CredentialFor("x", stall)(context.Background())
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 2*time.Second {
+		t.Fatalf("stalled refresh must fail at the timeout: %v after %v", err, time.Since(start))
+	}
+}
+
+// A transient refresh failure inside the pre-expiry window falls back to the
+// still-valid token; once the token is truly expired it is an error; a
+// terminal failure never falls back.
+func TestTransientRefreshFailureFallsBack(t *testing.T) {
+	boom := func(context.Context, Token) (Token, error) { return Token{}, errors.New("network down") }
+	s := NewStore(filepath.Join(t.TempDir(), "auth.json"))
+	if err := s.Put("x", Token{Access: "still-valid", Refresh: "r", Expiry: time.Now().Add(30 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.CredentialFor("x", boom)(context.Background())
+	if err != nil || c.Token != "still-valid" {
+		t.Fatalf("valid token must serve through a transient refresh failure: %v %v", c, err)
+	}
+	if err := s.Put("x", Token{Access: "dead", Refresh: "r", Expiry: time.Now().Add(-time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CredentialFor("x", boom)(context.Background()); err == nil || !strings.Contains(err.Error(), "refreshing x token") {
+		t.Fatalf("expired token + failed refresh must error: %v", err)
+	}
+	if err := s.Put("x", Token{Access: "still-valid", Refresh: "r", Expiry: time.Now().Add(30 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	revoked := func(context.Context, Token) (Token, error) { return Token{}, ErrInvalidGrant }
+	if _, err := s.CredentialFor("x", revoked)(context.Background()); !errors.Is(err, ErrInvalidGrant) {
+		t.Fatalf("a revoked session must not fall back to the old token: %v", err)
+	}
+}

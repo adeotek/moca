@@ -30,17 +30,26 @@ func (e *HTTPError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.Status,
 
 func newHTTPError(resp *http.Response) *HTTPError {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-	e := &HTTPError{Status: resp.StatusCode, Body: string(b)}
-	if s := resp.Header.Get("Retry-After"); s != "" {
-		if f, err := strconv.ParseFloat(s, 64); err == nil {
-			if f > 0 { // also rejects NaN
-				e.RetryAfter = time.Duration(min(f, 3600) * float64(time.Second))
-			}
-		} else if t, err := http.ParseTime(s); err == nil {
-			e.RetryAfter = max(time.Until(t), 0)
-		}
+	return &HTTPError{Status: resp.StatusCode, Body: string(b), RetryAfter: retryAfter(resp.Header)}
+}
+
+// retryAfter parses a Retry-After header (delta-seconds or an HTTP date);
+// zero when absent or unparseable.
+func retryAfter(h http.Header) time.Duration {
+	s := h.Get("Retry-After")
+	if s == "" {
+		return 0
 	}
-	return e
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		if f > 0 { // also rejects NaN
+			return time.Duration(min(f, 3600) * float64(time.Second))
+		}
+		return 0
+	}
+	if t, err := http.ParseTime(s); err == nil {
+		return max(time.Until(t), 0)
+	}
+	return 0
 }
 
 func retryable(err error) bool {

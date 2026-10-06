@@ -103,15 +103,16 @@ func (s *Store) write(f storeFile) error {
 	return os.Rename(tmp, s.path)
 }
 
-// withLock runs fn holding the cross-process store lock (<path>.lock). Every
+// withLock runs fn holding the cross-process store lock (<path>.lock); waiting
+// for the lock gives up when ctx is done. Every
 // read-modify-write goes through it; credential refreshes hold it across
 // read → refresh → write so two processes can never race a rotating token
 // (a refresh token that rotates on use would otherwise be burned).
-func (s *Store) withLock(fn func() error) error {
+func (s *Store) withLock(ctx context.Context, fn func() error) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return err
 	}
-	unlock, err := lockFile(s.path + ".lock")
+	unlock, err := lockFile(ctx, s.path+".lock")
 	if err != nil {
 		return err
 	}
@@ -129,7 +130,7 @@ func (s *Store) Get(p string) (Token, bool, error) {
 }
 
 func (s *Store) Put(p string, t Token) error {
-	return s.withLock(func() error {
+	return s.withLock(context.Background(), func() error {
 		f, err := s.read()
 		if err != nil {
 			return err
@@ -142,7 +143,7 @@ func (s *Store) Put(p string, t Token) error {
 // Delete removes a provider's registration (logout). A corrupt store is
 // reset rather than blocking logout; the host id is kept when readable.
 func (s *Store) Delete(p string) error {
-	return s.withLock(func() error {
+	return s.withLock(context.Background(), func() error {
 		f, err := s.read()
 		if err != nil {
 			f = storeFile{Providers: map[string]Token{}}
@@ -156,7 +157,7 @@ func (s *Store) Delete(p string) error {
 // persisting it (urn:uuid form) on first use.
 func (s *Store) HostID() (string, error) {
 	var id string
-	err := s.withLock(func() error {
+	err := s.withLock(context.Background(), func() error {
 		f, err := s.read()
 		if err != nil {
 			return err
@@ -185,6 +186,10 @@ func newHostID() (string, error) {
 	return fmt.Sprintf("urn:uuid:%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
 
+// refreshTimeout bounds one token-endpoint refresh: it runs under the store
+// lock, so a stalled endpoint would otherwise hold every other moca process.
+var refreshTimeout = 30 * time.Second
+
 // CredentialFor returns a CredentialFunc that refreshes when the access
 // token has under a minute left, holding the store lock across
 // read → refresh → write. The refreshed token is written before the
@@ -193,7 +198,7 @@ func newHostID() (string, error) {
 func (s *Store) CredentialFor(p string, refresh Refresher) CredentialFunc {
 	return func(ctx context.Context) (Credential, error) {
 		var tok Token
-		err := s.withLock(func() error {
+		err := s.withLock(ctx, func() error {
 			f, err := s.read()
 			if err != nil {
 				return err
@@ -206,7 +211,9 @@ func (s *Store) CredentialFor(p string, refresh Refresher) CredentialFunc {
 				tok = t
 				return nil
 			}
-			nt, err := refresh(ctx, t)
+			rctx, cancel := context.WithTimeout(ctx, refreshTimeout)
+			nt, err := refresh(rctx, t)
+			cancel()
 			if errors.Is(err, ErrInvalidGrant) {
 				return fmt.Errorf("session expired for %s: run moca login %s: %w", p, p, ErrInvalidGrant)
 			}
@@ -214,6 +221,13 @@ func (s *Store) CredentialFor(p string, refresh Refresher) CredentialFunc {
 				return fmt.Errorf("stored client registration for %s was rejected: run moca logout %s then moca login %s: %w", p, p, p, ErrInvalidClient)
 			}
 			if err != nil {
+				// A transient failure (network, 429/5xx, timeout) inside the
+				// pre-expiry window must not fail a request the current token
+				// can still serve; the next call tries the refresh again.
+				if ctx.Err() == nil && time.Until(t.Expiry) > 0 {
+					tok = t
+					return nil
+				}
 				return fmt.Errorf("refreshing %s token: %w", p, err)
 			}
 			// A rotating provider returns a replacement refresh token; a

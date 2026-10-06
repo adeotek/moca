@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -241,5 +242,49 @@ func TestOAuthRequiresResponsesProtocol(t *testing.T) {
 	}
 	if _, _, err := r.Resolve("openai/gpt-6-astra"); err == nil || !strings.Contains(err.Error(), "openai-responses") {
 		t.Fatalf("oauth + completions protocol must be refused: %v", err)
+	}
+}
+
+type countingTransport struct {
+	rt   http.RoundTripper
+	hits *atomic.Int32
+}
+
+func (c countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.hits.Add(1)
+	return c.rt.RoundTrip(r)
+}
+
+// CheckCredential runs on the TUI's update goroutine (/model): for an OAuth
+// provider it must only confirm a login exists. An expired token is the first
+// request's job to refresh, not a blocking, uncancellable network call here.
+func TestCheckCredentialOAuthDoesNotTouchNetwork(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	f := newFakeAS(t)
+	orig := oauthProviders["openai"]
+	oauthProviders["openai"] = f.config()
+	defer func() { oauthProviders["openai"] = orig }()
+	var hits atomic.Int32
+	hc := &http.Client{Transport: countingTransport{http.DefaultTransport, &hits}}
+	cfg := mustCfg(t, `{"model":"openai/gpt-6-astra","providers":{"openai":{"auth":"oauth"}}}`)
+	r, err := NewRegistry(cfg, hc, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CheckCredential("openai/gpt-6-astra"); err == nil || !strings.Contains(err.Error(), "moca login openai") {
+		t.Fatalf("no stored login must point at `moca login openai`: %v", err)
+	}
+	store := NewStore(filepath.Join(config.DataDir(), "auth.json"))
+	if err := store.Put("openai", Token{Access: "OLD", Refresh: "RT", ClientID: "oaiapp_x", Expiry: time.Now().Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CheckCredential("openai/gpt-6-astra"); err != nil {
+		t.Fatal(err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("CheckCredential made %d network requests", hits.Load())
+	}
+	if tok, _, _ := store.Get("openai"); tok.Access != "OLD" {
+		t.Fatalf("CheckCredential must not rewrite the store: %+v", tok)
 	}
 }

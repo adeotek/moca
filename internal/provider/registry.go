@@ -88,9 +88,12 @@ func (r *Registry) Models() []Model {
 	return out
 }
 
-// CheckCredential resolves a model's provider credential once (env lookup or
-// token-store read; no network) and verifies the model exists, so a TUI model
-// switch fails fast before anything changes.
+// CheckCredential verifies, without any network call, that a model exists and
+// its provider credential is usable: an env lookup for api_key providers, and
+// for store-backed OAuth providers that a login is stored (a token near
+// expiry is refreshed by the first request, which has a cancellable context,
+// not here). A TUI model switch calls this on its update goroutine, so it
+// fails fast before anything changes and never blocks on I/O.
 func (r *Registry) CheckCredential(qualified string) error {
 	pname, _, err := config.SplitModel(qualified)
 	if err != nil {
@@ -98,6 +101,18 @@ func (r *Registry) CheckCredential(qualified string) error {
 	}
 	if _, ok := r.models[qualified]; !ok {
 		return fmt.Errorf("%w %q", ErrUnknownModel, qualified)
+	}
+	if r.cfg.Providers[pname].Auth == "oauth" && r.oauth[pname] == nil {
+		if _, ok := oauthProviders[pname]; ok {
+			_, found, err := NewStore(filepath.Join(config.DataDir(), "auth.json")).Get(pname)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return fmt.Errorf("not logged in to %s: run moca login %s", pname, pname)
+			}
+			return nil
+		}
 	}
 	_, err = r.credential(pname)(context.Background())
 	return err

@@ -1,17 +1,24 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/provider"
 )
+
+// oauthLookup resolves a provider's OAuth parameters; a variable so the CLI
+// can be driven against a fake authorization server in tests.
+var oauthLookup = provider.OAuthProvider
+
+// revokeTimeout bounds the best-effort remote revocation on logout.
+const revokeTimeout = 15 * time.Second
 
 // runLogin implements `moca login <provider> [--no-browser]`: the SIWC
 // authorization-code flow (openai only — policy gate, §3), then the token
@@ -31,7 +38,7 @@ func runLogin(ctx context.Context, o Options, cfg config.Config, cfgPath string,
 		return exitUsage
 	}
 	p := rest[0]
-	oc, ok := provider.OAuthProvider(p)
+	oc, ok := oauthLookup(p)
 	if !ok {
 		if reason, unsupported := config.OAuthUnsupported[p]; unsupported {
 			fmt.Fprintf(stderr, "moca: providers.%s cannot use OAuth: %s\n", p, reason)
@@ -59,7 +66,14 @@ func runLogin(ctx context.Context, o Options, cfg config.Config, cfgPath string,
 		return exitRuntime
 	}
 	oc.HostID = hostID
-	lio := provider.LoginIO{Out: stdout, In: stdin, Headless: noBrowser || provider.Headless()}
+	// One line reader for the whole command: the paste prompt and the
+	// "switch auth?" prompt share it, so an unanswered paste read can never
+	// swallow the second answer.
+	var lines *provider.LineReader
+	if stdin != nil {
+		lines = provider.NewLineReader(stdin)
+	}
+	lio := provider.LoginIO{Out: stdout, Lines: lines, Headless: noBrowser || provider.Headless()}
 	if !noBrowser {
 		lio.OpenURL = provider.OpenBrowser
 	}
@@ -79,7 +93,7 @@ func runLogin(ctx context.Context, o Options, cfg config.Config, cfgPath string,
 	}
 	if cfg.Providers[p].Auth != "oauth" {
 		fmt.Fprintf(stdout, "Set \"auth\": \"oauth\" for providers.%s in %s to use your subscription.\n", p, cfgPath)
-		if yesNo(stdin, stdout, "Switch it now? [y/N] ") {
+		if yesNo(lines, stdout, "Switch it now? [y/N] ") {
 			if _, err := config.SetString(cfgPath, []string{"providers", p}, "auth", "oauth"); err != nil {
 				fmt.Fprintln(stderr, "moca:", err)
 				return exitRuntime
@@ -110,7 +124,7 @@ func runLogout(ctx context.Context, o Options, cfg config.Config, stdout, stderr
 		fmt.Fprintf(stderr, "moca: warning: %v\n", err)
 	}
 	if ok && tok.Refresh != "" {
-		if oc, has := provider.OAuthProvider(p); has {
+		if oc, has := oauthLookup(p); has {
 			if rerr := provider.Revoke(ctx, oc, tok, http.DefaultClient); rerr != nil {
 				fmt.Fprintf(stderr, "moca: warning: could not revoke the session remotely (%v); clearing locally\n", rerr)
 			}
@@ -124,12 +138,12 @@ func runLogout(ctx context.Context, o Options, cfg config.Config, stdout, stderr
 	return exitOK
 }
 
-func yesNo(stdin io.Reader, stdout io.Writer, prompt string) bool {
-	if stdin == nil {
+func yesNo(lines *provider.LineReader, stdout io.Writer, prompt string) bool {
+	if lines == nil {
 		return false
 	}
 	fmt.Fprint(stdout, prompt)
-	line, err := bufio.NewReader(stdin).ReadString('\n')
+	line, err := lines.Next(nil)
 	if err != nil && line == "" {
 		return false
 	}

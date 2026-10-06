@@ -671,3 +671,154 @@ func TestLoginLatePasteIgnored(t *testing.T) {
 	}
 	<-done
 }
+
+// A 429/5xx from the token endpoint is an *HTTPError the retry layer
+// understands (honouring Retry-After); a 400 is not retried.
+func TestTokenEndpointTransientIsRetryable(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		retry  bool
+	}{{503, true}, {429, true}, {400, false}} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", "7")
+			w.WriteHeader(tc.status)
+			w.Write([]byte(`{"error":"temporarily_unavailable"}`))
+		}))
+		_, err := OAuthConfig{TokenURL: srv.URL}.refresher(srv.Client())(context.Background(), Token{Refresh: "RT", ClientID: "c"})
+		srv.Close()
+		var he *HTTPError
+		if !errors.As(err, &he) || he.Status != tc.status || retryable(err) != tc.retry {
+			t.Fatalf("status %d: err=%v retryable=%v want %v", tc.status, err, retryable(err), tc.retry)
+		}
+		if tc.retry && he.RetryAfter != 7*time.Second {
+			t.Fatalf("Retry-After lost: %v", he.RetryAfter)
+		}
+	}
+}
+
+// The line reader hands a line to whoever asks next when an earlier consumer
+// walked away: nothing is left blocked on the input stealing it.
+func TestLineReaderAbandonedReadKeepsLine(t *testing.T) {
+	pr, pw := io.Pipe()
+	lr := NewLineReader(pr)
+	done := make(chan struct{})
+	res := make(chan error, 1)
+	go func() { _, err := lr.Next(done); res <- err }()
+	time.Sleep(30 * time.Millisecond)
+	close(done)
+	if err := <-res; !errors.Is(err, ErrLineAbandoned) {
+		t.Fatalf("abandoned Next: %v", err)
+	}
+	go pw.Write([]byte("y\n"))
+	got := make(chan string, 1)
+	go func() { s, _ := lr.Next(nil); got <- s }()
+	select {
+	case s := <-got:
+		if s != "y\n" {
+			t.Fatalf("got %q", s)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the line was lost to the abandoned reader")
+	}
+}
+
+// The browser callback wins after the paste prompt was armed: the line typed
+// next (moca login's "switch auth?" answer) must reach the next consumer.
+func TestLoginCallbackWinLeavesNextLineForCaller(t *testing.T) {
+	f := newFakeAS(t)
+	pr, pw := io.Pipe()
+	lines := NewLineReader(pr)
+	open := func(u string) error { // the callback lands after the paste read started
+		go func() { time.Sleep(200 * time.Millisecond); browse(u) }()
+		return nil
+	}
+	var out syncBuf
+	if _, err := runLogin(t, f, nil, LoginIO{Out: &out, Lines: lines, OpenURL: open, WaitBeforePaste: 20 * time.Millisecond}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Still waiting") {
+		t.Fatalf("the paste prompt was never armed; the test does not cover the leak: %q", out.String())
+	}
+	go pw.Write([]byte("y\n"))
+	got := make(chan string, 1)
+	go func() { s, _ := lines.Next(nil); got <- s }()
+	select {
+	case s := <-got:
+		if s != "y\n" {
+			t.Fatalf("got %q", s)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the answer line was swallowed by the paste reader")
+	}
+}
+
+// Review Focus 5: the browser cannot be opened → the URL is still printed,
+// the failure is named, and after WaitBeforePaste a paste completes the login.
+func TestLoginOpenFailureThenPaste(t *testing.T) {
+	f := newFakeAS(t)
+	var out syncBuf
+	pr, pw := io.Pipe()
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for !strings.Contains(out.String(), "Still waiting") {
+			if time.Now().After(deadline) {
+				pw.CloseWithError(errors.New("paste prompt never shown"))
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		cl := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		resp, err := cl.Get(firstURL(out.String()))
+		if err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		resp.Body.Close()
+		pw.Write([]byte(resp.Header.Get("Location") + "\n"))
+	}()
+	noBrowser := func(string) error { return errors.New("xdg-open: not found") }
+	tok, err := runLogin(t, f, nil, LoginIO{Out: &out, In: pr, OpenURL: noBrowser, WaitBeforePaste: 50 * time.Millisecond})
+	if err != nil || tok.Access != "AT" {
+		t.Fatalf("%+v %v", tok, err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "could not open a browser: xdg-open: not found") || !strings.Contains(s, "/authorize?") {
+		t.Fatalf("URL and the open failure must be printed: %q", s)
+	}
+}
+
+// The loopback page must not claim success when the login is refused.
+func TestCallbackPageReportsFailure(t *testing.T) {
+	for name, setup := range map[string]func(*fakeAS){
+		"declined":       func(f *fakeAS) { f.deny = true },
+		"state mismatch": func(f *fakeAS) { f.badState = true },
+	} {
+		f := newFakeAS(t)
+		setup(f)
+		page := make(chan string, 1)
+		open := func(u string) error {
+			go func() {
+				resp, err := http.Get(u)
+				if err != nil {
+					page <- err.Error()
+					return
+				}
+				b, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				page <- fmt.Sprintf("%d %s", resp.StatusCode, b)
+			}()
+			return nil
+		}
+		if _, err := runLogin(t, f, nil, LoginIO{OpenURL: open}); err == nil {
+			t.Fatalf("%s: login must fail", name)
+		}
+		select {
+		case p := <-page:
+			if !strings.HasPrefix(p, "400 ") || strings.Contains(p, "Login complete") {
+				t.Fatalf("%s: callback page = %q", name, p)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("%s: no callback page", name)
+		}
+	}
+}
