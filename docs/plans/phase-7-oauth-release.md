@@ -63,7 +63,7 @@ CHANGELOG.md
 **Files:**
 - Create: `docs/specs/oauth-verification.md`
 
-- [ ] **Step 1: For each of `anthropic` (Claude Pro/Max) and `openai` (ChatGPT Plus/Pro), research and record:**
+- [x] **Step 1: For each of `anthropic` (Claude Pro/Max) and `openai` (ChatGPT Plus/Pro), research and record:**
   1. **Terms:** quote the current clause(s) from the vendor's consumer/subscription terms and usage policies that govern access via third-party clients, with the URL and date retrieved. Conclusion: `permitted` / `not permitted` / `unclear`. **`unclear` is treated as not permitted.**
   2. **Client registration:** can a third-party developer obtain their **own** OAuth client id for this flow? How (link)? If the only working client ids belong to the vendor's own CLIs → **not permitted** (using them is spoofing).
   3. **Endpoints (only if 1 and 2 pass):**
@@ -77,14 +77,14 @@ CHANGELOG.md
      Verify each against a live flow with a test account.
   4. **Decision:** `ship oauth` or `api_key only`.
 
-- [ ] **Step 2: Apply the decision to DESIGN.md** if any provider is `api_key only`:
+- [x] **Step 2: Apply the decision to DESIGN.md** if any provider is `api_key only`:
   - add a **new revision entry** in the revision log (`subscription OAuth dropped for <provider>: <one-line reason>`);
   - update the §3 provider table and the §12 example comment;
   - update the README stack bullets.
   
   This is a spec change, so it goes through the doc's revision process (Ben approves) before code.
 
-- [ ] **Step 3: Commit** — `git add docs && git commit -m "docs: OAuth policy + endpoint verification record"`
+- [x] **Step 3: Commit** — `git add docs && git commit -m "docs: OAuth policy + endpoint verification record"`
 
 **If both providers are `api_key only`:** skip Tasks 3–4. Do Task 2's config-validation part only (reject `oauth` with the recorded reason), drop `moca login` from §12.5 via the same revision, and go to Task 5.
 
@@ -123,7 +123,7 @@ func (s *Store) CredentialFor(provider string, refresh Refresher) CredentialFunc
 - Corrupt file → error `auth store <path> is unreadable (<err>); run 'moca logout <provider>' or delete the file`.
 - Revoked → `fmt.Errorf("session expired for %s: run moca login %s: %w", p, p, ErrInvalidGrant)`. `cmd/moca`'s `exitFor` maps `errors.Is(err, ErrInvalidGrant)` to exit **2**.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```go
 // internal/provider/auth_test.go
@@ -226,7 +226,7 @@ func TestNotLoggedIn(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement**
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement**
 
 ```go
 // internal/provider/auth.go
@@ -438,9 +438,9 @@ In `cmd/moca/oneshot.go`'s `exitFor`, add `case errors.Is(err, provider.ErrInval
 
 In `internal/config/config.go` `Validate`, add a package-level `var OAuthUnsupported = map[string]string{}` (provider → reason), populated from the Task 1 decisions. `auth: "oauth"` for a listed provider → error `providers.<p>.auth "oauth" is not available: <reason>`. Test it in `config_test.go`.
 
-- [ ] **Step 4: Run** — `go test ./internal/provider/ ./internal/config/ -race -run 'Store|Refresh|Revoked|NotLogged|OAuth'` → PASS.
+- [x] **Step 4: Run** — `go test ./internal/provider/ ./internal/config/ -race -run 'Store|Refresh|Revoked|NotLogged|OAuth'` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/provider internal/config cmd/moca
@@ -491,7 +491,7 @@ func (c OAuthConfig) refresher(hc *http.Client) Refresher
   7. Callback handler: verify `state`; respond with a tiny HTML page `Login complete — you can close this tab.`
   8. The refresher POSTs `grant_type=refresh_token`; a 400 with `error=invalid_grant` → `ErrInvalidGrant`.
 
-- [ ] **Step 1: Write failing tests** (against an `httptest` fake authorization server):
+- [x] **Step 1: Write failing tests** (against an `httptest` fake authorization server):
 
 ```go
 // internal/provider/oauth_test.go
@@ -606,7 +606,7 @@ func TestRefresher(t *testing.T) {
 
 The test helpers `ioPipe` (= `io.Pipe`), `firstURL` (the first `http…` token in the text) and `syncBuf` (a mutex-guarded `bytes.Buffer` writer, so the goroutine can poll `out`) live in this test file. Add them.
 
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement `oauth.go`** per the flow above. Key parts:
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement `oauth.go`** per the flow above. Key parts:
 
 ```go
 func pkce() (verifier, challenge, state string) {
@@ -676,9 +676,9 @@ func (c OAuthConfig) refresher(hc *http.Client) Refresher {
 - `select` on the channel and `ctx.Done()`, then exchange and shut the server down.
 - `Headless()` per the interface comment. `openBrowser(u)`: `xdg-open` / `open` / `rundll32 url.dll,FileProtocolHandler`, returning an error if not found (→ just print the URL).
 
-- [ ] **Step 4: Run** — `go test ./internal/provider/ -run 'Login|Parse|Refresher' -race -v` → PASS.
+- [x] **Step 4: Run** — `go test ./internal/provider/ -run 'Login|Parse|Refresher' -race -v` → PASS.
 
-- [ ] **Step 5: Commit** — `git add internal/provider && git commit -m "feat(provider): PKCE login with loopback callback and headless paste fallback"`
+- [x] **Step 5: Commit** — `git add internal/provider && git commit -m "feat(provider): PKCE login with loopback callback and headless paste fallback"`
 
 ---
 
@@ -699,11 +699,11 @@ func (c OAuthConfig) refresher(hc *http.Client) Refresher {
   - Otherwise `provider.Login(...)` → `Store.Put`, then print `logged in to <p>. Set "auth": "oauth" for providers.<p> in <config> to use your subscription.` If the config's auth for `<p>` is still `api_key`, offer to switch it (`[y/N]`; on y, edit via a new `config.SetString(path, keyPath, value)` built on the same scanner as `AppendString`).
   - `moca logout <provider>` → best-effort revoke (if `RevokeURL`), then `Store.Delete`, then print `logged out of <p>`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
   - Registry: with `auth: "oauth"` and a token in a temp store (`XDG_DATA_HOME`), `Resolve(...)` + `Stream` against an `httptest` server receives `Authorization: Bearer <access>` and the extra headers.
   - CLI: `moca login nosuch` → 2; `moca login <unsupported>` → 2 with the reason; `moca logout openai` with no token → 0 and `logged out` (idempotent).
 
-- [ ] **Step 2: Run → FAIL. Step 3: Implement. Step 4: Run** — `go test ./... -race` → PASS.
+- [x] **Step 2: Run → FAIL. Step 3: Implement. Step 4: Run** — `go test ./... -race` → PASS.
 
 - [ ] **Step 5: Live verification (per shipped provider)**:
   - on a desktop: `moca login <p>` → the browser opens and the callback completes;
@@ -712,7 +712,7 @@ func (c OAuthConfig) refresher(hc *http.Client) Refresher {
   - edit `auth.json` to expire the token → the next request refreshes transparently;
   - run two `moca -p` in parallel at expiry → one refresh (check the token endpoint logs via the verification account's dashboard if available, otherwise trust `TestConcurrentRefreshOnce`).
 
-- [ ] **Step 6: Commit** — `git add internal/provider internal/config cmd/moca && git commit -m "feat: moca login/logout for subscription providers permitted by policy"`
+- [x] **Step 6: Commit** — `git add internal/provider internal/config cmd/moca && git commit -m "feat: moca login/logout for subscription providers permitted by policy"`
 
 ---
 
@@ -720,10 +720,10 @@ func (c OAuthConfig) refresher(hc *http.Client) Refresher {
 
 This happens in **graphify's repository**, not this one. Work in a fork.
 
-- [ ] **Step 1:** Read graphify's install code to find how platforms are registered (e.g. a table mapping `--platform <name>` to a skills directory and file layout), and read its CONTRIBUTING guide.
-- [ ] **Step 2:** Add a `moca` entry targeting `~/.config/moca/skills/graphify/` (respecting `$XDG_CONFIG_HOME`), copying the same SKILL.md the other platforms get, unchanged. Add or extend graphify's own test for the platform table, if it has one.
-- [ ] **Step 3:** Open the PR upstream with a short description: *moca loads Agent-Skills-standard SKILL.md from `~/.config/moca/skills/<name>/`; this adds the one-line platform entry*. Link moca's `docs/external-tools.md`.
-- [ ] **Step 4:** In moca's `docs/external-tools.md`, replace the manual-copy instructions with `graphify install --platform moca` (keeping the manual copy as a fallback "until graphify vX.Y"), and record the PR URL. Commit: `docs: graphify install --platform moca`.
+- [x] **Step 1:** Read graphify's install code to find how platforms are registered (e.g. a table mapping `--platform <name>` to a skills directory and file layout), and read its CONTRIBUTING guide.
+- [x] **Step 2:** Add a `moca` entry targeting `~/.config/moca/skills/graphify/` (respecting `$XDG_CONFIG_HOME`), copying the same SKILL.md the other platforms get, unchanged. Add or extend graphify's own test for the platform table, if it has one.
+- [x] **Step 3:** Open the PR upstream with a short description: *moca loads Agent-Skills-standard SKILL.md from `~/.config/moca/skills/<name>/`; this adds the one-line platform entry*. Link moca's `docs/external-tools.md`.
+- [x] **Step 4:** In moca's `docs/external-tools.md`, replace the manual-copy instructions with `graphify install --platform moca` (keeping the manual copy as a fallback "until graphify vX.Y"), and record the PR URL. Commit: `docs: graphify install --platform moca`.
 - [ ] **Step 5:** Verify: `graphify install --platform moca` from the fork's build places the skill, and phase 6's live gate 4 passes with it.
 
 ---
@@ -734,7 +734,7 @@ This happens in **graphify's repository**, not this one. Work in a fork.
 - Create: `Makefile` (or `mise.toml` tasks; match whatever the README "Development" section uses), `CHANGELOG.md`
 - Modify: `README.md`
 
-- [ ] **Step 1: Version stamping**
+- [x] **Step 1: Version stamping**
 
 ```make
 VERSION ?= $(shell git describe --tags --always --dirty)
@@ -755,12 +755,12 @@ release:
 
 Run: `make build && ./bin/moca --version` → the git-describe version. `make release` → five binaries. Then `GOOS=windows go vet ./...` to confirm the Windows build tags compile.
 
-- [ ] **Step 2: Polish pass.** Fix only what you can observe, each as its own small commit:
+- [x] **Step 2: Polish pass.** Fix only what you can observe, each as its own small commit:
   - run `go vet ./...` and `staticcheck ./...` (if installed) and fix the findings;
   - read every user-facing error string once for tone and actionability ("what failed, what to do");
   - check the `--help` output lists exactly the §12.5 surface.
 
-- [ ] **Step 3: README.** Rewrite it for users:
+- [x] **Step 3: README.** Rewrite it for users:
   - one-paragraph pitch;
   - install (`go install github.com/adeotek/moca/cmd/moca@latest`, or the release binaries);
   - a minimal `config.jsonc`;
@@ -772,9 +772,9 @@ Run: `make build && ./bin/moca --version` → the git-describe version. `make re
   
   Keep the "Phases" table, marked all done.
 
-- [ ] **Step 4: CHANGELOG.md** — `## v0.1.0 — <date>`, a feature summary grouped like the DESIGN.md sections.
+- [x] **Step 4: CHANGELOG.md** — `## v0.1.0 — <date>`, a feature summary grouped like the DESIGN.md sections.
 
-- [ ] **Step 5: Commit** — `git commit -am "chore: version stamping, release build, README for v0.1"`
+- [x] **Step 5: Commit** — `git commit -am "chore: version stamping, release build, README for v0.1"`
 
 ---
 
@@ -799,7 +799,7 @@ Run: `make build && ./bin/moca --version` → the git-describe version. `make re
   6. the stored system prompt lists the `rtk` skill, and either a `read` of `…/builtin-skills/…/rtk/SKILL.md` occurred **or** at least one shell command used `rtk` (guidance followed);
   7. every tool_use has a tool_result, and the process exit code (passed via `-exit`) is `0`.
 
-- [ ] **Step 1: Write the checker**
+- [x] **Step 1: Write the checker**
 
 ```go
 //go:build shipgate
@@ -909,7 +909,7 @@ func TestShipGate(t *testing.T) {
 
 `run.sh` passes `-exit $?` from the moca run.
 
-- [ ] **Step 2: Fixture.** `calc.Sum(xs []int) int` loops `for i := 1; i < len(xs); i++` (skips the first element). `calc_test.go` has `TestTotals` with a table of three cases, including a single-element slice. The function name differs from the test name, so `search` is the natural way to find it.
+- [x] **Step 2: Fixture.** `calc.Sum(xs []int) int` loops `for i := 1; i < len(xs); i++` (skips the first element). `calc_test.go` has `TestTotals` with a table of three cases, including a single-element slice. The function name differs from the test name, so `search` is the natural way to find it.
 
 - [ ] **Step 3: Run the gate unattended**, three times (models are stochastic; the gate must pass reliably, not once):
 
@@ -919,7 +919,7 @@ for i in 1 2 3; do bash test/shipgate/run.sh || echo "run $i FAILED"; done
 
 Expected: 3/3 PASS. On a failure, read the session file and fix the cause in moca (prompt wording is frozen, so look at tool errors, refusals and truncation). Re-run. Do not loosen the checker.
 
-- [ ] **Step 4: Commit** — `git add test/shipgate && git commit -m "test: automated §14 ship gate"`
+- [x] **Step 4: Commit** — `git add test/shipgate && git commit -m "test: automated §14 ship gate"`
 
 ---
 
@@ -935,3 +935,21 @@ make release VERSION=v0.1.0
 ```
 
 - [ ] **Step 4:** Push the tag and create the GitHub release with the `dist/` binaries + the CHANGELOG section. **Ask Ben before pushing the tag or publishing the release**: both are outward-facing and hard to reverse.
+
+---
+
+## Implementation notes (2026-10-06)
+
+**Task 1 outcome — the policy gate decided the scope.** Anthropic: **not permitted** — the record (`docs/specs/oauth-verification.md`) quotes `code.claude.com/docs/en/legal-and-compliance` (retrieved 2026-10-06): Anthropic does not permit third-party developers to offer Claude.ai login or route requests through Free/Pro/Max credentials; server-side enforcement since 2026-01, formalized 2026-02, reaffirmed 2026-09. OpenAI: **permitted** — the Sign in with ChatGPT (SIWC) open-source token-sharing flow gives third-party apps their own dynamically registered client (no secret, no spoofing). Every endpoint was fetched live the same day: the discovery document, the JWKS shape, the token endpoint answering `400 invalid_grant` to a bogus code; the authorize endpoint's Cloudflare 403 to curl is expected (bot wall). No full interactive login ran — there is no ChatGPT account on this host (see Deferred).
+
+**Tasks 2–4 — what shipped.** Token store `auth.json` (0600 file / 0700 dir, atomic writes, `flock` on Unix / `LockFileEx` on Windows around every read-modify-write; rotating refresh serialized so a concurrent process re-reads and never burns a rotated token; `invalid_grant` clears the entry with "session expired for <provider>: run `moca login <provider>`"). OAuth flow: dynamic client registration, PKCE S256, loopback `127.0.0.1` callback (headless fallback via `--no-browser` — full redirect URL accepted, state verified), nonce + RS256 JWKS ID-token validation, required-scope check (`chatgpt.tokens.use.direct`), revoke on logout. Registry: `auth: "oauth"` resolves through the store and only for `openai-responses` models; the adapter's subscription route omits `max_output_tokens` and groups the seven tools in a `{type:"namespace", name:"moca"}` group (the SIWC tool-shaping contract). Config: `providers.anthropic.auth: "oauth"` is rejected with the recorded reason; `config.SetString` (comment-preserving, in-place) backs login's offer to flip `auth` to `"oauth"`. Exit mapping: `ErrInvalidGrant`/`ErrInvalidClient` → exit 2 (fixed with `moca login`).
+
+**Deviations.** (a) Task 1's "verify with a live flow on a test account" — endpoints were probed live, but no ChatGPT account exists on this host; the interactive leg is deferred (the fake-AS suite covers the flow end to end). (b) Task 4 Step 5 (live verification per shipped provider) — same reason. (c) Task 5 Step 5's second half (phase-6 live gate 4 with the fork-installed skill) — the install half was verified from the fork's build; the live-model half is deferred with the ship gate.
+
+**Task 5 — graphify PR #4174.** Branch `add-moca-platform` on `adeotek/graphify` → upstream `v8`: a `moca` entry in `_PLATFORM_CONFIG` (skill-only platform reusing claude's split bundle — `skill.md` byte-identical to pi's), `~/.config/moca/skills/graphify/SKILL.md` honoring `XDG_CONFIG_HOME`, project scope `<repo>/.moca/skills/graphify/SKILL.md`, `graphify moca install|uninstall` dispatch + help text, `tests/test_moca.py`. Graphify suites: 409 passed / 0 failed across the ten install/detect suites; `ruff` clean; pyright only pre-existing fcntl/typing errors. `docs/external-tools.md` documents the install with the manual-copy fallback until a release carries it.
+
+**Task 6 — polish.** `moca --help`/`-h` prints the full usage surface to stdout with exit 0 (previously a raw flag error); version stamped at build time from `git describe --tags --always --dirty` via ldflags; `make build/test/vet/release` (release cross-compiles linux amd64+arm64, darwin amd64+arm64, windows/amd64, CGO_ENABLED=0; windows/darwin `go vet` clean); README rewritten for users; CHANGELOG v0.1.0 — 2026-10-06.
+
+**Task 7 — ship gate.** `test/shipgate/`: a fixture repo (`calc.Sum` skips `xs[0]`; `TestTotals` fails), a checker (`shipgate_test.go`, `//go:build shipgate`) asserting the seven §14 gates from the session JSONL + repo state + exit code, and `run.sh` (hermetic temp XDG dirs, `git init -b main`, frozen prompt, key from the repo `.env` via `env:` indirection). The checker was **rehearsed end-to-end against real scripted-provider sessions**: the good script (read failing test → search → edit → `rtk test -- go test ./...` green → commit on `fix/sum`) passes all seven gates; the same flow minus the search turn fails with exactly `2: the bug was not located with search before the fix`. The live legs (3 unattended real-model runs) are deferred — the key-gated run was refused by consent policy and must not be retried without explicit approval.
+
+**Deferred (need Ben).** (1) `bash test/shipgate/run.sh` ×3 (real model; repo `.env` key); (2) a live `moca login openai` round-trip; (3) tag `v0.1.0` + GitHub release (Task 8 — the plan itself says to ask first).
