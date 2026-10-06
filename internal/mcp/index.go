@@ -36,6 +36,7 @@ type IndexEntry struct {
 type Index struct {
 	path    string
 	mu      sync.Mutex
+	touched map[string]bool       // servers this process Put (they win on Save)
 	Servers map[string]IndexEntry `json:"servers"`
 }
 
@@ -55,21 +56,54 @@ func LoadIndex(path string) (*Index, error) {
 	return ix, nil
 }
 
+// Save writes the index atomically. Other moca processes share the file, so
+// it merges instead of overwriting: entries on disk for servers this process
+// did not index are kept, and the temp file is unique per writer (a fixed name
+// let two writers interleave on one inode).
 func (ix *Index) Save() error {
+	disk := &Index{Servers: map[string]IndexEntry{}}
+	if b, err := os.ReadFile(ix.path); err == nil && json.Unmarshal(b, disk) != nil {
+		disk.Servers = nil
+	}
 	ix.mu.Lock()
-	b, err := json.MarshalIndent(ix, "", "  ")
+	merged := map[string]IndexEntry{}
+	for k, e := range disk.Servers {
+		merged[k] = e
+	}
+	for k, e := range ix.Servers {
+		if _, onDisk := merged[k]; ix.touched[k] || !onDisk {
+			merged[k] = e
+		}
+	}
+	b, err := json.MarshalIndent(struct {
+		Servers map[string]IndexEntry `json:"servers"`
+	}{merged}, "", "  ")
 	ix.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(ix.path), 0o700); err != nil {
+	dir := filepath.Dir(ix.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	tmp := ix.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	f, err := os.CreateTemp(dir, filepath.Base(ix.path)+".*.tmp") // 0600
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, ix.path)
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return err
+	}
+	if err := os.Rename(f.Name(), ix.path); err != nil {
+		os.Remove(f.Name())
+		return err
+	}
+	return nil
 }
 
 func (ix *Index) Valid(server, hash string) (IndexEntry, bool) {
@@ -86,6 +120,10 @@ func (ix *Index) Put(server, hash string, tools []Tool) {
 	}
 	ix.mu.Lock()
 	ix.Servers[server] = e
+	if ix.touched == nil {
+		ix.touched = map[string]bool{}
+	}
+	ix.touched[server] = true
 	ix.mu.Unlock()
 }
 

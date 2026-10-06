@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/adeotek/moca/internal/config"
 )
@@ -55,11 +57,19 @@ func initialize(ctx context.Context, t transport) error {
 	return t.Notify(ctx, "notifications/initialized", nil)
 }
 
+// maxToolPages caps tools/list pagination: a server that keeps handing out
+// cursors (or the same one forever) must not grow the list without bound.
+const maxToolPages = 100
+
 // listTools fetches every page of tools/list.
 func (c *client) listTools(ctx context.Context) ([]Tool, error) {
 	var all []Tool
 	cursor := ""
-	for {
+	seen := map[string]bool{}
+	for page := 0; ; page++ {
+		if page >= maxToolPages {
+			return nil, fmt.Errorf("mcp server %s: tools/list did not finish within %d pages", c.name, maxToolPages)
+		}
 		var params any
 		if cursor != "" {
 			params = map[string]string{"cursor": cursor}
@@ -68,23 +78,29 @@ func (c *client) listTools(ctx context.Context) ([]Tool, error) {
 		if err != nil {
 			return nil, err
 		}
-		var page struct {
+		var res struct {
 			Tools      []Tool `json:"tools"`
 			NextCursor string `json:"nextCursor"`
 		}
-		if err := json.Unmarshal(raw, &page); err != nil {
+		if err := json.Unmarshal(raw, &res); err != nil {
 			return nil, err
 		}
-		all = append(all, page.Tools...)
-		if page.NextCursor == "" {
+		all = append(all, res.Tools...)
+		if res.NextCursor == "" {
 			return all, nil
 		}
-		cursor = page.NextCursor
+		if seen[res.NextCursor] {
+			return nil, fmt.Errorf("mcp server %s: tools/list repeated cursor %q", c.name, res.NextCursor)
+		}
+		seen[res.NextCursor] = true
+		cursor = res.NextCursor
 	}
 }
 
 func (c *client) callTool(ctx context.Context, name string, args json.RawMessage) (CallResult, error) {
-	if len(args) == 0 {
+	// Omitted and explicit-null args both mean "no arguments": servers that
+	// validate `arguments` as an object reject null.
+	if a := bytes.TrimSpace(args); len(a) == 0 || bytes.Equal(a, []byte("null")) {
 		args = json.RawMessage(`{}`)
 	}
 	raw, err := c.t.Call(ctx, "tools/call", map[string]any{"name": name, "arguments": args})

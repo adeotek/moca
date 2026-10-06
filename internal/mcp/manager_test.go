@@ -32,7 +32,7 @@ func TestLazyStartAndPersistedIndex(t *testing.T) {
 	if starts() != 0 || len(m.Running()) != 0 {
 		t.Fatal("nothing starts at construction")
 	}
-	hits, err := m.Search(context.Background(), "documentation", "")
+	hits, _, err := m.Search(context.Background(), "documentation", "")
 	if err != nil || len(hits) != 1 || hits[0].Tool != "read_doc" || starts() != 1 {
 		t.Fatal(hits, err, starts())
 	}
@@ -42,7 +42,7 @@ func TestLazyStartAndPersistedIndex(t *testing.T) {
 	ix2, _ := LoadIndex(ixPath)
 	m2 := NewManager(map[string]config.MCPServer{"docs": s}, time.Minute, ix2, Options{BaseEnv: os.Environ()})
 	defer m2.Close()
-	if hits, _ := m2.Search(context.Background(), "issue", ""); len(hits) != 1 || starts() != 1 {
+	if hits, _, _ := m2.Search(context.Background(), "issue", ""); len(hits) != 1 || starts() != 1 {
 		t.Fatal("search served from the persisted index; no new process", starts())
 	}
 	tool, err := m2.Describe(context.Background(), "docs", "read_doc")
@@ -99,7 +99,7 @@ func TestUnknownServerAndTool(t *testing.T) {
 	ix, _ := LoadIndex(filepath.Join(t.TempDir(), "ix.json"))
 	m := NewManager(map[string]config.MCPServer{"docs": fakeServer("")}, time.Minute, ix, Options{BaseEnv: os.Environ()})
 	defer m.Close()
-	if _, err := m.Search(context.Background(), "x", "nope"); err == nil || !strings.Contains(err.Error(), "configured: docs") {
+	if _, _, err := m.Search(context.Background(), "x", "nope"); err == nil || !strings.Contains(err.Error(), "configured: docs") {
 		t.Fatal(err)
 	}
 	if _, _, err := m.Call(context.Background(), "docs", "nope", nil); err == nil || !strings.Contains(err.Error(), "action=search") {

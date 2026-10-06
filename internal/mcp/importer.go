@@ -3,9 +3,11 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/adeotek/moca/internal/config"
@@ -145,8 +147,18 @@ var (
 	// tokenish matches credential-shaped tokens anywhere in a value, with a
 	// length floor so benign strings ("sk-1") do not trip it: the same
 	// prefixes as secretValue plus scheme-style header values.
-	tokenish = regexp.MustCompile(`(?:(?:sk-|ghp_|gho_|github_pat_|glpat-|xox[abp]-|AKIA)[A-Za-z0-9_-]{8,}|(?:Bearer|Basic)\s+\S{8,})`)
+	// passwordKV matches key=value connection-string secrets ("password=…").
+	passwordKV = regexp.MustCompile(`(?i)\b(?:password|passwd|pwd)\s*=\s*\S+`)
+	tokenish   = regexp.MustCompile(`(?:(?:sk-|ghp_|gho_|github_pat_|glpat-|xox[abp]-|AKIA)[A-Za-z0-9_-]{8,}|(?:Bearer|Basic)\s+\S{8,})`)
 )
+
+// embeddedSecret reports a credential inside an env/header value whose key
+// gave nothing away: URL userinfo (postgres://user:pw@host), a
+// credential-shaped token or Bearer/Basic scheme anywhere in the value, or a
+// password=… pair (DSNs, connection strings).
+func embeddedSecret(v string) bool {
+	return userinfo.MatchString(v) || tokenish.MatchString(v) || passwordKV.MatchString(v)
+}
 
 // literalSecretFields lists the fields of a server carrying a
 // credential-shaped literal that RewriteSecrets does not rewrite (it only
@@ -173,8 +185,8 @@ func envName(server, key string) string {
 		strings.Trim(nonAlnum.ReplaceAllString(strings.ToUpper(key), "_"), "_")
 }
 
-// RewriteSecrets replaces credential-looking values with env: references;
-// secrets are never copied literally. `${VAR}`/`$VAR` whole-value references
+// RewriteSecrets replaces credential-looking env/header values with env:
+// references; secrets are never copied literally. `${VAR}`/`$VAR` whole-value references
 // become env:VAR (nothing to export); a secret-looking key or value becomes
 // env:MOCA_MCP_<SERVER>_<KEY> and is reported for export.
 func RewriteSecrets(server string, s config.MCPServer) (config.MCPServer, []EnvVar) {
@@ -190,7 +202,7 @@ func RewriteSecrets(server string, s config.MCPServer) (config.MCPServer, []EnvV
 				out[k] = v
 			case varRef.MatchString(v):
 				out[k] = "env:" + varRef.FindStringSubmatch(v)[1]
-			case secretKey.MatchString(k) || secretValue.MatchString(v):
+			case secretKey.MatchString(k) || secretValue.MatchString(v) || embeddedSecret(v):
 				name := envName(server, k)
 				out[k] = "env:" + name
 				vars = append(vars, EnvVar{Name: name, Server: server, Field: field, Key: k})
@@ -224,7 +236,8 @@ func Plan(sources []Source, existing map[string]config.MCPServer, cwd string) (m
 			notes = append(notes, fmt.Sprintf("could not read %s: %v", src.Path, err))
 			continue
 		}
-		for name, s := range servers {
+		for _, name := range slices.Sorted(maps.Keys(servers)) { // stable winners and notes
+			s := servers[name]
 			if _, ok := existing[name]; ok {
 				notes = append(notes, fmt.Sprintf("skipped %s: already configured", name))
 				continue

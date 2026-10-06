@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/adeotek/moca/internal/config"
 )
@@ -154,6 +155,11 @@ func (t *httpTransport) Notify(ctx context.Context, method string, params any) e
 	return nil
 }
 
+// closeTimeout bounds the session DELETE. Close runs under the server lock
+// (idle stop, restart, shutdown), so a half-open connection must not be able
+// to hold it for the HTTP client's whole timeout.
+var closeTimeout = 3 * time.Second
+
 // Close ends the session (best-effort: the server may be gone).
 func (t *httpTransport) Close() error {
 	t.mu.Lock()
@@ -162,7 +168,9 @@ func (t *httpTransport) Close() error {
 	if sid == "" {
 		return nil
 	}
-	req, _ := http.NewRequest(http.MethodDelete, t.url, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodDelete, t.url, nil)
 	req.Header.Set("Mcp-Session-Id", sid)
 	if resp, err := t.hc.Do(req); err == nil {
 		resp.Body.Close()

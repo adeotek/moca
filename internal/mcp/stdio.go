@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -21,11 +23,25 @@ import (
 // enough to run and resolve binaries, nothing that carries credentials.
 var keepEnv = []string{"PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"}
 
+// keepEnvWindows adds what a Windows process needs to run at all (Windows
+// reports names in mixed case, so the comparison there is case-insensitive).
+var keepEnvWindows = []string{"SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "USERPROFILE", "USERNAME", "APPDATA",
+	"LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "TEMP", "TMP", "PATHEXT", "COMSPEC"}
+
+// keepName reports whether an inherited variable survives the filter on goos.
+func keepName(goos, k string) bool {
+	if goos == "windows" {
+		k = strings.ToUpper(k)
+		return strings.HasPrefix(k, "XDG_") || slices.Contains(keepEnv, k) || slices.Contains(keepEnvWindows, k)
+	}
+	return strings.HasPrefix(k, "XDG_") || slices.Contains(keepEnv, k)
+}
+
 func FilterEnv(base []string) []string {
 	var out []string
 	for _, kv := range base {
 		k, _, _ := strings.Cut(kv, "=")
-		if strings.HasPrefix(k, "XDG_") || slices.Contains(keepEnv, k) {
+		if keepName(runtime.GOOS, k) {
 			out = append(out, kv)
 		}
 	}
@@ -68,6 +84,13 @@ func (r *ring) tail() string {
 	return strings.Join(lines[max(0, len(lines)-5):], " | ")
 }
 
+// callResult is what a pending call receives: the server's response, or the
+// transport's own failure (kept as an error so errors.Is sees its sentinel).
+type callResult struct {
+	resp response
+	err  error
+}
+
 // stdioTransport speaks line-delimited JSON-RPC over a server subprocess.
 // One reader goroutine routes responses to pending calls by id, answers
 // server→client requests (ping only) and logs everything else that is not
@@ -80,11 +103,16 @@ type stdioTransport struct {
 	wmu     sync.Mutex
 	nextID  atomic.Int64
 	mu      sync.Mutex
-	pending map[int64]chan response
+	pending map[int64]chan callResult
 	dead    error
 	logs    *ring
 	done    chan struct{}
 }
+
+// exitGrace bounds how long the exit handler waits for the stdout reader to
+// drain after the process is reaped (a grandchild holding the pipe open would
+// otherwise keep it waiting forever).
+const exitGrace = 500 * time.Millisecond
 
 func startStdio(_ context.Context, name string, s config.MCPServer, baseEnv []string) (transport, error) {
 	env, err := serverEnv(baseEnv, s.Env)
@@ -93,24 +121,41 @@ func startStdio(_ context.Context, name string, s config.MCPServer, baseEnv []st
 	}
 	cmd := exec.Command(s.Command, s.Args...)
 	cmd.Env = env
+	cmd.WaitDelay = exitGrace // a grandchild holding stderr open must not stall Wait
 	logs := &ring{}
 	cmd.Stderr = logs
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
+	// The stdout pipe is ours, not cmd.StdoutPipe's: Wait closes that one the
+	// moment the process is reaped, discarding output the reader has not
+	// consumed yet (a reply followed by an exit, or a fatal message on stdout).
+	pr, pw, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
+	cmd.Stdout = pw
 	tools.SetProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
+		pr.Close()
+		pw.Close()
 		return nil, fmt.Errorf("mcp server %s: %w", name, err)
 	}
-	t := &stdioTransport{name: name, cmd: cmd, stdin: stdin, pending: map[int64]chan response{}, logs: logs, done: make(chan struct{})}
-	go t.readLoop(stdout)
+	pw.Close() // the child holds the write end now
+	t := &stdioTransport{name: name, cmd: cmd, stdin: stdin, pending: map[int64]chan callResult{}, logs: logs, done: make(chan struct{})}
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		t.readLoop(pr)
+	}()
 	go func() {
 		werr := cmd.Wait()
+		select { // let the reader drain what the server wrote before exiting
+		case <-readDone:
+		case <-time.After(exitGrace):
+		}
+		pr.Close()
 		t.fail(fmt.Errorf("%w: server %s exited (%v): %s", errTransportDead, name, werr, logs.tail()))
 		close(t.done)
 	}()
@@ -124,7 +169,7 @@ func (t *stdioTransport) fail(err error) {
 		t.dead = err
 	}
 	for id, ch := range t.pending {
-		ch <- response{Error: &rpcError{Code: -32000, Message: t.dead.Error()}}
+		ch <- callResult{err: t.dead}
 		delete(t.pending, id)
 	}
 }
@@ -161,7 +206,7 @@ func (t *stdioTransport) readLoop(r io.Reader) {
 		delete(t.pending, id)
 		t.mu.Unlock()
 		if ch != nil {
-			ch <- m
+			ch <- callResult{resp: m}
 		}
 	}
 }
@@ -179,12 +224,12 @@ func (t *stdioTransport) write(v any) error {
 
 func (t *stdioTransport) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	id := t.nextID.Add(1)
-	ch := make(chan response, 1)
+	ch := make(chan callResult, 1)
 	t.mu.Lock()
 	dead := t.dead
 	if dead != nil {
 		t.mu.Unlock()
-		return nil, dead
+		return nil, fmt.Errorf("%w: %w", errNotSent, dead)
 	}
 	t.pending[id] = ch
 	t.mu.Unlock()
@@ -206,7 +251,7 @@ func (t *stdioTransport) Call(ctx context.Context, method string, params any) (j
 			t.mu.Unlock()
 		}
 		if dead != nil {
-			return nil, dead
+			return nil, fmt.Errorf("%w: %w", errNotSent, dead)
 		}
 		return nil, ctx.Err()
 	}
@@ -217,10 +262,13 @@ func (t *stdioTransport) Call(ctx context.Context, method string, params any) (j
 		t.mu.Unlock()
 		return nil, ctx.Err()
 	case r := <-ch:
-		if r.Error != nil {
-			return nil, r.Error
+		if r.err != nil {
+			return nil, r.err
 		}
-		return r.Result, nil
+		if r.resp.Error != nil {
+			return nil, r.resp.Error
+		}
+		return r.resp.Result, nil
 	}
 }
 

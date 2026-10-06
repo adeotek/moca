@@ -16,7 +16,9 @@ import (
 )
 
 // TestHelperProcess is the fake stdio MCP server, run as a subprocess.
-// Behaviour switches: MOCA_FAKE_MODE = "" | "noisy" | "die" | "paged".
+// Behaviour switches: MOCA_FAKE_MODE = "" | "noisy" | "die" | "paged" |
+// "errtext" | "crashcall" (exit during tools/call) | "hangcall" / "hanginit"
+// (never answer) | "loopcursor" (tools/list never ends).
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("MOCA_FAKE_MCP") != "1" {
 		return
@@ -49,6 +51,9 @@ func TestHelperProcess(t *testing.T) {
 		var result any
 		switch req.Method {
 		case "initialize":
+			if mode == "hanginit" {
+				continue
+			}
 			result = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{}},
 				"serverInfo": map[string]any{"name": "fake", "version": "1"}}
 			if mode == "noisy" {
@@ -64,7 +69,9 @@ func TestHelperProcess(t *testing.T) {
 				{"name": "read_doc", "description": "Read library documentation", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"lib": map[string]any{"type": "string"}}}, "annotations": map[string]any{"readOnlyHint": ro}},
 				{"name": "create_issue", "description": "Create an issue", "inputSchema": map[string]any{"type": "object"}},
 			}
-			if mode == "paged" && p.Cursor == "" {
+			if mode == "loopcursor" {
+				result = map[string]any{"tools": page1[:1], "nextCursor": "same"}
+			} else if mode == "paged" && p.Cursor == "" {
 				result = map[string]any{"tools": page1[:1], "nextCursor": "p2"}
 			} else if mode == "paged" {
 				result = map[string]any{"tools": page1[1:]}
@@ -72,6 +79,12 @@ func TestHelperProcess(t *testing.T) {
 				result = map[string]any{"tools": page1}
 			}
 		case "tools/call":
+			if mode == "crashcall" {
+				os.Exit(5)
+			}
+			if mode == "hangcall" {
+				continue
+			}
 			if mode == "errtext" {
 				out.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{"code": -32000, "message": "job exited"}})
 				continue

@@ -16,9 +16,15 @@ import (
 // Manager.Call retries exactly once on these, never on server-supplied error
 // text (a server error message containing "exited" must not restart a healthy
 // server).
+//
+// errNotSent marks a failure that happened before the request reached the
+// server (the transport was already dead, or the write failed): replaying it
+// cannot execute a tool twice. A dead-transport error without it is ambiguous
+// — the server may have run the call before dying.
 var (
 	errTransportDead  = errors.New("MCP transport is dead")
 	errSessionExpired = errors.New("session expired")
+	errNotSent        = errors.New("request not sent")
 )
 
 type request struct {

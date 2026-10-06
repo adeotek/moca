@@ -79,20 +79,27 @@ func (p *ProxyTool) Run(ctx context.Context, env *tools.Env, input json.RawMessa
 	}
 	switch a.Action {
 	case "search":
-		hits, err := p.m.Search(ctx, a.Query, a.Server)
+		hits, notes, err := p.m.Search(ctx, a.Query, a.Server)
 		if err != nil {
 			return errResult("%v", err)
 		}
-		if len(hits) == 0 {
-			return tools.Result{Content: "[no matching MCP tools]", Summary: "search " + a.Query}
-		}
 		var sb strings.Builder
+		if len(hits) == 0 {
+			sb.WriteString("[no matching MCP tools]")
+			for _, n := range notes {
+				sb.WriteString("\n[" + n + "]")
+			}
+			return tools.Result{Content: sb.String(), Summary: "search " + a.Query}
+		}
 		for _, h := range hits {
 			d := h.Description
 			if len(d) > 160 {
 				d = cutRunes(d, 157) + "..."
 			}
 			fmt.Fprintf(&sb, "%s/%s — %s\n", h.Server, h.Tool, strings.Join(strings.Fields(d), " "))
+		}
+		for _, n := range notes {
+			sb.WriteString("[" + n + "]\n")
 		}
 		sb.WriteString("[describe before calling]")
 		return tools.Result{Content: sb.String(), Summary: fmt.Sprintf("search %q (%d)", a.Query, len(hits))}

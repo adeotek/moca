@@ -300,9 +300,10 @@ func TestMaxStepsWrapUpRepairsStrayCalls(t *testing.T) {
 
 func TestMCPNoSchemasInPromptAndZeroStarts(t *testing.T) {
 	// The fake stdio server from internal/mcp is not reachable here; use a
-	// command that would fail loudly if spawned.
+	// command that leaves a marker file if it is ever spawned.
+	marker := filepath.Join(t.TempDir(), "spawned")
 	s := newScript(t, textTurn("ok"))
-	a, _, _ := startTestWith(t, s, `"mcp":{"servers":{"never":{"command":"/nonexistent/should-not-spawn","description":"docs lookup"}}}`, "")
+	a, _, _ := startTestWith(t, s, fmt.Sprintf(`"mcp":{"servers":{"never":{"command":"sh","args":["-c","touch %s"],"description":"docs lookup"}}}`, marker), "")
 	defer a.Close()
 	if _, err := a.Run(context.Background(), "hi"); err != nil {
 		t.Fatal(err)
@@ -316,7 +317,11 @@ func TestMCPNoSchemasInPromptAndZeroStarts(t *testing.T) {
 	if !strings.Contains(sys, "- never: docs lookup") {
 		t.Fatal("roster line present")
 	}
-	// Spawning the server would have produced an error entry; none should exist.
+	// Neither session start nor a whole run may spawn the server. (An eager
+	// spawn in build would fail silently, so the marker is the only witness.)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the configured server was spawned at session start")
+	}
 	entries, _ := session.ReadFile(a.Session().Path())
 	for _, e := range entries {
 		if e.Type == session.TypeError {
@@ -324,7 +329,8 @@ func TestMCPNoSchemasInPromptAndZeroStarts(t *testing.T) {
 		}
 	}
 	// The proxy replaced the stub: a search reaches the manager (and fails on
-	// the unusable command) instead of answering "no MCP servers configured".
+	// the server that exits without speaking MCP) instead of answering "no MCP
+	// servers configured".
 	res := a.opts.Tools.Run(context.Background(), a.opts.Env,
 		llm.ToolCall{Name: "mcp", Input: json.RawMessage(`{"action":"search","query":"x"}`)})
 	if !res.IsError || strings.Contains(res.Content, "no MCP servers configured") {
