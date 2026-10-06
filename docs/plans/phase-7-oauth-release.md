@@ -942,9 +942,9 @@ make release VERSION=v0.1.0
 
 **Task 1 outcome — the policy gate decided the scope.** Anthropic: **not permitted** — the record (`docs/specs/oauth-verification.md`) quotes `code.claude.com/docs/en/legal-and-compliance` (retrieved 2026-10-06): Anthropic does not permit third-party developers to offer Claude.ai login or route requests through Free/Pro/Max credentials; server-side enforcement since 2026-01, formalized 2026-02, reaffirmed 2026-09. OpenAI: **permitted** — the Sign in with ChatGPT (SIWC) open-source token-sharing flow gives third-party apps their own dynamically registered client (no secret, no spoofing). Every endpoint was fetched live the same day: the discovery document, the JWKS shape, the token endpoint answering `400 invalid_grant` to a bogus code; the authorize endpoint's Cloudflare 403 to curl is expected (bot wall). No full interactive login ran — there is no ChatGPT account on this host (see Deferred).
 
-**Tasks 2–4 — what shipped.** Token store `auth.json` (0600 file / 0700 dir, atomic writes, `flock` on Unix / `LockFileEx` on Windows around every read-modify-write; rotating refresh serialized so a concurrent process re-reads and never burns a rotated token; `invalid_grant` clears the entry with "session expired for <provider>: run `moca login <provider>`"). OAuth flow: dynamic client registration, PKCE S256, loopback `127.0.0.1` callback (headless fallback via `--no-browser` — full redirect URL accepted, state verified), nonce + RS256 JWKS ID-token validation, required-scope check (`chatgpt.tokens.use.direct`), revoke on logout. Registry: `auth: "oauth"` resolves through the store and only for `openai-responses` models; the adapter's subscription route omits `max_output_tokens` and groups the seven tools in a `{type:"namespace", name:"moca"}` group (the SIWC tool-shaping contract). Config: `providers.anthropic.auth: "oauth"` is rejected with the recorded reason; `config.SetString` (comment-preserving, in-place) backs login's offer to flip `auth` to `"oauth"`. Exit mapping: `ErrInvalidGrant`/`ErrInvalidClient` → exit 2 (fixed with `moca login`).
+**Tasks 2–4 — what shipped.** Token store `auth.json` (0600 file / 0700 dir, atomic writes, `flock` on Unix / `LockFileEx` on Windows around every read-modify-write; rotating refresh serialized so a concurrent process re-reads and never burns a rotated token; `invalid_grant` keeps the entry (so `moca logout` still works) and errors "session expired for <provider>: run `moca login <provider>`"). OAuth flow: dynamic client registration, PKCE S256, loopback `127.0.0.1` callback (headless fallback via `--no-browser` — full redirect URL accepted, state verified), nonce + RS256 JWKS ID-token validation, required-scope check (`chatgpt.tokens.use.direct`), revoke on logout. Registry: `auth: "oauth"` resolves through the store and only for `openai-responses` models; the adapter's subscription route omits `max_output_tokens` and groups the seven tools in a `{type:"namespace", name:"moca"}` group (the SIWC tool-shaping contract). Config: `providers.anthropic.auth: "oauth"` is rejected with the recorded reason; `config.SetString` (comment-preserving, in-place) backs login's offer to flip `auth` to `"oauth"`. Exit mapping: `ErrInvalidGrant`/`ErrInvalidClient` → exit 2 (fixed with `moca login`).
 
-**Deviations.** (a) Task 1's "verify with a live flow on a test account" — endpoints were probed live, but no ChatGPT account exists on this host; the interactive leg is deferred (the fake-AS suite covers the flow end to end). (b) Task 4 Step 5 (live verification per shipped provider) — same reason. (c) Task 5 Step 5's second half (phase-6 live gate 4 with the fork-installed skill) — the install half was verified from the fork's build; the live-model half is deferred with the ship gate.
+**Deviations.** (0) Task 4's `subscriptionBaseURLs`, `subscriptionHeaders` and `Credential.Extra` were not built: the verification record shows the same Responses base URL and no extra headers on the subscription route. (a) Task 1's "verify with a live flow on a test account" — endpoints were probed live, but no ChatGPT account exists on this host; the interactive leg is deferred (the fake-AS suite covers the flow end to end). (b) Task 4 Step 5 (live verification per shipped provider) — same reason. (c) Task 5 Step 5's second half (phase-6 live gate 4 with the fork-installed skill) — the install half was verified from the fork's build; the live-model half is deferred with the ship gate.
 
 **Task 5 — graphify PR #4174.** Branch `add-moca-platform` on `adeotek/graphify` → upstream `v8`: a `moca` entry in `_PLATFORM_CONFIG` (skill-only platform reusing claude's split bundle — `skill.md` byte-identical to pi's), `~/.config/moca/skills/graphify/SKILL.md` honoring `XDG_CONFIG_HOME`, project scope `<repo>/.moca/skills/graphify/SKILL.md`, `graphify moca install|uninstall` dispatch + help text, `tests/test_moca.py`. Graphify suites: 409 passed / 0 failed across the ten install/detect suites; `ruff` clean; pyright only pre-existing fcntl/typing errors. `docs/external-tools.md` documents the install with the manual-copy fallback until a release carries it.
 
@@ -1054,3 +1054,50 @@ behaviour test either failed against the pre-fix sources (fail-first, before
 the fix) or was mutation-proven load-bearing (overlay copies); the ship-gate
 checker rehearsal (scripted provider) still passes both directions; the
 working tree was never mutated by the mutation checks.
+
+## Review fixes (2026-10-06 — review pass 3)
+
+Pass 3 (`docs/reviews/2026-10-06-phase-7-oauth-release-pass-3.md`, Approve
+with fixes: 0H/3M/6L) found nothing the earlier passes had marked fixed
+regressed; its new findings were all fixed, each with a regression test that
+was shown to fail against the pre-fix behaviour (scratch overlay mutations).
+
+- 3-1 (Medium): the ship-gate checker trusted the transcript's `[exit 0]`,
+  which `go test ./... | tail` or `|| true` forges. It now also runs
+  `go test ./...` in the final repo and fails gate 4 if that is red. Verified
+  with the pass-3 synthetic piped session against a repo with the bug unfixed
+  (now fails) and the good session against a fixed repo (passes).
+- 3-2 (Medium): `Registry.CheckCredential` (the `/model` and resume check)
+  refreshed an expired OAuth token over the network on the TUI update
+  goroutine with no ctx and no timeout. For OAuth it now only confirms a
+  stored login; refresh stays with the first request.
+  `TestCheckCredentialOAuthDoesNotTouchNetwork`.
+- 3-3 (Medium): the paste prompt's blocked stdin read outlived `Login` and
+  swallowed the "Switch it now? [y/N]" answer. `provider.LineReader` lets an
+  abandoned read keep its line for the next consumer; `runLogin` shares one
+  reader across both prompts. `TestLineReaderAbandonedReadKeepsLine`,
+  `TestLoginCallbackWinLeavesNextLineForCaller`, and the CLI-level
+  `TestLoginCLISwitchesAuthAfterCallback` (new `oauthLookup` seam drives
+  `moca login` against a fake authorization server).
+- 3-4 (Low): the store-lock wait ignored ctx (blocking `flock`) and the token
+  endpoint had no timeout. The lock now polls non-blocking (`LOCK_NB` /
+  `LOCKFILE_FAIL_IMMEDIATELY`) and gives up with ctx; a refresh is bounded at
+  30 s and logout's revoke at 15 s. `TestCredentialForLockWaitHonoursContext`,
+  `TestLockFileWaitsThenAcquires`, `TestRefreshIsTimeBounded`.
+- 3-5 (Low): a 429/5xx from the token endpoint was a plain error the retry
+  layer never retried, and a valid access token was not used when the
+  pre-expiry refresh failed. `tokenFrom` now returns `*HTTPError` (with
+  Retry-After), and `CredentialFor` falls back to the still-valid token on a
+  non-terminal failure. `TestTokenEndpointTransientIsRetryable`,
+  `TestTransientRefreshFailureFallsBack`.
+- 3-6/3-7 (Low): SPECS (`invalid_grant` keeps the entry; unknown-provider
+  wording; `CheckCredential`; 388 tests across 13 packages) and this plan's
+  Implementation notes corrected; CHANGELOG head is "unreleased" until the tag.
+- 3-8 (Low): tests for the open-failure message, wait-then-paste (Review
+  Focus 5) and `runLogin`'s success path (above).
+- 3-9 (Low): the loopback page answers a refused login with a 400 and "Login
+  failed", not "Login complete" (`TestCallbackPageReportsFailure`).
+
+Still deferred (need Ben): the three live ship-gate runs, a live `moca login
+openai`, and the `v0.1.0` tag. Review 1-6b (checker gates 1–2 accept any
+`_test.go` read / any search) stays batched with the live runs.

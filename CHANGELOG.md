@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.0 — 2026-10-06
+## v0.1.0 — unreleased (pending the §14 ship gate's live runs and the tag)
 
 First release. A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, seven tools, no framework.
 
