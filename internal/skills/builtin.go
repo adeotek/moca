@@ -19,7 +19,15 @@ var builtinFS embed.FS
 // on the next run, and the write-then-rename is safe against two processes
 // racing on first use.
 func ExtractBuiltins(dataDir string) (string, error) {
-	h, err := builtinHash()
+	return extractBuiltins(builtinFS, dataDir)
+}
+
+// extractBuiltins is ExtractBuiltins with an injectable filesystem. The
+// directory is keyed on a content hash, so changed embedded content lands in
+// a NEW directory on the next run (the old one is simply no longer
+// referenced) — tests prove that with a MapFS.
+func extractBuiltins(fsys fs.FS, dataDir string) (string, error) {
+	h, err := builtinHash(fsys)
 	if err != nil {
 		return "", err
 	}
@@ -36,7 +44,7 @@ func ExtractBuiltins(dataDir string) (string, error) {
 		return "", err
 	}
 	defer os.RemoveAll(tmp) // no-op after a successful rename
-	err = fs.WalkDir(builtinFS, "builtin", func(p string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(fsys, "builtin", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -45,7 +53,7 @@ func ExtractBuiltins(dataDir string) (string, error) {
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
-		b, err := builtinFS.ReadFile(p)
+		b, err := fs.ReadFile(fsys, p)
 		if err != nil {
 			return err
 		}
@@ -64,13 +72,13 @@ func ExtractBuiltins(dataDir string) (string, error) {
 }
 
 // builtinHash is a stable content hash of the embedded built-in skills.
-func builtinHash() (string, error) {
+func builtinHash(fsys fs.FS) (string, error) {
 	h := sha256.New()
-	err := fs.WalkDir(builtinFS, "builtin", func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(fsys, "builtin", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		b, err := builtinFS.ReadFile(p)
+		b, err := fs.ReadFile(fsys, p)
 		if err != nil {
 			return err
 		}

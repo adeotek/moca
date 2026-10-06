@@ -58,13 +58,13 @@ docs/
 **Interfaces:**
 - Produces: `var rtkSelf map[string]bool` — rtk subcommands that **don't** run another program (e.g. `read`, `ls`, `gain`, `init`, `config`, `help`, `version`). `var rtkProxy map[string]bool` — subcommands whose remaining argv is an arbitrary command (`proxy`). `var rtkDashDash map[string]bool` — subcommands that run the command after `--` (e.g. `test`). Every other first word is treated as a **wrapped command name** (`rtk git …`, `rtk docker …`, `rtk gh …`).
 
-- [ ] **Step 1: Inspect the installed rtk**
+- [x] **Step 1: Inspect the installed rtk**
 
 Run: `rtk --version && rtk --help` and `rtk <sub> --help` for each listed subcommand. For each subcommand, record:
 - whether it executes an external program;
 - if so, which argv word names that program: the subcommand itself (`git`), the word after `--`, or the rest of the argv (`proxy`).
 
-- [ ] **Step 2: Write the table** from that record:
+- [x] **Step 2: Write the table** from that record:
 
 ```go
 // internal/permissions/rtk.go
@@ -84,7 +84,7 @@ var (
 
 Replace the example entries with exactly what Step 1 found. Fill in the version/date comment.
 
-- [ ] **Step 3: Commit** — `git add internal/permissions/rtk.go && git commit -m "chore(permissions): record rtk subcommand classes from the real CLI"`
+- [x] **Step 3: Commit** — `git add internal/permissions/rtk.go && git commit -m "chore(permissions): record rtk subcommand classes from the real CLI"`
 
 ---
 
@@ -106,7 +106,7 @@ Replace the example entries with exactly what Step 1 found. Fill in the version/
 
 `classify` must run for both `rtk` and the wrapped name. Restructure the CallExpr branch so `unwrap` returns the **list** of command-name indexes to classify: wrappers like `env`/`time` stay transparent (not classified), while `rtk` is classified **and** unwrapped.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```go
 // internal/permissions/rtk_test.go
@@ -158,9 +158,9 @@ func TestRtkUnwrap(t *testing.T) {
 
 Adjust the `rtk read` / `rtk ls` / `rtk test` rows to the subcommands Task 1 recorded. The proxy / `--` / plain-wrapper rows and the deny rows must stay.
 
-- [ ] **Step 2: Run** — `go test ./internal/permissions/ -run Rtk` → FAIL.
+- [x] **Step 2: Run** — `go test ./internal/permissions/ -run Rtk` → FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```go
 // internal/permissions/rtk.go — append:
@@ -251,9 +251,9 @@ Extract phase 2's per-wrapper switch bodies into `skipWrapper(args, i) (next int
 - otherwise `classify(name)`;
 - if any index names `tee`, apply the tee target check from that index.
 
-- [ ] **Step 4: Run** — `go test ./internal/permissions/ -v` → PASS. The phase-2 ladder must still pass unchanged.
+- [x] **Step 4: Run** — `go test ./internal/permissions/ -v` → PASS. The phase-2 ladder must still pass unchanged.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/permissions
@@ -271,7 +271,7 @@ git commit -m "feat(permissions): unwrap rtk so it never launders a non-allowlis
 **Interfaces:**
 - Produces: `TestEcosystemSkillsLoadUnchanged` — every `testdata/ecosystem/<source>/<skill>/SKILL.md` loads via `Discover`, with a non-empty description equal to the expected value in `testdata/ecosystem/expected.json` (`{"<source>/<skill>": {"name": …, "description": …}}`).
 
-- [ ] **Step 1: Assemble the corpus (verbatim copies, never edited)**
+- [x] **Step 1: Assemble the corpus (verbatim copies, never edited)**
 
 Collect at least these, byte-for-byte. Keep each skill's directory structure, but SKILL.md plus at most one supporting file is enough. Record the URL, commit and license of each in `SOURCES.md`:
 - `graphify/graphify` — graphify's SKILL.md (from its repo, or from `graphify install` output for another platform);
@@ -291,7 +291,7 @@ Collect at least these, byte-for-byte. Keep each skill's directory structure, bu
 
 Only include third-party files whose licenses permit redistribution. If one doesn't, record the expected name/description in `expected.json`, keep the file **out** of the repo, and test it in the live gate instead.
 
-- [ ] **Step 2: Write the test**
+- [x] **Step 2: Write the test**
 
 ```go
 // internal/skills/ecosystem_test.go
@@ -340,12 +340,12 @@ func TestEcosystemSkillsLoadUnchanged(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** — `go test ./internal/skills/ -run Ecosystem -v`. For every failure, fix **the parser** (`frontmatter.go`), never the fixture. Add a focused unit test in `frontmatter_test.go` for each fix. Likely gaps:
+- [x] **Step 3: Run** — `go test ./internal/skills/ -run Ecosystem -v`. For every failure, fix **the parser** (`frontmatter.go`), never the fixture. Add a focused unit test in `frontmatter_test.go` for each fix. Likely gaps:
   - indentation-sensitive folded blocks that contain blank lines (keep paragraph breaks as `\n` for `|`, as a single space for `>`);
   - `description: "multi \"quoted\""` escapes (unquote with `strconv.Unquote` for double quotes; `''` → `'` for single quotes);
   - list-valued keys written inline vs as `- item` blocks (both skipped).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/skills
@@ -363,7 +363,7 @@ git commit -m "test(skills): ecosystem SKILL.md corpus (graphify, claude-code, p
 **Interfaces:**
 - No new API. This task verifies that phase 2's read-only roots cover entire skill directories, and makes the rtk skill text match the real CLI.
 
-- [ ] **Step 1: Write the failing/guard test**
+- [x] **Step 1: Write the failing/guard test**
 
 ```go
 func TestModelCanReadGlobalSkillSupportFiles(t *testing.T) {
@@ -387,9 +387,9 @@ func TestModelCanReadGlobalSkillSupportFiles(t *testing.T) {
 
 This test sets up the skill dir **after** `Start`. That works because the jail's read-only roots are directory prefixes. If `NewJail` dropped the root because it didn't exist yet at `canonical()` time, fix `NewJail`: keep non-existent read-only roots as `filepath.Abs` paths instead of skipping them. Then make the test pass.
 
-- [ ] **Step 2: Run** — `go test ./internal/agent/ -run SkillSupport -v` → fix `NewJail` if needed → PASS.
+- [x] **Step 2: Run** — `go test ./internal/agent/ -run SkillSupport -v` → fix `NewJail` if needed → PASS.
 
-- [ ] **Step 3: Revise `builtin/rtk/SKILL.md`** against Task 1's record:
+- [x] **Step 3: Revise `builtin/rtk/SKILL.md`** against Task 1's record:
   - every command shown must exist in the installed rtk;
   - the "Instead of / Use" table uses real subcommands;
   - the fallback instruction names the real raw-output escape (`rtk proxy <cmd>` if that's what rtk provides);
@@ -397,11 +397,11 @@ This test sets up the skill dir **after** `Start`. That works because the jail's
   
   Keep it under ~40 lines: every session pays for the description, and the body when loaded.
 
-- [ ] **Step 4: Bump the extraction version**
+- [x] **Step 4: Bump the extraction version**
 
 Built-ins extract to `builtin-skills/<mocaVersion>/`. During development (`0.0.0-dev`), an existing extraction would shadow the revised file. Change `ExtractBuiltins` to also re-extract when the embedded content hash differs from a `.hash` file in the target dir. Add a test: extract, then modify the embedded content via a test-only override var, then extract again → the file is updated.
 
-- [ ] **Step 5: Run** — `go test ./... -race` → PASS. **Commit**
+- [x] **Step 5: Run** — `go test ./... -race` → PASS. **Commit**
 
 ```bash
 git add internal/skills internal/permissions internal/agent
@@ -416,7 +416,7 @@ git commit -m "feat(skills): rtk skill verified against the real CLI; built-ins 
 - Create: `internal/skills/testdata/prompts/claude-review.md`, `internal/skills/testdata/prompts/pi-commit.md`
 - Test: `internal/skills/prompts_test.go` (extend)
 
-- [ ] **Step 1: Fixtures**
+- [x] **Step 1: Fixtures**
 
 `claude-review.md` (Claude Code command shape):
 
@@ -439,7 +439,7 @@ description: Write a commit message
 Write a conventional commit message for the staged changes. Scope: $1. Extra: $@
 ```
 
-- [ ] **Step 2: Test**
+- [x] **Step 2: Test**
 
 ```go
 func TestEcosystemPromptsLoad(t *testing.T) {
@@ -456,7 +456,7 @@ func TestEcosystemPromptsLoad(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** — PASS (fix the parser if not, with a unit test). **Commit** — `git commit -am "test(skills): Claude Code / pi prompt templates load and expand"`
+- [x] **Step 3: Run** — PASS (fix the parser if not, with a unit test). **Commit** — `git commit -am "test(skills): Claude Code / pi prompt templates load and expand"`
 
 ---
 
@@ -465,28 +465,128 @@ func TestEcosystemPromptsLoad(t *testing.T) {
 **Files:**
 - Create: `docs/external-tools.md`
 
-- [ ] **Step 1: Write `docs/external-tools.md`** (short):
+- [x] **Step 1: Write `docs/external-tools.md`** (short):
   - how moca integrates CLIs (allowlist + skill);
   - rtk: what the built-in skill does, how the analyser treats `rtk <cmd>`;
   - graphify: until `graphify install --platform moca` lands upstream (phase 7), install manually with `mkdir -p ~/.config/moca/skills/graphify && cp <graphify skill dir>/* ~/.config/moca/skills/graphify/` (give the exact source path that graphify uses for other platforms);
   - using skills/prompts from Claude Code / pi / OpenCode: copy or symlink their dirs into `~/.config/moca/skills/` and `~/.config/moca/prompts/`.
 
-- [ ] **Step 2: Live gate — rtk preferred in a real session**
+- [x] **Step 2: Live gate — rtk preferred in a real session**
 
 With rtk installed, in a scratch Go repo with a failing test:
 `moca -p 'run the tests and tell me what fails' --model opencode-go/glm-5.3-flash`
 Expected: stderr shows a `shell rtk test -- go test ./…` (or `rtk go test`, per the real CLI), not bare `go test`, and the session file's tool_use entries confirm it. If the model doesn't prefer rtk, first check that the rtk skill is in the stored system prompt. Then tune the **skill's description** (the only part always in context) and re-run. Do not touch the frozen system prompt.
 
-- [ ] **Step 3: Live gate — rtk can't launder**
+- [x] **Step 3: Live gate — rtk can't launder**
 
 `moca -p 'run: rtk proxy python3 -c "print(1)"'` with `python3` not allowlisted → refused in `-p` (`✗ shell refused: python3 …`).
 
-- [ ] **Step 4: Live gate — graphify SKILL.md loads unchanged**
+- [x] **Step 4: Live gate — graphify SKILL.md loads unchanged**
 
 Copy graphify's skill dir into `~/.config/moca/skills/graphify/` (no edits). Then `moca -p 'what does the graphify skill do? read it'` → stderr shows `▸ read …/graphify/SKILL.md`, and the answer reflects its content. In a repo with `graphify-out/graph.json`, ask a codebase question → the model runs `graphify query "…"` (allowlisted).
 
-- [ ] **Step 5: Live gate — pi package skill + Claude Code skill**
+- [x] **Step 5: Live gate — pi package skill + Claude Code skill**
 
 Point `~/.config/moca/skills/` at (symlink) one pi-package skill and one Claude Code skill. Both appear in the stored system prompt's skill list, and asking for each triggers a `read` of its SKILL.md.
 
-- [ ] **Step 6: README + commit**: status `phase 6 done — rtk, graphify, ecosystem skills`; `git add docs README.md && git commit -m "docs: external tools guide; phase 6 gate passed"`.
+- [x] **Step 6: README + commit**: status `phase 6 done — rtk, graphify, ecosystem skills`; `git add docs README.md && git commit -m "docs: external tools guide; phase 6 gate passed"`.
+
+## Implementation notes (2026-10-06)
+
+**The real rtk CLI is a superset of the plan's assumptions (rtk 0.51.0, 88 subcommands).** Probes: `rtk test echo x` runs the command *directly* — the plan's "missing `--` → self" reading was wrong and would have been a laundering hole; `rtk err`, `rtk summary` and `rtk run` also take the command as the first positional word; `rtk run -c` / `--shell` take a shell command *string*; `rtk find … -exec …` forwards execution (the same trust as running `find` directly — the analyser never inspects a tool's own argv; noted in `rtk.go`). Task 2 therefore unified `proxy`/`test`/`err`/`summary`/`run` into one runner class — the first non-flag word (or the word after `--`) is classified; shell-string options and unknown options refuse; the plan's `rtkDashDash` sketch was replaced.
+
+**Task 4 Step 4 was already solved differently.** Phase 2 shipped content-hash-keyed extraction (`builtin-skills/<hash>`), not `builtin-skills/<mocaVersion>/`; the `.hash`-file scheme was unnecessary. `ExtractBuiltins` now delegates to `extractBuiltins(fsys, …)`, and a MapFS test pins re-extraction on content change.
+
+**Task 4's jail fix was real.** `NewJail` silently dropped read-only roots that did not exist yet (`EvalSymlinks` failed on them); switched to `resolveDeep`. `TestJailKeepsNotYetExistingReadOnlyRoot` fails against the pre-fix code.
+
+**Corpus provenance.** Vendored from the real installed distributions: graphify's skill from its `install` output (Apache-2.0 OR MIT; the claude and pi installs are byte-identical, the opencode variant differs in platform dispatch wording), `anthropics/skills` at commit `683bc88e56f3e09ba94f7055977f3d3aa499f202` (Apache-2.0; skill-creator brings supporting files), npm `pi-subagents` 0.76.1 + `pi-mcp-adapter` 5.1.0 (MIT), an OpenCode-format skill from the author's dotfiles (MIT-declared). Anthropic's document skills are source-available → deliberately not vendored. SHA-256s in `SOURCES.md`. Parser fixes the corpus forced: folded `>` blank lines (double space → single space); from the plan's gap list: Go-style unescaping for well-formed double-quoted values, `''` collapsing for single-quoted ones (unit tests in `frontmatter_test.go`).
+
+**Gate deviation (plan Task 6 Step 5).** The plan said to symlink the pi / Claude Code skills into `~/.config/moca/skills`; symlinked skill directories are skipped by design (phase 2 — bodies load through the read jail), so the gate copied them.
+
+**Gate results (scripted provider, real CLIs; scratch `moca_gate6/`).** A: graphify + pi-subagents + skill-creator staged skills all appear in the stored system prompt (plus the `- rtk:` line and the rtk-preference line); their bodies and graphify's `references/query.md` load through `read`. B: `rtk proxy python3 -c 'print(1)'` refused (`python3 is not allowlisted…`) while `rtk ls .` / `rtk read note.txt` ran (exit 0). C: `graphify --version` → `graphify 0.9.77`; `graphify query "what runs the agent loop?"` → a real traversal of the committed graph (1629 nodes, 345 found, budget-truncated).
+
+**Live legs (2026-10-06, real OpenCode Go `glm-5.3-flash`; key from the repo `.env` via `env:OPENCODE_GO_KEY`; scratch `moca_gate6live/`).** First run: with the original skill description the model ran bare `go test` (and PATH-fumbled — `go` is mise-only on this host, so the harness now exports it). The rtk skill **description was sharpened** with concrete wrapper examples (`rtk test go test ./...`, `rtk err <cmd>`, `rtk read <file>`, …) — rerun: `rtk test -- go test ./...` ✓. `rtk proxy python3 -c 'print(1)'` → refused verbatim by the allowlist ✓. graphify: the model read its SKILL.md, ran `graphify query "What runs the agent loop?"` against the committed graph, and source-verified with `rtk grep` ✓ — and the analyser correctly refused an attempted `"$PYTHON" -c …` bootstrap (non-literal command name) before the model recovered and queried directly. pi-subagents (npm pi package) + skill-creator (Claude Code) read and summarized ✓. Transient Go-tier flake seen twice before any token was spent: `HTTP 400 … [1210] This model always engages in thinking…`; an immediate retry succeeded, and direct curl probes of every `reasoning_effort` value returned 200 (backend-dependent, not request shape).
+
+**Docs.** `docs/external-tools.md` (rtk/graphify semantics + how to install skills and prompts from other tools), README status, SPECS §1/§11/§12/§15.
+
+## Review fixes (2026-10-06 — review passes 1 & 2)
+
+Two independent review passes ran on the phase-6 PR: pass 1
+(`docs/reviews/2026-10-06-phase-6-rtk-graphify-ecosystem.md`, Approve with
+fixes: 0H/3M/4L) and an adversarial pass 2
+(`docs/reviews/2026-10-06-phase-6-rtk-graphify-ecosystem-pass-2.md`, Approve
+with fixes: 1H/3M/4L; the passes ran in parallel and mutually cross-checked).
+All confirmed findings were fixed; every behavior-pinning test row was
+verified to fail against the pre-fix sources (stash of the non-test source
+files).
+
+**Pass-2 H1 (`rtk test|err|summary … --shell <sh> <string>` executes the
+string) — did not reproduce.** Pass 1 rebuilt the probe and found literal
+argv; a dedicated spy harness (`~/.hermes/cache/scratch/repro6/`) confirmed
+across `rtk test|err|summary`, `--shell` and `--shell=` (word present or
+absent): the spy never ran, the tokens arrived as argv of the wrapped
+command. The string-executing shape is `--shell` *before* the command word
+(`rtk test --shell <sh> <string>`), which the analyser already refuses; `rtk
+run --shell …` is refused by rtk itself. `rtk_test.go` now pins the
+literal-argv form; `rtk.go`'s header records the probe date and the
+re-check-on-bump contract.
+
+- **F1/M4 — Windows rtk unwrap**: `checkWindows` steps past `rtk` to the sub
+  word, then a runner's first positional word (flags and `--` skipped,
+  `.exe`/quotes normalized; option-shaped word after `--` refused like
+  Unix). Rows added to `TestWindowsBestEffort`; `docs/external-tools.md` and
+  SPECS §11 updated.
+- **F2/M3 — case-variant wrappers**: `unwrap`/`skipWrapper` and the rtk
+  subcommand class lookups match case-insensitively; `RTK proxy python x`
+  now classifies `python` (pre-fix only `RTK` was classified, so one
+  allow-always click laundered everything behind it). Rows added.
+- **F4/M2 — option-shaped word after `--`**: refused as unclassifiable
+  instead of blessed as a command name; rows added.
+- **F3 — provenance**: `opencode/dotnet-unit-testing` pinned to
+  `adeotek/dotfiles@389806b9439272a6a5d3aad4169d265ceafc55ef` (MIT; dotfiles
+  `LICENSE`) in `SOURCES.md`.
+- **F5/L5 — hash enforcement**: `TestEcosystemSourcesHashes` recomputes
+  every SHA-256 recorded in `SOURCES.md` and requires every vendored file to
+  be recorded.
+- **F6/L6 — corpus loop**: driven by `expected.json`'s keys, so a deleted
+  fixture cannot hide behind an aggregate count.
+- **Not actioned**: pass-2 L7 (frontmatter `|+` / unterminated-quote
+  cosmetic boundary — unreachable through `Discover`; recorded for a future
+  parser revision) and pass-2 L8 (rtk `smart --model` future risk — the
+  table's re-check-on-bump contract covers it).
+
+## Review fixes (2026-10-06 — review pass 3)
+
+Pass 3 (`docs/reviews/2026-10-06-phase-6-rtk-graphify-ecosystem-pass-3.md`,
+Approve with fixes: 1H/0M/2L). All three fixed with tests that fail against
+the pre-fix sources:
+
+- **H1 — `rtkSelf` waved native-binary proxies through.** `rtk find -exec …`
+  executes (probed on rtk 0.51.0), so with `shell.allow: ["rtk","git"]` it ran
+  arbitrary programs unprompted; `rg --pre`, `ast-grep -U` and `tree -o` are the
+  same shape. `rtkSelf` now holds only rtk's own read-only machinery; `ls tree
+  find grep rg ast-grep wc diff` fall through to the default branch (the sub
+  word is classified as the wrapped command), on Unix and the Windows mirror.
+  `TestRtkUnwrap` gained a narrow-allowlist ladder. On the default allowlist
+  only `rtk tree` / `rtk ast-grep` newly ask. (`wc`/`diff` were moved
+  conservatively: both are allowlisted by default, so it costs nothing.)
+- **L2 — config-mutating subcommands ran silently.** `init config trust
+  untrust learn telemetry` now classify the sub word (so they ask once as
+  `init`, `config`, …); docs no longer call them read-only.
+- **L3 — frontmatter block headers.** `>+`, `|+`, `>2`, `> # note` are
+  recognised block scalars; a trailing ` # comment` after a plain or quoted
+  value is dropped as in YAML (`TestFrontmatterBlockIndicatorsAndComments`).
+- **Follow-ups found while probing (pre-existing shell-analyser gaps, fixed
+  here):** an unquoted brace expansion (`{sudo,ls}`, `{rm,x}`) was classified
+  as a command literally named `{sudo,ls}`, skipping hard-deny and
+  ask-every-time — `literalSafe` now treats it as non-literal; and
+  `classify` matched hard-deny / refused / ask-every-time case-sensitively, so
+  `SUDO`/`RM` slipped past on case-insensitive filesystems — it now lowercases
+  for those classes (`TestShellBraceExpansionAndCaseVariants`).
+  A follow-up security review of that fix found a parser differential: the
+  brace/bracket check ran per literal part, so a quote-split group such as
+  `{"sudo",ls}` or `/bin/r["m"]` (unquoted text `{,ls}` / `[]` around a quoted
+  word, still expanded by bash) passed. `wordLit` now judges the whole
+  unquoted text of the word (`patternSafe`); rows added to
+  `TestShellBraceExpansionAndCaseVariants`.
+

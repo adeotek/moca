@@ -126,4 +126,75 @@ func TestWindowsBestEffort(t *testing.T) {
 	if need, _, _ := s.Check("git status | python.exe x"); !slices.Equal(need, []string{"python"}) {
 		t.Fatal(need)
 	}
+
+	// rtk is unwrapped best-effort on Windows too (review F1/M4): the
+	// runner's first positional word (or the tool sub word) is classified.
+	s2 := NewShell([]string{"rtk", "go", "git", "docker"}, j, "windows")
+	if need, every, err := s2.Check("rtk proxy rm -rf x"); err != nil || len(need) != 0 || !slices.Equal(every, []string{"rm"}) {
+		t.Fatal("rtk proxy rm:", need, every, err)
+	}
+	if need, _, _ := s2.Check("rtk proxy python.exe x"); !slices.Equal(need, []string{"python"}) {
+		t.Fatal("rtk proxy python.exe:", need)
+	}
+	if need, every, err := s2.Check("rtk test -- go test ./..."); err != nil || len(need) != 0 || len(every) != 0 {
+		t.Fatal("rtk test -- go:", need, every, err)
+	}
+	if _, _, err := s2.Check("rtk test -- sudo make"); err == nil {
+		t.Fatal("rtk test -- sudo must hard-deny on Windows")
+	}
+	if need, every, err := s2.Check("rtk read big.log"); err != nil || len(need) != 0 || len(every) != 0 {
+		t.Fatal("rtk read:", need, every, err)
+	}
+	if need, every, err := s2.Check("rtk docker ps"); err != nil || len(need) != 0 || len(every) != 0 {
+		t.Fatal("rtk docker:", need, every, err)
+	}
+	// Native proxies and config-mutating subcommands are classified as the
+	// wrapped command on Windows too (review pass 3).
+	if need, _, _ := s2.Check("rtk find . -exec x ;"); !slices.Equal(need, []string{"find"}) {
+		t.Fatal("rtk find:", need)
+	}
+	if need, _, _ := s2.Check("rtk init -g"); !slices.Equal(need, []string{"init"}) {
+		t.Fatal("rtk init:", need)
+	}
+}
+
+// Brace expansion happens before the command runs, so `{sudo,ls}` is not a
+// command named "{sudo,ls}": classifying it as one skipped hard-deny and
+// ask-every-time. And on case-insensitive filesystems `SUDO`/`RM` are the real
+// binaries, so the safety classes match case-insensitively.
+func TestShellBraceExpansionAndCaseVariants(t *testing.T) {
+	s := newTestShell(t)
+	cases := map[string]verdict{
+		"{sudo,ls}":            {deny: "non-literal"},
+		"{rm,x} y":             {deny: "non-literal"},
+		"{1..3}":               {deny: "non-literal"},
+		"echo > {a,b}":         {deny: "non-literal"},
+		"env {rm,x} y":         {deny: "non-literal"},
+		`{"sudo",ls}`:          {deny: "non-literal"}, // quotes split the brace group across parts
+		`{r'm',x} y`:           {deny: "non-literal"},
+		`r{"m",} y`:            {deny: "non-literal"},
+		`/bin/r["m"] x`:        {deny: "non-literal"},
+		`{rm","x}`:             {need: []string{"{rm,x}"}}, // a quoted comma does not expand
+		`'{rm,x}' y`:           {need: []string{"{rm,x}"}}, // fully quoted: literal
+		"SUDO ls":              {deny: "hard-deny"},
+		"Sudo ls":              {deny: "hard-deny"},
+		"MKFS.ext4 /dev/x":     {deny: "hard-deny"},
+		"EVAL x":               {deny: "refused"},
+		"RM -rf x":             {every: []string{"RM"}},
+		"go test ./... ; Rm x": {every: []string{"Rm"}},
+		"echo {a,b}":           {}, // arguments are not command positions
+		"go test -run '{a,b}'": {},
+	}
+	for cmd, want := range cases {
+		need, every, err := s.Check(cmd)
+		if want.deny != "" {
+			if err == nil || !strings.Contains(err.Error(), want.deny) {
+				t.Errorf("%q: want deny %q, got err=%v need=%v every=%v", cmd, want.deny, err, need, every)
+			}
+			continue
+		}
+		if err != nil || !slices.Equal(need, want.need) || !slices.Equal(every, want.every) {
+			t.Errorf("%q: need=%v every=%v err=%v; want %+v", cmd, need, every, err, want)
+		}
+	}
 }

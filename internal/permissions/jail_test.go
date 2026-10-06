@@ -109,3 +109,25 @@ func TestJailDanglingSymlinks(t *testing.T) {
 		t.Fatalf("resolved to %q, want %q", got, want)
 	}
 }
+
+// A read-only root that does not exist when the jail is built must be kept:
+// the global skills directory is routinely absent at session start and is
+// created later — its files must become readable, and writes stay refused.
+func TestJailKeepsNotYetExistingReadOnlyRoot(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "work")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	future := filepath.Join(base, "skills", "deploy")
+	j, err := NewJail(root, []string{future})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.Resolve(filepath.Join(future, "references", "api.md"), false); err != nil {
+		t.Fatalf("read under a not-yet-existing read-only root must resolve: %v", err)
+	}
+	if _, err := j.Resolve(filepath.Join(future, "x"), true); err == nil {
+		t.Fatal("writes under a read-only root must stay refused")
+	}
+}
