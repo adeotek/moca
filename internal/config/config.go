@@ -254,6 +254,9 @@ func (c Config) Validate() error {
 	if c.Snapshot.RetentionDays != nil && *c.Snapshot.RetentionDays < 0 {
 		return fmt.Errorf("snapshot.retentionDays must be >= 0")
 	}
+	if c.MCP.IdleTimeout < 0 {
+		return fmt.Errorf("mcp.idleTimeout must be > 0 seconds (0 means the default, 600)")
+	}
 	for name, s := range c.MCP.Servers {
 		if (s.Command == "") == (s.URL == "") {
 			return fmt.Errorf("mcp.servers.%s: exactly one of command (stdio) or url (streamable HTTP)", name)

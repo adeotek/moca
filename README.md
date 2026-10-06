@@ -6,7 +6,7 @@ Minimal, token-efficient, provider-agnostic coding agent. Single Go binary, Bubb
 
 Inspired by Claude Code, OpenCode, and Pi — deliberately ~10% of their surface area. Competes on **cost per task** and **read-the-whole-codebase-in-an-hour** transparency, not features.
 
-**Status: phase 4 done — long sessions never overflow: token-triggered compaction (structured summary + cumulative file lists, cut points that never orphan tool results, loop guard) with one compact-and-retry on provider overflow, `/compact` in the TUI, and `--resume <id8|last>` / `--continue` for both `-p` and the TUI (stored system prompt reused verbatim, model/effort restored, crash repair).** Next: phase 5 (MCP lazy proxy). Specs: [`docs/specs/SPECS.md`](docs/specs/SPECS.md) (current state) · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) (v1 vision) · Plans: [`docs/plans/`](docs/plans/).
+**Status: phase 5 done — MCP lazy proxy: configured servers (stdio + streamable HTTP) are discoverable through a persisted name+description index, zero servers start at session start, servers start on the first `describe`/`call` and stop after `mcp.idleTimeout`, tool schemas never enter the prompt (one frozen ~200-token `mcp` tool), calls are gated by read-only annotations or a per-server `approve` list, and `moca mcp import` brings Claude Code / OpenCode / Pi servers over without ever copying a secret (rewritten to `env:MOCA_MCP_*` references).** Next: phase 6 (rtk + graphify + skills ecosystem). Specs: [`docs/specs/SPECS.md`](docs/specs/SPECS.md) (current state) · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) (v1 vision) · Plans: [`docs/plans/`](docs/plans/).
 
 ## Stack
 
