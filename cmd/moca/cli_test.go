@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -522,5 +523,26 @@ func TestResumeModelOverride(t *testing.T) {
 	}
 	if last != "loc2/m2" {
 		t.Fatalf("model_change %q, want loc2/m2", last)
+	}
+}
+
+// The OAuth sentinels are a usage error (the user fixes them with
+// `moca login`), not a runtime failure: a revoked ChatGPT session must exit
+// 2, and a cancelled context must still win over the sentinels.
+func TestExitForOAuthSentinels(t *testing.T) {
+	ctx := context.Background()
+	if got := exitFor(ctx, fmt.Errorf("session expired: %w", provider.ErrInvalidGrant)); got != exitUsage {
+		t.Fatalf("invalid_grant exit %d, want %d", got, exitUsage)
+	}
+	if got := exitFor(ctx, fmt.Errorf("registration rejected: %w", provider.ErrInvalidClient)); got != exitUsage {
+		t.Fatalf("invalid_client exit %d, want %d", got, exitUsage)
+	}
+	if got := exitFor(ctx, errors.New("boom")); got != exitRuntime {
+		t.Fatalf("plain error exit %d, want %d", got, exitRuntime)
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if got := exitFor(cctx, context.Canceled); got != exitInterrupted {
+		t.Fatalf("cancelled exit %d, want %d", got, exitInterrupted)
 	}
 }
