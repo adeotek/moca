@@ -81,6 +81,7 @@ func TestValidationErrors(t *testing.T) {
 		`{"model":"foo/bar"}`: "unknown provider \"foo\"",
 		`{"providers":{"anthropic":{"auth":"api_key","apiKey":"sk-x"}}}`:                                                                                           "env:",
 		`{"providers":{"anthropic":{"auth":"magic"}}}`:                                                                                                             "auth",
+		`{"providers":{"anthropic":{"auth":"oauth"}}}`:                                                                                                             "not available",
 		`{"providers":{"vllm":{"auth":"api_key","apiKey":"env:K"}}}`:                                                                                               "baseUrl",
 		`{"providers":{"vllm":{"baseUrl":"http://x/v1","protocol":"openai-completions","auth":"api_key","apiKey":"env:K","models":{"m":{}}}}}`:                     "contextWindow",
 		`{"providers":{"vllm":{"baseUrl":"http://x/v1","protocol":"openai-completions","auth":"api_key","apiKey":"env:K","models":{"m":{"contextWindow":8192}}}}}`: "16384",
@@ -94,6 +95,13 @@ func TestValidationErrors(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("Parse(%s) err = %v, want containing %q", in, err, want)
 		}
+	}
+}
+
+func TestOAuthAllowedForOpenAI(t *testing.T) {
+	c, err := Parse([]byte(`{"providers":{"openai":{"auth":"oauth"}}}`))
+	if err != nil || c.Providers["openai"].Auth != "oauth" {
+		t.Fatalf("openai oauth must parse: %v", err)
 	}
 }
 
