@@ -13,8 +13,11 @@ import (
 // `rtk err`, `rtk summary` and `rtk run` take the command as the first
 // positional word; `rtk run -c` and `--shell` take a shell command string;
 // `rtk test` (bare) errors with "command is required"; `rtk find … -exec …`
-// forwards execution. Re-check when bumping the rtk version the built-in
-// skill documents.
+// forwards execution. `--shell` AFTER the command word is passed through as
+// literal argv of the wrapped command (spy-probed 2026-10-06 — review pass 2
+// H1 did not reproduce); the string-executing shape is the option-before-
+// command form, refused below. Re-check when bumping the rtk version the
+// built-in skill documents.
 //
 // The analyser's contract (§7/§10): `rtk <cmd>` is unwrapped like env/time —
 // the wrapped command passes the same analysis — and rtk itself must be
@@ -61,11 +64,15 @@ func rtkTarget(args []*syntax.Word, i int) (next int, self bool, err error) {
 	if j < 0 {
 		return 0, true, nil
 	}
+	// Subcommand classes are looked up case-insensitively — `rtk PROXY …`
+	// and `RTK proxy …` must not skip the unwrap (review F2/M3); the
+	// wrapped word itself keeps its original spelling for classification.
+	lsub := strings.ToLower(sub)
 	switch {
-	case rtkSelf[sub]:
+	case rtkSelf[lsub]:
 		return 0, true, nil
-	case rtkRun[sub]:
-		return rtkRunTarget(args, j, sub)
+	case rtkRun[lsub]:
+		return rtkRunTarget(args, j, lsub)
 	}
 	return j, false, nil // the sub word is itself the wrapped command name
 }
@@ -101,6 +108,12 @@ func rtkRunTarget(args []*syntax.Word, i int, sub string) (int, bool, error) {
 		switch {
 		case w == "--":
 			if j+1 < len(args) {
+				// An option-shaped word after `--` is not a command name;
+				// refusing beats blessing a `-c`/`--shell`-shaped literal as
+				// an allowlistable command (review F4/M2).
+				if nw, ok := wordLit(args[j+1]); ok && strings.HasPrefix(nw, "-") {
+					return 0, false, fmt.Errorf("cannot analyse `rtk %s -- %s`: the word after `--` is option-shaped; run the command without the option", sub, nw)
+				}
 				return j + 1, false, nil
 			}
 			return 0, true, nil

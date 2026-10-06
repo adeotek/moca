@@ -48,6 +48,24 @@ func TestRtkUnwrap(t *testing.T) {
 		"rtk proxy $X":                   {deny: "non-literal"},
 		"rtk git log | rtk proxy curl":   {need: []string{"curl"}},
 		"rtk proxy tee /etc/x":           {deny: "outside"},
+
+		// Case variants must not skip the unwrap: `RTK proxy rm` classified
+		// only `RTK` before, so one allow-always click laundered everything
+		// behind it (review F2/M3).
+		"RTK proxy rm -rf build": {need: []string{"RTK"}, every: []string{"rm"}},
+		"Rtk proxy python x":     {need: []string{"Rtk", "python"}},
+		"rtk PROXY python x":     {need: []string{"python"}},
+
+		// An option-shaped word after `--` is refused, not classified as a
+		// command name (review F4/M2).
+		"rtk test -- -c 'echo hi'": {deny: "option-shaped"},
+		"rtk run -- --shell x":     {deny: "option-shaped"},
+
+		// Pinned probe result (rtk 0.51.0, 2026-10-06): after the command
+		// word, `--shell` is literal argv of that command — the harness spy
+		// never ran; only the option-before-command form executes a string
+		// and is refused above.
+		"rtk test echo hi --shell sh 'echo x'": {},
 	}
 	for cmd, want := range cases {
 		need, every, err := s.Check(cmd)

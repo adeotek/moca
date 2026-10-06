@@ -21,13 +21,18 @@ command:
   command given as their first argument (after `--` also works): that
   command is what gets checked.
 - Shell command strings (`rtk run -c '…'`, `--shell`) and unknown options
-  are refused — the analyser cannot see inside them.
+  are refused — the analyser cannot see inside them; on rtk 0.51.0 the
+  string form is the option-*before*-command shape, which is the refused
+  one (a later `--shell …` is literal argv — spy-probed).
 - rtk's own read-only subcommands (`rtk read`, `rtk ls`, `rtk tree`,
   `rtk find`, `rtk grep`, `rtk gain`, …) are allowed as plain `rtk`.
 
 The subcommand classes are captured from the real CLI (rtk 0.51.0) in
 `internal/permissions/rtk.go` — re-check them when the documented rtk
 version changes.
+
+On Windows the best-effort analyser unwraps rtk on the same rule, without a
+quoting model or option tables; the Unix analyser stays the reference.
 
 ## graphify
 

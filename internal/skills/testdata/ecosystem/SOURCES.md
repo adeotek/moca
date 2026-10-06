@@ -14,7 +14,7 @@ fixtures are never edited; parser fixes go into `frontmatter.go`.
 | `claude-code/frontend-design/` | same repo → `skills/frontend-design` | same commit | Apache-2.0 (`LICENSE.txt` kept) |
 | `pi/pi-subagents/` | npm package `pi-subagents` → `skills/pi-subagents` | 0.76.1 | MIT |
 | `pi/mcp-scripting/` | npm package `pi-mcp-adapter` → `skills/mcp-scripting` | 5.1.0 | MIT |
-| `opencode/dotnet-unit-testing/` | the moca author's dotfiles (`opencode/skills/dotnet-unit-testing`), used daily with OpenCode | — | MIT (declared in the skill's frontmatter) |
+| `opencode/dotnet-unit-testing/` | the moca author's dotfiles — <https://github.com/adeotek/dotfiles> → `opencode/skills/dotnet-unit-testing`, used daily with OpenCode | commit `389806b9439272a6a5d3aad4169d265ceafc55ef` | MIT (dotfiles `LICENSE`; also declared in the skill's frontmatter) |
 
 Each skill keeps the upstream directory shape but only a representative
 supporting file (plus the upstream license file where the skill ships one).

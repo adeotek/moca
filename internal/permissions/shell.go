@@ -232,8 +232,8 @@ func skipWrapperOpts(args []*syntax.Word, i int, spec optSpec, wrapper string) (
 // nice, timeout, nohup, command — and returns the index of the wrapped
 // command name (-1 when there is none, e.g. `env -i` or `command -v cmd`).
 func skipWrapper(args []*syntax.Word, i int) (int, error) {
-	name, _ := wordLit(args[i]) // callers switch on the same names
-	switch filepath.Base(name) {
+	name, _ := wordLit(args[i]) // callers switch on the same names, lowercased
+	switch strings.ToLower(filepath.Base(name)) {
 	case "env":
 		return skipWrapperOpts(args, i, envSpec, "env")
 	case "time":
@@ -300,6 +300,8 @@ func skipCommand(args []*syntax.Word, i int) (int, error) {
 // time, timeout, nice, nohup, command) are not classified themselves — they
 // only relocate the command; rtk is classified AND unwrapped, so `rtk git …`
 // classifies both `rtk` and `git`, and `rtk proxy rm x` reaches `rm`.
+// Wrapper names match case-insensitively: a case variant (`RTK proxy …`)
+// must not skip the analysis behind one allow-always click (review F2/M3).
 func unwrap(args []*syntax.Word) ([]int, error) {
 	var out []int
 	i := 0
@@ -308,7 +310,7 @@ func unwrap(args []*syntax.Word) ([]int, error) {
 		if !ok {
 			return append(out, i), nil // a non-literal name is refused by Check
 		}
-		switch filepath.Base(name) {
+		switch strings.ToLower(filepath.Base(name)) {
 		case "rtk":
 			out = append(out, i)
 			next, self, err := rtkTarget(args, i)

@@ -509,3 +509,49 @@ Point `~/.config/moca/skills/` at (symlink) one pi-package skill and one Claude 
 
 **Docs.** `docs/external-tools.md` (rtk/graphify semantics + how to install skills and prompts from other tools), README status, SPECS §1/§11/§12/§15.
 
+## Review fixes (2026-10-06 — review passes 1 & 2)
+
+Two independent review passes ran on the phase-6 PR: pass 1
+(`docs/reviews/2026-10-06-phase-6-rtk-graphify-ecosystem.md`, Approve with
+fixes: 0H/3M/4L) and an adversarial pass 2
+(`docs/reviews/2026-10-06-phase-6-rtk-graphify-ecosystem-pass-2.md`, Approve
+with fixes: 1H/3M/4L; the passes ran in parallel and mutually cross-checked).
+All confirmed findings were fixed; every behavior-pinning test row was
+verified to fail against the pre-fix sources (stash of the non-test source
+files).
+
+**Pass-2 H1 (`rtk test|err|summary … --shell <sh> <string>` executes the
+string) — did not reproduce.** Pass 1 rebuilt the probe and found literal
+argv; a dedicated spy harness (`~/.hermes/cache/scratch/repro6/`) confirmed
+across `rtk test|err|summary`, `--shell` and `--shell=` (word present or
+absent): the spy never ran, the tokens arrived as argv of the wrapped
+command. The string-executing shape is `--shell` *before* the command word
+(`rtk test --shell <sh> <string>`), which the analyser already refuses; `rtk
+run --shell …` is refused by rtk itself. `rtk_test.go` now pins the
+literal-argv form; `rtk.go`'s header records the probe date and the
+re-check-on-bump contract.
+
+- **F1/M4 — Windows rtk unwrap**: `checkWindows` steps past `rtk` to the sub
+  word, then a runner's first positional word (flags and `--` skipped,
+  `.exe`/quotes normalized; option-shaped word after `--` refused like
+  Unix). Rows added to `TestWindowsBestEffort`; `docs/external-tools.md` and
+  SPECS §11 updated.
+- **F2/M3 — case-variant wrappers**: `unwrap`/`skipWrapper` and the rtk
+  subcommand class lookups match case-insensitively; `RTK proxy python x`
+  now classifies `python` (pre-fix only `RTK` was classified, so one
+  allow-always click laundered everything behind it). Rows added.
+- **F4/M2 — option-shaped word after `--`**: refused as unclassifiable
+  instead of blessed as a command name; rows added.
+- **F3 — provenance**: `opencode/dotnet-unit-testing` pinned to
+  `adeotek/dotfiles@389806b9439272a6a5d3aad4169d265ceafc55ef` (MIT; dotfiles
+  `LICENSE`) in `SOURCES.md`.
+- **F5/L5 — hash enforcement**: `TestEcosystemSourcesHashes` recomputes
+  every SHA-256 recorded in `SOURCES.md` and requires every vendored file to
+  be recorded.
+- **F6/L6 — corpus loop**: driven by `expected.json`'s keys, so a deleted
+  fixture cannot hide behind an aggregate count.
+- **Not actioned**: pass-2 L7 (frontmatter `|+` / unterminated-quote
+  cosmetic boundary — unreachable through `Discover`; recorded for a future
+  parser revision) and pass-2 L8 (rtk `smart --model` future risk — the
+  table's re-check-on-bump contract covers it).
+

@@ -126,4 +126,26 @@ func TestWindowsBestEffort(t *testing.T) {
 	if need, _, _ := s.Check("git status | python.exe x"); !slices.Equal(need, []string{"python"}) {
 		t.Fatal(need)
 	}
+
+	// rtk is unwrapped best-effort on Windows too (review F1/M4): the
+	// runner's first positional word (or the tool sub word) is classified.
+	s2 := NewShell([]string{"rtk", "go", "git", "docker"}, j, "windows")
+	if need, every, err := s2.Check("rtk proxy rm -rf x"); err != nil || len(need) != 0 || !slices.Equal(every, []string{"rm"}) {
+		t.Fatal("rtk proxy rm:", need, every, err)
+	}
+	if need, _, _ := s2.Check("rtk proxy python.exe x"); !slices.Equal(need, []string{"python"}) {
+		t.Fatal("rtk proxy python.exe:", need)
+	}
+	if need, every, err := s2.Check("rtk test -- go test ./..."); err != nil || len(need) != 0 || len(every) != 0 {
+		t.Fatal("rtk test -- go:", need, every, err)
+	}
+	if _, _, err := s2.Check("rtk test -- sudo make"); err == nil {
+		t.Fatal("rtk test -- sudo must hard-deny on Windows")
+	}
+	if need, every, err := s2.Check("rtk read big.log"); err != nil || len(need) != 0 || len(every) != 0 {
+		t.Fatal("rtk read:", need, every, err)
+	}
+	if need, every, err := s2.Check("rtk docker ps"); err != nil || len(need) != 0 || len(every) != 0 {
+		t.Fatal("rtk docker:", need, every, err)
+	}
 }
