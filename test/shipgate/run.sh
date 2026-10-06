@@ -27,6 +27,17 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/moca-shipgate.XXXXXX")
 data=$(mktemp -d "${TMPDIR:-/tmp}/moca-shipgate-data.XXXXXX")
 cfg=$(mktemp -d "${TMPDIR:-/tmp}/moca-shipgate-cfg.XXXXXX")
 
+# Keep the artifacts when anything failed (the session file is the evidence
+# to inspect); remove them when the gate passed.
+cleanup() {
+  if [ "${code:-1}" = 0 ] && [ "${check:-1}" = 0 ]; then
+    rm -rf "$work" "$data" "$cfg"
+  else
+    echo "artifacts kept for inspection: $work $data $cfg"
+  fi
+}
+trap cleanup EXIT
+
 cp -r "$GATE/fixture/." "$work/"
 (
   cd "$work" || exit 1
@@ -57,3 +68,5 @@ tail -12 "$data/gate-stderr.txt"
 
 cd "$REPO" || exit 1
 go test -tags shipgate ./test/shipgate -count=1 -args -session "$sess" -repo "$work" -exit "$code"
+check=$?
+exit "$check"
