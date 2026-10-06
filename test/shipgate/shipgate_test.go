@@ -5,6 +5,8 @@
 // behaviour, then the process exit code. Driven by test/shipgate/run.sh:
 //
 //	go test -tags shipgate ./test/shipgate -args -session <jsonl> -repo <dir> -exit <code>
+//
+// The checker runs `go test ./...` in -repo itself, so `go` must be on PATH.
 package shipgate
 
 import (
@@ -101,6 +103,15 @@ func TestShipGate(t *testing.T) {
 		git("log", "--oneline", "main..fix/sum") == "" ||
 		git("status", "--porcelain") != "" {
 		t.Fatal("5: the fix is not committed on branch fix/sum with a clean tree")
+	}
+	// Gate 4 above reads the transcript, where "[exit 0]" is the exit status of
+	// the whole shell command: `go test ./... | tail` or `|| true` reports 0
+	// with the suite red. The authoritative check is the suite itself, run in
+	// the repo the session left behind.
+	cmd := exec.Command("go", "test", "./...")
+	cmd.Dir = *repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("4: `go test ./...` in the final repo state fails: %v\n%s", err, out)
 	}
 	sys := entries[0].Session.SystemPrompt
 	rtkRead := idx(func(u *use) bool { return u.name == "read" && strings.Contains(str(u, "path"), "/rtk/SKILL.md") }) >= 0
