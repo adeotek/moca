@@ -169,6 +169,31 @@ func TestFilterEnv(t *testing.T) {
 	}
 }
 
+// An explicit env entry replaces the inherited variable of the same name:
+// duplicate names resolve platform-dependently (glibc keeps the first), so an
+// appended override behind the inherited entry would be silently ignored.
+func TestServerEnvExplicitEntryReplacesInherited(t *testing.T) {
+	env, err := serverEnv([]string{"PATH=/base:/usr/bin", "HOME=/h"}, map[string]string{"PATH": "/custom/bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			n++
+			if kv != "PATH=/custom/bin" {
+				t.Fatalf("PATH = %q, want the explicit value", kv)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d PATH entries in %v", n, env)
+	}
+	if !slices.Contains(env, "HOME=/h") {
+		t.Fatalf("unrelated inherited entries must survive: %v", env)
+	}
+}
+
 // The write-error branch must surface the recorded exit error with its stderr
 // tail (wrapping errTransportDead), never a bare EPIPE or a ctx error — the
 // manager's restart-once predicate keys on the sentinel (pass-1 M2).
