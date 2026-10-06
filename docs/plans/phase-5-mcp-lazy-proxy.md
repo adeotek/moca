@@ -119,7 +119,7 @@ func (c *client) callTool(ctx context.Context, name string, args json.RawMessage
 - stderr is drained into the same ring. When the process exits, every pending call fails with `server <name> exited: <ring tail>`.
 - Process group kill on `Close` via `tools.SetProcessGroup` / `tools.KillProcessGroup` (exported in this task from phase 2's shell runner).
 
-- [ ] **Step 1: Write the fake server + failing tests**
+- [x] **Step 1: Write the fake server + failing tests**
 
 ```go
 // internal/mcp/stdio_test.go
@@ -277,9 +277,9 @@ func TestFilterEnv(t *testing.T) {
 
 The fake server's own env must pass `MOCA_FAKE_*` through. `serverEnv` adds the explicit `Env` map, so the filter doesn't drop them.
 
-- [ ] **Step 2: Run** — `go test ./internal/mcp/` → FAIL.
+- [x] **Step 2: Run** — `go test ./internal/mcp/` → FAIL.
 
-- [ ] **Step 3: Implement `jsonrpc.go` + `client.go`**
+- [x] **Step 3: Implement `jsonrpc.go` + `client.go`**
 
 ```go
 // internal/mcp/jsonrpc.go
@@ -422,7 +422,7 @@ func (c *client) callTool(ctx context.Context, name string, args json.RawMessage
 }
 ```
 
-- [ ] **Step 4: Implement `stdio.go` (+ platform files)**
+- [x] **Step 4: Implement `stdio.go` (+ platform files)**
 
 ```go
 // internal/mcp/stdio.go
@@ -649,9 +649,9 @@ func (t *stdioTransport) Close() error {
 
 Process-group handling is shared with the shell tool. In `internal/tools/shellrun_unix.go` and `shellrun_windows.go`, rename `setProcessGroup` → `SetProcessGroup` and `killProcessGroup` → `KillProcessGroup` (exported), and update their callers in `shellrun.go`. `mcp` may import `tools` (§2), and this avoids duplicating platform code.
 
-- [ ] **Step 5: Run** — `go test ./internal/mcp/ -race -v` → PASS.
+- [x] **Step 5: Run** — `go test ./internal/mcp/ -race -v` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/mcp internal/tools
@@ -674,7 +674,7 @@ git commit -m "feat(mcp): JSON-RPC client and stdio transport with filtered env"
   - `Close` sends `DELETE` with the session id (errors ignored).
   - `sse.go`: `readEvents(r io.Reader, fn func(data string) error) error` — `data:` lines only, CRLF tolerant. Kept separate from `provider`'s reader per §2; no stall timeout (bounded by ctx).
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```go
 // internal/mcp/http_test.go
@@ -758,7 +758,7 @@ func TestHTTPTransport(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement**
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement**
 
 ```go
 // internal/mcp/sse.go
@@ -956,7 +956,7 @@ func (t *httpTransport) Close() error {
 }
 ```
 
-- [ ] **Step 4: Run** — PASS. **Step 5: Commit** — `git add internal/mcp && git commit -m "feat(mcp): streamable HTTP transport with session id and SSE responses"`
+- [x] **Step 4: Run** — PASS. **Step 5: Commit** — `git add internal/mcp && git commit -m "feat(mcp): streamable HTTP transport with session id and SSE responses"`
 
 ---
 
@@ -979,7 +979,7 @@ func (t *httpTransport) Close() error {
   - `type Hit struct { Server, Tool, Description string; score int }`
   - `func Rank(query string, entries map[string]IndexEntry, server string, limit int) []Hit` — lowercase word tokens (split on non-alnum, `_` and `-` included as separators). Score: +3 per token equal to a name token, +2 per token contained in the name, +1 per token contained in the description. Ties broken by server, then tool name. Zero-score hits are dropped. An empty query lists all tools (score 0 allowed) up to `limit`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```go
 // internal/mcp/index_test.go
@@ -1031,7 +1031,7 @@ func TestRank(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement**
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement**
 
 ```go
 // internal/mcp/index.go
@@ -1170,7 +1170,7 @@ func Rank(query string, entries map[string]IndexEntry, server string, limit int)
 
 `TestRank` expects `list_issues` (score: "issue" contained in name +2, in description +1 → 3) after `create_issue` (create +3 +1, issue +2 +1 → 7). Matching is substring-based, so `issue` matches `issues`.
 
-- [ ] **Step 4: Run** — PASS. **Step 5: Commit** — `git add internal/mcp && git commit -m "feat(mcp): persisted discovery index, config hash, word-match ranking"`
+- [x] **Step 4: Run** — PASS. **Step 5: Commit** — `git add internal/mcp && git commit -m "feat(mcp): persisted discovery index, config hash, word-match ranking"`
 
 ---
 
@@ -1206,7 +1206,7 @@ func (m *Manager) Close()
 - `Search`: for each configured server (or just `server`), use `ix.Valid(name, ConfigHash(cfg))`. Invalid/missing → `ensure` (which indexes it); the started server then follows the normal idle timeout. Unknown `server` → error `unknown MCP server "x" (configured: a, b)`.
 - `Describe` / `Call`: unknown server → same error; unknown tool → `server x has no tool "y"; use action=search`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```go
 // internal/mcp/manager_test.go
@@ -1316,7 +1316,7 @@ func TestUnknownServerAndTool(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement**
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement**
 
 ```go
 // internal/mcp/manager.go
@@ -1581,9 +1581,9 @@ func (m *Manager) Close() {
 }
 ```
 
-- [ ] **Step 4: Run** — `go test ./internal/mcp/ -race -v` → PASS.
+- [x] **Step 4: Run** — `go test ./internal/mcp/ -race -v` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/mcp
@@ -1611,7 +1611,7 @@ git commit -m "feat(mcp): manager with lazy start, idle stop, restart, index ref
     - `call` → text blocks joined with `\n`; `image`/`audio`/`resource`/`resource_link` → `[<type> omitted]`; truncated at 30K; `IsError` from the result. Summary `server/tool`.
   - Gating question: `tools.Question{Kind: "mcp", Subject: server + "/" + tool, Detail: string(args), CanAlways: true}`. `AllowAlways` → session allow plus TUI persistence (Task 6). `Deny` / no asker → error `refused: server/tool is not marked read-only and is not in mcp.servers.<server>.approve`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```go
 // internal/mcp/tool_test.go
@@ -1704,7 +1704,7 @@ func TestProxyArgErrors(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement**
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement**
 
 ```go
 // internal/mcp/tool.go
@@ -1856,7 +1856,7 @@ func (p *ProxyTool) Run(ctx context.Context, env *tools.Env, input json.RawMessa
 }
 ```
 
-- [ ] **Step 4: Run** — PASS. **Step 5: Commit** — `git add internal/mcp && git commit -m "feat(mcp): proxy tool with annotation/approve gating and result rendering"`
+- [x] **Step 4: Run** — PASS. **Step 5: Commit** — `git add internal/mcp && git commit -m "feat(mcp): proxy tool with annotation/approve gating and result rendering"`
 
 ---
 
@@ -1876,7 +1876,7 @@ func (p *ProxyTool) Run(ctx context.Context, env *tools.Env, input json.RawMessa
 - TUI approval for `Kind == "mcp"` with `A` → `config.AppendString(cfgPath, []string{"mcp","servers",server,"approve"}, tool, nil)`. `Subject` is `server/tool`; split at the first `/`.
 - The phase-2 roster lines are unchanged (no tool lists in the prompt).
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```go
 func TestMCPNoSchemasInPromptAndZeroStarts(t *testing.T) {
@@ -1905,9 +1905,9 @@ func TestMCPNoSchemasInPromptAndZeroStarts(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** — FAIL (`a.Close` undefined). **Step 3: Implement** per the interfaces. **Step 4: Run** — `go test ./... -race` → PASS.
+- [x] **Step 2: Run** — FAIL (`a.Close` undefined). **Step 3: Implement** per the interfaces. **Step 4: Run** — `go test ./... -race` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent internal/tui cmd/moca
@@ -1945,7 +1945,7 @@ git commit -m "feat(agent): register the MCP proxy when servers are configured; 
   - On yes → `SetObjectEntry(ConfigFile(), ["mcp","servers"], name, json)` for each.
 - CLI `moca mcp index`: builds the Manager over the config servers, calls `IndexAll`, prints `name: N tools` / `name: error …`, then `Close`. Exit 1 if any server failed.
 
-- [ ] **Step 1: Fixtures**
+- [x] **Step 1: Fixtures**
 
 `internal/mcp/testdata/claude.json`:
 
@@ -1976,7 +1976,7 @@ git commit -m "feat(agent): register the MCP proxy when servers are configured; 
 
 `internal/mcp/testdata/pi-mcp.json` — the Claude shape, with one server `"github"` (duplicate name to test first-wins) and one `"brave": {"command":"brave-mcp","env":{"BRAVE_API_KEY":"BSA123"}}`.
 
-- [ ] **Step 2: Write failing tests**
+- [x] **Step 2: Write failing tests**
 
 ```go
 // internal/mcp/importer_test.go
@@ -2054,16 +2054,16 @@ func TestSetObjectEntry(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** — FAIL.
+- [x] **Step 3: Run** — FAIL.
 
-- [ ] **Step 4: Implement `SetObjectEntry`** in `internal/config/edit.go`. Reuse `scanner.value(keyPath)`:
+- [x] **Step 4: Implement `SetObjectEntry`** in `internal/config/edit.go`. Reuse `scanner.value(keyPath)`:
   - **Path fully present (an object)**: check `key` among its members. To find members, scan the object's span with a fresh `scanner` and collect top-level keys. If `key` is absent, insert `"\n  "+quote(key)+": "+rawJSON+","` right after `{`, or with no comma when the object is empty.
   - **Path partially present**: insert the missing chain `nested(keyPath[depth:]...)`, ending in `{ key: raw }`, after the deepest object's `{`, as in `AppendString`.
   - Write `.bak` and replace atomically.
 
 Factor the shared write tail of `AppendString` into `writeEdited(path string, src, out []byte) error`.
 
-- [ ] **Step 5: Implement `importer.go`**
+- [x] **Step 5: Implement `importer.go`**
 
 ```go
 // internal/mcp/importer.go
@@ -2255,11 +2255,11 @@ func Plan(sources []Source, existing map[string]config.MCPServer, cwd string) (m
 }
 ```
 
-- [ ] **Step 6: Implement `cmd/moca/mcp.go`** with `runMCP(ctx, o Options, cfg config.Config, cfgPath string, stdin io.Reader, stdout, stderr io.Writer) int`, dispatching `import` (`--yes` parsed from `o.Sub`) and `index`. In `main.go`, route `o.Sub[0] == "mcp"` there (before the model check: `mcp` subcommands don't need a model).
+- [x] **Step 6: Implement `cmd/moca/mcp.go`** with `runMCP(ctx, o Options, cfg config.Config, cfgPath string, stdin io.Reader, stdout, stderr io.Writer) int`, dispatching `import` (`--yes` parsed from `o.Sub`) and `index`. In `main.go`, route `o.Sub[0] == "mcp"` there (before the model check: `mcp` subcommands don't need a model).
 
-- [ ] **Step 7: Run** — `go test ./... -race` → PASS.
+- [x] **Step 7: Run** — `go test ./... -race` → PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/config internal/mcp cmd/moca
@@ -2270,15 +2270,82 @@ git commit -m "feat(mcp): moca mcp import (secret rewriting) and moca mcp index"
 
 ### Task 8: Phase gate
 
-- [ ] **Unit**: `go test ./... -race -count=1` → PASS. In particular:
+- [x] **Unit**: `go test ./... -race -count=1` → PASS. In particular:
   - `TestProxySpecFrozen` and phase 2's `TestSchemasFrozen` are unchanged;
   - `TestLazyStartAndPersistedIndex` (second session searches with zero starts);
   - `TestIdleStopAndRestart`;
   - `TestProxyGating`;
   - `TestImportPlan`;
   - `TestMCPNoSchemasInPromptAndZeroStarts`.
-- [ ] **Live: real server via proxy.** Add `filesystem` (stdio, `npx -y @modelcontextprotocol/server-filesystem .`) and `context7` (HTTP) to the config. Run `moca mcp index` → counts printed. In the TUI ask `look up the Go net/http docs via MCP`: the model calls `mcp search` → `describe` → `call` on context7. Capture one request body (temporary debug env `MOCA_DUMP_REQUESTS=1` writing to `/tmp`, or a local proxy) and confirm `tools` has exactly 7 entries and no server tool schema appears anywhere in the payload.
-- [ ] **Live: zero servers at start.** Open a new session, then `pgrep -fl server-filesystem` → nothing. Ask a question needing only `search` → still nothing running. Then `call` → it appears. Wait `idleTimeout` (set it to 30 for the test) → gone.
-- [ ] **Live: gating.** `moca -p 'use the filesystem MCP server to write hello to x.txt'` → refused (`write_file` is not read-only) and exit 0 with an explanation. Add `"approve": ["write_file"]` → it works. Remove it again and run with `--yolo` → it works.
-- [ ] **Live: import.** On a machine with Claude Code / OpenCode configs: `moca mcp import` → the preview shows env names and no secret values; after `y`, `grep -E 'ghp_|sk-|Bearer ' ~/.config/moca/config.jsonc` → nothing.
-- [ ] **README + commit**: status `phase 5 done — MCP lazy proxy`; `git commit -m "docs: phase 5 gate passed"`.
+- [x] **Live: real server via proxy.** Add `filesystem` (stdio, `npx -y @modelcontextprotocol/server-filesystem .`) and `context7` (HTTP) to the config. Run `moca mcp index` → counts printed. In the TUI ask `look up the Go net/http docs via MCP`: the model calls `mcp search` → `describe` → `call` on context7. Capture one request body (temporary debug env `MOCA_DUMP_REQUESTS=1` writing to `/tmp`, or a local proxy) and confirm `tools` has exactly 7 entries and no server tool schema appears anywhere in the payload.
+- [x] **Live: zero servers at start.** Open a new session, then `pgrep -fl server-filesystem` → nothing. Ask a question needing only `search` → still nothing running. Then `call` → it appears. Wait `idleTimeout` (set it to 30 for the test) → gone.
+- [x] **Live: gating.** `moca -p 'use the filesystem MCP server to write hello to x.txt'` → refused (`write_file` is not read-only) and exit 0 with an explanation. Add `"approve": ["write_file"]` → it works. Remove it again and run with `--yolo` → it works.
+- [x] **Live: import.** On a machine with Claude Code / OpenCode configs: `moca mcp import` → the preview shows env names and no secret values; after `y`, `grep -E 'ghp_|sk-|Bearer ' ~/.config/moca/config.jsonc` → nothing.
+- [x] **README + commit**: status `phase 5 done — MCP lazy proxy`; `git commit -m "docs: phase 5 gate passed"`.
+
+---
+
+## Implementation notes (added after implementation + gate runs)
+
+Deviations from the task snippets, all deliberate; the plan's intent is kept.
+
+1. **`EnvVar` gained a `Tool` field** — the plan's own export-hint requirement (`<value from <tool> config>`) cannot be rendered from the specified `{Name, Server, Field, Key}`; `Plan` stamps the winning source's tool onto each var. `RewriteSecrets` keeps its specified signature.
+2. **stdio `Call` write-error path waits for the exit** — when the stdin write fails because the child died, returning the bare `EPIPE` would violate Review Focus 1 (the test wants the stderr tail). The call now waits on `done` (bounded by ctx) and returns the recorded exit error; `dead` is captured under the lock (race cleanliness).
+3. **Beyond the plan's tests** (same code, more coverage): `TestDiscoverSources` (Pi/shared paths), `TestParsePiShape` (`stdio`/`http`/`streamable-http` types, `enabled:false`, `${VAR}` in a pi file), the agent test also asserts the **proxy replaced the stub** (a direct `mcp` tool run no longer answers "no MCP servers configured"), `TestAllowAlwaysMCPPersists` (the TUI `ctrl+a` path writes `mcp.servers.ctx7.approve`; the written config re-parses; the `/clear` copy learns it), `TestMCPImportCLI` (declined run writes nothing; accepted run rewrites secrets; `mcp index` no-op; unknown subcommand exit 2), `SetObjectEntry` also checks the invalid-value refusal leaves the file untouched.
+4. **`SetObjectEntry` validates `rawJSON` before any write** and shares `prepEdit`/`writeEdited` with `AppendString` (the plan asked for the write-tail factor; the head factor followed to keep symlink/mode behavior identical). Missing-file creation and the “key exists” check are covered by `TestSetObjectEntry`.
+5. **`cmd/moca` routes `mcp` before the model check**, as the plan specified; both subcommands load config only.
+6. **The tmux quit check needs two `ctrl+c` presses within 1 s** (the input's documented double-press window) — a first attempt with 1 s between presses left the TUI open (and its server running, correctly); the gate re-ran with presses 0.2 s apart.
+
+Gate evidence (2026-10-06, scratch dir `~/.hermes/cache/scratch/moca_gate5/`, real MCP servers + a scripted openai-completions provider; the OpenCode key that previous phases' scratch runs used was pruned by the 24 h sweep, so the real-model legs are recorded as pending for Ben):
+
+- **`moca mcp index`** against the real `@modelcontextprotocol/server-filesystem` via `npx -y` (stdio): `fs: 14 tools`, exit 0 — and against the real context7 server over **streamable HTTP**: `ctx7: 2 tools`. Annotations came back exactly as DESIGN assumed (`read_text_file` readOnly, `write_file` readOnly=false destructive=true).
+- **No schemas in the prompt (captured payloads)**: first `-p` request body carries exactly 7 tools — `read, write, edit, shell, search, ls, mcp` — with no server tool name or schema anywhere in it; the search hits (`fs/read_file — …`) appear only in the *tool result* of the following request, where they belong.
+- **Zero servers at start / index-served search**: a search-only run observed **0** `server-filesystem` processes before, during and after a successful 14-hit search that used the persisted index.
+- **Lazy start + Close**: a describe+call run observed the server appear during the call (`seen_during=1`) and **gone** (`after=0`) once moca exited — `Agent.Close` stops the process group. Real file content (`hello gate5`) came back through `read_text_file`.
+- **Idle stop (tmux TUI, `idleTimeout: 30`)**: `start=0`, `after_search=0`, `after_call=2` (npx + node), `after_idle35s=0`. A separate run quit the TUI immediately after a call → `after_quit=0` (0 strays).
+- **Gating ladder (`-p`)**: no approve → `refused: fs/write_file is not marked read-only and is not in mcp.servers.fs.approve; the user did not approve it`, no file written, **exit 0** with the model's explanation; `"approve": ["write_file"]` → file written; `--yolo` → file written.
+- **Live HTTP call through the proxy**: search → describe → call on context7; the first two attempts returned context7's own validation errors through the proxy (the tool needs both `libraryName` and `query` — visible in the describe schema), the third returned real library results (`/samber/slog-http`, …).
+- **Import**: the host's real configs contain no MCP servers (`.claude.json` `mcpServers: {}`, no `mcp` key in `opencode.jsonc`, no Pi files) → the correct `nothing to import` with notes. With a scratch HOME carrying realistic Claude/OpenCode/Pi files, the preview showed the JSONC blocks + export hints and **no secret value** (`(clean)` scans); the accepted write produced a config that re-parses, with every secret rewritten (`env:MOCA_MCP_GITHUB_GITHUB_PERSONAL_ACCESS_TOKEN`, `env:MOCA_MCP_LINEAR_AUTHORIZATION`, `env:MOCA_MCP_BRAVE_BRAVE_API_KEY`), `PLAIN_VAR` left literal, `sse`/disabled/duplicate names skipped with notes, and a second run skipped everything as already configured.
+- **Deliberate gate deviation**: the import leg wrote to a scratch config, not `~/.config/moca/config.jsonc` — writing servers into the user's live (dotfiles-managed) config is a machine change the plan's literal wording did not consider safe to do unasked. The preview leg ran against the real host files.
+- **Not verified here (pending an OpenCode key)**: a real model driving search→describe→call in the TUI, and the real-model gating run (`-p` with a live model) — the same code paths are covered by the scripted runs above plus the unit suites; the key used by phases 1–4's live gates was pruned from scratch before this session.
+
+## Review fixes (2026-10-06, two independent subagent reviews)
+
+Pass 1 (`docs/reviews/2026-10-06-phase-5-mcp-lazy-proxy.md`, spec/plan conformance): **Approve with fixes — 0 High / 2 Medium / 5 Low.** Pass 2 (`docs/reviews/2026-10-06-phase-5-mcp-lazy-proxy-pass-2.md`, adversarial quality): **Approve with fixes — 0 High / 3 Medium / 7 Low** (its header line says 6 Low while seven Low sections follow — a counting typo, the document is otherwise consistent and is left as written). All confirmed findings are fixed with regression tests; **307 top-level tests, race-clean; gofmt/vet clean**. Every behaviour-pinning test was verified to **fail against the pre-fix sources** (fixed files stashed, tests kept) before landing — see the cross-verification note below.
+
+- **Pass-1 M1 + Pass-2 M3 (one root cause) — the restart-once retry predicate string-matched error text.** A server-returned error containing "exited" (or "session expired") restarted a healthy server, killing in-flight sibling calls; an aborted SSE response ("no response for …") never restarted though the design promised self-heal. The transports now return sentinels — `errTransportDead` (stdio exit; HTTP response that ends without our id, or a body read error) and `errSessionExpired` (404 once a session exists) — and `Manager.Call` retries on `errors.Is` only. `TestServerErrorTextDoesNotRestart` (pre-fix: two starts for a `-32000 job exited` error), `TestHTTPRestartOnSessionExpired` (404 → transport closed → re-initialize → the second session serves the call, exactly one restart), `TestHTTPNotifyStatusChecked`.
+- **Pass-1 M2 — the stdio write-failure path could return `ctx.Err()` over the recorded exit error.** The branch now prefers the already-recorded `dead` error (checked under the lock) and only falls back to ctx after waiting; a deadline racing a dead server still surfaces `server <name> exited … : <stderr tail>` (and the sentinel, so the retry fires). `TestStdioWriteEPIPE` (write against a closed pipe must return the exit error wrapping `errTransportDead`).
+- **Pass-2 M1 — an HTTP server that answers `text/event-stream` and wedges hung a call forever.** The manager's default client is now `&http.Client{Timeout: 15m}` (`defaultHTTPTimeout`; `Options.HTTP` still overrides for tests). `TestDefaultHTTPClientHasTimeout`.
+- **Pass-2 M2 — `moca mcp import` copied literal secrets outside `env`/`headers`.** `literalSecretFields` scans `command`, every `args` entry and the URL (token-shaped values with a length floor, `Bearer/Basic` schemes, and `://user:pass@` userinfo); such a server is **skipped with a note** rather than imported with the secret copied (rewriting positional args would be guesswork). `TestImportSkipsLiteralSecretsOutsideEnv`.
+- **Pass-1 L3 + Pass-2 L2 — two env/headers keys could normalize to one export variable.** `Plan` detects duplicate generated names (within a server and across accepted servers) and skips the server with a note naming the variable. `TestImportEnvNameCollisionSkipped`.
+- **Pass-1 L2 — a corrupt index file could serve a half-parsed map.** `LoadIndex` resets to empty on any unmarshal error (the "corrupt → empty" contract). `TestLoadIndexCorruptResets` (pre-fix: the partially-decoded entry was served).
+- **Pass-1 L4 + Pass-2 L3 — search descriptions were cut mid-rune.** `cutRunes` snaps the 157-byte cut to a rune boundary. `TestCutRunesSafe`, `TestProxySearchDescriptionRuneSafe` (pre-fix: invalid UTF-8 in the tool result).
+- **Pass-1 L5 — `Close` waited unboundedly for a SIGKILLed child.** The wait is bounded at 5 s; `Agent.Close` at session end can no longer hang on a child stuck in uninterruptible sleep.
+- **Pass-2 L4 — a failing call racing `Close` could respawn a server nothing would stop.** `Manager.closed` (atomic) is set first in `Close`; the retry loop and `ensure` refuse to start anything after it. `TestClosedManagerDoesNotRespawn` (pre-fix: a second start).
+- **Pass-2 L6 — servers echoing string JSON-RPC ids were silently unsupported.** `responseID` accepts int64 and quoted-int64 echoes; `null`/fractions/garbage still do not parse. `TestResponseID`.
+- **Pass-2 L7 — the import summary counted already-present servers as written.** The closing line now separates written from already-present-kept.
+- **Pass-2 L1 (Notify status) and L5 (missing error-path tests)** — both fixed: the notification status is checked (404 → `session expired`), and the previously untested error paths now have tests (404 restart, EPIPE path, corrupt index, id echo, notify status, closed manager).
+- **Not changed, recorded**: pass-1 L1 (closing a dead transport also fails sibling in-flight calls, each spending its own retry) — documented v1 semantics in the code; the sentinel change only narrows when that happens (a genuine transport death, never a server error string).
+
+### Cross-verification (2026-10-06)
+
+Re-ran `gofmt -l .` / `go vet ./...` / `go test ./... -race -count=1` on the fixed tree (307 tests, clean) and, for each behaviour-pinning test, ran it with the fixed sources stashed and the tests kept: `TestServerErrorTextDoesNotRestart` (2 starts pre-fix), `TestClosedManagerDoesNotRespawn` (respawned pre-fix), `TestImportSkipsLiteralSecretsOutsideEnv`, `TestImportEnvNameCollisionSkipped`, `TestLoadIndexCorruptResets` (half-index served pre-fix), `TestHTTPNotifyStatusChecked` (nil error pre-fix), `TestProxySearchDescriptionRuneSafe` / `TestCutRunesSafe`, `TestDefaultHTTPClientHasTimeout` — all failed pre-fix and pass now. `TestHTTPRestartOnSessionExpired` and `TestStdioWriteEPIPE` pass both before and after by design (they pin the restart machinery and the stderr-tail contract, which the string-match era already satisfied for those exact paths). The live-gate legs recorded above were not re-run (no provider key); nothing in the fix set touches the manager's lifecycle or the transports' happy paths.
+
+## Review fixes — pass 3 (2026-10-06)
+
+Pass 3 (`docs/reviews/2026-10-06-phase-5-mcp-lazy-proxy-pass-3.md`, post-fix re-review): **Approve with fixes — 0 High / 3 Medium / 9 Low.** All fixed with regression tests (new file `internal/mcp/hardening_test.go`, plus table entries in `config_test.go`, a stronger agent test and a restored fixture); 324 top-level tests, race-clean (stable over `-count=8` for the `mcp` package); gofmt/vet clean. The Mediums and the first Lows were first reproduced with throwaway `go test -overlay` tests before any change.
+
+- **M1 — stdio exit raced the stdout reader.** `cmd.StdoutPipe`'s read end is closed by `Wait` the moment the process is reaped, discarding unread output: a fatal message on stdout was missing from the error in ~5% of runs and a reply written just before an exit was lost in ~3–4%. stdout is now an `os.Pipe` moca owns; the exit handler lets the reader drain (500 ms grace, plus `cmd.WaitDelay` for a grandchild holding the pipes) before failing pending calls. `TestStdioStdoutFatalAlwaysSurfaces`, `TestStdioReplyThenExitKeepsReply` (200 spawns each), `TestStdioGrandchildHoldingStdoutDoesNotHangExit`.
+- **A latent bug found while fixing L1:** a stdio exit *during* a call was delivered to the waiting call as a plain `rpcError`, so it never carried `errTransportDead` and was never classified as a dead transport (only an exit *before* the call was). Pending calls now receive the transport's real error.
+- **M2 — import copied credentials embedded in `env`/`headers` values under innocuous keys** (`DATABASE_URL=postgres://user:pw@host`, `DSN=… password=…`). `RewriteSecrets` now also rewrites values with URL userinfo, a credential-shaped token anywhere, or a `password=` pair. `TestImportRewritesEmbeddedSecretsInValues`, `TestRewriteSecretsValueRuleAlone`; the `claude.json` fixture's token value (a secret-scrubber artifact) is restored. `Plan` now iterates servers in sorted order so which one wins an export-name collision is stable.
+- **M3 — HTTP `Close` was unbounded** (DELETE with no context, under the server lock). It is bounded to 3 s. `TestHTTPCloseBounded`.
+- **L1 — the restart-once replayed a possibly-executed `tools/call`.** A dead transport is always dropped (the next use restarts it), but the call is replayed once only when that cannot run it twice: `errNotSent` (never left), session expired, or a read-only non-destructive tool; otherwise the error says the call may have executed. `TestHTTPAbortedStreamReplayRule`, `TestStdioCrashMidCallReplayRule`, `TestStdioDeadBetweenCallsRestarts` (these also cover the aborted-SSE and stdio-restart paths that had no tests, L7).
+- **L2** — explicit `"args": null` is sent as `{}`. `TestCallToolNullArgsSentAsEmptyObject`.
+- **L3** — `search` names the servers it could not index (and an unsaved index) in bracketed notes, and remembers a failed start for 2 minutes instead of respawning the server on every query (`describe`/`call` always retry). `TestSearchReportsAndRemembersFailedServer`, `TestSearchReportsUnsavedIndex`. `Manager.Search` now returns `([]Hit, []string, error)`.
+- **L4** — the handshake (start + initialize + tools/list) is bounded to 60 s, each `tools/call` to 15 min (a timed-out server is stopped), and `tools/list` pagination stops on a repeated cursor or after 100 pages. `Options.HandshakeTimeout`/`CallTimeout` override the defaults. `TestHandshakeTimeout`, `TestCallTimeoutStopsWedgedServer`, `TestListToolsRepeatedCursor`.
+- **L5** — `Index.Save` writes a unique temp file and merges with the on-disk entries (a process's own re-indexed servers win), so concurrent moca processes no longer corrupt or drop each other's entries. `TestIndexSaveMergesConcurrentWriters`.
+- **L6** — a negative `mcp.idleTimeout` is rejected by `Validate`.
+- **L7** — the agent-level zero-start test now uses a marker-file command (an eager spawn in `build` would have failed silently and passed before); the aborted-SSE / stdio-restart paths and the value-only secret rule are tested (see above).
+- **L8** — the stdio env filter compares names case-insensitively on Windows and keeps the variables Windows needs to run a process (`SystemRoot`, `USERPROFILE`, `APPDATA`, …). `TestKeepNameWindows` (logic only; not run on Windows).
+- **L9** — SPECS §10.5: the garbled zero-start sentence and the `glpat-` prefix are corrected, and the new behaviours are documented.
+- **Not changed, recorded:** `Describe` on an already-running server does not reset the idle timer (the timer arms at start and after every call, as documented); a stdout line longer than 64 MiB ends the reader (a bounded edge, noted in pass 1).

@@ -87,6 +87,7 @@ func TestValidationErrors(t *testing.T) {
 		`{"providers":{"vllm":{"baseUrl":"http://x/v1","protocol":"grpc","auth":"api_key","apiKey":"env:K"}}}`:                                                     "protocol",
 		`{"modle":"x/y"}`:             "unknown field",
 		`{"context":{"maxSteps":-1}}`: "maxSteps",
+		`{"mcp":{"idleTimeout":-5}}`:  "mcp.idleTimeout",
 	}
 	for in, want := range cases {
 		_, err := Parse([]byte(in))

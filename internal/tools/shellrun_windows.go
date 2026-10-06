@@ -18,11 +18,13 @@ func shellCommand(command string) (string, []string, error) {
 	return "", nil, errors.New("neither pwsh nor powershell.exe found on PATH")
 }
 
-func setProcessGroup(cmd *exec.Cmd) {
+// SetProcessGroup is the Windows counterpart of the Unix helper (shared with
+// the MCP stdio transport).
+func SetProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
 }
 
-func killProcessGroup(cmd *exec.Cmd) {
+func KillProcessGroup(cmd *exec.Cmd) {
 	if cmd.Process != nil {
 		exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid)).Run()
 	}

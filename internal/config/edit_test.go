@@ -135,3 +135,37 @@ func TestAppendStringThroughSymlinkKeepsLinkAndMode(t *testing.T) {
 		t.Fatalf("mode changed to %v", fi.Mode().Perm())
 	}
 }
+
+func TestSetObjectEntry(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.jsonc")
+	os.WriteFile(p, []byte("{\n  // c\n  \"mcp\": { \"servers\": { \"a\": {\"url\":\"https://x\"} } }\n}\n"), 0o600)
+	added, err := SetObjectEntry(p, []string{"mcp", "servers"}, "b", `{"command": "y"}`)
+	if err != nil || !added {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(p)
+	c, err := Parse(b)
+	if err != nil || c.MCP.Servers["b"].Command != "y" || c.MCP.Servers["a"].URL != "https://x" || !strings.Contains(string(b), "// c") {
+		t.Fatalf("%s %v", b, err)
+	}
+	if added, _ := SetObjectEntry(p, []string{"mcp", "servers"}, "a", `{}`); added {
+		t.Fatal("existing key untouched")
+	}
+	// Missing parents and a missing file both create the chain.
+	p2 := filepath.Join(t.TempDir(), "new.jsonc")
+	added, err = SetObjectEntry(p2, []string{"mcp", "servers"}, "gh", `{"command": "npx"}`)
+	if err != nil || !added {
+		t.Fatal(err)
+	}
+	b2, _ := os.ReadFile(p2)
+	if c, err := Parse(b2); err != nil || c.MCP.Servers["gh"].Command != "npx" {
+		t.Fatalf("%s %v", b2, err)
+	}
+	// A malformed value never reaches the file.
+	if _, err := SetObjectEntry(p, []string{"mcp", "servers"}, "bad", `not json`); err == nil {
+		t.Fatal("invalid JSON value must be refused")
+	}
+	if b3, _ := os.ReadFile(p); string(b3) != string(b) {
+		t.Fatal("refused write must leave the file untouched")
+	}
+}

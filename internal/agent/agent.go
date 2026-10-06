@@ -10,6 +10,7 @@ import (
 	"github.com/adeotek/moca/internal/compact"
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
+	"github.com/adeotek/moca/internal/mcp"
 	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
 	"github.com/adeotek/moca/internal/tools"
@@ -30,6 +31,9 @@ type Options struct {
 	Effort    llm.Effort
 	Emit      func(Event)
 	Prior     []session.Entry
+	// MCP is the lazy MCP-server manager when servers are configured
+	// (start.go); nil otherwise.
+	MCP *mcp.Manager
 }
 
 type Outcome struct {
@@ -99,6 +103,16 @@ func (a *Agent) Model() provider.Model        { return a.model }
 func (a *Agent) Effort() llm.Effort           { return a.effort }
 func (a *Agent) Totals() (llm.Usage, float64) { return a.usage, a.cost }
 func (a *Agent) Session() *session.Writer     { return a.opts.Session }
+
+// Close releases the agent's resources: the MCP servers it may have started
+// (stopping their processes) and the session writer. Both front ends call it
+// at shutdown.
+func (a *Agent) Close() error {
+	if a.opts.MCP != nil {
+		a.opts.MCP.Close()
+	}
+	return a.opts.Session.Close()
+}
 
 // Workdir is the session's jail root — the workdir the session was started
 // in; a resumed session keeps its original one.

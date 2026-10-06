@@ -67,6 +67,58 @@ func isolate(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 }
 
+// TestMCPImportCLI drives `moca mcp import` end to end: discovery, secret
+// rewriting, the confirm prompt, and the written config.
+func TestMCPImportCLI(t *testing.T) {
+	isolate(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	os.WriteFile(filepath.Join(home, ".claude.json"),
+		[]byte(`{"mcpServers":{"github":{"command":"npx","env":{"GITHUB_TOKEN":"ghp_secret","LOG":"info"}}}}`), 0o600)
+	providers := `"providers":{"loc":{"baseUrl":"http://127.0.0.1:1","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY"}}`
+
+	cfg := writeCfg(t, `{"model":"loc/m",`+providers+`}`)
+	var out, errb bytes.Buffer
+	code := run(context.Background(), []string{"--config", cfg, "mcp", "import"}, strings.NewReader("n\n"), &out, &errb)
+	if code != 0 || !strings.Contains(out.String(), "aborted") {
+		t.Fatalf("code %d out %q err %q", code, out.String(), errb.String())
+	}
+	if b, _ := os.ReadFile(cfg); strings.Contains(string(b), "mcp") {
+		t.Fatalf("declined import must not write: %s", b)
+	}
+
+	out.Reset()
+	errb.Reset()
+	code = run(context.Background(), []string{"--config", cfg, "mcp", "import", "--yes"}, strings.NewReader(""), &out, &errb)
+	if code != 0 {
+		t.Fatalf("code %d out %q err %q", code, out.String(), errb.String())
+	}
+	b, _ := os.ReadFile(cfg)
+	if strings.Contains(string(b), "ghp_secret") {
+		t.Fatal("secret copied into the config")
+	}
+	c, err := config.Parse(b)
+	if err != nil || c.MCP.Servers["github"].Command != "npx" {
+		t.Fatalf("%v\n%s", err, b)
+	}
+	if c.MCP.Servers["github"].Env["GITHUB_TOKEN"] != "env:MOCA_MCP_GITHUB_GITHUB_TOKEN" || c.MCP.Servers["github"].Env["LOG"] != "info" {
+		t.Fatal(c.MCP.Servers["github"].Env)
+	}
+	if !strings.Contains(out.String(), "export MOCA_MCP_GITHUB_GITHUB_TOKEN=<value of GITHUB_TOKEN from the claude-code config>") {
+		t.Fatalf("export hint: %q", out.String())
+	}
+
+	// index with no servers configured is a no-op; a bad subcommand is usage.
+	empty := writeCfg(t, `{"model":"loc/m",`+providers+`}`)
+	out.Reset()
+	if code := run(context.Background(), []string{"--config", empty, "mcp", "index"}, nil, &out, &errb); code != 0 || !strings.Contains(out.String(), "no MCP servers configured") {
+		t.Fatalf("code %d out %q", code, out.String())
+	}
+	if code := run(context.Background(), []string{"--config", empty, "mcp", "nope"}, nil, &out, &errb); code != exitUsage {
+		t.Fatalf("unknown subcommand: code %d", code)
+	}
+}
+
 func fakeCompletions(t *testing.T, status int, body string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

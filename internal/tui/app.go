@@ -367,20 +367,37 @@ func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 		q, reply := m.approval.q, m.approval.reply
 		m.approval = nil
 		reply <- tools.AllowAlways
-		if q.Kind != "shell" {
-			return nil, true
-		}
-		// The running session (and a /clear restart) honours it now; the file
-		// makes it permanent.
-		m.start.Config.Shell.Allow = append(slices.Clone(m.start.Config.Shell.Allow), q.Subject)
 		path := m.opts.ConfigPath
 		if path == "" {
 			path = config.ConfigFile()
 		}
-		if err := config.AppendString(path, []string{"shell", "allow"}, q.Subject, config.DefaultShellAllow); err != nil {
-			return printlnContent("error: allow-always not saved: " + err.Error()), true
+		switch q.Kind {
+		case "shell":
+			// The running session (and a /clear restart) honours it now; the file
+			// makes it permanent.
+			m.start.Config.Shell.Allow = append(slices.Clone(m.start.Config.Shell.Allow), q.Subject)
+			if err := config.AppendString(path, []string{"shell", "allow"}, q.Subject, config.DefaultShellAllow); err != nil {
+				return printlnContent("error: allow-always not saved: " + err.Error()), true
+			}
+			return printlnContent(fmt.Sprintf("always allowing %q (saved to %s)", q.Subject, path)), true
+		case "mcp":
+			// Subject is server/tool. The running session already learned it
+			// from the AllowAlways answer; the config makes it survive /clear
+			// and the next start.
+			server, tool, ok := strings.Cut(q.Subject, "/")
+			if !ok || server == "" || tool == "" {
+				return nil, true
+			}
+			if s, ok := m.start.Config.MCP.Servers[server]; ok {
+				s.Approve = append(slices.Clone(s.Approve), tool)
+				m.start.Config.MCP.Servers[server] = s
+			}
+			if err := config.AppendString(path, []string{"mcp", "servers", server, "approve"}, tool, nil); err != nil {
+				return printlnContent("error: allow-always not saved: " + err.Error()), true
+			}
+			return printlnContent(fmt.Sprintf("always allowing %s (saved to %s)", q.Subject, path)), true
 		}
-		return printlnContent(fmt.Sprintf("always allowing %q (saved to %s)", q.Subject, path)), true
+		return nil, true
 	}
 	return nil, false
 }
@@ -615,7 +632,7 @@ func (m *model) restartSession() tea.Cmd {
 		return printlnContent("error: " + err.Error())
 	}
 	if m.agent != nil {
-		m.agent.Session().Close()
+		m.agent.Close()
 	}
 	m.agent = a
 	m.start = opts
@@ -870,7 +887,7 @@ func Run(ctx context.Context, o AppOptions) error {
 	}
 	m.waitRun(2 * time.Second)
 	close(pipe.stop)
-	m.agent.Session().Close()
+	m.agent.Close()
 	return runResult(ctx, err)
 }
 

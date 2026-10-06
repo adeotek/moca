@@ -106,7 +106,7 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		}
 		return exitUsage
 	}
-	defer a.Session().Close()
+	defer a.Close()
 	out, err := a.Run(ctx, o.Prompt)
 	u, cost := a.Totals()
 	defer fmt.Fprintf(stderr, "tokens %d/%d · $%.4f\n", u.Input+u.CacheRead+u.CacheWrite, u.Output, cost)

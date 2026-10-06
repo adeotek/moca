@@ -11,6 +11,7 @@ import (
 
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
+	"github.com/adeotek/moca/internal/mcp"
 	"github.com/adeotek/moca/internal/permissions"
 	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
@@ -88,8 +89,18 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(cfg.Shell.Allow, jail, runtime.GOOS),
 		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
 		ShellEnv: tools.ShellEnv(os.Environ(), config.EnvRefs(cfg))}
-	a, err := New(Options{Config: cfg, Providers: st.reg, Tools: tools.NewRegistry(tools.Builtins()...), Env: env,
-		Session: w, Snapshots: snaps, System: system, Model: model, Effort: effort, Emit: o.Emit, Prior: prior})
+	reg := tools.NewRegistry(tools.Builtins()...)
+	// With servers configured, the frozen `mcp` stub is replaced by the lazy
+	// proxy (§10.5): nothing starts here, and no server tool schema ever
+	// reaches the prompt — the roster lines above are all the model sees.
+	var mgr *mcp.Manager
+	if len(cfg.MCP.Servers) > 0 {
+		ix, _ := mcp.LoadIndex(filepath.Join(config.DataDir(), "mcp-index.json"))
+		mgr = mcp.NewManager(cfg.MCP.Servers, time.Duration(cfg.MCP.IdleTimeout)*time.Second, ix, mcp.Options{BaseEnv: os.Environ()})
+		reg.Register(mcp.NewTool(mgr, cfg.MCP.Servers))
+	}
+	a, err := New(Options{Config: cfg, Providers: st.reg, Tools: reg, Env: env,
+		Session: w, Snapshots: snaps, System: system, Model: model, Effort: effort, Emit: o.Emit, Prior: prior, MCP: mgr})
 	if err != nil {
 		return nil, err
 	}
