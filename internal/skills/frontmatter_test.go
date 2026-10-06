@@ -25,3 +25,33 @@ func TestFrontmatter(t *testing.T) {
 		t.Fatal("missing frontmatter is an error")
 	}
 }
+
+// Block scalars and quoted values, pinned by the ecosystem corpus: folded
+// text collapses to one space (even across a blank line), literal keeps its
+// newlines, double quotes unescape Go-style when they form a valid quoted
+// string, and a doubled single quote is one quote.
+func TestFrontmatterBlockAndQuoteEdges(t *testing.T) {
+	fm, _, err := ParseFrontmatter([]byte("---\ndescription: >\n  one line\n\n  second paragraph\nname: x\n---\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fm["description"] != "one line second paragraph" {
+		t.Fatalf("folded with a blank line: %q", fm["description"])
+	}
+	fm, _, _ = ParseFrontmatter([]byte("---\ndescription: |\n  one line\n\n  second paragraph\n---\n"))
+	if fm["description"] != "one line\n\nsecond paragraph" {
+		t.Fatalf("literal with a blank line: %q", fm["description"])
+	}
+	fm, _, _ = ParseFrontmatter([]byte("---\ndescription: \"multi \\\"quoted\\\" tail\"\n---\n"))
+	if fm["description"] != `multi "quoted" tail` {
+		t.Fatalf("escaped double quotes: %q", fm["description"])
+	}
+	fm, _, _ = ParseFrontmatter([]byte("---\ndescription: \"C:\\Users\\x\"\n---\n"))
+	if fm["description"] != `C:\Users\x` {
+		t.Fatalf("invalid escape falls back to raw: %q", fm["description"])
+	}
+	fm, _, _ = ParseFrontmatter([]byte("---\ndescription: 'it''s fine'\n---\n"))
+	if fm["description"] != "it's fine" {
+		t.Fatalf("single-quote escape: %q", fm["description"])
+	}
+}

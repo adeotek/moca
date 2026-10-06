@@ -3,6 +3,8 @@ package skills
 import (
 	"bytes"
 	"errors"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -41,7 +43,11 @@ func ParseFrontmatter(data []byte) (map[string]string, []byte, error) {
 			}
 			sep := "\n"
 			if v[0] == '>' {
+				// Folded: every line break — including a paragraph break
+				// (a blank line) — collapses to a single space; `|` keeps
+				// its newlines.
 				sep = " "
+				block = slices.DeleteFunc(block, func(l string) bool { return l == "" })
 			}
 			fm[k] = strings.TrimSpace(strings.Join(block, sep))
 			continue
@@ -49,8 +55,14 @@ func ParseFrontmatter(data []byte) (map[string]string, []byte, error) {
 		if v == "" {
 			continue // nested map or list follows
 		}
-		if len(v) >= 2 && (v[0] == '"' && v[len(v)-1] == '"' || v[0] == '\'' && v[len(v)-1] == '\'') {
-			v = v[1 : len(v)-1]
+		if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
+			if uq, err := strconv.Unquote(v); err == nil {
+				v = uq
+			} else {
+				v = v[1 : len(v)-1] // not a Go-style quoted string; keep as written
+			}
+		} else if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
+			v = strings.ReplaceAll(v[1:len(v)-1], "''", "'")
 		}
 		fm[k] = v
 	}
