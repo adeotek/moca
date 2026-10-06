@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func mkSkill(t *testing.T, dir, name, desc string) {
@@ -60,5 +61,35 @@ func TestDiscoverReportsSymlinkedDir(t *testing.T) {
 	got, errs := Discover([]Dir{{root, "global"}})
 	if len(got) != 0 || len(errs) != 1 || !strings.Contains(errs[0].Error(), "symlink") {
 		t.Fatalf("got=%v errs=%v", got, errs)
+	}
+}
+
+// Changed embedded content must re-extract (development runs 0.0.0-dev, so a
+// version-keyed directory would shadow the edit forever): the directory is
+// keyed on the content hash, so the next run lands in a new one.
+func TestExtractBuiltinsReExtractsOnContentChange(t *testing.T) {
+	data := t.TempDir()
+	mk := func(body string) fstest.MapFS {
+		return fstest.MapFS{"builtin/rtk/SKILL.md": &fstest.MapFile{Data: []byte(body)}}
+	}
+	d1, err := extractBuiltins(mk("---\nname: rtk\ndescription: v1\n---\n"), data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(d1, "rtk", "SKILL.md")); !strings.Contains(string(b), "v1") {
+		t.Fatalf("v1 not extracted: %q", b)
+	}
+	d2, err := extractBuiltins(mk("---\nname: rtk\ndescription: v2\n---\n"), data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d2 == d1 {
+		t.Fatal("changed content must extract into a new directory")
+	}
+	if b, _ := os.ReadFile(filepath.Join(d2, "rtk", "SKILL.md")); !strings.Contains(string(b), "v2") {
+		t.Fatalf("v2 not extracted: %q", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(d1, "rtk", "SKILL.md")); !strings.Contains(string(b), "v1") {
+		t.Fatalf("the previous extraction must stay untouched: %q", b)
 	}
 }
