@@ -6,7 +6,7 @@ Minimal, token-efficient, provider-agnostic coding agent. Single Go binary, Bubb
 
 Inspired by Claude Code, OpenCode, and Pi — deliberately ~10% of their surface area. Competes on **cost per task** and **read-the-whole-codebase-in-an-hour** transparency, not features.
 
-**Status: phase 5 done — MCP lazy proxy: configured servers (stdio + streamable HTTP) are discoverable through a persisted name+description index, zero servers start at session start, servers start on the first `describe`/`call` and stop after `mcp.idleTimeout`, tool schemas never enter the prompt (one frozen ~200-token `mcp` tool), calls are gated by read-only annotations or a per-server `approve` list, and `moca mcp import` brings Claude Code / OpenCode / Pi servers over without ever copying a secret (rewritten to `env:MOCA_MCP_*` references).** Next: phase 6 (rtk + graphify + skills ecosystem). Specs: [`docs/specs/SPECS.md`](docs/specs/SPECS.md) (current state) · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) (v1 vision) · Plans: [`docs/plans/`](docs/plans/).
+**Status: phase 6 done — rtk, graphify, ecosystem skills: the shell analyser unwraps `rtk <cmd>` (the wrapped command is checked too — rtk cannot launder a non-allowlisted command), the built-in rtk skill is verified against the real CLI (rtk 0.51.0), and SKILL.md / prompt-template files written for pi, Claude Code and OpenCode (graphify's included) load unchanged — proven by a vendored compatibility corpus with provenance and licenses (`internal/skills/testdata/ecosystem/SOURCES.md`).** Next: phase 7 (OAuth + upstream graphify PR + v0.1). Specs: [`docs/specs/SPECS.md`](docs/specs/SPECS.md) (current state) · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) (v1 vision) · Plans: [`docs/plans/`](docs/plans/).
 
 ## Stack
 

@@ -1,0 +1,4 @@
+# Byte-exact fixtures: the CRLF and BOM cases depend on their bytes, so git
+# must never normalize them (the parser normalizes CRLF itself when reading).
+synthetic/crlf/SKILL.md -text
+synthetic/bom/SKILL.md -text

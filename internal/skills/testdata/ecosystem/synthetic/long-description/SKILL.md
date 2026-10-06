@@ -1,0 +1,6 @@
+---
+name: long-description-skill
+description: This skill exercises a deliberately long description that the loader must keep whole, never truncating it silently. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. More sentences follow so the total reaches the intended length. ............................................................
+---
+
+# Long

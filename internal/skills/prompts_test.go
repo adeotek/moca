@@ -27,3 +27,25 @@ func TestExpandPrompt(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Prompt templates written for Claude Code commands and pi load unchanged:
+// unknown frontmatter keys (allowed-tools, model) are ignored, and the
+// positional / $ARGUMENTS / $@ expansions match both ecosystems.
+func TestEcosystemPromptsLoad(t *testing.T) {
+	ps := LoadPrompts([]Dir{{Path: "testdata/prompts", Source: "global"}})
+	if len(ps) != 2 {
+		t.Fatalf("%+v", ps)
+	}
+	if ps[0].Name != "claude-review" || ps[0].Description != "Review a file for bugs" || ps[0].ArgumentHint != "[file]" {
+		t.Fatalf("%+v", ps[0])
+	}
+	if ps[1].Name != "pi-commit" || ps[1].Description != "Write a commit message" {
+		t.Fatalf("%+v", ps[1])
+	}
+	if got := ExpandPrompt(ps[0].Body, "main.go"); got != "Review main.go for bugs. Focus on: main.go\n" {
+		t.Fatalf("%q", got)
+	}
+	if got := ExpandPrompt(ps[1].Body, "api fixes"); got != "Write a conventional commit message for the staged changes. Scope: api. Extra: api fixes\n" {
+		t.Fatalf("%q", got)
+	}
+}

@@ -337,3 +337,29 @@ func TestMCPNoSchemasInPromptAndZeroStarts(t *testing.T) {
 		t.Fatalf("mcp proxy must be registered when servers are configured: %+v", res)
 	}
 }
+
+// A skill's supporting files load through the read tool even when the skill
+// directory did not exist at session start (the global skills directory is
+// routinely absent until the first skill is installed): read-only roots cover
+// whole skill directories, and writes into them stay refused.
+func TestModelCanReadGlobalSkillSupportFiles(t *testing.T) {
+	s := newScript(t)
+	a, _, _ := startTestWith(t, s, "", "")
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "moca", "skills", "deploy", "references")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "api.md"), []byte("API NOTES"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := a.opts.Tools.Run(context.Background(), a.opts.Env, llm.ToolCall{Name: "read",
+		Input: json.RawMessage(fmt.Sprintf(`{"path":%q}`, filepath.Join(dir, "api.md")))})
+	if r.IsError || !strings.Contains(r.Content, "API NOTES") {
+		t.Fatal(r.Content)
+	}
+	w := a.opts.Tools.Run(context.Background(), a.opts.Env, llm.ToolCall{Name: "write",
+		Input: json.RawMessage(fmt.Sprintf(`{"path":%q,"content":"x"}`, filepath.Join(dir, "api.md")))})
+	if !w.IsError {
+		t.Fatal("skill dirs are read-only")
+	}
+}

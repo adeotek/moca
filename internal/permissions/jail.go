@@ -25,9 +25,19 @@ func NewJail(root string, readOnly []string) (*Jail, error) {
 	}
 	j := &Jail{root: r}
 	for _, ro := range readOnly {
-		if c, err := canonical(ro); err == nil {
-			j.readOnly = append(j.readOnly, c)
+		abs, err := filepath.Abs(ro)
+		if err != nil {
+			continue
 		}
+		// resolveDeep, not canonical: a read root that does not exist yet
+		// (the global skills directory is routinely absent at session
+		// start) must stay a root — EvalSymlinks would drop it and every
+		// read under it would refuse once the directory appears.
+		c, err := resolveDeep(abs)
+		if err != nil {
+			continue
+		}
+		j.readOnly = append(j.readOnly, c)
 	}
 	return j, nil
 }
