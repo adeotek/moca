@@ -1,6 +1,6 @@
 ---
 name: rtk
-description: Token-compressed CLI proxy. Prefer `rtk <cmd>` over raw git/ls/read/grep/find/test/diff/docker/gh output — same information, far fewer tokens.
+description: Token-compressed CLI proxy. Prefer it for shell commands whenever a wrapper exists — tests `rtk test go test ./...`, noisy builds `rtk err <cmd>`, git `rtk git …`, reads `rtk read <file>`, listings `rtk ls`/`rtk tree`, search `rtk grep`/`rtk find` — same signal, far fewer tokens.
 ---
 # rtk — prefer compressed command output
 
