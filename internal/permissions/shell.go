@@ -66,13 +66,17 @@ func (v *verdictAcc) add(list *[]string, name string) {
 
 func (s *Shell) classify(name string, v *verdictAcc) error {
 	base := filepath.Base(name)
+	// The safety classes match case-insensitively: on a case-insensitive
+	// filesystem (macOS, Windows) `SUDO` and `RM` resolve to the real
+	// binaries, and must not slip past hard-deny / ask-every-time.
+	lower := strings.ToLower(base)
 	switch {
-	case hardDeny[base] || strings.HasPrefix(base, "mkfs"):
+	case hardDeny[lower] || strings.HasPrefix(lower, "mkfs"):
 		return fmt.Errorf("%s is never allowed (hard-deny)", base)
-	case refused[base]:
+	case refused[lower]:
 		return fmt.Errorf("%s is refused: it runs code the analyser cannot see", base)
 	case builtinsOK[base]:
-	case askEvery[base]:
+	case askEvery[lower]:
 		v.add(&v.every, base)
 	case !s.allowed(base):
 		v.add(&v.need, base)
@@ -83,7 +87,8 @@ func (s *Shell) classify(name string, v *verdictAcc) error {
 // literalSafe reports whether a word part's runtime value is exactly its
 // source text: no backslash escapes (unquoted words decode them; inside
 // double quotes they are escapes) and, unquoted only, no glob
-// metacharacters, which bash expands before the command runs.
+// metacharacters or brace expansion (`{rm,x}`, `{1..3}`), which bash expands
+// before the command runs.
 func literalSafe(v string, unquoted bool) bool {
 	if strings.Contains(v, "\\") {
 		return false
@@ -92,6 +97,10 @@ func literalSafe(v string, unquoted bool) bool {
 		return false
 	}
 	if unquoted && strings.Contains(v, "[") && strings.Contains(v, "]") {
+		return false
+	}
+	if unquoted && strings.Contains(v, "{") && strings.Contains(v, "}") &&
+		(strings.Contains(v, ",") || strings.Contains(v, "..")) {
 		return false
 	}
 	return true

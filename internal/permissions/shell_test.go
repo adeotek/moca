@@ -157,3 +157,38 @@ func TestWindowsBestEffort(t *testing.T) {
 		t.Fatal("rtk init:", need)
 	}
 }
+
+// Brace expansion happens before the command runs, so `{sudo,ls}` is not a
+// command named "{sudo,ls}": classifying it as one skipped hard-deny and
+// ask-every-time. And on case-insensitive filesystems `SUDO`/`RM` are the real
+// binaries, so the safety classes match case-insensitively.
+func TestShellBraceExpansionAndCaseVariants(t *testing.T) {
+	s := newTestShell(t)
+	cases := map[string]verdict{
+		"{sudo,ls}":            {deny: "non-literal"},
+		"{rm,x} y":             {deny: "non-literal"},
+		"{1..3}":               {deny: "non-literal"},
+		"echo > {a,b}":         {deny: "non-literal"},
+		"env {rm,x} y":         {deny: "non-literal"},
+		"SUDO ls":              {deny: "hard-deny"},
+		"Sudo ls":              {deny: "hard-deny"},
+		"MKFS.ext4 /dev/x":     {deny: "hard-deny"},
+		"EVAL x":               {deny: "refused"},
+		"RM -rf x":             {every: []string{"RM"}},
+		"go test ./... ; Rm x": {every: []string{"Rm"}},
+		"echo {a,b}":           {}, // arguments are not command positions
+		"go test -run '{a,b}'": {},
+	}
+	for cmd, want := range cases {
+		need, every, err := s.Check(cmd)
+		if want.deny != "" {
+			if err == nil || !strings.Contains(err.Error(), want.deny) {
+				t.Errorf("%q: want deny %q, got err=%v need=%v every=%v", cmd, want.deny, err, need, every)
+			}
+			continue
+		}
+		if err != nil || !slices.Equal(need, want.need) || !slices.Equal(every, want.every) {
+			t.Errorf("%q: need=%v every=%v err=%v; want %+v", cmd, need, every, err, want)
+		}
+	}
+}

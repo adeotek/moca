@@ -576,3 +576,11 @@ the pre-fix sources:
 - **L3 — frontmatter block headers.** `>+`, `|+`, `>2`, `> # note` are
   recognised block scalars; a trailing ` # comment` after a plain or quoted
   value is dropped as in YAML (`TestFrontmatterBlockIndicatorsAndComments`).
+- **Follow-ups found while probing (pre-existing shell-analyser gaps, fixed
+  here):** an unquoted brace expansion (`{sudo,ls}`, `{rm,x}`) was classified
+  as a command literally named `{sudo,ls}`, skipping hard-deny and
+  ask-every-time — `literalSafe` now treats it as non-literal; and
+  `classify` matched hard-deny / refused / ask-every-time case-sensitively, so
+  `SUDO`/`RM` slipped past on case-insensitive filesystems — it now lowercases
+  for those classes (`TestShellBraceExpansionAndCaseVariants`).
+
