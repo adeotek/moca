@@ -33,21 +33,25 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return exitOK
 	}
 	if len(o.Sub) > 0 {
-		// `moca mcp` subcommands need config but no model.
-		if o.Sub[0] == "mcp" {
-			path := o.ConfigPath
-			if path == "" {
-				path = config.ConfigFile()
-			}
-			cfg, err := config.Load(path)
-			if err != nil {
-				fmt.Fprintln(stderr, "moca:", err)
-				return exitUsage
-			}
-			return runMCP(ctx, o, cfg, path, stdin, stdout, stderr)
+		// mcp/login/logout subcommands need config but no model.
+		path := o.ConfigPath
+		if path == "" {
+			path = config.ConfigFile()
 		}
-		// login/logout land in a later phase.
-		fmt.Fprintf(stderr, "moca: %s lands in a later phase\n", o.Sub[0])
+		cfg, err := config.Load(path)
+		if err != nil {
+			fmt.Fprintln(stderr, "moca:", err)
+			return exitUsage
+		}
+		switch o.Sub[0] {
+		case "mcp":
+			return runMCP(ctx, o, cfg, path, stdin, stdout, stderr)
+		case "login":
+			return runLogin(ctx, o, cfg, path, stdin, stdout, stderr)
+		case "logout":
+			return runLogout(ctx, o, cfg, stdout, stderr)
+		}
+		fmt.Fprintf(stderr, "moca: unknown command %q\n", o.Sub[0])
 		return exitUsage
 	}
 	path := o.ConfigPath

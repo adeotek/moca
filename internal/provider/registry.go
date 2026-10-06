@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -145,8 +146,20 @@ func (r *Registry) credential(provider string) CredentialFunc {
 				return withExtra(c), nil
 			}
 		}
+		if oc, ok := oauthProviders[provider]; ok {
+			// Store-backed subscription credentials: read auth.json (0600),
+			// refresh under the cross-process lock near expiry.
+			fn := NewStore(filepath.Join(config.DataDir(), "auth.json")).CredentialFor(provider, oc.refresher(r.hc))
+			return func(ctx context.Context) (Credential, error) {
+				c, err := fn(ctx)
+				if err != nil {
+					return Credential{}, err
+				}
+				return withExtra(c), nil
+			}
+		}
 		return func(context.Context) (Credential, error) {
-			return Credential{}, fmt.Errorf("provider %s uses oauth: run `moca login %s`", provider, provider)
+			return Credential{}, fmt.Errorf("provider %s: OAuth is not available; set auth \"api_key\"", provider)
 		}
 	}
 	return func(context.Context) (Credential, error) {
@@ -167,8 +180,16 @@ func (r *Registry) Resolve(qualified string) (Model, Adapter, error) {
 	if !ok {
 		return Model{}, nil, fmt.Errorf("%w %q", ErrUnknownModel, qualified)
 	}
-	if _, ok := r.cfg.Providers[pname]; !ok {
+	p, ok := r.cfg.Providers[pname]
+	if !ok {
 		return Model{}, nil, fmt.Errorf("unknown provider %q", pname)
+	}
+	if p.Auth == "oauth" {
+		// The SIWC subscription route serves the Responses API only
+		// (docs/specs/oauth-verification.md §2.4).
+		if _, hasOAuth := oauthProviders[pname]; hasOAuth && m.Protocol != "openai-responses" {
+			return Model{}, nil, fmt.Errorf("model %s: subscription OAuth is only available on the openai-responses protocol (model speaks %s)", qualified, m.Protocol)
+		}
 	}
 	base := r.baseURL(pname, m.Protocol)
 	if base == "" {

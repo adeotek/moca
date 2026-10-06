@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
@@ -178,5 +180,66 @@ func TestNoSessionHeaderOutsideOpenCodeGo(t *testing.T) {
 	}
 	if hdr.Get("x-opencode-session") != "" {
 		t.Fatalf("OpenCode routing header must not leak to other providers: %v", hdr)
+	}
+}
+
+// OAuth (Sign in with ChatGPT) is store-backed: with a token in auth.json
+// and auth "oauth", requests carry the stored access token as a bearer.
+func TestOAuthCredentialFromStore(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	store := NewStore(filepath.Join(config.DataDir(), "auth.json"))
+	if err := store.Put("openai", Token{Access: "AT-1", Expiry: time.Now().Add(time.Hour), ClientID: "oaiapp_x"}); err != nil {
+		t.Fatal(err)
+	}
+	var hdr http.Header
+	srv := sseServer(t, 200, `event: response.completed
+data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}
+
+`, nil, &hdr)
+	defer srv.Close()
+	cfg := mustCfg(t, fmt.Sprintf(
+		`{"model":"openai/gpt-6-astra","providers":{"openai":{"auth":"oauth","baseUrls":{"openai-responses":%q}}}}`, srv.URL))
+	r, err := NewRegistry(cfg, srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, a, err := r.Resolve("openai/gpt-6-astra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Stream(context.Background(), llm.Request{Model: m.ID, MaxTokens: 16}, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if hdr.Get("Authorization") != "Bearer AT-1" {
+		t.Fatalf("oauth bearer: %v", hdr)
+	}
+}
+
+func TestOAuthNotLoggedIn(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	cfg := mustCfg(t, `{"model":"openai/gpt-6-astra","providers":{"openai":{"auth":"oauth"}}}`)
+	r, err := NewRegistry(cfg, http.DefaultClient, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, a, err := r.Resolve("openai/gpt-6-astra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.Stream(context.Background(), llm.Request{Model: "gpt-6-astra", MaxTokens: 16}, func(llm.Event) {})
+	if err == nil || !strings.Contains(err.Error(), "moca login openai") {
+		t.Fatalf("not-logged-in error must point at `moca login openai`: %v", err)
+	}
+}
+
+func TestOAuthRequiresResponsesProtocol(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	cfg := mustCfg(t, `{"model":"openai/gpt-6-astra","providers":{"openai":{"auth":"oauth","models":{"gpt-6-astra":{"protocol":"openai-completions"}}}}}`)
+	r, err := NewRegistry(cfg, http.DefaultClient, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.Resolve("openai/gpt-6-astra"); err == nil || !strings.Contains(err.Error(), "openai-responses") {
+		t.Fatalf("oauth + completions protocol must be refused: %v", err)
 	}
 }

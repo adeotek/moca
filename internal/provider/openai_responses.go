@@ -22,7 +22,7 @@ func newOpenAIResponses(m Model, baseURL string, cred CredentialFunc, hc *http.C
 	return &responsesAdapter{m: m, url: strings.TrimRight(baseURL, "/") + "/responses", cred: cred, hc: hc}
 }
 
-func (a *responsesAdapter) body(req llm.Request) map[string]any {
+func (a *responsesAdapter) body(req llm.Request, oauth bool) map[string]any {
 	var input []map[string]any
 	for _, m := range req.Messages {
 		for _, c := range m.Content {
@@ -55,7 +55,12 @@ func (a *responsesAdapter) body(req llm.Request) map[string]any {
 		}
 	}
 	b := map[string]any{"model": req.Model, "input": input, "stream": true, "store": false,
-		"max_output_tokens": req.MaxTokens, "include": []string{"reasoning.encrypted_content"}}
+		"include": []string{"reasoning.encrypted_content"}}
+	if !oauth {
+		// The subscription route rejects max_output_tokens
+		// (docs/specs/oauth-verification.md §2.4).
+		b["max_output_tokens"] = req.MaxTokens
+	}
 	if req.System != "" {
 		b["instructions"] = req.System
 	}
@@ -64,7 +69,14 @@ func (a *responsesAdapter) body(req llm.Request) map[string]any {
 		for i, t := range req.Tools {
 			tools[i] = map[string]any{"type": "function", "name": t.Name, "description": t.Description, "parameters": t.Schema}
 		}
-		b["tools"] = tools
+		if oauth {
+			// The subscription route takes function tools grouped in a
+			// namespace (§2.4); API-key traffic keeps the flat list.
+			b["tools"] = []map[string]any{{"type": "namespace", "name": "moca",
+				"description": "moca coding agent tools", "tools": tools}}
+		} else {
+			b["tools"] = tools
+		}
 		if req.ToolChoice != "" {
 			b["tool_choice"] = string(req.ToolChoice)
 		}
@@ -125,7 +137,7 @@ func (a *responsesAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	resp, err := post(ctx, a.hc, a.url, hdr, a.body(req))
+	resp, err := post(ctx, a.hc, a.url, hdr, a.body(req, cred.OAuth))
 	if err != nil {
 		return llm.Response{}, openaiOverflow(err)
 	}

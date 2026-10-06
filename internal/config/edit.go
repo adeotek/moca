@@ -299,6 +299,71 @@ func AppendString(path string, keyPath []string, value string, init []string) er
 	return writeEdited(path, src, out, mode)
 }
 
+// objectValueSpan returns the byte range of key's value inside obj (a
+// standardized JSON object).
+func objectValueSpan(obj []byte, key string) (span, bool) {
+	sc := &scanner{b: obj}
+	sc.i++ // '{'
+	for {
+		sc.ws()
+		if sc.i >= len(sc.b) || sc.b[sc.i] == '}' {
+			return span{}, false
+		}
+		if sc.b[sc.i] == ',' {
+			sc.i++
+			continue
+		}
+		k, err := sc.str()
+		if err != nil {
+			return span{}, false
+		}
+		sc.ws()
+		if sc.i >= len(sc.b) || sc.b[sc.i] != ':' {
+			return span{}, false
+		}
+		sc.i++
+		sp, _, err := sc.value(nil)
+		if err != nil {
+			return span{}, false
+		}
+		if k == key {
+			return sp, true
+		}
+	}
+}
+
+// SetString sets key to a string value at keyPath, replacing an existing
+// value in place (SetObjectEntry only inserts). Missing keys or paths fall
+// back to SetObjectEntry. Same .bak copy, atomic write, symlink/mode and
+// comment-preservation behaviour as AppendString.
+func SetString(path string, keyPath []string, key, value string) (bool, error) {
+	q, _ := json.Marshal(value)
+	p, mode := prepEdit(path)
+	src, err := os.ReadFile(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return SetObjectEntry(path, keyPath, key, string(q))
+	}
+	if err != nil {
+		return false, err
+	}
+	std, err := Standardize(src)
+	if err != nil {
+		return false, err
+	}
+	sc := &scanner{b: std}
+	sp, depth, err := sc.value(keyPath)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", p, err)
+	}
+	if depth == len(keyPath) && std[sp.start] == '{' {
+		if vs, ok := objectValueSpan(std[sp.start:sp.end], key); ok {
+			out := concat(src[:sp.start+vs.start], q, src[sp.start+vs.end:])
+			return true, writeEdited(p, src, out, mode)
+		}
+	}
+	return SetObjectEntry(path, keyPath, key, string(q))
+}
+
 // SetObjectEntry inserts "key": rawJSON into the object at keyPath, creating
 // missing intermediate objects like AppendString (and the file itself when
 // absent). An existing key is left untouched (added=false). Same .bak, atomic

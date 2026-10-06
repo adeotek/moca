@@ -169,3 +169,49 @@ func TestSetObjectEntry(t *testing.T) {
 		t.Fatal("refused write must leave the file untouched")
 	}
 }
+
+func TestSetString(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.jsonc")
+	src := `{
+  // keep this comment
+  "providers": {
+    "openai": { "auth": "api_key", "apiKey": "env:K" }, // https://x/v1
+  },
+}
+`
+	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := SetString(p, []string{"providers", "openai"}, "auth", "oauth")
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	b, _ := os.ReadFile(p)
+	if !strings.Contains(string(b), `"auth": "oauth"`) ||
+		!strings.Contains(string(b), "keep this comment") ||
+		!strings.Contains(string(b), "https://x/v1") ||
+		!strings.Contains(string(b), `"apiKey": "env:K"`) {
+		t.Fatalf("edit lost content: %s", b)
+	}
+	c, err := Parse(b)
+	if err != nil || c.Providers["openai"].Auth != "oauth" || c.Providers["openai"].APIKey != "env:K" {
+		t.Fatalf("%v %+v", err, c.Providers["openai"])
+	}
+	// A missing key falls back to insertion.
+	if ok, err := SetString(p, []string{"providers", "openai"}, "baseUrl", "http://y"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	// A missing path creates the chain, and a missing file is created.
+	p2 := filepath.Join(t.TempDir(), "new.jsonc")
+	if ok, err := SetString(p2, []string{"providers", "openai"}, "auth", "oauth"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	b2, _ := os.ReadFile(p2)
+	if c, err := Parse(b2); err != nil || c.Providers["openai"].Auth != "oauth" {
+		t.Fatalf("%s %v", b2, err)
+	}
+	// Replacing again is idempotent in place.
+	if ok, err := SetString(p, []string{"providers", "openai"}, "auth", "oauth"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+}
