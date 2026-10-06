@@ -300,14 +300,20 @@ func AppendString(path string, keyPath []string, value string, init []string) er
 }
 
 // objectValueSpan returns the byte range of key's value inside obj (a
-// standardized JSON object).
+// standardized JSON object). Duplicate keys resolve to the last one — the
+// same key encoding/json keeps and Parse reads — so an edit lands on the
+// value that is actually in effect.
 func objectValueSpan(obj []byte, key string) (span, bool) {
 	sc := &scanner{b: obj}
 	sc.i++ // '{'
+	var (
+		last span
+		ok   bool
+	)
 	for {
 		sc.ws()
 		if sc.i >= len(sc.b) || sc.b[sc.i] == '}' {
-			return span{}, false
+			return last, ok
 		}
 		if sc.b[sc.i] == ',' {
 			sc.i++
@@ -327,7 +333,7 @@ func objectValueSpan(obj []byte, key string) (span, bool) {
 			return span{}, false
 		}
 		if k == key {
-			return sp, true
+			last, ok = sp, true
 		}
 	}
 }
@@ -357,6 +363,13 @@ func SetString(path string, keyPath []string, key, value string) (bool, error) {
 	}
 	if depth == len(keyPath) && std[sp.start] == '{' {
 		if vs, ok := objectValueSpan(std[sp.start:sp.end], key); ok {
+			// The contract is a string value: a non-string prior value is a
+			// broken config and must be refused, not silently replaced into
+			// a parseable one. (vs is relative to the object slice.)
+			var cur string
+			if err := json.Unmarshal(std[sp.start+vs.start:sp.start+vs.end], &cur); err != nil {
+				return false, fmt.Errorf("%s: %s.%s is not a string; fix the config first", p, strings.Join(keyPath, "."), key)
+			}
 			out := concat(src[:sp.start+vs.start], q, src[sp.start+vs.end:])
 			return true, writeEdited(p, src, out, mode)
 		}

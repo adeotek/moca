@@ -105,6 +105,18 @@ func TestOAuthAllowedForOpenAI(t *testing.T) {
 	}
 }
 
+func TestOAuthRejectedForNonOAuthProvider(t *testing.T) {
+	// OAuth exists only where the policy gate permits it: `auth: "oauth"`
+	// for anything else is a config error at load, not a request-time
+	// failure with a runtime exit code.
+	if _, err := Parse([]byte(`{"providers":{"opencode-go":{"auth":"oauth"}}}`)); err == nil || !strings.Contains(err.Error(), "no OAuth support") {
+		t.Fatalf("oauth on a non-OAuth provider must be refused: %v", err)
+	}
+	if _, err := Parse([]byte(`{"providers":{"mycorp":{"auth":"oauth","baseUrl":"http://x","protocol":"openai-responses"}}}`)); err == nil || !strings.Contains(err.Error(), "no OAuth support") {
+		t.Fatalf("oauth on a custom provider must be refused: %v", err)
+	}
+}
+
 func TestSyntaxErrorReportsLineCol(t *testing.T) {
 	// `x` is a genuine syntax error on line 3. (A trailing comma — e.g.
 	// `"model": ,` — is legitimately blanked by the pre-pass, which moves
