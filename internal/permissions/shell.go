@@ -1,6 +1,7 @@
 package permissions
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -18,6 +19,10 @@ var builtinsOK = map[string]bool{"cd": true, "pwd": true, "echo": true, "printf"
 var refused = map[string]bool{"eval": true, "source": true, ".": true, "exec": true}
 
 var askEvery = map[string]bool{"rm": true}
+
+// errNonLiteral refuses any command-name position whose runtime value cannot
+// be known exactly (expansions, escapes, globs): fail closed, never guess.
+var errNonLiteral = errors.New("non-literal command name refused (e.g. $CMD); write the command out")
 
 // Shell analyses commands for the model-facing shell tool (§7). Not a
 // sandbox: an allowlisted interpreter can do anything the user can.
@@ -172,10 +177,10 @@ var (
 	nohupSpec = optSpec{bare: map[string]bool{"--help": true, "--version": true}}
 )
 
-// skipWrapper consumes a wrapper's options and returns the index of the
+// skipWrapperOpts consumes a wrapper's options and returns the index of the
 // wrapped command name, or -1 when the wrapper has no wrapped command. It
 // fails closed: an option it cannot model refuses the whole command.
-func skipWrapper(args []*syntax.Word, i int, spec optSpec, wrapper string) (int, error) {
+func skipWrapperOpts(args []*syntax.Word, i int, spec optSpec, wrapper string) (int, error) {
 	j := i + 1
 	for j < len(args) {
 		a, ok := wordLit(args[j])
@@ -223,6 +228,35 @@ func skipWrapper(args []*syntax.Word, i int, spec optSpec, wrapper string) (int,
 	return -1, nil
 }
 
+// skipWrapper consumes one transparent wrapper at args[i] — env, time,
+// nice, timeout, nohup, command — and returns the index of the wrapped
+// command name (-1 when there is none, e.g. `env -i` or `command -v cmd`).
+func skipWrapper(args []*syntax.Word, i int) (int, error) {
+	name, _ := wordLit(args[i]) // callers switch on the same names
+	switch filepath.Base(name) {
+	case "env":
+		return skipWrapperOpts(args, i, envSpec, "env")
+	case "time":
+		return skipWrapperOpts(args, i, timeSpec, "time")
+	case "nice":
+		return skipWrapperOpts(args, i, niceSpec, "nice")
+	case "timeout":
+		j, err := skipWrapperOpts(args, i, timeoutSpec, "timeout")
+		if err != nil || j < 0 || j >= len(args) {
+			return j, err
+		}
+		if _, ok := wordLit(args[j]); !ok {
+			return -1, fmt.Errorf("cannot analyse a non-literal `timeout` duration")
+		}
+		return j + 1, nil // the duration word
+	case "nohup":
+		return skipWrapperOpts(args, i, nohupSpec, "nohup")
+	case "command":
+		return skipCommand(args, i)
+	}
+	return -1, nil // unreachable: callers switch on the same names
+}
+
 func numericFlag(a string) bool {
 	if len(a) < 2 || a[0] != '-' {
 		return false
@@ -261,49 +295,45 @@ func skipCommand(args []*syntax.Word, i int) (int, error) {
 	return -1, nil
 }
 
-// unwrap skips wrapper commands and their options, returning the index of
-// the wrapped command name in args (or -1 if none).
-func unwrap(args []*syntax.Word) (int, error) {
+// unwrap walks transparent wrappers and rtk, returning the indexes of every
+// word that must be classified as a command name. Transparent wrappers (env,
+// time, timeout, nice, nohup, command) are not classified themselves — they
+// only relocate the command; rtk is classified AND unwrapped, so `rtk git …`
+// classifies both `rtk` and `git`, and `rtk proxy rm x` reaches `rm`.
+func unwrap(args []*syntax.Word) ([]int, error) {
+	var out []int
 	i := 0
 	for i < len(args) {
 		name, ok := wordLit(args[i])
 		if !ok {
-			return i, nil // a non-literal command name is refused by Check
+			return append(out, i), nil // a non-literal name is refused by Check
 		}
-		var (
-			j   int
-			err error
-		)
 		switch filepath.Base(name) {
-		case "env":
-			j, err = skipWrapper(args, i, envSpec, "env")
-		case "time":
-			j, err = skipWrapper(args, i, timeSpec, "time")
-		case "nice":
-			j, err = skipWrapper(args, i, niceSpec, "nice")
-		case "timeout":
-			if j, err = skipWrapper(args, i, timeoutSpec, "timeout"); err == nil && j >= 0 && j < len(args) {
-				if _, ok := wordLit(args[j]); !ok {
-					return -1, fmt.Errorf("cannot analyse a non-literal `timeout` duration")
-				}
-				j++ // the duration word
+		case "rtk":
+			out = append(out, i)
+			next, self, err := rtkTarget(args, i)
+			if err != nil {
+				return nil, err
 			}
-		case "nohup":
-			j, err = skipWrapper(args, i, nohupSpec, "nohup")
-		case "command":
-			j, err = skipCommand(args, i)
-		default:
-			return i, nil
+			if self {
+				return out, nil
+			}
+			i = next
+			continue
+		case "env", "time", "nohup", "nice", "timeout", "command":
+			next, err := skipWrapper(args, i)
+			if err != nil {
+				return nil, err
+			}
+			if next < 0 {
+				return out, nil
+			}
+			i = next
+			continue
 		}
-		if err != nil {
-			return -1, err
-		}
-		if j < 0 {
-			return -1, nil
-		}
-		i = j
+		return append(out, i), nil
 	}
-	return -1, nil
+	return out, nil
 }
 
 func (s *Shell) checkTarget(w *syntax.Word, cwdUnknown bool) error {
@@ -363,36 +393,35 @@ func (s *Shell) Check(command string) ([]string, []string, error) {
 			if len(x.Args) == 0 {
 				return true // pure assignment
 			}
-			idx, uerr := unwrap(x.Args)
+			idxs, uerr := unwrap(x.Args)
 			if uerr != nil {
 				fail(uerr)
 				return false
 			}
-			if idx < 0 {
-				return true // wrappers are transparent; nothing wrapped (or `command -v`)
-			}
-			name, ok := wordLit(x.Args[idx])
-			if !ok {
-				fail(fmt.Errorf("non-literal command name refused (e.g. $CMD); write the command out"))
-				return false
-			}
-			if err := s.classify(name, &v); err != nil {
-				fail(err)
-				return false
-			}
-			switch filepath.Base(name) {
-			case "cd", "pushd", "popd":
-				// Relative redirect targets are resolved against the jail
-				// root, which is only correct while the cwd is unchanged;
-				// after a cd only absolute targets can be checked.
-				cwdUnknown = true
-			case "tee":
-				for _, a := range x.Args[idx+1:] {
-					if l, ok := wordLit(a); ok && strings.HasPrefix(l, "-") {
-						continue
-					}
-					if err := s.checkTarget(a, cwdUnknown); err != nil {
-						fail(err)
+			for _, idx := range idxs {
+				name, ok := wordLit(x.Args[idx])
+				if !ok {
+					fail(errNonLiteral)
+					return false
+				}
+				if err := s.classify(name, &v); err != nil {
+					fail(err)
+					return false
+				}
+				switch filepath.Base(name) {
+				case "cd", "pushd", "popd":
+					// Relative redirect targets are resolved against the jail
+					// root, which is only correct while the cwd is unchanged;
+					// after a cd only absolute targets can be checked.
+					cwdUnknown = true
+				case "tee":
+					for _, a := range x.Args[idx+1:] {
+						if l, ok := wordLit(a); ok && strings.HasPrefix(l, "-") {
+							continue
+						}
+						if err := s.checkTarget(a, cwdUnknown); err != nil {
+							fail(err)
+						}
 					}
 				}
 			}
