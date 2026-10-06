@@ -74,6 +74,11 @@ func (s *Store) read() (storeFile, error) {
 	return f, nil
 }
 
+// write publishes the store atomically (tmp + rename, forcing 0600). The
+// rename replaces the file: a symlinked auth.json is deliberately neither
+// followed nor preserved — this is moca's own credential store, not a
+// dotfile-managed config file (unlike config's edit helpers, which edit
+// through the link).
 func (s *Store) write(f storeFile) error {
 	if f.Providers == nil {
 		f.Providers = map[string]Token{}

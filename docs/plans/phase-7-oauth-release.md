@@ -953,3 +953,104 @@ make release VERSION=v0.1.0
 **Task 7 — ship gate.** `test/shipgate/`: a fixture repo (`calc.Sum` skips `xs[0]`; `TestTotals` fails), a checker (`shipgate_test.go`, `//go:build shipgate`) asserting the seven §14 gates from the session JSONL + repo state + exit code, and `run.sh` (hermetic temp XDG dirs, `git init -b main`, frozen prompt, key from the repo `.env` via `env:` indirection). The checker was **rehearsed end-to-end against real scripted-provider sessions**: the good script (read failing test → search → edit → `rtk test -- go test ./...` green → commit on `fix/sum`) passes all seven gates; the same flow minus the search turn fails with exactly `2: the bug was not located with search before the fix`. The live legs (3 unattended real-model runs) are deferred — the key-gated run was refused by consent policy and must not be retried without explicit approval.
 
 **Deferred (need Ben).** (1) `bash test/shipgate/run.sh` ×3 (real model; repo `.env` key); (2) a live `moca login openai` round-trip; (3) tag `v0.1.0` + GitHub release (Task 8 — the plan itself says to ask first).
+
+## Review fixes (2026-10-06 — review passes 1 & 2)
+
+Two independent review passes ran on the phase-7 branch: pass 1
+(`docs/reviews/2026-10-06-phase-7-oauth-release.md`, Approve with fixes:
+0H/2M/4L) and an adversarial pass 2
+(`docs/reviews/2026-10-06-phase-7-oauth-release-pass-2.md`, Approve with
+fixes: 0H/4M/6L; the passes ran in parallel and were committed as-is). All
+confirmed findings were fixed with regression tests; the guard tests that
+cannot fail against the pre-fix tree were proven load-bearing by mutation
+(scratch overlay copies, working tree untouched): randText swallowing the
+entropy error, a constant randText, the JWKS kid filter, the JWKS exponent
+guard, the exitFor sentinel case and the config/provider OAuth-list sync all
+fail their tests when mutated.
+
+**Fixed.**
+
+- 1-1 / 2-3 (Medium): a pre-existing `auth.json.tmp` mode was published
+  through the rename. `Store.write` now `os.Chmod`s the tmp to 0600 before
+  the rename; `TestStoreWriteForcesMode` pre-creates the tmp at 0644.
+- 1-2 / 2-1 (Medium): `randText` swallowed `crypto/rand` failures, so state
+  and nonce could silently become `""` (fail-open CSRF). It now returns
+  `(string, error)` and `pkce()` propagates; `randRead` is indirected for
+  the test. `TestLoginFailsOnEntropyError` (fails only after the verifier
+  read, so it pins the randText path) and `TestPKCEUniqueness` (catches
+  constant/empty sources and re-pins S256).
+- 1-3 / 2-2 (Low/Medium): the `ErrInvalidGrant`/`ErrInvalidClient` → exit 2
+  mapping had no test. `TestExitForOAuthSentinels` pins both sentinels plus
+  the plain-error and cancelled-context cases.
+- 1-4 (Low): `auth: "oauth"` for a provider with no OAuth flow passed config
+  validation and failed at request time as a runtime error. Config now
+  rejects it at load (`config.OAuthProviders`, message "no OAuth support for
+  this provider; set "api_key""), and `TestOAuthProviderListsStayInSync`
+  pins `config.OAuthProviders` against `provider.oauthProviders`.
+- 1-5 (Low): README said "Status: v0.1.0" while the tag is deferred — now
+  "pending the §14 ship gate", and the phase-7 table row says so too.
+- 1-6a (Low): `run.sh` leaked three temp dirs per run. A cleanup trap now
+  removes them on success and keeps them (with a note) on failure, so a
+  failed gate's session file stays inspectable.
+- 2-5 (Low): `SetString` on duplicate keys edited the first occurrence while
+  `encoding/json`/`Parse` keep the last — the write silently didn't take
+  effect. Own probe adjudicated the passes' disagreement (see below).
+  `objectValueSpan` now resolves to the last match, consistent with
+  `scanner.value`'s existing last-wins behaviour; pinned by
+  `TestSetStringDuplicateKeys` (both the duplicate-key and duplicate-object
+  shapes).
+- 2-6 (Low): `SetString` replaced a non-string value (`auth: 42` →
+  `"oauth"`), laundering a broken config into a parseable one. It now
+  refuses with "is not a string; fix the config first";
+  `TestSetStringRefusesNonString` also asserts the file is untouched.
+- 2-8 (Low): JWKS `kid` selection and the exponent sanity guard were
+  untested (both mutations survived the suite). The fake AS now serves a
+  second RSA key (`kid: "other"`) and can serve a bogus exponent;
+  `TestValidateIDTokenKidSelection` proves kid selection in both directions
+  and `TestJWKSExponentSanity` proves a zero exponent is skipped, not used.
+- 2-9 (Low): a redirect URL pasted without its scheme (terminal wrap, hand
+  copy) was exchanged as a bogus code and failed with an opaque
+  `invalid_grant`. `parsePasted` now recovers a scheme-less URL (prepending
+  `http://`, host must be plausible) with the state check still applying,
+  and names the problem ("lost its scheme") when it cannot; the bare-code
+  trust argument is now stated in the comment.
+- 2-10 (Low): the login used two channels, so when both a callback and a
+  paste result were ready the `select` picked randomly — a wrong paste could
+  flip an otherwise-successful login. Both producers now share one
+  first-wins channel (deterministic FIFO), pinned by
+  `TestLoginLatePasteIgnored`.
+- 2-7 (Low): documented at `Store.write` that the rename replaces a
+  symlinked `auth.json` by design (unlike the config edit helpers).
+
+**Adjudicated (own probes; reviewer claims are hypotheses).**
+
+- 2-5's probe shape was wrong: duplicate *provider objects* were already
+  edited last-wins and read last-wins (pass 1 was right to drop it). The
+  real inconsistency was duplicate *keys inside one object* — reproduced
+  with a scratch test before fixing (the probe became
+  `TestSetStringDuplicateKeys`). Fix: last-wins alignment, not the proposed
+  refusal — the edit must land on the value `Parse` reads, and the package's
+  scanner already resolves duplicates last-wins.
+- 2-4 (Medium, callback client-id echo): not actioned as a behaviour change.
+  The record (`docs/specs/oauth-verification.md` §2.2) specifies exactly the
+  implemented contract — the issued client id comes back in the callback
+  query and a different id must be rejected on reauthorization; the
+  proposed "prefer the token response" fallback would implement an
+  undocumented shape. Added the explicit contract comment at the
+  registration switch instead; `TestLoginRegistrationIncomplete` already
+  pins the loud refusal.
+- 2-10's proposed "ignored response" stderr note was not adopted: the drop
+  can only be observed inside the race window and printing from a losing
+  goroutine is itself racy; the structural fix removes the nondeterminism,
+  which is the actual defect.
+- 1-6b (checker scope: gates 1–2 accept any `_test.go` read / any search):
+  left as recorded — the plan's §14 wording is stricter, and tightening it
+  is batched with the deferred live legs (the checker's docstring already
+  commits to changing with the frozen prompt shape in one revision).
+
+**Re-verification.** Full suite race-green at 377 top-level tests (was 366);
+`gofmt`/`go vet` clean, `GOOS=windows`/`GOOS=darwin` vet clean; every new
+behaviour test either failed against the pre-fix sources (fail-first, before
+the fix) or was mutation-proven load-bearing (overlay copies); the ship-gate
+checker rehearsal (scripted provider) still passes both directions; the
+working tree was never mutated by the mutation checks.
