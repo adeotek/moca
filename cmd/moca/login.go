@@ -17,8 +17,14 @@ import (
 // can be driven against a fake authorization server in tests.
 var oauthLookup = provider.OAuthProvider
 
-// revokeTimeout bounds the best-effort remote revocation on logout.
-const revokeTimeout = 15 * time.Second
+// revokeTimeout bounds the best-effort remote revocation on logout (a var so
+// tests can shrink it): a stalled revoke endpoint must not hang the command.
+var revokeTimeout = 15 * time.Second
+
+// loginHTTPTimeout bounds each login HTTP call — the token exchange and the
+// JWKS fetch (a var so tests can shrink it). The browser-side wait is not
+// part of it.
+var loginHTTPTimeout = 30 * time.Second
 
 // runLogin implements `moca login <provider> [--no-browser]`: the SIWC
 // authorization-code flow (openai only — policy gate, §3), then the token
@@ -77,7 +83,7 @@ func runLogin(ctx context.Context, o Options, cfg config.Config, cfgPath string,
 	if !noBrowser {
 		lio.OpenURL = provider.OpenBrowser
 	}
-	tok, err := provider.Login(ctx, oc, savedPtr, lio, http.DefaultClient)
+	tok, err := provider.Login(ctx, oc, savedPtr, lio, &http.Client{Timeout: loginHTTPTimeout})
 	if err != nil {
 		fmt.Fprintln(stderr, "moca:", err)
 		return exitFor(ctx, err)
@@ -125,7 +131,10 @@ func runLogout(ctx context.Context, o Options, cfg config.Config, stdout, stderr
 	}
 	if ok && tok.Refresh != "" {
 		if oc, has := oauthLookup(p); has {
-			if rerr := provider.Revoke(ctx, oc, tok, http.DefaultClient); rerr != nil {
+			rctx, cancel := context.WithTimeout(ctx, revokeTimeout)
+			rerr := provider.Revoke(rctx, oc, tok, http.DefaultClient)
+			cancel()
+			if rerr != nil {
 				fmt.Fprintf(stderr, "moca: warning: could not revoke the session remotely (%v); clearing locally\n", rerr)
 			}
 		}

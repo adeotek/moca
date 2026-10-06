@@ -1101,3 +1101,35 @@ was shown to fail against the pre-fix behaviour (scratch overlay mutations).
 Still deferred (need Ben): the three live ship-gate runs, a live `moca login
 openai`, and the `v0.1.0` tag. Review 1-6b (checker gates 1–2 accept any
 `_test.go` read / any search) stays batched with the live runs.
+
+## Review fixes (2026-10-06 — maintainer re-review of the pass-3 fixes)
+
+Mo re-reviewed the pass-3 fix commits (`2e35f7d`, `9f1ba7f`, `ddada17`,
+`b5198ec`) against `main..HEAD` before Ben's merge. Verified independently:
+
+- 3-1's checker gate: my own probe — the pass-case scripted session (whose
+  transcript says `[exit 0]`) pointed at a repo where the bug is **not** fixed
+  now fails with "4: `go test ./...` in the final repo state fails"; the same
+  session against the real fixed repo passes; the full scripted rehearsal
+  still passes both directions (good script ✓, no-search script fails gate 2).
+- 3-2..3-5, 3-9: the new tests are meaningful and the suite is race-green
+  (390 top-level tests, 13 packages); `a.cred(ctx)` runs inside the
+  retry-wrapped `Stream`, so the token-endpoint `*HTTPError` really is
+  retried; the Windows lock file closes its handle and handles
+  `ERROR_LOCK_VIOLATION`.
+- Docs (`ddada17`) match the code; the graph refresh (`b5198ec`) is valid
+  JSON (1986 nodes / 7292 links).
+
+**Found and fixed here:**
+
+1. `revokeTimeout` was declared but never used — the pass-3 note and this
+   plan claimed "logout's revoke at 15 s", but `runLogout` still called
+   `provider.Revoke` with the unbounded context. Wired with
+   `context.WithTimeout`; `TestLogoutRevokeIsBounded` (stalled revoke
+   endpoint, shrunk timeout) fails against the un-wired code
+   (mutation-proven: the test hangs into its own bound).
+2. The login path's HTTP client was still unbounded (pass 3 asked for the
+   token/revoke/JWKS client bound). `moca login` now uses
+   `&http.Client{Timeout: loginHTTPTimeout}` (30 s; a var for tests);
+   `TestLoginTokenEndpointIsBounded` (stalling token endpoint) fails against
+   the unbounded client (mutation-proven).

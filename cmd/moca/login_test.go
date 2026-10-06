@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -44,7 +45,11 @@ func (l *lockedBuf) String() string {
 // fakeSIWC is a minimal authorization server for the CLI: authorize redirects
 // to the loopback callback with an issued client id, token returns an
 // RS256-signed ID token carrying the authorize request's nonce.
-func fakeSIWC(t *testing.T) provider.OAuthConfig {
+func fakeSIWC(t *testing.T) provider.OAuthConfig { return fakeSIWCOpts(t, false) }
+
+// fakeSIWCOpts builds the CLI's fake authorization server; stallToken makes
+// /token never answer (until the test ends), for the timeout test.
+func fakeSIWCOpts(t *testing.T, stallToken bool) provider.OAuthConfig {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -63,6 +68,10 @@ func fakeSIWC(t *testing.T) provider.OAuthConfig {
 		http.Redirect(w, r, q.Get("redirect_uri")+"?code=C1&client_id=oaiapp_t&state="+url.QueryEscape(q.Get("state")), http.StatusFound)
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		if stallToken {
+			<-t.Context().Done()
+			return
+		}
 		mu.Lock()
 		n := nonce
 		mu.Unlock()
@@ -150,5 +159,89 @@ func TestLoginCLISwitchesAuthAfterCallback(t *testing.T) {
 	tok, ok, err := provider.NewStore(config.DataDir() + "/auth.json").Get("openai")
 	if err != nil || !ok || tok.Access != "AT" || tok.ClientID != "oaiapp_t" {
 		t.Fatalf("stored token: %+v %v %v", tok, ok, err)
+	}
+}
+
+func authURLFrom(t *testing.T, out *lockedBuf) string {
+	t.Helper()
+	for _, f := range strings.Fields(out.String()) {
+		if strings.HasPrefix(f, "http") {
+			return f
+		}
+	}
+	t.Fatalf("no authorize URL in output: %q", out.String())
+	return ""
+}
+
+// A stalled token endpoint must not hang `moca login`: each login HTTP call
+// is bounded by the client timeout.
+func TestLoginTokenEndpointIsBounded(t *testing.T) {
+	isolate(t)
+	oc := fakeSIWCOpts(t, true)
+	oldLookup := oauthLookup
+	oauthLookup = func(p string) (provider.OAuthConfig, bool) { return oc, p == "openai" }
+	defer func() { oauthLookup = oldLookup }()
+	oldTimeout := loginHTTPTimeout
+	loginHTTPTimeout = 100 * time.Millisecond
+	defer func() { loginHTTPTimeout = oldTimeout }()
+	cfg := writeCfg(t, `{}`)
+
+	var out, errb lockedBuf
+	code := make(chan int, 1)
+	go func() {
+		code <- run(context.Background(), []string{"--config", cfg, "login", "openai", "--no-browser"}, nil, &out, &errb)
+	}()
+	waitFor(t, &out, "/authorize?")
+	resp, err := http.Get(authURLFrom(t, &out)) // the browser: the callback lands, then the token POST stalls
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	select {
+	case c := <-code:
+		if c != 1 {
+			t.Fatalf("stalled token endpoint: exit %d, want 1 (%q)", c, errb.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("login hung on a stalled token endpoint: %q", out.String())
+	}
+	if !strings.Contains(errb.String(), "Client.Timeout") && !strings.Contains(errb.String(), "deadline exceeded") {
+		t.Fatalf("stderr %q", errb.String())
+	}
+}
+
+// A stalled revoke endpoint must not hang logout: the remote revocation is
+// best-effort and bounded; the local registration is cleared either way.
+func TestLogoutRevokeIsBounded(t *testing.T) {
+	isolate(t)
+	stall := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-stall // never answers until the test lets go
+	}))
+	t.Cleanup(func() { close(stall); srv.Close() })
+	oc := provider.OAuthConfig{Provider: "openai", RevokeURL: srv.URL}
+	oldLookup := oauthLookup
+	oauthLookup = func(p string) (provider.OAuthConfig, bool) { return oc, p == "openai" }
+	defer func() { oauthLookup = oldLookup }()
+	oldTimeout := revokeTimeout
+	revokeTimeout = 100 * time.Millisecond
+	defer func() { revokeTimeout = oldTimeout }()
+	cfg := writeCfg(t, `{}`)
+	store := provider.NewStore(filepath.Join(config.DataDir(), "auth.json"))
+	if err := store.Put("openai", provider.Token{Access: "a", Refresh: "r", ClientID: "c", Expiry: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb lockedBuf
+	start := time.Now()
+	code := run(context.Background(), []string{"--config", cfg, "logout", "openai"}, nil, &out, &errb)
+	if code != 0 || time.Since(start) > 5*time.Second {
+		t.Fatalf("logout exit %d after %v: %q", code, time.Since(start), errb.String())
+	}
+	if !strings.Contains(errb.String(), "could not revoke") {
+		t.Fatalf("stderr %q", errb.String())
+	}
+	if _, ok, _ := store.Get("openai"); ok {
+		t.Fatal("the local registration must be cleared")
 	}
 }
