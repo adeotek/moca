@@ -11,7 +11,7 @@ Inspired by Claude Code, OpenCode, and Pi — deliberately ~10% of their surface
 ## Stack
 
 - Go 1.27 (via mise) + Bubble Tea / lipgloss
-- **Three providers from day 1**: `anthropic` (native + Claude subscription OAuth), `opencode-go` (OpenCode Zen, mixed-protocol catalog), `openai` (API + ChatGPT subscription OAuth) — plus optional per-provider `baseUrl` (any OpenAI-protocol endpoint: vLLM, LM Studio, Ollama)
+- **Three providers from day 1**: `anthropic` (native; API key only — subscription OAuth not permitted by Anthropic's terms), `opencode-go` (OpenCode Zen, mixed-protocol catalog), `openai` (API key + ChatGPT subscription login via Sign in with ChatGPT) — plus optional per-provider `baseUrl` (any OpenAI-protocol endpoint: vLLM, LM Studio, Ollama)
 - `model` + `modelHard` routing (`/hard` toggle), cheap default with explicit escalation; effort as a first-class request param (`/effort`); cross-provider model switching mid-session
 - **MCP in v1, lazy by design** — one fixed ~200-token `mcp` proxy tool; server tool lists never enter the prompt ([DESIGN.md](docs/specs/DESIGN.md) §10.5)
 - External tools (`rtk`, `graphify`) from day 1 via skills + slash commands + shell allowlist
