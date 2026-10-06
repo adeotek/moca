@@ -35,6 +35,27 @@ func TestStoreRoundTripAndMode(t *testing.T) {
 	}
 }
 
+// A pre-existing tmp file (crash debris, another tool running as the same
+// user) must not leak its mode into the published store: the write path
+// forces 0600 regardless of what the tmp file had.
+func TestStoreWriteForcesMode(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(p+".tmp", []byte("junk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(p)
+	if err := s.Put("openai", Token{Access: "a", Refresh: "r", Expiry: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("auth.json mode %v, want 0600", fi.Mode().Perm())
+	}
+}
+
 func TestConcurrentRefreshOnce(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "auth.json")
 	s := NewStore(p)

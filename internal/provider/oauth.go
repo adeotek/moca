@@ -128,9 +128,8 @@ func Login(ctx context.Context, c OAuthConfig, saved *Token, lio LoginIO, hc *ht
 	go srv.Serve(ln)
 	defer srv.Close()
 
-	pasteCh := make(chan pastedResult, 1)
 	if lio.In != nil {
-		go pasteReader(lio, state, pasteCh, done)
+		go pasteReader(lio, state, resCh, done)
 	}
 
 	if lio.Headless {
@@ -147,7 +146,6 @@ func Login(ctx context.Context, c OAuthConfig, saved *Token, lio LoginIO, hc *ht
 	var res pastedResult
 	select {
 	case res = <-resCh:
-	case res = <-pasteCh:
 	case <-ctx.Done():
 		return Token{}, ctx.Err()
 	}
@@ -155,6 +153,13 @@ func Login(ctx context.Context, c OAuthConfig, saved *Token, lio LoginIO, hc *ht
 		return Token{}, res.Err
 	}
 
+	// The registration leg depends on the authorize redirect carrying the
+	// issued client id (docs/specs/oauth-verification.md §2.2): the
+	// placeholder id is never used for token exchange, the issued id is what
+	// refresh and revoke must carry later, and a reauthorization callback
+	// returning a different id must not replace the saved registration. A
+	// first-registration callback without the field cannot be completed —
+	// refuse loudly rather than inventing one.
 	clientID := res.ClientID
 	switch {
 	case saved == nil:
@@ -208,9 +213,12 @@ func pasteReader(lio LoginIO, state string, ch chan<- pastedResult, done <-chan 
 	if perr != nil {
 		res = pastedResult{Err: perr}
 	}
+	// One shared channel, first result wins: a paste that arrives after the
+	// browser callback answered is dropped (the buffered slot is taken), so
+	// the outcome never depends on a two-channel select race.
 	select {
 	case ch <- res:
-	case <-done:
+	default:
 	}
 }
 
@@ -358,32 +366,54 @@ func Revoke(ctx context.Context, c OAuthConfig, t Token, hc *http.Client) error 
 
 func pkce() (verifier, challenge, state, nonce string, err error) {
 	b := make([]byte, 32)
-	if _, err = rand.Read(b); err != nil {
+	if _, err = randRead(b); err != nil {
 		return
 	}
 	verifier = base64.RawURLEncoding.EncodeToString(b)
 	sum := sha256.Sum256([]byte(verifier))
 	challenge = base64.RawURLEncoding.EncodeToString(sum[:])
-	state = randText(16)
-	nonce = randText(16)
+	if state, err = randText(16); err != nil {
+		return
+	}
+	if nonce, err = randText(16); err != nil {
+		return
+	}
 	return
 }
 
-func randText(n int) string {
+// randRead is crypto/rand.Read, indirected so tests can force the
+// entropy-failure path: an entropy failure must abort the login, never
+// continue with empty anti-replay values (state and nonce are the CSRF and
+// ID-token mix-up defenses).
+var randRead = rand.Read
+
+func randText(n int) (string, error) {
 	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return ""
+	if _, err := randRead(b); err != nil {
+		return "", fmt.Errorf("reading entropy: %w", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// parsePasted accepts a bare code, "code#state", or a full redirect URL
-// (the SSH/headless case: the browser lands on an unreachable loopback and
-// the user copies the whole URL back). The state is verified in every form
-// that carries one.
+// parsePasted accepts a bare code, "code#state", or a redirect URL (the
+// SSH/headless case: the browser lands on an unreachable loopback and the
+// user copies the URL back). The state is verified in every form that
+// carries one. A bare code needs no local check: it is bound server-side to
+// this attempt's client id, PKCE verifier and redirect URI, and the verifier
+// never leaves this process.
 func parsePasted(s, wantState string) (pastedResult, error) {
 	s = strings.TrimSpace(s)
-	if u, err := url.Parse(s); err == nil && u.Scheme != "" && u.Host != "" {
+	u, err := url.Parse(s)
+	if (err != nil || u.Scheme == "" || u.Host == "") && strings.Contains(s, "code=") {
+		// A redirect URL whose scheme was lost (terminal wrap, hand copy)
+		// parses as a bare path or not at all; recover it so the paste
+		// works instead of failing the exchange with an opaque
+		// invalid_grant. The state check below still applies.
+		if u2, err2 := url.Parse("http://" + strings.TrimPrefix(s, "//")); err2 == nil && u2.Host != "" && !strings.ContainsAny(u2.Host, "= ") {
+			u, err = u2, nil
+		}
+	}
+	if err == nil && u.Scheme != "" && u.Host != "" {
 		q := u.Query()
 		if e := q.Get("error"); e != "" {
 			return pastedResult{}, fmt.Errorf("authorization was declined (%s)", e)
@@ -395,6 +425,9 @@ func parsePasted(s, wantState string) (pastedResult, error) {
 			return pastedResult{}, errors.New("the pasted URL carries no authorization code")
 		}
 		return pastedResult{Code: q.Get("code"), ClientID: q.Get("client_id")}, nil
+	}
+	if strings.Contains(s, "code=") {
+		return pastedResult{}, errors.New("the pasted value looks like a redirect URL without its scheme; paste it with http://…, or paste just the code")
 	}
 	if code, st, ok := strings.Cut(s, "#"); ok {
 		if st != wantState {

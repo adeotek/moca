@@ -89,6 +89,12 @@ func (s *Store) write(f storeFile) error {
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
+	// WriteFile's mode applies only when it creates the file: a pre-existing
+	// tmp (crash debris, another tool) would otherwise be published with its
+	// old mode through the rename. Force it, like config's writeEdited does.
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		return err
+	}
 	return os.Rename(tmp, s.path)
 }
 

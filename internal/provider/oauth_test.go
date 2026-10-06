@@ -16,10 +16,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/adeotek/moca/internal/config"
 )
 
 // fakeAS is a stand-in for auth.openai.com's SIWC endpoints: /authorize
@@ -43,6 +46,9 @@ type fakeAS struct {
 	omitRefresh        bool   // token response omits refresh_token
 	omitCallbackClient bool   // callback omits client_id
 	callbackClientID   string // override the callback's client_id when non-empty
+	extraKey           bool   // JWKS publishes a second RSA key under kid "other"
+	otherKey           *rsa.PrivateKey
+	jwksExponent       string // when set, the "test" key's e is served verbatim
 }
 
 func newFakeAS(t *testing.T) *fakeAS {
@@ -120,7 +126,16 @@ func newFakeAS(t *testing.T) *fakeAS {
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
 		n := base64.RawURLEncoding.EncodeToString(f.key.N.Bytes())
 		e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(f.key.E)).Bytes())
-		fmt.Fprintf(w, `{"keys":[{"kty":"RSA","kid":"test","alg":"RS256","use":"sig","n":%q,"e":%q}]}`, n, e)
+		if f.jwksExponent != "" {
+			e = f.jwksExponent
+		}
+		keys := fmt.Sprintf(`{"kty":"RSA","kid":"test","alg":"RS256","use":"sig","n":%q,"e":%q}`, n, e)
+		if f.extraKey && f.otherKey != nil {
+			on := base64.RawURLEncoding.EncodeToString(f.otherKey.N.Bytes())
+			oe := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(f.otherKey.E)).Bytes())
+			keys += fmt.Sprintf(`,{"kty":"RSA","kid":"other","alg":"RS256","use":"sig","n":%q,"e":%q}`, on, oe)
+		}
+		fmt.Fprintf(w, `{"keys":[%s]}`, keys)
 	})
 	mux.HandleFunc("/revoke", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
@@ -159,15 +174,33 @@ func (f *fakeAS) idToken(clientID, nonce string) string {
 	})
 }
 
+// enableExtraKey makes the JWKS serve a second RSA key under kid "other",
+// so key selection is exercised against a rotating multi-key set.
+func (f *fakeAS) enableExtraKey(t *testing.T) {
+	t.Helper()
+	if f.otherKey == nil {
+		k, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.otherKey = k
+	}
+	f.extraKey = true
+}
+
 func (f *fakeAS) signID(claims map[string]any) string {
-	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","kid":"test"}`))
+	return f.signIDWithKey(f.key, "test", claims)
+}
+
+func (f *fakeAS) signIDWithKey(key *rsa.PrivateKey, kid string, claims map[string]any) string {
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"alg":"RS256","kid":%q}`, kid)))
 	pb, err := json.Marshal(claims)
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	payload := base64.RawURLEncoding.EncodeToString(pb)
 	sum := sha256.Sum256([]byte(hdr + "." + payload))
-	sig, err := rsa.SignPKCS1v15(rand.Reader, f.key, crypto.SHA256, sum[:])
+	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, sum[:])
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -348,6 +381,21 @@ func TestParsePasted(t *testing.T) {
 	if _, err := parsePasted("", "S1"); err == nil {
 		t.Fatal("empty refused")
 	}
+	// A redirect URL that lost its scheme (terminal wrap, hand copy) is
+	// recovered, and the state check still applies to it.
+	if c, err := parsePasted("127.0.0.1:5/auth/callback?code=ABC&state=S1&client_id=oaiapp_z", "S1"); err != nil || c.Code != "ABC" || c.ClientID != "oaiapp_z" {
+		t.Fatal(c, err)
+	}
+	if c, err := parsePasted("localhost:5/auth/callback?code=ABC&state=S1", "S1"); err != nil || c.Code != "ABC" {
+		t.Fatal(c, err)
+	}
+	if _, err := parsePasted("127.0.0.1:5/auth/callback?code=ABC&state=EVIL", "S1"); err == nil || !strings.Contains(err.Error(), "state mismatch") {
+		t.Fatal("recovered URL must still verify the state", err)
+	}
+	// Not recoverable: a URL fragment with no host is named, not exchanged.
+	if _, err := parsePasted("code=ABC", "S1"); err == nil || !strings.Contains(err.Error(), "scheme") {
+		t.Fatal("scheme-less fragment refused", err)
+	}
 }
 
 func TestLoginReauthReusesSavedRegistration(t *testing.T) {
@@ -487,4 +535,139 @@ func TestHeadlessDetectionSSH(t *testing.T) {
 	if !Headless() {
 		t.Fatal("SSH session must be headless")
 	}
+}
+
+// Two keys in the JWKS: the token's kid selects the verification key, and a
+// mismatched kid never falls back to another RSA key.
+func TestValidateIDTokenKidSelection(t *testing.T) {
+	f := newFakeAS(t)
+	f.enableExtraKey(t)
+	hc := f.srv.Client()
+	ctx := context.Background()
+	claims := func() map[string]any {
+		return map[string]any{"iss": f.srv.URL, "aud": "oaiapp_test", "exp": time.Now().Add(time.Hour).Unix(), "nonce": "N1", "sub": "s"}
+	}
+	// Signed by the second key, labelled with its own kid: verifies.
+	if _, err := validateIDToken(ctx, hc, f.srv.URL+"/jwks", f.srv.URL, "oaiapp_test", "N1", f.signIDWithKey(f.otherKey, "other", claims())); err != nil {
+		t.Fatalf("second-key token must verify: %v", err)
+	}
+	// Signed by the first key but labelled "other": must not verify.
+	if _, err := validateIDToken(ctx, hc, f.srv.URL+"/jwks", f.srv.URL, "oaiapp_test", "N1", f.signIDWithKey(f.key, "other", claims())); err == nil {
+		t.Fatal("kid mismatch not caught")
+	}
+	// An unknown kid is refused outright.
+	if _, err := validateIDToken(ctx, hc, f.srv.URL+"/jwks", f.srv.URL, "oaiapp_test", "N1", f.signIDWithKey(f.key, "nope", claims())); err == nil {
+		t.Fatal("unknown kid not caught")
+	}
+}
+
+// A JWKS key with a nonsense public exponent is skipped, not used: the
+// whole token is refused rather than verified against a bogus modulus.
+func TestJWKSExponentSanity(t *testing.T) {
+	f := newFakeAS(t)
+	f.jwksExponent = "AA" // e = 0
+	if _, err := jwksKey(context.Background(), f.srv.Client(), f.srv.URL+"/jwks", "test"); err == nil || !strings.Contains(err.Error(), "no RSA key matches") {
+		t.Fatalf("bogus exponent accepted: %v", err)
+	}
+	if _, err := validateIDToken(context.Background(), f.srv.Client(), f.srv.URL+"/jwks", f.srv.URL, "oaiapp_test", "N1", f.idToken("oaiapp_test", "N1")); err == nil {
+		t.Fatal("token verified against a zero exponent")
+	}
+}
+
+// state and nonce must come from fresh entropy on every attempt: a constant
+// (or empty) source must fail this, not silently degrade CSRF protection.
+func TestPKCEUniqueness(t *testing.T) {
+	v1, c1, s1, n1, err := pkce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2, c2, s2, n2, err := pkce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v1 == "" || s1 == "" || n1 == "" || s1 == s2 || n1 == n2 || v1 == v2 || c1 == c2 {
+		t.Fatalf("pkce must be unique per attempt: %q/%q %q/%q %q/%q", v1, v2, s1, s2, n1, n2)
+	}
+	sum := sha256.Sum256([]byte(v1))
+	if base64.RawURLEncoding.EncodeToString(sum[:]) != c1 {
+		t.Fatal("challenge is not S256(verifier)")
+	}
+}
+
+// An entropy failure aborts the login instead of continuing with empty
+// state/nonce values. The first read (the PKCE verifier) succeeds; every
+// later one fails, so this pins the randText path specifically.
+func TestLoginFailsOnEntropyError(t *testing.T) {
+	f := newFakeAS(t)
+	old := randRead
+	n := 0
+	randRead = func(b []byte) (int, error) {
+		n++
+		if n == 1 {
+			return old(b)
+		}
+		return 0, errors.New("rng failed")
+	}
+	defer func() { randRead = old }()
+	_, err := runLogin(t, f, nil, LoginIO{OpenURL: browse})
+	if err == nil || !strings.Contains(err.Error(), "entropy") {
+		t.Fatalf("entropy failure must abort the login: %v", err)
+	}
+}
+
+// config.OAuthProviders (what config validation permits) and the endpoint
+// table here must stay the same list: a provider that validates but has no
+// flow fails at request time, and a flow that config rejects is dead code.
+func TestOAuthProviderListsStayInSync(t *testing.T) {
+	var fromTable []string
+	for name := range oauthProviders {
+		fromTable = append(fromTable, name)
+	}
+	slices.Sort(fromTable)
+	want := slices.Clone(config.OAuthProviders)
+	slices.Sort(want)
+	if !slices.Equal(fromTable, want) {
+		t.Fatalf("config.OAuthProviders %v != oauthProviders %v", want, fromTable)
+	}
+}
+
+// A paste that arrives after the browser callback answered is ignored: the
+// outcome is decided by the first response, deterministically.
+func TestLoginLatePasteIgnored(t *testing.T) {
+	f := newFakeAS(t)
+	var out syncBuf
+	pr, pw := io.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		deadline := time.Now().Add(5 * time.Second)
+		for !strings.Contains(out.String(), "/authorize?") {
+			if time.Now().After(deadline) {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		authURL := firstURL(out.String())
+		cl := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		resp, err := cl.Get(authURL)
+		if err != nil {
+			return
+		}
+		loc := resp.Header.Get("Location")
+		resp.Body.Close()
+		if _, err := http.Get(loc); err != nil { // the browser callback answers first
+			return
+		}
+		time.Sleep(50 * time.Millisecond) // let the callback result land
+		pw.Write([]byte("http://127.0.0.1:5/auth/callback?code=WRONG&state=EVIL\n"))
+		pw.Close()
+	}()
+	tok, err := runLogin(t, f, nil, LoginIO{Out: &out, In: pr, Headless: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok.Access != "AT" {
+		t.Fatalf("%+v", tok)
+	}
+	<-done
 }
