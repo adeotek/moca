@@ -55,6 +55,22 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
+func TestHelpListsSurface(t *testing.T) {
+	for _, arg := range []string{"--help", "-h"} {
+		var out, errb bytes.Buffer
+		code := run(context.Background(), []string{arg}, nil, &out, &errb)
+		if code != 0 {
+			t.Fatalf("%s: exit %d stderr %q", arg, code, errb.String())
+		}
+		for _, want := range []string{"moca -p", "--model", "--effort", "--approve", "--yolo", "--resume", "--continue",
+			"moca login", "moca logout", "moca mcp import", "moca mcp index", "moca --version"} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("%s: usage missing %q", arg, want)
+			}
+		}
+	}
+}
+
 func writeCfg(t *testing.T, body string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "config.jsonc")

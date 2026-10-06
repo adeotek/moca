@@ -21,6 +21,10 @@ func main() {
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	o, err := parseArgs(args, stdin)
 	if err != nil {
+		if errors.Is(err, errHelp) {
+			printUsage(stdout)
+			return exitOK
+		}
 		fmt.Fprintln(stderr, "moca:", err)
 		var ue usageError
 		if errors.As(err, &ue) {
