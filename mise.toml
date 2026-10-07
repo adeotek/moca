@@ -18,8 +18,12 @@ description = "Run all tests (-race)"
 run = "go test ./... -race -count=1"
 
 [tasks.vet]
-description = "go vet ./..."
-run = "go vet ./..."
+description = "go vet + gofmt check"
+run = '''
+go vet ./...
+out="$(gofmt -l .)"
+if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
+'''
 
 [tasks.fmt]
 description = "go fmt ./..."

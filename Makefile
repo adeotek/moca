@@ -8,6 +8,7 @@
 # The targets below are mirrored as mise tasks in mise.toml (`mise run
 # <task>`) — keep the two in sync.
 GORUN := $(shell command -v go >/dev/null 2>&1 && echo go || echo "mise x go -- go")
+GOFMT := $(shell command -v gofmt >/dev/null 2>&1 && echo gofmt || echo "mise x go -- gofmt")
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 LDFLAGS := -s -w -X github.com/adeotek/moca/internal/config.Version=$(VERSION)
 
@@ -21,6 +22,7 @@ test:
 
 vet:
 	$(GORUN) vet ./...
+	@out="$$($(GOFMT) -l .)"; if [ -n "$$out" ]; then echo "gofmt needed on:"; echo "$$out"; exit 1; fi
 
 fmt:
 	$(GORUN) fmt ./...

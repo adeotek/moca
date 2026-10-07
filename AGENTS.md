@@ -14,14 +14,14 @@ mise install                                # provisions go 1.27.1 (pinned in go
 export PATH="$(mise where go)/bin:$PATH"    # `go` is not on the global PATH on every host
 make build                                  # bin/moca, version-stamped from git describe
 make test                                   # go test ./... -race -count=1
-make vet                                    # go vet ./...  (does NOT run gofmt)
+make vet                                    # go vet ./... + gofmt -l . (both must be clean)
 make fmt                                    # go fmt ./...
 make release                                # 5 cross-compiled binaries in dist/
 mise run <task>                             # the make targets, as mise tasks
 ```
 
 - `make` falls back to `mise x go -- go` when `go` is missing from PATH; the make targets are mirrored as mise tasks (invoke as `mise run <task>` — bare `mise fmt` is mise's own config formatter).
-- **CI gate** (`.github/workflows/ci.yml`): `gofmt -l .` empty, `go vet ./...`, `go build ./...`, `go test ./... -race`. Run the gofmt check manually — `make vet` skips it despite SPECS §2 claiming otherwise.
+- **CI gate** (`.github/workflows/ci.yml`): `gofmt -l .` empty, `go vet ./...`, `go build ./...`, `go test ./... -race`. `make vet` runs the first two locally.
 - Single package/test: `go test ./internal/agent -run TestName -race -count=1`.
 - **Ship gate** (not in CI, needs repo `.env` with `OPENCODE_GO_KEY`, and a build first): `make build && bash test/shipgate/run.sh`. The checker is `//go:build shipgate`, so plain `go test ./...` skips it. Several `internal/tools` tests are `//go:build !windows`.
 
