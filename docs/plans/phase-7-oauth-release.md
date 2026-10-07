@@ -1203,3 +1203,19 @@ Two gaps, two fixes — the checker and the frozen task prompt are untouched:
 
 Pinned by `TestBuildSystemPrompt`; the scripted rehearsals (rtk-present,
 rtk-absent, negative controls) are unchanged; full suite race-green.
+
+## Live-run iteration 3 (2026-10-07 — fourth live run)
+
+The fourth live run used search (the tool-explicit line landed) but still
+never opened the failing test: the model read the failure text, searched,
+hit the edit guard, read `calc.go`, fixed and committed — gate 1 again.
+
+The prompt lever is exhausted for this model class, so the step is now
+repeated where the attention is: a failing test run's shell result carries a
+trailing hint — *"[hint: when tests fail, read the failing test file with the
+read tool and locate the cause with search before changing code]"*. It fires
+when the command mentions a known test runner and the run failed (exit ≠ 0,
+or `fail` in the output — piped runs mask the exit code). The checker, the
+frozen task prompt and the tool schemas are untouched; pinned by
+`TestTestFailureHint` (pure) and `TestShellToolHintsFailingTestRun` (a real
+red `go test` through the tool); the rehearsals stay green.

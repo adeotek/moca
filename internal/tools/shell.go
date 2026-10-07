@@ -88,6 +88,34 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	if len(short) > 60 {
 		short = short[:57] + "..."
 	}
-	return Result{Content: body + status, IsError: out.ExitCode != 0 || out.TimedOut,
+	hint := testFailureHint(a.Command, out.Output, out.ExitCode, out.TimedOut)
+	return Result{Content: body + hint + status, IsError: out.ExitCode != 0 || out.TimedOut,
 		Summary: fmt.Sprintf("%s %s", short, status), Detail: Truncate(out.Output, shellMaxOutput)}
+}
+
+// testRunners identify a test run from its command line (case-insensitive).
+var testRunners = []string{"go test", "pytest", "cargo test", "dotnet test", "npm test", "npm run test",
+	"yarn test", "jest", "vitest", "rspec", "phpunit", "mvn test", "gradle test", "make test", "rtk test"}
+
+// testFailureHint is appended to a failing test run's result. Weak models
+// read the failure text and fix from it without opening the test; the §14
+// demo requires reading the failing test before the fix, so the step is
+// repeated at the moment it matters. Piped runs mask the exit code, hence
+// the output check.
+func testFailureHint(command, output string, exit int, timedOut bool) string {
+	if timedOut {
+		return ""
+	}
+	lc := strings.ToLower(command)
+	run := false
+	for _, m := range testRunners {
+		if strings.Contains(lc, m) {
+			run = true
+			break
+		}
+	}
+	if !run || (exit == 0 && !strings.Contains(strings.ToLower(output), "fail")) {
+		return ""
+	}
+	return "[hint: when tests fail, read the failing test file with the read tool and locate the cause with search before changing code]\n"
 }
