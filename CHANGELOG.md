@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.0 — unreleased (pending the §14 ship gate's live runs and the tag)
+## v0.1.0 — unreleased (pending Ben's go-ahead and the tag; the §14 ship gate's live legs passed 2026-10-07)
 
 First release. A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, seven tools, no framework.
 
@@ -8,7 +8,7 @@ First release. A minimal, token-efficient, provider-agnostic coding agent: one G
 
 - Three protocol adapters, hand-rolled HTTP+SSE, no SDKs: `anthropic-messages`, `openai-completions`, `openai-responses`.
 - Built-in providers: `anthropic` (API key; subscription OAuth is not permitted by Anthropic's terms), `opencode-go` (OpenCode Zen, mixed-protocol catalog incl. the Go-tier session header), `openai` (API key + ChatGPT subscription login). Custom providers via `baseUrl` + `protocol` (vLLM, LM Studio, Ollama, any OpenAI-compatible gateway).
-- Retry/backoff with jitter honoring `retry-after`, SSE stall timeout, mid-stream failure rule; effort as a first-class request parameter with per-model clamping; cross-provider history transform (thinking replay bound to the producing model, tool-id normalization).
+- Retry/backoff with jitter honoring `retry-after`, SSE stall timeout, mid-stream failure rule; effort as a first-class request parameter with per-model clamping; cross-provider history transform (thinking replay bound to the producing model, tool-id normalization). Upstream failures the gateway labels `server_error` are retried even when framed as HTTP 400 (the opencode-go `[1210]` thinking-config flake); the default HTTP client bounds the response-header wait at 120 s so a silent provider cannot hang an unattended run.
 
 ### OAuth (subscription login)
 
@@ -20,6 +20,7 @@ First release. A minimal, token-efficient, provider-agnostic coding agent: one G
 - Seven frozen tools: `read`, `write`, `edit` (exact-match-first with one whitespace-tolerant fallback, re-indentation, CRLF/BOM preservation), `shell` (stateless, `bash -c` / `pwsh -NoProfile`, process-group kill), `search` (pure-Go, ripgrep semantics, `.gitignore`-aware), `ls`, and the lazy `mcp` proxy.
 - Path jail anchored at the session workdir (symlink-resolved, read-only skill roots); shell command analysis via `mvdan.cc/sh` with hard-deny/ask ladders, compound-command checking and `rtk` unwrapping; project trust (`--approve`/`--no-approve`, `trust.json`); yolo mode (`--yolo`, `/yolo`) turns every check off between runs.
 - Pre-edit snapshots + `/undo` (skipped for clean tracked files — git is the undo there).
+- Failing-test investigation protocol: while a failing test run is unresolved, every tool result states the next step (read the failing test with the `read` tool; locate the cause with `search`), and `edit` refuses until both happened — the §14 loop's investigation steps, enforced rather than advisory.
 
 ### TUI
 

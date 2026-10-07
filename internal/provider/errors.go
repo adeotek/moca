@@ -58,7 +58,14 @@ func retryable(err error) bool {
 	}
 	var he *HTTPError
 	if errors.As(err, &he) {
-		return he.Status == 408 || he.Status == 429 || he.Status >= 500
+		if he.Status == 408 || he.Status == 429 || he.Status >= 500 {
+			return true
+		}
+		// The opencode-go gateway frames some upstream failures as HTTP 400
+		// while labelling them server_error (the [1210] thinking-config
+		// flake observed in the live ship-gate runs): retry what the server
+		// itself calls a server error, bounded by the five-attempt budget.
+		return he.Status == http.StatusBadRequest && strings.Contains(he.Body, `"type":"server_error"`)
 	}
 	var ne net.Error
 	return errors.Is(err, ErrStall) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||

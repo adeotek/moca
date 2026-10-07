@@ -33,6 +33,16 @@ func testPolicy(slept *[]time.Duration, notes *[]RetryNotice) RetryPolicy {
 func fail(err error) func(func(llm.Event)) error { return func(func(llm.Event)) error { return err } }
 func ok(func(llm.Event)) error                   { return nil }
 
+func TestRetryableServerError400(t *testing.T) {
+	flaky := &HTTPError{Status: 400, Body: `{"error":{"type":"server_error","message":"Upstream request failed: [1210] This model always engages in thinking and cannot be disabled; please use low, high, or max"}}`}
+	if !retryable(flaky) {
+		t.Fatal("a 400 the provider labels server_error must be retryable")
+	}
+	if retryable(&HTTPError{Status: 400, Body: `{"error":{"type":"invalid_request_error","message":"unknown model"}}`}) {
+		t.Fatal("a plain 400 must stay fatal")
+	}
+}
+
 func TestRetryBackoffThenSuccess(t *testing.T) {
 	var slept []time.Duration
 	var notes []RetryNotice

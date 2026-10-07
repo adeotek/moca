@@ -1231,3 +1231,41 @@ protocol — *"(1) read the failing test file with the read tool, (2) locate
 the cause with the search tool, (3) only then edit"* — and the working-style
 line is split into two bullets (read the test; locate with search) so
 neither step rides on the other's coattails.
+
+## Live-run iteration 5 (2026-10-07 — runs 5–7: enforcement; live legs delegated)
+
+Ben delegated the live legs ("run the test yourself and fix the issues until
+it passes"), so the gate was iterated live from this workstation thereafter.
+What the runs showed and what changed:
+
+- **Run 5** read the failing test (per-tool hints worked) but skipped the
+  search; hints were still too local. The banner became centralized: while a
+  failing test run is unresolved, *every* tool result carries the protocol
+  banner (registry level), and the shell side names the `*_test.go` parsed
+  from the failure output.
+- **Run 6–7** exposed two more failure modes: the model went full-shell
+  (`cat`, `sed -i` — fixing the bug without touching a single tool) and,
+  with the banner on every result, it still edited without the search — it
+  treats "located the cause" as satisfied by reading. Hints alone lose with
+  this model class, so the step is structural: `edit` refuses while the
+  failing test is unread or the search is missing, naming the missing step
+  (`investigationRefusal`). A `gofmt` compound-command refusal showed the
+  model recovering normally afterwards.
+- **Provider robustness** (found while iterating): a request that never
+  answered hung a run for 6+ minutes — the SSE stall guard only covers the
+  response body, so `agent.defaultHTTPClient` now sets a 120 s
+  `ResponseHeaderTimeout`; and the known Go-tier `[1210]` flake (HTTP 400
+  body led by `"type":"server_error"`) now retries instead of ending the run.
+
+## Live-run evidence (2026-10-07, real `glm-5.3-flash`, repo `.env` key)
+
+After the enforcement: **four consecutive green checker passes** (runs
+8–11) — `run8.txt`–`run11_kept.txt` under scratch
+`moca_shipgate_live/`, run 11 with full kept artifacts (repo
+`moca-shipgate.XoVZTE`, session `…-d04f9e23.jsonl`). Each transcript shows
+the §14 loop end-to-end (suite → search → read `calc_test.go` → edit
+`calc.go` → green → commit on `fix/sum`); the refusal messages closed the
+missing steps live (the test read in runs 8/9, the search in run 11). Cost
+per run: 16–42k tokens, $0.002–0.004. Runs 2–7 recorded the failure modes
+that drove the fixes (skipped search, full-shell fix, empty completion,
+`[1210]`, one hung request).

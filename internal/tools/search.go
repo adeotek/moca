@@ -46,6 +46,7 @@ func (searchTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resu
 	if r := decode(input, &a); r != nil {
 		return *r
 	}
+	env.Searched = true
 	re, err := regexp.Compile(a.Pattern)
 	if err != nil {
 		return errorf("invalid pattern (Go RE2 syntax — no lookaround or backreferences): %v", err)

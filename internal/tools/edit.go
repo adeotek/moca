@@ -46,6 +46,9 @@ func (editTool) Run(_ context.Context, env *Env, input json.RawMessage) Result {
 	if err := env.Reads.Check(abs); err != nil {
 		return errorf("%v", err)
 	}
+	if msg := investigationRefusal(env); msg != "" {
+		return errorf("%s", msg)
+	}
 	out, hunks, err := applyEdit(orig, a.OldString, a.NewString, a.ReplaceAll)
 	if err != nil {
 		return errorf("%s: %v", a.Path, err)
