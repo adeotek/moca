@@ -129,6 +129,7 @@ func Start(o StartOptions) (*Agent, error) {
 			emit(Warning{Text: se.Error()})
 		}
 	}
+	sk = filterSkills(sk)
 	instr, err := skills.LoadInstructions(config.ConfigDir(), o.Workdir, o.Trusted)
 	if err != nil {
 		return nil, &StartError{err}
@@ -141,7 +142,7 @@ func Start(o StartOptions) (*Agent, error) {
 	osName, arch := Platform()
 	system := BuildSystemPrompt(PromptInput{Workdir: jail.Root(), OS: osName, Arch: arch,
 		Date: time.Now().Format("2006-01-02"), Git: GitState(jail.Root()), Version: config.Version,
-		Skills: sk, Servers: servers, Instructions: instr})
+		RTK: toolOnPath("rtk"), Skills: sk, Servers: servers, Instructions: instr})
 
 	session.Prune(filepath.Join(config.DataDir(), "snapshot"), cfg.RetentionDays())
 	m, _, err := reg.Resolve(cfg.Model)

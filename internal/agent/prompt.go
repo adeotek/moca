@@ -15,6 +15,7 @@ type ServerLine struct{ Name, Description string }
 
 type PromptInput struct {
 	Workdir, OS, Arch, Date, Git, Version string
+	RTK                                   bool // rtk is on PATH: only then is it advertised
 	Skills                                []skills.Skill
 	Servers                               []ServerLine
 	Instructions                          []skills.Instruction
@@ -47,14 +48,17 @@ const coreTemplate = `You are moca, a coding agent working in a user's repositor
 
 # Token discipline
 - Every tool result costs tokens on every later turn. Read windows, not whole files; search before reading.
-- Prefer rtk-prefixed variants where they exist (e.g. ` + "`rtk git status`, `rtk test -- go test ./...`" + `).
-- Don't echo file contents or tool output back to the user; summarize.
+%s- Don't echo file contents or tool output back to the user; summarize.
 
 moca %s`
 
 func BuildSystemPrompt(in PromptInput) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, coreTemplate, in.Workdir, in.OS, in.Arch, in.Date, in.Git, in.Version)
+	rtk := ""
+	if in.RTK {
+		rtk = "- Prefer rtk-prefixed variants where they exist (e.g. `rtk git status`, `rtk test -- go test ./...`).\n"
+	}
+	fmt.Fprintf(&sb, coreTemplate, in.Workdir, in.OS, in.Arch, in.Date, in.Git, rtk, in.Version)
 	if len(in.Skills) > 0 {
 		sb.WriteString("\n\n# Skills\nLoad a skill's instructions with read on its path when the task matches.\n")
 		for _, s := range in.Skills {
@@ -78,6 +82,34 @@ func BuildSystemPrompt(in PromptInput) string {
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// toolOnPath reports whether an external helper is installed (indirected for
+// tests): the prompt only advertises token-savers the shell can actually run.
+var toolOnPath = func(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+// builtinTools maps an embedded builtin skill to the external CLI it
+// instructs; a host without that CLI must not be told to use it (the first
+// live ship-gate run on a host without rtk derailed on `rtk: command not
+// found` and never read the failing test).
+var builtinTools = map[string]string{"rtk": "rtk"}
+
+// filterSkills drops builtin skills whose external tool is not installed.
+// Project/global skills are never filtered: they are the user's own files.
+func filterSkills(sk []skills.Skill) []skills.Skill {
+	out := make([]skills.Skill, 0, len(sk))
+	for _, s := range sk {
+		if s.Source == "builtin" {
+			if tool, ok := builtinTools[s.Name]; ok && !toolOnPath(tool) {
+				continue
+			}
+		}
+		out = append(out, s)
+	}
+	return out
+}
 
 func Platform() (string, string) {
 	osName := map[string]string{"linux": "Linux", "darwin": "Darwin", "windows": "Windows"}[runtime.GOOS]

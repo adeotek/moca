@@ -29,3 +29,36 @@ func TestBuildSystemPrompt(t *testing.T) {
 		t.Fatal("version stamp last")
 	}
 }
+
+// rtk is advertised only when it is installed: a host without the CLI must
+// not be told to use it (the first live ship-gate run derailed on
+// `rtk: command not found` and never read the failing test).
+func TestPromptRTKIsConditional(t *testing.T) {
+	on := BuildSystemPrompt(PromptInput{RTK: true})
+	if !strings.Contains(on, "rtk-prefixed") {
+		t.Fatal("rtk on PATH: the token-discipline line must be present")
+	}
+	off := BuildSystemPrompt(PromptInput{})
+	if strings.Contains(off, "rtk") {
+		t.Fatalf("rtk absent: the prompt must not mention rtk at all:\n%s", off)
+	}
+}
+
+func TestFilterSkillsDropsMissingBuiltins(t *testing.T) {
+	sk := []skills.Skill{
+		{Name: "rtk", Source: "builtin", Path: "/b/rtk/SKILL.md"},
+		{Name: "rtk", Source: "global", Path: "/g/rtk/SKILL.md"}, // the user's own file survives
+		{Name: "other", Source: "builtin", Path: "/b/other/SKILL.md"},
+	}
+	old := toolOnPath
+	defer func() { toolOnPath = old }()
+	toolOnPath = func(string) bool { return false }
+	got := filterSkills(sk)
+	if len(got) != 2 || got[0].Source != "global" || got[1].Name != "other" {
+		t.Fatalf("missing tool: %+v", got)
+	}
+	toolOnPath = func(string) bool { return true }
+	if got := filterSkills(sk); len(got) != 3 {
+		t.Fatalf("installed tool: the builtin must stay: %+v", got)
+	}
+}

@@ -7,6 +7,9 @@
 //	go test -tags shipgate ./test/shipgate -args -session <jsonl> -repo <dir> -exit <code>
 //
 // The checker runs `go test ./...` in -repo itself, so `go` must be on PATH.
+// Gate 6 adapts to the host: with rtk installed the prompt must advertise it
+// and the session must use it; without rtk the prompt must hide it (moca
+// never pushes a tool the shell cannot run).
 package shipgate
 
 import (
@@ -114,15 +117,24 @@ func TestShipGate(t *testing.T) {
 		t.Fatalf("4: `go test ./...` in the final repo state fails: %v\n%s", err, out)
 	}
 	sys := entries[0].Session.SystemPrompt
-	rtkRead := idx(func(u *use) bool { return u.name == "read" && strings.Contains(str(u, "path"), "/rtk/SKILL.md") }) >= 0
-	rtkUsed := idx(func(u *use) bool {
-		return u.name == "shell" && strings.HasPrefix(strings.TrimSpace(str(u, "command")), "rtk ")
-	}) >= 0
-	if !strings.Contains(sys, "- rtk:") || !(rtkRead || rtkUsed) {
-		// The literal "- rtk:" is phase-2's frozen skill-list line shape
-		// ("- <name>: <one-line description> (<absolute path>)"); if the shape
-		// ever changes, this assertion changes with it, in the same revision.
-		t.Fatal("6: the rtk skill was not discoverable or its guidance was not followed")
+	if _, err := exec.LookPath("rtk"); err == nil {
+		rtkRead := idx(func(u *use) bool { return u.name == "read" && strings.Contains(str(u, "path"), "/rtk/SKILL.md") }) >= 0
+		rtkUsed := idx(func(u *use) bool {
+			return u.name == "shell" && strings.HasPrefix(strings.TrimSpace(str(u, "command")), "rtk ")
+		}) >= 0
+		if !strings.Contains(sys, "- rtk:") || !(rtkRead || rtkUsed) {
+			// The literal "- rtk:" is phase-2's frozen skill-list line shape
+			// ("- <name>: <one-line description> (<absolute path>)"); if the shape
+			// ever changes, this assertion changes with it, in the same revision.
+			t.Fatal("6: the rtk skill was not discoverable or its guidance was not followed")
+		}
+	} else {
+		// This host has no rtk: the prompt must not push a tool the shell
+		// cannot run (no builtin skill line, no token-discipline bullet), and
+		// no rtk usage is expected.
+		if strings.Contains(sys, "- rtk:") || strings.Contains(sys, "rtk-prefixed") {
+			t.Fatal("6: rtk is not installed on this host but the prompt still advertises it")
+		}
 	}
 	if *exitCode != 0 {
 		t.Fatalf("7: moca exit code %d", *exitCode)

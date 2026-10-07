@@ -1133,3 +1133,30 @@ Mo re-reviewed the pass-3 fix commits (`2e35f7d`, `9f1ba7f`, `ddada17`,
    `&http.Client{Timeout: loginHTTPTimeout}` (30 s; a var for tests);
    `TestLoginTokenEndpointIsBounded` (stalling token endpoint) fails against
    the unbounded client (mutation-proven).
+
+## Host adaptation (2026-10-07 — first live ship-gate run on a host without rtk)
+
+Ben ran the first live ship-gate run on a host without rtk/graphify. The run
+failed gate 1, and the transcript shows why: the prompt hard-coded the rtk
+push, so the model's first action was `rtk …` → `bash: rtk: command not
+found`; it then explored without reading the failing test and gate 1 failed
+(`1: the failing test was not read before the fix`). The suite itself ended
+green and committed.
+
+Fix — the gate must be runnable on any host, and moca must never advertise a
+tool the shell cannot run:
+
+- `agent.filterSkills` drops builtin skills whose external CLI is missing
+  from `PATH` (`builtinTools` maps skill → CLI; project/global skills are
+  never filtered), and `PromptInput.RTK` gates the "Prefer rtk-prefixed …"
+  token-discipline line on `exec.LookPath("rtk")`. Tests:
+  `TestPromptRTKIsConditional`, `TestFilterSkillsDropsMissingBuiltins`.
+- The checker's gate 6 adapts: rtk on `PATH` → the prompt must advertise it
+  and the session must use it (unchanged); rtk absent → the prompt must hide
+  it (no `- rtk:` line, no `rtk-prefixed` bullet) and no usage is expected.
+  `run.sh` prints which mode it is in.
+- Verified end-to-end: a stripped-PATH simulation (scripted provider, bare
+  `go test ./...`) passes all gates with an rtk-free prompt; an rtk-built
+  session checked under the stripped PATH fails exactly
+  `6: rtk is not installed on this host but the prompt still advertises it`;
+  the normal rtk-present rehearsal is unchanged.

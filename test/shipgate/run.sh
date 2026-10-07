@@ -60,6 +60,11 @@ code=$?
 
 sess=$(ls -t "$data"/moca/sessions/*.jsonl 2>/dev/null | head -1)
 if [ -z "$sess" ]; then echo "no session recorded under $data"; exit 2; fi
+if command -v rtk >/dev/null 2>&1; then
+  echo "rtk:     present (gate 6 requires it to be used)"
+else
+  echo "rtk:     absent (gate 6 requires the prompt to hide it)"
+fi
 echo "repo:    $work"
 echo "session: $sess"
 echo "exit:    $code"
