@@ -1,6 +1,8 @@
 module github.com/adeotek/moca
 
-go 1.27.1
+go 1.27
+
+toolchain go1.27.1
 
 require (
 	charm.land/bubbles/v2 v2.2.1

@@ -1,2 +1,5 @@
-[tools]
-go = "1.27.1"
+# The Go version is pinned once, in go.mod's `toolchain` directive — mise
+# reads it natively via the idiomatic Go version file enabled below (no
+# [tools] entry; requires a recent mise).
+[settings]
+idiomatic_version_file_enable_tools = ["go"]

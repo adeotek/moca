@@ -10,7 +10,7 @@ One Go binary: a minimal TUI coding agent (`github.com/adeotek/moca`, binary `mo
 ## Commands
 
 ```bash
-mise install                                # pins Go 1.27.1 (mise.toml)
+mise install                                # provisions go 1.27.1 (pinned in go.mod)
 export PATH="$(mise where go)/bin:$PATH"    # `go` is not on the global PATH on every host
 make build                                  # bin/moca, version-stamped from git describe
 make test                                   # go test ./... -race -count=1

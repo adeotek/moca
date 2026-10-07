@@ -82,7 +82,7 @@ subagents · hooks · plan mode · LSP · web browsing · image gen · voice · 
 ## Development
 
 ```bash
-mise install        # Go 1.27.1 (mise.toml)
+mise install        # provisions Go 1.27.1 — pinned once, in go.mod
 make build          # bin/moca, version-stamped from git describe
 make test           # go test ./... -race -count=1
 make release        # five cross-compiled binaries in dist/
