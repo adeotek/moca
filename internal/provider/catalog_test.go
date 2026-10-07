@@ -84,4 +84,15 @@ func TestBuiltinCatalogSane(t *testing.T) {
 			t.Fatalf("spec-named model %s missing", q)
 		}
 	}
+	for _, q := range []string{
+		"opencode-go/deepseek-v4.1-flash", "opencode-go/deepseek-v4-flash",
+		"opencode-go/deepseek-v4-pro", "opencode-go/deepseek-v4-flash-vision-exp",
+		"opencode-go/kimi-k2.7-code", "opencode-go/mimo-v2.6-pro",
+		"opencode-go/mimo-v2.6-flash", "opencode-go/qwen3.8-max",
+		"opencode-go/qwen3.8-flash", "opencode-go/qwen3.7-plus",
+	} {
+		if !seen[q] {
+			t.Fatalf("catalog-expansion model %s missing", q)
+		}
+	}
 }

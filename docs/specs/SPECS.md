@@ -118,7 +118,7 @@ Inline Bubble Tea v2 TUI (no alt-screen except the pager). Layout top→bottom: 
 
 `internal/provider/catalog.go` — `Model{Provider, ID, Protocol, ContextWindow, MaxOutput, Cost(USD/M input/output/cacheRead/cacheWrite), ThinkingMode, ThinkingLevelMap}`.
 
-**Built-in catalog** (prices/limits verified 2026-10-04 — re-verify against the sources listed in the file's comment when vendor pages change; cost = standard non-tiered rates):
+**Built-in catalog** (prices/limits verified 2026-10-04, opencode-go expansion rows 2026-10-07 — re-verify against the sources listed in the file's comment when vendor pages change; cost = standard rates; the deepseek rows use the off-peak rate):
 
 | provider | model | protocol | ctx | max out | in/out/cacheR/cacheW $/M | thinking |
 |---|---|---|---|---|---|---|
@@ -128,6 +128,16 @@ Inline Bubble Tea v2 TUI (no alt-screen except the pager). Layout top→bottom: 
 | opencode-go | kimi-k3 | openai-completions | 1,048,576 | 131,072 | 3 / 15 / 0.3 / 0 | openai + glmThinking |
 | opencode-go | gpt-6-luna | openai-responses | 1,050,000 | 128,000 | 0.1 / 0.5 / 0.01 / 0.125 | openai + openaiReasoning |
 | opencode-go | grok-4.7 | openai-responses | 500,000 | 500,000 | 2 / 6 / 0.5 / 0 | openai + openaiReasoning |
+| opencode-go | deepseek-v4.1-flash | openai-completions | 1,000,000 | 384,000 | 0.15 / 0.6 / 0.003 / 0 | openai + deepseekThinking |
+| opencode-go | deepseek-v4-flash | openai-completions | 1,000,000 | 384,000 | 0.15 / 0.6 / 0.003 / 0 | openai + deepseekThinking |
+| opencode-go | deepseek-v4-pro | openai-completions | 1,000,000 | 384,000 | 0.66 / 1.98 / 0.022 / 0 | openai + deepseekProThinking |
+| opencode-go | deepseek-v4-flash-vision-exp | openai-completions | 1,000,000 | 384,000 | 0.15 / 0.6 / 0.003 / 0 | openai + deepseekThinking |
+| opencode-go | kimi-k2.7-code | openai-completions | 262,144 | 262,144 | 0.95 / 4 / 0.19 / 0 | openai + basicThinking |
+| opencode-go | mimo-v2.6-pro | openai-completions | 1,048,576 | 131,072 | 0.435 / 0.87 / 0.003625 / 0 | openai + basicThinking |
+| opencode-go | mimo-v2.6-flash | openai-completions | 1,048,576 | 131,072 | 0.14 / 0.28 / 0.0028 / 0 | openai + basicThinking |
+| opencode-go | qwen3.8-max | openai-completions | 1,000,000 | 131,072 | 2 / 6 / 0.25 / 2.5 | openai + qwenThinking |
+| opencode-go | qwen3.8-flash | anthropic-messages | 1,000,000 | 131,072 | 0.15 / 0.47 / 0.016 / 0.2 | budget |
+| opencode-go | qwen3.7-plus | anthropic-messages | 1,000,000 | 65,536 | 0.4 / 1.6 / 0.04 / 0.5 | budget |
 | anthropic | claude-opus-5-5 | anthropic-messages | 1,000,000 | 128,000 | 4 / 20 / 0.2 / 5 | adaptive |
 | anthropic | claude-sonnet-5-5 | anthropic-messages | 1,000,000 | 128,000 | 2 / 10 / 0.2 / 2.5 | adaptive |
 | anthropic | claude-haiku-4-5 | anthropic-messages | 200,000 | 64,000 | 1 / 5 / 0.1 / 1.25 | budget |
@@ -139,7 +149,7 @@ Inline Bubble Tea v2 TUI (no alt-screen except the pager). Layout top→bottom: 
 - `none` — no thinking; every effort clamps to `off`.
 - `budget` (anthropic manual mode) — sends `thinking: {type:"enabled", budget_tokens:N}`; omitted when effort is `off` **or** `N == 0`.
 - `adaptive` (current Claude) — sends `thinking: {type:"adaptive", display:"summarized"}` + `output_config.effort`; map `anthropicAdaptive` = {low, medium, high, max} (so `off`/`minimal` clamp up to `low`; `xhigh` clamps down to `high`).
-- `openai` — completions: `reasoning_effort`; responses: `reasoning: {effort, summary:"auto"}`. Maps: `openaiReasoning` = {minimal, low, medium, high}; `glmThinking` = {off:"none", low, medium, high}.
+- `openai` — completions: `reasoning_effort`; responses: `reasoning: {effort, summary:"auto"}`. Maps: `openaiReasoning` = {minimal, low, medium, high}; `glmThinking` = {off:"none", low, medium, high}; `deepseekThinking` = {low, high, max}; `deepseekProThinking` = {high, max}; `qwenThinking` = {low, medium, xhigh}; `basicThinking` = {low, medium, high} (models whose gateway rejects `off`/`minimal` — kimi-k2.7-code, mimo-v2.6-*).
 
 **Effort clamping** (`Model.ClampEffort`): nearest supported level **at or below** the request; if none is below, the lowest supported; `off` on a model that cannot disable → lowest supported.
 
