@@ -1177,3 +1177,29 @@ assertions say what the code must do"*, and the end-to-end bullet adds
 masked its own exit code with a pipe — `rtk test` itself propagates exit codes
 correctly, verified locally; the checker's in-repo suite run is the
 authoritative gate-4 check either way.)
+
+## Live-run iteration 2 (2026-10-07 — third live run, rtk host)
+
+The third live run (the nudge present in the stored prompt — verified in the
+kept session) failed gate 1 again. The session
+(`/tmp/moca-shipgate-data.FiiHmH`, `…-13df5209.jsonl`) shows why: the model
+ran the suite (piped `rtk test`), read the failure text, read the sources via
+shell `cat calc/*.go` (the edit guard then refused the edit until `calc.go`
+was read with the read tool), fixed the off-by-one, and committed on
+`fix/sum` — but never opened the failing test and never used the search tool
+(`cat`/`ls`/`go test` in shell replaced them).
+
+Two gaps, two fixes — the checker and the frozen task prompt are untouched:
+
+- the working-style line is now tool-explicit: *"when tests fail, read the
+  failing test file with the read tool and locate the cause with search
+  before changing code"*;
+- file access is carved out of the rtk push: a new tools bullet says to use
+  read/search/ls for files (not shell cat/grep/find/ls — tracked reads are
+  what the edit guard accepts), the token-discipline line is scoped to
+  "shell command output", and the builtin rtk skill drops its file rows
+  (`rtk read`/`rtk ls`/`rtk grep`/`rtk find`) and defers to the tools — the
+  skill's own guidance was reinforcing the shell drift.
+
+Pinned by `TestBuildSystemPrompt`; the scripted rehearsals (rtk-present,
+rtk-absent, negative controls) are unchanged; full suite race-green.

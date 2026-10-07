@@ -34,6 +34,7 @@ const coreTemplate = `You are moca, a coding agent working in a user's repositor
 - Prefer edit (small exact replacements) over write for existing files. Copy old_string without read's N| prefixes.
 - read pages large files: use offset/limit instead of re-reading whole files.
 - search finds code (RE2 regex, respects .gitignore); ls lists one directory.
+- Use read/search/ls for files, not shell cat/grep/find/ls — reads are windowed and tracked (edit requires a tracked read of the file).
 - ` + "`shell` is stateless" + `: every call starts in the workdir. Use ` + "`cd dir && cmd`" + ` in one call.
 - shell commands are checked against an allowlist. If one is refused, do not retry variants that
   do the same thing (find -delete, python -c …); explain what you need and ask the user.
@@ -42,7 +43,7 @@ const coreTemplate = `You are moca, a coding agent working in a user's repositor
 
 # Working style
 - Do the task end to end: understand, change, verify (build/tests), commit when the task asks, then report briefly.
-- When tests fail, read the failing test before changing code — its assertions say what the code must do.
+- When tests fail, read the failing test file with the read tool and locate the cause with search before changing code — the assertions say what the code must do.
 - Keep changes minimal and in the style of the surrounding code. Don't add unrequested features.
 - When something fails, read the error and fix the cause; don't loop on the same failing call.
 - Final answer: what changed, how it was verified, anything left open. No filler.
@@ -57,7 +58,7 @@ func BuildSystemPrompt(in PromptInput) string {
 	var sb strings.Builder
 	rtk := ""
 	if in.RTK {
-		rtk = "- Prefer rtk-prefixed variants where they exist (e.g. `rtk git status`, `rtk test -- go test ./...`).\n"
+		rtk = "- Prefer rtk-prefixed variants for shell command output where they exist (e.g. `rtk git status`, `rtk test -- go test ./...`).\n"
 	}
 	fmt.Fprintf(&sb, coreTemplate, in.Workdir, in.OS, in.Arch, in.Date, in.Git, rtk, in.Version)
 	if len(in.Skills) > 0 {
