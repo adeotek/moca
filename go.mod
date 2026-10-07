@@ -7,11 +7,11 @@ toolchain go1.27.1
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.0.10
+	charm.land/lipgloss/v2 v2.0.6
 	mvdan.cc/sh/v3 v3.14.1
 )
 
 require (
-	charm.land/lipgloss/v2 v2.0.6 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260811164956-006e29f97886 // indirect
