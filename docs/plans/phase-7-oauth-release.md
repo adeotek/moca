@@ -1160,3 +1160,20 @@ tool the shell cannot run:
   session checked under the stripped PATH fails exactly
   `6: rtk is not installed on this host but the prompt still advertises it`;
   the normal rtk-present rehearsal is unchanged.
+
+## Live-run iteration (2026-10-07 — second live ship-gate run, rtk host)
+
+The second live run (rtk present, gate-6 mode correct) failed gate 1: the
+model ran the suite, searched, read `calc.go`/`stats.go`, diagnosed the
+off-by-one from the source and fixed it — without ever opening the failing
+test. DESIGN §14 step 1 is "read a failing test", so the gate stands and the
+agent got the missing guidance instead: the core prompt's working style now
+says *"When tests fail, read the failing test before changing code — its
+assertions say what the code must do"*, and the end-to-end bullet adds
+*"commit when the task asks"* (gate 5 needs the commit). Both pinned by
+`TestBuildSystemPrompt`.
+
+(The run's first `rtk test` showed `[exit 0]` on a red suite because the model
+masked its own exit code with a pipe — `rtk test` itself propagates exit codes
+correctly, verified locally; the checker's in-repo suite run is the
+authoritative gate-4 check either way.)
