@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -87,9 +88,12 @@ func (r *Registry) Models() []Model {
 	return out
 }
 
-// CheckCredential resolves a model's provider credential once (env lookup or
-// token-store read; no network) and verifies the model exists, so a TUI model
-// switch fails fast before anything changes.
+// CheckCredential verifies, without any network call, that a model exists and
+// its provider credential is usable: an env lookup for api_key providers, and
+// for store-backed OAuth providers that a login is stored (a token near
+// expiry is refreshed by the first request, which has a cancellable context,
+// not here). A TUI model switch calls this on its update goroutine, so it
+// fails fast before anything changes and never blocks on I/O.
 func (r *Registry) CheckCredential(qualified string) error {
 	pname, _, err := config.SplitModel(qualified)
 	if err != nil {
@@ -97,6 +101,18 @@ func (r *Registry) CheckCredential(qualified string) error {
 	}
 	if _, ok := r.models[qualified]; !ok {
 		return fmt.Errorf("%w %q", ErrUnknownModel, qualified)
+	}
+	if r.cfg.Providers[pname].Auth == "oauth" && r.oauth[pname] == nil {
+		if _, ok := oauthProviders[pname]; ok {
+			_, found, err := NewStore(filepath.Join(config.DataDir(), "auth.json")).Get(pname)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return fmt.Errorf("not logged in to %s: run moca login %s", pname, pname)
+			}
+			return nil
+		}
 	}
 	_, err = r.credential(pname)(context.Background())
 	return err
@@ -145,8 +161,20 @@ func (r *Registry) credential(provider string) CredentialFunc {
 				return withExtra(c), nil
 			}
 		}
+		if oc, ok := oauthProviders[provider]; ok {
+			// Store-backed subscription credentials: read auth.json (0600),
+			// refresh under the cross-process lock near expiry.
+			fn := NewStore(filepath.Join(config.DataDir(), "auth.json")).CredentialFor(provider, oc.refresher(r.hc))
+			return func(ctx context.Context) (Credential, error) {
+				c, err := fn(ctx)
+				if err != nil {
+					return Credential{}, err
+				}
+				return withExtra(c), nil
+			}
+		}
 		return func(context.Context) (Credential, error) {
-			return Credential{}, fmt.Errorf("provider %s uses oauth: run `moca login %s`", provider, provider)
+			return Credential{}, fmt.Errorf("provider %s: OAuth is not available; set auth \"api_key\"", provider)
 		}
 	}
 	return func(context.Context) (Credential, error) {
@@ -167,8 +195,16 @@ func (r *Registry) Resolve(qualified string) (Model, Adapter, error) {
 	if !ok {
 		return Model{}, nil, fmt.Errorf("%w %q", ErrUnknownModel, qualified)
 	}
-	if _, ok := r.cfg.Providers[pname]; !ok {
+	p, ok := r.cfg.Providers[pname]
+	if !ok {
 		return Model{}, nil, fmt.Errorf("unknown provider %q", pname)
+	}
+	if p.Auth == "oauth" {
+		// The SIWC subscription route serves the Responses API only
+		// (docs/specs/oauth-verification.md §2.4).
+		if _, hasOAuth := oauthProviders[pname]; hasOAuth && m.Protocol != "openai-responses" {
+			return Model{}, nil, fmt.Errorf("model %s: subscription OAuth is only available on the openai-responses protocol (model speaks %s)", qualified, m.Protocol)
+		}
 	}
 	base := r.baseURL(pname, m.Protocol)
 	if base == "" {

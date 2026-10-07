@@ -81,6 +81,7 @@ func TestValidationErrors(t *testing.T) {
 		`{"model":"foo/bar"}`: "unknown provider \"foo\"",
 		`{"providers":{"anthropic":{"auth":"api_key","apiKey":"sk-x"}}}`:                                                                                           "env:",
 		`{"providers":{"anthropic":{"auth":"magic"}}}`:                                                                                                             "auth",
+		`{"providers":{"anthropic":{"auth":"oauth"}}}`:                                                                                                             "not available",
 		`{"providers":{"vllm":{"auth":"api_key","apiKey":"env:K"}}}`:                                                                                               "baseUrl",
 		`{"providers":{"vllm":{"baseUrl":"http://x/v1","protocol":"openai-completions","auth":"api_key","apiKey":"env:K","models":{"m":{}}}}}`:                     "contextWindow",
 		`{"providers":{"vllm":{"baseUrl":"http://x/v1","protocol":"openai-completions","auth":"api_key","apiKey":"env:K","models":{"m":{"contextWindow":8192}}}}}`: "16384",
@@ -94,6 +95,25 @@ func TestValidationErrors(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("Parse(%s) err = %v, want containing %q", in, err, want)
 		}
+	}
+}
+
+func TestOAuthAllowedForOpenAI(t *testing.T) {
+	c, err := Parse([]byte(`{"providers":{"openai":{"auth":"oauth"}}}`))
+	if err != nil || c.Providers["openai"].Auth != "oauth" {
+		t.Fatalf("openai oauth must parse: %v", err)
+	}
+}
+
+func TestOAuthRejectedForNonOAuthProvider(t *testing.T) {
+	// OAuth exists only where the policy gate permits it: `auth: "oauth"`
+	// for anything else is a config error at load, not a request-time
+	// failure with a runtime exit code.
+	if _, err := Parse([]byte(`{"providers":{"opencode-go":{"auth":"oauth"}}}`)); err == nil || !strings.Contains(err.Error(), "no OAuth support") {
+		t.Fatalf("oauth on a non-OAuth provider must be refused: %v", err)
+	}
+	if _, err := Parse([]byte(`{"providers":{"mycorp":{"auth":"oauth","baseUrl":"http://x","protocol":"openai-responses"}}}`)); err == nil || !strings.Contains(err.Error(), "no OAuth support") {
+		t.Fatalf("oauth on a custom provider must be refused: %v", err)
 	}
 }
 

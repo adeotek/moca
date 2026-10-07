@@ -65,6 +65,15 @@ type Env struct {
 	Reads    *ReadTracker
 	Snap     Snapshotter
 	ShellEnv []string
+	// TestSeen/TestFailed/FailingTest/Searched drive the investigation hints:
+	// a failing test run sets TestFailed and FailingTest (the file name parsed
+	// from its output); reading any *_test.go sets TestSeen and clears
+	// FailingTest; a search call sets Searched; a green test run clears
+	// TestFailed/FailingTest (shell.go/read.go/search.go).
+	TestSeen    bool
+	TestFailed  bool
+	FailingTest string
+	Searched    bool
 }
 
 type Registry struct {
@@ -105,7 +114,45 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 		return errorf("invalid JSON arguments for %s (the call was probably cut off at the output limit). "+
 			"Split the work into smaller calls, e.g. write a large file in parts with edit.", call.Name)
 	}
-	return t.Run(ctx, env, call.Input)
+	res := t.Run(ctx, env, call.Input)
+	if h := investigationHint(env); h != "" {
+		res.Content += h
+	}
+	return res
+}
+
+// investigationHint is the protocol banner appended to every tool result
+// while a failing test run is unresolved: weak models fix from the failure
+// text (or shell out entirely with cat/sed) without reading the failing test
+// or locating the cause with search; the §14 demo requires both before the
+// fix. State: shell.go (TestFailed/FailingTest, cleared by a green run),
+// read.go (TestSeen/FailingTest), search.go (Searched).
+func investigationHint(env *Env) string {
+	if env.FailingTest != "" {
+		return fmt.Sprintf("\n[hint: tests failed: (1) read the failing test file (%s) with the read tool, (2) locate the cause with the search tool, (3) only then edit]", env.FailingTest)
+	}
+	if env.TestFailed && !env.Searched {
+		return "\n[hint: locate the cause with the search tool before editing]"
+	}
+	return ""
+}
+
+// investigationRefusal is the edit gate for the same protocol: while a
+// failing test run's investigation is incomplete the edit tool refuses —
+// weak models treat "read the file"/"locate the cause" as satisfied by
+// shell equivalents (cat/sed), so hints alone lose; the guard is what binds.
+func investigationRefusal(env *Env) string {
+	if !env.TestFailed || (env.TestSeen && env.Searched) {
+		return ""
+	}
+	if !env.TestSeen {
+		name := env.FailingTest
+		if name == "" {
+			name = "*_test.go"
+		}
+		return fmt.Sprintf("refused: tests are failing — read the failing test file (%s) with the read tool and locate the cause with the search tool before editing", name)
+	}
+	return "refused: tests are failing — locate the cause with the search tool before editing"
 }
 
 func decode[T any](input json.RawMessage, v *T) *Result {

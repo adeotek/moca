@@ -19,6 +19,30 @@ const (
 	exitInterrupted = 130
 )
 
+// errHelp signals -h/--help: usage goes to stdout, exit 0.
+var errHelp = errors.New("help requested")
+
+func printUsage(w io.Writer) {
+	fmt.Fprint(w, `moca — minimal, token-efficient coding agent
+
+usage:
+  moca                         TUI in the current directory
+  moca -p "<prompt>"           one-shot; prompt also accepted on stdin (`+"`"+`-p -`+"`"+`)
+    --model <provider/model>   override config `+"`"+`model`+"`"+` for this session
+    --effort <level>           override effort for this session (off|minimal|low|medium|high|xhigh|max)
+    --approve | --no-approve   project trust for this run (-p default: --no-approve)
+    --yolo | --no-yolo         all permission checks off/on for this run (overrides config yolo)
+    --resume <id8|last>        resume a session
+    --continue                 latest session in this workdir
+    --config <path>            config file (dev/test)
+  moca login <provider>        OAuth login (openai) [--no-browser]
+  moca logout <provider>       clear a stored login
+  moca mcp import              import MCP servers from Claude Code / OpenCode / Pi configs
+  moca mcp index               prebuild the persisted MCP discovery index
+  moca --version
+`)
+}
+
 type Options struct {
 	Prompt     string
 	OneShot    bool
@@ -59,6 +83,9 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 	fs.BoolVar(&o.Version, "version", false, "print version")
 	fs.StringVar(&o.ConfigPath, "config", "", "config file (dev/test)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return o, errHelp
+		}
 		return o, usageError{err}
 	}
 	fs.Visit(func(f *flag.Flag) {

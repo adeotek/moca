@@ -56,7 +56,7 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	}
 	hc := o.HTTP
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = defaultHTTPClient()
 	}
 	emit := o.Emit
 	reg, err := provider.NewRegistry(cfg, hc, func(n provider.RetryNotice) {
@@ -129,6 +129,7 @@ func Start(o StartOptions) (*Agent, error) {
 			emit(Warning{Text: se.Error()})
 		}
 	}
+	sk = filterSkills(sk)
 	instr, err := skills.LoadInstructions(config.ConfigDir(), o.Workdir, o.Trusted)
 	if err != nil {
 		return nil, &StartError{err}
@@ -141,7 +142,7 @@ func Start(o StartOptions) (*Agent, error) {
 	osName, arch := Platform()
 	system := BuildSystemPrompt(PromptInput{Workdir: jail.Root(), OS: osName, Arch: arch,
 		Date: time.Now().Format("2006-01-02"), Git: GitState(jail.Root()), Version: config.Version,
-		Skills: sk, Servers: servers, Instructions: instr})
+		RTK: toolOnPath("rtk"), Skills: sk, Servers: servers, Instructions: instr})
 
 	session.Prune(filepath.Join(config.DataDir(), "snapshot"), cfg.RetentionDays())
 	m, _, err := reg.Resolve(cfg.Model)
@@ -164,4 +165,20 @@ func Start(o StartOptions) (*Agent, error) {
 		return nil, &StartError{err}
 	}
 	return build(o, st, w, system, cfg.Model, effort, nil, filepath.Join(config.DataDir(), "snapshot"))
+}
+
+// headerTimeout bounds the wait for provider response headers: the SSE stall
+// timeout only covers the response body, so a server that accepts a request
+// and then goes silent would hang an unattended run forever (seen once in
+// the live ship-gate runs).
+var headerTimeout = 120 * time.Second
+
+func defaultHTTPClient() *http.Client {
+	tr, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Client{Transport: http.DefaultTransport}
+	}
+	ct := tr.Clone()
+	ct.ResponseHeaderTimeout = headerTimeout
+	return &http.Client{Transport: ct}
 }

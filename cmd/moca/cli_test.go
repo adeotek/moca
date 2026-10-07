@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,8 +14,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
 )
 
@@ -50,6 +53,22 @@ func TestParseArgs(t *testing.T) {
 	o, _ = parseArgs([]string{"mcp", "import"}, nil)
 	if strings.Join(o.Sub, " ") != "mcp import" {
 		t.Fatal(o.Sub)
+	}
+}
+
+func TestHelpListsSurface(t *testing.T) {
+	for _, arg := range []string{"--help", "-h"} {
+		var out, errb bytes.Buffer
+		code := run(context.Background(), []string{arg}, nil, &out, &errb)
+		if code != 0 {
+			t.Fatalf("%s: exit %d stderr %q", arg, code, errb.String())
+		}
+		for _, want := range []string{"moca -p", "--model", "--effort", "--approve", "--yolo", "--resume", "--continue",
+			"moca login", "moca logout", "moca mcp import", "moca mcp index", "moca --version"} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("%s: usage missing %q", arg, want)
+			}
+		}
 	}
 }
 
@@ -214,11 +233,57 @@ func TestExitCodes(t *testing.T) {
 
 func TestSubcommandBeforeConfig(t *testing.T) {
 	// Subcommand stubs must not trip the "no model configured" check on a
-	// fresh install.
+	// fresh install; anthropic OAuth is refused by the §3 policy gate.
 	var out, errb bytes.Buffer
 	code := run(context.Background(), []string{"--config", filepath.Join(t.TempDir(), "none.jsonc"), "login", "anthropic"}, nil, &out, &errb)
-	if code != 2 || !strings.Contains(errb.String(), "login lands in a later phase") {
+	if code != 2 || !strings.Contains(errb.String(), "cannot use OAuth") || !strings.Contains(errb.String(), "does not permit") {
 		t.Fatalf("code %d stderr %q", code, errb.String())
+	}
+}
+
+func TestLoginLogoutCLI(t *testing.T) {
+	isolate(t)
+	cfg := writeCfg(t, `{}`)
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"--config", cfg, "login"}, nil, &out, &errb); code != 2 || !strings.Contains(errb.String(), "usage: moca login") {
+		t.Fatalf("login without provider: %d %q", code, errb.String())
+	}
+	errb.Reset()
+	if code := run(context.Background(), []string{"--config", cfg, "login", "nosuch"}, nil, &out, &errb); code != 2 || !strings.Contains(errb.String(), "unknown provider") {
+		t.Fatalf("unknown provider: %d %q", code, errb.String())
+	}
+	errb.Reset()
+	if code := run(context.Background(), []string{"--config", cfg, "login", "opencode-go"}, nil, &out, &errb); code != 2 || !strings.Contains(errb.String(), "no OAuth for opencode-go") {
+		t.Fatalf("provider without OAuth: %d %q", code, errb.String())
+	}
+	// logout is idempotent and offline-safe: no stored token → nothing to
+	// revoke, still exit 0.
+	out.Reset()
+	errb.Reset()
+	if code := run(context.Background(), []string{"--config", cfg, "logout", "openai"}, nil, &out, &errb); code != 0 || !strings.Contains(out.String(), "logged out of openai") {
+		t.Fatalf("logout: %d %q", code, out.String()+errb.String())
+	}
+	// A stored registration without a refresh token is cleared without any
+	// network call (revocation needs a refresh token).
+	store := provider.NewStore(filepath.Join(config.DataDir(), "auth.json"))
+	if err := store.Put("openai", provider.Token{Access: "a", Expiry: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := run(context.Background(), []string{"--config", cfg, "logout", "openai"}, nil, &out, &errb); code != 0 {
+		t.Fatalf("logout with token: %d %q", code, errb.String())
+	}
+	if _, ok, _ := store.Get("openai"); ok {
+		t.Fatal("token must be deleted")
+	}
+	// A corrupt store must not block logout (its error message says so).
+	if err := os.WriteFile(filepath.Join(config.DataDir(), "auth.json"), []byte("{oops"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errb.Reset()
+	if code := run(context.Background(), []string{"--config", cfg, "logout", "openai"}, nil, &out, &errb); code != 0 || !strings.Contains(out.String(), "logged out") {
+		t.Fatalf("logout corrupt: %d %q", code, out.String()+errb.String())
 	}
 }
 
@@ -458,5 +523,26 @@ func TestResumeModelOverride(t *testing.T) {
 	}
 	if last != "loc2/m2" {
 		t.Fatalf("model_change %q, want loc2/m2", last)
+	}
+}
+
+// The OAuth sentinels are a usage error (the user fixes them with
+// `moca login`), not a runtime failure: a revoked ChatGPT session must exit
+// 2, and a cancelled context must still win over the sentinels.
+func TestExitForOAuthSentinels(t *testing.T) {
+	ctx := context.Background()
+	if got := exitFor(ctx, fmt.Errorf("session expired: %w", provider.ErrInvalidGrant)); got != exitUsage {
+		t.Fatalf("invalid_grant exit %d, want %d", got, exitUsage)
+	}
+	if got := exitFor(ctx, fmt.Errorf("registration rejected: %w", provider.ErrInvalidClient)); got != exitUsage {
+		t.Fatalf("invalid_client exit %d, want %d", got, exitUsage)
+	}
+	if got := exitFor(ctx, errors.New("boom")); got != exitRuntime {
+		t.Fatalf("plain error exit %d, want %d", got, exitRuntime)
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if got := exitFor(cctx, context.Canceled); got != exitInterrupted {
+		t.Fatalf("cancelled exit %d, want %d", got, exitInterrupted)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
+	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
 )
 
@@ -20,6 +21,10 @@ func exitFor(ctx context.Context, err error) int {
 	switch {
 	case ctx.Err() != nil || errors.Is(err, context.Canceled):
 		return exitInterrupted
+	case errors.Is(err, provider.ErrInvalidGrant) || errors.Is(err, provider.ErrInvalidClient):
+		// The session/registration is unusable: a usage error the user
+		// fixes with `moca login` (or logout + login), not a runtime bug.
+		return exitUsage
 	case errors.As(err, &ee):
 		return exitUsage
 	default:

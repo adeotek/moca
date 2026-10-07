@@ -48,8 +48,8 @@ func (a *Agent) recordModel() {
 }
 
 // SetModel switches model (and effort; "" = the model's default) for the next
-// run/turn. The provider credential is resolved first (env lookup only; no
-// network), so a missing key refuses the switch and nothing changes. Callers
+// run/turn. The provider credential is checked first (an env lookup, or a stored
+// login for OAuth; never the network), so a missing key refuses the switch and nothing changes. Callers
 // must not switch while a run is in progress (the TUI refuses; §11).
 func (a *Agent) SetModel(q string, e llm.Effort) error {
 	if err := a.opts.Providers.CheckCredential(q); err != nil {
