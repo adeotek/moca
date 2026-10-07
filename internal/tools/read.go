@@ -86,6 +86,10 @@ func (readTool) Run(_ context.Context, env *Env, input json.RawMessage) Result {
 		return errorf("%s is a binary file (%d bytes, %s); not shown", a.Path, fi.Size(), http.DetectContentType(head[:n]))
 	}
 	env.Reads.Record(abs)
+	if strings.HasSuffix(a.Path, "_test.go") {
+		env.TestSeen = true
+		env.FailingTest = ""
+	}
 
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return errorf("%v", err)

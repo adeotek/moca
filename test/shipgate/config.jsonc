@@ -1,0 +1,6 @@
+{
+  // §14 ship gate — real opencode-go model; the key comes from the repo .env
+  // through the env: indirection (never a literal, never echoed).
+  "model": "opencode-go/glm-5.3-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_GO_KEY" } }
+}

@@ -63,7 +63,7 @@ CHANGELOG.md
 **Files:**
 - Create: `docs/specs/oauth-verification.md`
 
-- [ ] **Step 1: For each of `anthropic` (Claude Pro/Max) and `openai` (ChatGPT Plus/Pro), research and record:**
+- [x] **Step 1: For each of `anthropic` (Claude Pro/Max) and `openai` (ChatGPT Plus/Pro), research and record:**
   1. **Terms:** quote the current clause(s) from the vendor's consumer/subscription terms and usage policies that govern access via third-party clients, with the URL and date retrieved. Conclusion: `permitted` / `not permitted` / `unclear`. **`unclear` is treated as not permitted.**
   2. **Client registration:** can a third-party developer obtain their **own** OAuth client id for this flow? How (link)? If the only working client ids belong to the vendor's own CLIs → **not permitted** (using them is spoofing).
   3. **Endpoints (only if 1 and 2 pass):**
@@ -77,14 +77,14 @@ CHANGELOG.md
      Verify each against a live flow with a test account.
   4. **Decision:** `ship oauth` or `api_key only`.
 
-- [ ] **Step 2: Apply the decision to DESIGN.md** if any provider is `api_key only`:
+- [x] **Step 2: Apply the decision to DESIGN.md** if any provider is `api_key only`:
   - add a **new revision entry** in the revision log (`subscription OAuth dropped for <provider>: <one-line reason>`);
   - update the §3 provider table and the §12 example comment;
   - update the README stack bullets.
   
   This is a spec change, so it goes through the doc's revision process (Ben approves) before code.
 
-- [ ] **Step 3: Commit** — `git add docs && git commit -m "docs: OAuth policy + endpoint verification record"`
+- [x] **Step 3: Commit** — `git add docs && git commit -m "docs: OAuth policy + endpoint verification record"`
 
 **If both providers are `api_key only`:** skip Tasks 3–4. Do Task 2's config-validation part only (reject `oauth` with the recorded reason), drop `moca login` from §12.5 via the same revision, and go to Task 5.
 
@@ -123,7 +123,7 @@ func (s *Store) CredentialFor(provider string, refresh Refresher) CredentialFunc
 - Corrupt file → error `auth store <path> is unreadable (<err>); run 'moca logout <provider>' or delete the file`.
 - Revoked → `fmt.Errorf("session expired for %s: run moca login %s: %w", p, p, ErrInvalidGrant)`. `cmd/moca`'s `exitFor` maps `errors.Is(err, ErrInvalidGrant)` to exit **2**.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```go
 // internal/provider/auth_test.go
@@ -226,7 +226,7 @@ func TestNotLoggedIn(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement**
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement**
 
 ```go
 // internal/provider/auth.go
@@ -438,9 +438,9 @@ In `cmd/moca/oneshot.go`'s `exitFor`, add `case errors.Is(err, provider.ErrInval
 
 In `internal/config/config.go` `Validate`, add a package-level `var OAuthUnsupported = map[string]string{}` (provider → reason), populated from the Task 1 decisions. `auth: "oauth"` for a listed provider → error `providers.<p>.auth "oauth" is not available: <reason>`. Test it in `config_test.go`.
 
-- [ ] **Step 4: Run** — `go test ./internal/provider/ ./internal/config/ -race -run 'Store|Refresh|Revoked|NotLogged|OAuth'` → PASS.
+- [x] **Step 4: Run** — `go test ./internal/provider/ ./internal/config/ -race -run 'Store|Refresh|Revoked|NotLogged|OAuth'` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/provider internal/config cmd/moca
@@ -491,7 +491,7 @@ func (c OAuthConfig) refresher(hc *http.Client) Refresher
   7. Callback handler: verify `state`; respond with a tiny HTML page `Login complete — you can close this tab.`
   8. The refresher POSTs `grant_type=refresh_token`; a 400 with `error=invalid_grant` → `ErrInvalidGrant`.
 
-- [ ] **Step 1: Write failing tests** (against an `httptest` fake authorization server):
+- [x] **Step 1: Write failing tests** (against an `httptest` fake authorization server):
 
 ```go
 // internal/provider/oauth_test.go
@@ -606,7 +606,7 @@ func TestRefresher(t *testing.T) {
 
 The test helpers `ioPipe` (= `io.Pipe`), `firstURL` (the first `http…` token in the text) and `syncBuf` (a mutex-guarded `bytes.Buffer` writer, so the goroutine can poll `out`) live in this test file. Add them.
 
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement `oauth.go`** per the flow above. Key parts:
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement `oauth.go`** per the flow above. Key parts:
 
 ```go
 func pkce() (verifier, challenge, state string) {
@@ -676,9 +676,9 @@ func (c OAuthConfig) refresher(hc *http.Client) Refresher {
 - `select` on the channel and `ctx.Done()`, then exchange and shut the server down.
 - `Headless()` per the interface comment. `openBrowser(u)`: `xdg-open` / `open` / `rundll32 url.dll,FileProtocolHandler`, returning an error if not found (→ just print the URL).
 
-- [ ] **Step 4: Run** — `go test ./internal/provider/ -run 'Login|Parse|Refresher' -race -v` → PASS.
+- [x] **Step 4: Run** — `go test ./internal/provider/ -run 'Login|Parse|Refresher' -race -v` → PASS.
 
-- [ ] **Step 5: Commit** — `git add internal/provider && git commit -m "feat(provider): PKCE login with loopback callback and headless paste fallback"`
+- [x] **Step 5: Commit** — `git add internal/provider && git commit -m "feat(provider): PKCE login with loopback callback and headless paste fallback"`
 
 ---
 
@@ -699,11 +699,11 @@ func (c OAuthConfig) refresher(hc *http.Client) Refresher {
   - Otherwise `provider.Login(...)` → `Store.Put`, then print `logged in to <p>. Set "auth": "oauth" for providers.<p> in <config> to use your subscription.` If the config's auth for `<p>` is still `api_key`, offer to switch it (`[y/N]`; on y, edit via a new `config.SetString(path, keyPath, value)` built on the same scanner as `AppendString`).
   - `moca logout <provider>` → best-effort revoke (if `RevokeURL`), then `Store.Delete`, then print `logged out of <p>`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
   - Registry: with `auth: "oauth"` and a token in a temp store (`XDG_DATA_HOME`), `Resolve(...)` + `Stream` against an `httptest` server receives `Authorization: Bearer <access>` and the extra headers.
   - CLI: `moca login nosuch` → 2; `moca login <unsupported>` → 2 with the reason; `moca logout openai` with no token → 0 and `logged out` (idempotent).
 
-- [ ] **Step 2: Run → FAIL. Step 3: Implement. Step 4: Run** — `go test ./... -race` → PASS.
+- [x] **Step 2: Run → FAIL. Step 3: Implement. Step 4: Run** — `go test ./... -race` → PASS.
 
 - [ ] **Step 5: Live verification (per shipped provider)**:
   - on a desktop: `moca login <p>` → the browser opens and the callback completes;
@@ -712,7 +712,7 @@ func (c OAuthConfig) refresher(hc *http.Client) Refresher {
   - edit `auth.json` to expire the token → the next request refreshes transparently;
   - run two `moca -p` in parallel at expiry → one refresh (check the token endpoint logs via the verification account's dashboard if available, otherwise trust `TestConcurrentRefreshOnce`).
 
-- [ ] **Step 6: Commit** — `git add internal/provider internal/config cmd/moca && git commit -m "feat: moca login/logout for subscription providers permitted by policy"`
+- [x] **Step 6: Commit** — `git add internal/provider internal/config cmd/moca && git commit -m "feat: moca login/logout for subscription providers permitted by policy"`
 
 ---
 
@@ -720,10 +720,10 @@ func (c OAuthConfig) refresher(hc *http.Client) Refresher {
 
 This happens in **graphify's repository**, not this one. Work in a fork.
 
-- [ ] **Step 1:** Read graphify's install code to find how platforms are registered (e.g. a table mapping `--platform <name>` to a skills directory and file layout), and read its CONTRIBUTING guide.
-- [ ] **Step 2:** Add a `moca` entry targeting `~/.config/moca/skills/graphify/` (respecting `$XDG_CONFIG_HOME`), copying the same SKILL.md the other platforms get, unchanged. Add or extend graphify's own test for the platform table, if it has one.
-- [ ] **Step 3:** Open the PR upstream with a short description: *moca loads Agent-Skills-standard SKILL.md from `~/.config/moca/skills/<name>/`; this adds the one-line platform entry*. Link moca's `docs/external-tools.md`.
-- [ ] **Step 4:** In moca's `docs/external-tools.md`, replace the manual-copy instructions with `graphify install --platform moca` (keeping the manual copy as a fallback "until graphify vX.Y"), and record the PR URL. Commit: `docs: graphify install --platform moca`.
+- [x] **Step 1:** Read graphify's install code to find how platforms are registered (e.g. a table mapping `--platform <name>` to a skills directory and file layout), and read its CONTRIBUTING guide.
+- [x] **Step 2:** Add a `moca` entry targeting `~/.config/moca/skills/graphify/` (respecting `$XDG_CONFIG_HOME`), copying the same SKILL.md the other platforms get, unchanged. Add or extend graphify's own test for the platform table, if it has one.
+- [x] **Step 3:** Open the PR upstream with a short description: *moca loads Agent-Skills-standard SKILL.md from `~/.config/moca/skills/<name>/`; this adds the one-line platform entry*. Link moca's `docs/external-tools.md`.
+- [x] **Step 4:** In moca's `docs/external-tools.md`, replace the manual-copy instructions with `graphify install --platform moca` (keeping the manual copy as a fallback "until graphify vX.Y"), and record the PR URL. Commit: `docs: graphify install --platform moca`.
 - [ ] **Step 5:** Verify: `graphify install --platform moca` from the fork's build places the skill, and phase 6's live gate 4 passes with it.
 
 ---
@@ -734,7 +734,7 @@ This happens in **graphify's repository**, not this one. Work in a fork.
 - Create: `Makefile` (or `mise.toml` tasks; match whatever the README "Development" section uses), `CHANGELOG.md`
 - Modify: `README.md`
 
-- [ ] **Step 1: Version stamping**
+- [x] **Step 1: Version stamping**
 
 ```make
 VERSION ?= $(shell git describe --tags --always --dirty)
@@ -755,12 +755,12 @@ release:
 
 Run: `make build && ./bin/moca --version` → the git-describe version. `make release` → five binaries. Then `GOOS=windows go vet ./...` to confirm the Windows build tags compile.
 
-- [ ] **Step 2: Polish pass.** Fix only what you can observe, each as its own small commit:
+- [x] **Step 2: Polish pass.** Fix only what you can observe, each as its own small commit:
   - run `go vet ./...` and `staticcheck ./...` (if installed) and fix the findings;
   - read every user-facing error string once for tone and actionability ("what failed, what to do");
   - check the `--help` output lists exactly the §12.5 surface.
 
-- [ ] **Step 3: README.** Rewrite it for users:
+- [x] **Step 3: README.** Rewrite it for users:
   - one-paragraph pitch;
   - install (`go install github.com/adeotek/moca/cmd/moca@latest`, or the release binaries);
   - a minimal `config.jsonc`;
@@ -772,9 +772,9 @@ Run: `make build && ./bin/moca --version` → the git-describe version. `make re
   
   Keep the "Phases" table, marked all done.
 
-- [ ] **Step 4: CHANGELOG.md** — `## v0.1.0 — <date>`, a feature summary grouped like the DESIGN.md sections.
+- [x] **Step 4: CHANGELOG.md** — `## v0.1.0 — <date>`, a feature summary grouped like the DESIGN.md sections.
 
-- [ ] **Step 5: Commit** — `git commit -am "chore: version stamping, release build, README for v0.1"`
+- [x] **Step 5: Commit** — `git commit -am "chore: version stamping, release build, README for v0.1"`
 
 ---
 
@@ -799,7 +799,7 @@ Run: `make build && ./bin/moca --version` → the git-describe version. `make re
   6. the stored system prompt lists the `rtk` skill, and either a `read` of `…/builtin-skills/…/rtk/SKILL.md` occurred **or** at least one shell command used `rtk` (guidance followed);
   7. every tool_use has a tool_result, and the process exit code (passed via `-exit`) is `0`.
 
-- [ ] **Step 1: Write the checker**
+- [x] **Step 1: Write the checker**
 
 ```go
 //go:build shipgate
@@ -909,7 +909,7 @@ func TestShipGate(t *testing.T) {
 
 `run.sh` passes `-exit $?` from the moca run.
 
-- [ ] **Step 2: Fixture.** `calc.Sum(xs []int) int` loops `for i := 1; i < len(xs); i++` (skips the first element). `calc_test.go` has `TestTotals` with a table of three cases, including a single-element slice. The function name differs from the test name, so `search` is the natural way to find it.
+- [x] **Step 2: Fixture.** `calc.Sum(xs []int) int` loops `for i := 1; i < len(xs); i++` (skips the first element). `calc_test.go` has `TestTotals` with a table of three cases, including a single-element slice. The function name differs from the test name, so `search` is the natural way to find it.
 
 - [ ] **Step 3: Run the gate unattended**, three times (models are stochastic; the gate must pass reliably, not once):
 
@@ -919,7 +919,7 @@ for i in 1 2 3; do bash test/shipgate/run.sh || echo "run $i FAILED"; done
 
 Expected: 3/3 PASS. On a failure, read the session file and fix the cause in moca (prompt wording is frozen, so look at tool errors, refusals and truncation). Re-run. Do not loosen the checker.
 
-- [ ] **Step 4: Commit** — `git add test/shipgate && git commit -m "test: automated §14 ship gate"`
+- [x] **Step 4: Commit** — `git add test/shipgate && git commit -m "test: automated §14 ship gate"`
 
 ---
 
@@ -935,3 +935,337 @@ make release VERSION=v0.1.0
 ```
 
 - [ ] **Step 4:** Push the tag and create the GitHub release with the `dist/` binaries + the CHANGELOG section. **Ask Ben before pushing the tag or publishing the release**: both are outward-facing and hard to reverse.
+
+---
+
+## Implementation notes (2026-10-06)
+
+**Task 1 outcome — the policy gate decided the scope.** Anthropic: **not permitted** — the record (`docs/specs/oauth-verification.md`) quotes `code.claude.com/docs/en/legal-and-compliance` (retrieved 2026-10-06): Anthropic does not permit third-party developers to offer Claude.ai login or route requests through Free/Pro/Max credentials; server-side enforcement since 2026-01, formalized 2026-02, reaffirmed 2026-09. OpenAI: **permitted** — the Sign in with ChatGPT (SIWC) open-source token-sharing flow gives third-party apps their own dynamically registered client (no secret, no spoofing). Every endpoint was fetched live the same day: the discovery document, the JWKS shape, the token endpoint answering `400 invalid_grant` to a bogus code; the authorize endpoint's Cloudflare 403 to curl is expected (bot wall). No full interactive login ran — there is no ChatGPT account on this host (see Deferred).
+
+**Tasks 2–4 — what shipped.** Token store `auth.json` (0600 file / 0700 dir, atomic writes, `flock` on Unix / `LockFileEx` on Windows around every read-modify-write; rotating refresh serialized so a concurrent process re-reads and never burns a rotated token; `invalid_grant` keeps the entry (so `moca logout` still works) and errors "session expired for <provider>: run `moca login <provider>`"). OAuth flow: dynamic client registration, PKCE S256, loopback `127.0.0.1` callback (headless fallback via `--no-browser` — full redirect URL accepted, state verified), nonce + RS256 JWKS ID-token validation, required-scope check (`chatgpt.tokens.use.direct`), revoke on logout. Registry: `auth: "oauth"` resolves through the store and only for `openai-responses` models; the adapter's subscription route omits `max_output_tokens` and groups the seven tools in a `{type:"namespace", name:"moca"}` group (the SIWC tool-shaping contract). Config: `providers.anthropic.auth: "oauth"` is rejected with the recorded reason; `config.SetString` (comment-preserving, in-place) backs login's offer to flip `auth` to `"oauth"`. Exit mapping: `ErrInvalidGrant`/`ErrInvalidClient` → exit 2 (fixed with `moca login`).
+
+**Deviations.** (0) Task 4's `subscriptionBaseURLs`, `subscriptionHeaders` and `Credential.Extra` were not built: the verification record shows the same Responses base URL and no extra headers on the subscription route. (a) Task 1's "verify with a live flow on a test account" — endpoints were probed live, but no ChatGPT account exists on this host; the interactive leg is deferred (the fake-AS suite covers the flow end to end). (b) Task 4 Step 5 (live verification per shipped provider) — same reason. (c) Task 5 Step 5's second half (phase-6 live gate 4 with the fork-installed skill) — the install half was verified from the fork's build; the live-model half is deferred with the ship gate.
+
+**Task 5 — graphify PR #4174.** Branch `add-moca-platform` on `adeotek/graphify` → upstream `v8`: a `moca` entry in `_PLATFORM_CONFIG` (skill-only platform reusing claude's split bundle — `skill.md` byte-identical to pi's), `~/.config/moca/skills/graphify/SKILL.md` honoring `XDG_CONFIG_HOME`, project scope `<repo>/.moca/skills/graphify/SKILL.md`, `graphify moca install|uninstall` dispatch + help text, `tests/test_moca.py`. Graphify suites: 409 passed / 0 failed across the ten install/detect suites; `ruff` clean; pyright only pre-existing fcntl/typing errors. `docs/external-tools.md` documents the install with the manual-copy fallback until a release carries it.
+
+**Task 6 — polish.** `moca --help`/`-h` prints the full usage surface to stdout with exit 0 (previously a raw flag error); version stamped at build time from `git describe --tags --always --dirty` via ldflags; `make build/test/vet/release` (release cross-compiles linux amd64+arm64, darwin amd64+arm64, windows/amd64, CGO_ENABLED=0; windows/darwin `go vet` clean); README rewritten for users; CHANGELOG v0.1.0 — 2026-10-06.
+
+**Task 7 — ship gate.** `test/shipgate/`: a fixture repo (`calc.Sum` skips `xs[0]`; `TestTotals` fails), a checker (`shipgate_test.go`, `//go:build shipgate`) asserting the seven §14 gates from the session JSONL + repo state + exit code, and `run.sh` (hermetic temp XDG dirs, `git init -b main`, frozen prompt, key from the repo `.env` via `env:` indirection). The checker was **rehearsed end-to-end against real scripted-provider sessions**: the good script (read failing test → search → edit → `rtk test -- go test ./...` green → commit on `fix/sum`) passes all seven gates; the same flow minus the search turn fails with exactly `2: the bug was not located with search before the fix`. The live legs (3 unattended real-model runs) are deferred — the key-gated run was refused by consent policy and must not be retried without explicit approval.
+
+**Deferred (need Ben).** (1) `bash test/shipgate/run.sh` ×3 (real model; repo `.env` key); (2) a live `moca login openai` round-trip; (3) tag `v0.1.0` + GitHub release (Task 8 — the plan itself says to ask first).
+
+## Review fixes (2026-10-06 — review passes 1 & 2)
+
+Two independent review passes ran on the phase-7 branch: pass 1
+(`docs/reviews/2026-10-06-phase-7-oauth-release.md`, Approve with fixes:
+0H/2M/4L) and an adversarial pass 2
+(`docs/reviews/2026-10-06-phase-7-oauth-release-pass-2.md`, Approve with
+fixes: 0H/4M/6L; the passes ran in parallel and were committed as-is). All
+confirmed findings were fixed with regression tests; the guard tests that
+cannot fail against the pre-fix tree were proven load-bearing by mutation
+(scratch overlay copies, working tree untouched): randText swallowing the
+entropy error, a constant randText, the JWKS kid filter, the JWKS exponent
+guard, the exitFor sentinel case and the config/provider OAuth-list sync all
+fail their tests when mutated.
+
+**Fixed.**
+
+- 1-1 / 2-3 (Medium): a pre-existing `auth.json.tmp` mode was published
+  through the rename. `Store.write` now `os.Chmod`s the tmp to 0600 before
+  the rename; `TestStoreWriteForcesMode` pre-creates the tmp at 0644.
+- 1-2 / 2-1 (Medium): `randText` swallowed `crypto/rand` failures, so state
+  and nonce could silently become `""` (fail-open CSRF). It now returns
+  `(string, error)` and `pkce()` propagates; `randRead` is indirected for
+  the test. `TestLoginFailsOnEntropyError` (fails only after the verifier
+  read, so it pins the randText path) and `TestPKCEUniqueness` (catches
+  constant/empty sources and re-pins S256).
+- 1-3 / 2-2 (Low/Medium): the `ErrInvalidGrant`/`ErrInvalidClient` → exit 2
+  mapping had no test. `TestExitForOAuthSentinels` pins both sentinels plus
+  the plain-error and cancelled-context cases.
+- 1-4 (Low): `auth: "oauth"` for a provider with no OAuth flow passed config
+  validation and failed at request time as a runtime error. Config now
+  rejects it at load (`config.OAuthProviders`, message "no OAuth support for
+  this provider; set "api_key""), and `TestOAuthProviderListsStayInSync`
+  pins `config.OAuthProviders` against `provider.oauthProviders`.
+- 1-5 (Low): README said "Status: v0.1.0" while the tag is deferred — now
+  "pending the §14 ship gate", and the phase-7 table row says so too.
+- 1-6a (Low): `run.sh` leaked three temp dirs per run. A cleanup trap now
+  removes them on success and keeps them (with a note) on failure, so a
+  failed gate's session file stays inspectable.
+- 2-5 (Low): `SetString` on duplicate keys edited the first occurrence while
+  `encoding/json`/`Parse` keep the last — the write silently didn't take
+  effect. Own probe adjudicated the passes' disagreement (see below).
+  `objectValueSpan` now resolves to the last match, consistent with
+  `scanner.value`'s existing last-wins behaviour; pinned by
+  `TestSetStringDuplicateKeys` (both the duplicate-key and duplicate-object
+  shapes).
+- 2-6 (Low): `SetString` replaced a non-string value (`auth: 42` →
+  `"oauth"`), laundering a broken config into a parseable one. It now
+  refuses with "is not a string; fix the config first";
+  `TestSetStringRefusesNonString` also asserts the file is untouched.
+- 2-8 (Low): JWKS `kid` selection and the exponent sanity guard were
+  untested (both mutations survived the suite). The fake AS now serves a
+  second RSA key (`kid: "other"`) and can serve a bogus exponent;
+  `TestValidateIDTokenKidSelection` proves kid selection in both directions
+  and `TestJWKSExponentSanity` proves a zero exponent is skipped, not used.
+- 2-9 (Low): a redirect URL pasted without its scheme (terminal wrap, hand
+  copy) was exchanged as a bogus code and failed with an opaque
+  `invalid_grant`. `parsePasted` now recovers a scheme-less URL (prepending
+  `http://`, host must be plausible) with the state check still applying,
+  and names the problem ("lost its scheme") when it cannot; the bare-code
+  trust argument is now stated in the comment.
+- 2-10 (Low): the login used two channels, so when both a callback and a
+  paste result were ready the `select` picked randomly — a wrong paste could
+  flip an otherwise-successful login. Both producers now share one
+  first-wins channel (deterministic FIFO), pinned by
+  `TestLoginLatePasteIgnored`.
+- 2-7 (Low): documented at `Store.write` that the rename replaces a
+  symlinked `auth.json` by design (unlike the config edit helpers).
+
+**Adjudicated (own probes; reviewer claims are hypotheses).**
+
+- 2-5's probe shape was wrong: duplicate *provider objects* were already
+  edited last-wins and read last-wins (pass 1 was right to drop it). The
+  real inconsistency was duplicate *keys inside one object* — reproduced
+  with a scratch test before fixing (the probe became
+  `TestSetStringDuplicateKeys`). Fix: last-wins alignment, not the proposed
+  refusal — the edit must land on the value `Parse` reads, and the package's
+  scanner already resolves duplicates last-wins.
+- 2-4 (Medium, callback client-id echo): not actioned as a behaviour change.
+  The record (`docs/specs/oauth-verification.md` §2.2) specifies exactly the
+  implemented contract — the issued client id comes back in the callback
+  query and a different id must be rejected on reauthorization; the
+  proposed "prefer the token response" fallback would implement an
+  undocumented shape. Added the explicit contract comment at the
+  registration switch instead; `TestLoginRegistrationIncomplete` already
+  pins the loud refusal.
+- 2-10's proposed "ignored response" stderr note was not adopted: the drop
+  can only be observed inside the race window and printing from a losing
+  goroutine is itself racy; the structural fix removes the nondeterminism,
+  which is the actual defect.
+- 1-6b (checker scope: gates 1–2 accept any `_test.go` read / any search):
+  left as recorded — the plan's §14 wording is stricter, and tightening it
+  is batched with the deferred live legs (the checker's docstring already
+  commits to changing with the frozen prompt shape in one revision).
+
+**Re-verification.** Full suite race-green at 377 top-level tests (was 366);
+`gofmt`/`go vet` clean, `GOOS=windows`/`GOOS=darwin` vet clean; every new
+behaviour test either failed against the pre-fix sources (fail-first, before
+the fix) or was mutation-proven load-bearing (overlay copies); the ship-gate
+checker rehearsal (scripted provider) still passes both directions; the
+working tree was never mutated by the mutation checks.
+
+## Review fixes (2026-10-06 — review pass 3)
+
+Pass 3 (`docs/reviews/2026-10-06-phase-7-oauth-release-pass-3.md`, Approve
+with fixes: 0H/3M/6L) found nothing the earlier passes had marked fixed
+regressed; its new findings were all fixed, each with a regression test that
+was shown to fail against the pre-fix behaviour (scratch overlay mutations).
+
+- 3-1 (Medium): the ship-gate checker trusted the transcript's `[exit 0]`,
+  which `go test ./... | tail` or `|| true` forges. It now also runs
+  `go test ./...` in the final repo and fails gate 4 if that is red. Verified
+  with the pass-3 synthetic piped session against a repo with the bug unfixed
+  (now fails) and the good session against a fixed repo (passes).
+- 3-2 (Medium): `Registry.CheckCredential` (the `/model` and resume check)
+  refreshed an expired OAuth token over the network on the TUI update
+  goroutine with no ctx and no timeout. For OAuth it now only confirms a
+  stored login; refresh stays with the first request.
+  `TestCheckCredentialOAuthDoesNotTouchNetwork`.
+- 3-3 (Medium): the paste prompt's blocked stdin read outlived `Login` and
+  swallowed the "Switch it now? [y/N]" answer. `provider.LineReader` lets an
+  abandoned read keep its line for the next consumer; `runLogin` shares one
+  reader across both prompts. `TestLineReaderAbandonedReadKeepsLine`,
+  `TestLoginCallbackWinLeavesNextLineForCaller`, and the CLI-level
+  `TestLoginCLISwitchesAuthAfterCallback` (new `oauthLookup` seam drives
+  `moca login` against a fake authorization server).
+- 3-4 (Low): the store-lock wait ignored ctx (blocking `flock`) and the token
+  endpoint had no timeout. The lock now polls non-blocking (`LOCK_NB` /
+  `LOCKFILE_FAIL_IMMEDIATELY`) and gives up with ctx; a refresh is bounded at
+  30 s and logout's revoke at 15 s. `TestCredentialForLockWaitHonoursContext`,
+  `TestLockFileWaitsThenAcquires`, `TestRefreshIsTimeBounded`.
+- 3-5 (Low): a 429/5xx from the token endpoint was a plain error the retry
+  layer never retried, and a valid access token was not used when the
+  pre-expiry refresh failed. `tokenFrom` now returns `*HTTPError` (with
+  Retry-After), and `CredentialFor` falls back to the still-valid token on a
+  non-terminal failure. `TestTokenEndpointTransientIsRetryable`,
+  `TestTransientRefreshFailureFallsBack`.
+- 3-6/3-7 (Low): SPECS (`invalid_grant` keeps the entry; unknown-provider
+  wording; `CheckCredential`; 388 tests across 13 packages) and this plan's
+  Implementation notes corrected; CHANGELOG head is "unreleased" until the tag.
+- 3-8 (Low): tests for the open-failure message, wait-then-paste (Review
+  Focus 5) and `runLogin`'s success path (above).
+- 3-9 (Low): the loopback page answers a refused login with a 400 and "Login
+  failed", not "Login complete" (`TestCallbackPageReportsFailure`).
+
+Still deferred (need Ben): the three live ship-gate runs, a live `moca login
+openai`, and the `v0.1.0` tag. Review 1-6b (checker gates 1–2 accept any
+`_test.go` read / any search) stays batched with the live runs.
+
+## Review fixes (2026-10-06 — maintainer re-review of the pass-3 fixes)
+
+Mo re-reviewed the pass-3 fix commits (`2e35f7d`, `9f1ba7f`, `ddada17`,
+`b5198ec`) against `main..HEAD` before Ben's merge. Verified independently:
+
+- 3-1's checker gate: my own probe — the pass-case scripted session (whose
+  transcript says `[exit 0]`) pointed at a repo where the bug is **not** fixed
+  now fails with "4: `go test ./...` in the final repo state fails"; the same
+  session against the real fixed repo passes; the full scripted rehearsal
+  still passes both directions (good script ✓, no-search script fails gate 2).
+- 3-2..3-5, 3-9: the new tests are meaningful and the suite is race-green
+  (390 top-level tests, 13 packages); `a.cred(ctx)` runs inside the
+  retry-wrapped `Stream`, so the token-endpoint `*HTTPError` really is
+  retried; the Windows lock file closes its handle and handles
+  `ERROR_LOCK_VIOLATION`.
+- Docs (`ddada17`) match the code; the graph refresh (`b5198ec`) is valid
+  JSON (1986 nodes / 7292 links).
+
+**Found and fixed here:**
+
+1. `revokeTimeout` was declared but never used — the pass-3 note and this
+   plan claimed "logout's revoke at 15 s", but `runLogout` still called
+   `provider.Revoke` with the unbounded context. Wired with
+   `context.WithTimeout`; `TestLogoutRevokeIsBounded` (stalled revoke
+   endpoint, shrunk timeout) fails against the un-wired code
+   (mutation-proven: the test hangs into its own bound).
+2. The login path's HTTP client was still unbounded (pass 3 asked for the
+   token/revoke/JWKS client bound). `moca login` now uses
+   `&http.Client{Timeout: loginHTTPTimeout}` (30 s; a var for tests);
+   `TestLoginTokenEndpointIsBounded` (stalling token endpoint) fails against
+   the unbounded client (mutation-proven).
+
+## Host adaptation (2026-10-07 — first live ship-gate run on a host without rtk)
+
+Ben ran the first live ship-gate run on a host without rtk/graphify. The run
+failed gate 1, and the transcript shows why: the prompt hard-coded the rtk
+push, so the model's first action was `rtk …` → `bash: rtk: command not
+found`; it then explored without reading the failing test and gate 1 failed
+(`1: the failing test was not read before the fix`). The suite itself ended
+green and committed.
+
+Fix — the gate must be runnable on any host, and moca must never advertise a
+tool the shell cannot run:
+
+- `agent.filterSkills` drops builtin skills whose external CLI is missing
+  from `PATH` (`builtinTools` maps skill → CLI; project/global skills are
+  never filtered), and `PromptInput.RTK` gates the "Prefer rtk-prefixed …"
+  token-discipline line on `exec.LookPath("rtk")`. Tests:
+  `TestPromptRTKIsConditional`, `TestFilterSkillsDropsMissingBuiltins`.
+- The checker's gate 6 adapts: rtk on `PATH` → the prompt must advertise it
+  and the session must use it (unchanged); rtk absent → the prompt must hide
+  it (no `- rtk:` line, no `rtk-prefixed` bullet) and no usage is expected.
+  `run.sh` prints which mode it is in.
+- Verified end-to-end: a stripped-PATH simulation (scripted provider, bare
+  `go test ./...`) passes all gates with an rtk-free prompt; an rtk-built
+  session checked under the stripped PATH fails exactly
+  `6: rtk is not installed on this host but the prompt still advertises it`;
+  the normal rtk-present rehearsal is unchanged.
+
+## Live-run iteration (2026-10-07 — second live ship-gate run, rtk host)
+
+The second live run (rtk present, gate-6 mode correct) failed gate 1: the
+model ran the suite, searched, read `calc.go`/`stats.go`, diagnosed the
+off-by-one from the source and fixed it — without ever opening the failing
+test. DESIGN §14 step 1 is "read a failing test", so the gate stands and the
+agent got the missing guidance instead: the core prompt's working style now
+says *"When tests fail, read the failing test before changing code — its
+assertions say what the code must do"*, and the end-to-end bullet adds
+*"commit when the task asks"* (gate 5 needs the commit). Both pinned by
+`TestBuildSystemPrompt`.
+
+(The run's first `rtk test` showed `[exit 0]` on a red suite because the model
+masked its own exit code with a pipe — `rtk test` itself propagates exit codes
+correctly, verified locally; the checker's in-repo suite run is the
+authoritative gate-4 check either way.)
+
+## Live-run iteration 2 (2026-10-07 — third live run, rtk host)
+
+The third live run (the nudge present in the stored prompt — verified in the
+kept session) failed gate 1 again. The session
+(`/tmp/moca-shipgate-data.FiiHmH`, `…-13df5209.jsonl`) shows why: the model
+ran the suite (piped `rtk test`), read the failure text, read the sources via
+shell `cat calc/*.go` (the edit guard then refused the edit until `calc.go`
+was read with the read tool), fixed the off-by-one, and committed on
+`fix/sum` — but never opened the failing test and never used the search tool
+(`cat`/`ls`/`go test` in shell replaced them).
+
+Two gaps, two fixes — the checker and the frozen task prompt are untouched:
+
+- the working-style line is now tool-explicit: *"when tests fail, read the
+  failing test file with the read tool and locate the cause with search
+  before changing code"*;
+- file access is carved out of the rtk push: a new tools bullet says to use
+  read/search/ls for files (not shell cat/grep/find/ls — tracked reads are
+  what the edit guard accepts), the token-discipline line is scoped to
+  "shell command output", and the builtin rtk skill drops its file rows
+  (`rtk read`/`rtk ls`/`rtk grep`/`rtk find`) and defers to the tools — the
+  skill's own guidance was reinforcing the shell drift.
+
+Pinned by `TestBuildSystemPrompt`; the scripted rehearsals (rtk-present,
+rtk-absent, negative controls) are unchanged; full suite race-green.
+
+## Live-run iteration 3 (2026-10-07 — fourth live run)
+
+The fourth live run used search (the tool-explicit line landed) but still
+never opened the failing test: the model read the failure text, searched,
+hit the edit guard, read `calc.go`, fixed and committed — gate 1 again.
+
+The prompt lever is exhausted for this model class, so the step is now
+repeated where the attention is: a failing test run's shell result carries a
+trailing hint — *"[hint: when tests fail, read the failing test file with the
+read tool and locate the cause with search before changing code]"*. It fires
+when the command mentions a known test runner and the run failed (exit ≠ 0,
+or `fail` in the output — piped runs mask the exit code). The checker, the
+frozen task prompt and the tool schemas are untouched; pinned by
+`TestTestFailureHint` (pure) and `TestShellToolHintsFailingTestRun` (a real
+red `go test` through the tool); the rehearsals stay green.
+
+## Live-run iteration 4 (2026-10-07 — fifth live run)
+
+The hint worked: the fifth live run read `calc/calc_test.go` and
+`calc/stats_test.go` right after the failing suite run (gate 1 green) — but
+gate 2 surfaced next: the model never used the search tool (shell `ls calc` +
+reading all four files, then editing). Both remaining misses share a shape:
+a compound sentence loses its second half. The hint is now a numbered
+protocol — *"(1) read the failing test file with the read tool, (2) locate
+the cause with the search tool, (3) only then edit"* — and the working-style
+line is split into two bullets (read the test; locate with search) so
+neither step rides on the other's coattails.
+
+## Live-run iteration 5 (2026-10-07 — runs 5–7: enforcement; live legs delegated)
+
+Ben delegated the live legs ("run the test yourself and fix the issues until
+it passes"), so the gate was iterated live from this workstation thereafter.
+What the runs showed and what changed:
+
+- **Run 5** read the failing test (per-tool hints worked) but skipped the
+  search; hints were still too local. The banner became centralized: while a
+  failing test run is unresolved, *every* tool result carries the protocol
+  banner (registry level), and the shell side names the `*_test.go` parsed
+  from the failure output.
+- **Run 6–7** exposed two more failure modes: the model went full-shell
+  (`cat`, `sed -i` — fixing the bug without touching a single tool) and,
+  with the banner on every result, it still edited without the search — it
+  treats "located the cause" as satisfied by reading. Hints alone lose with
+  this model class, so the step is structural: `edit` refuses while the
+  failing test is unread or the search is missing, naming the missing step
+  (`investigationRefusal`). A `gofmt` compound-command refusal showed the
+  model recovering normally afterwards.
+- **Provider robustness** (found while iterating): a request that never
+  answered hung a run for 6+ minutes — the SSE stall guard only covers the
+  response body, so `agent.defaultHTTPClient` now sets a 120 s
+  `ResponseHeaderTimeout`; and the known Go-tier `[1210]` flake (HTTP 400
+  body led by `"type":"server_error"`) now retries instead of ending the run.
+
+## Live-run evidence (2026-10-07, real `glm-5.3-flash`, repo `.env` key)
+
+After the enforcement: **four consecutive green checker passes** (runs
+8–11) — `run8.txt`–`run11_kept.txt` under scratch
+`moca_shipgate_live/`, run 11 with full kept artifacts (repo
+`moca-shipgate.XoVZTE`, session `…-d04f9e23.jsonl`). Each transcript shows
+the §14 loop end-to-end (suite → search → read `calc_test.go` → edit
+`calc.go` → green → commit on `fix/sum`); the refusal messages closed the
+missing steps live (the test read in runs 8/9, the search in run 11). Cost
+per run: 16–42k tokens, $0.002–0.004. Runs 2–7 recorded the failure modes
+that drove the fixes (skipped search, full-shell fix, empty completion,
+`[1210]`, one hung request).

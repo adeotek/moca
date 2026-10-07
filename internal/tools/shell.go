@@ -88,6 +88,70 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	if len(short) > 60 {
 		short = short[:57] + "..."
 	}
+	if testRunCommand(a.Command) {
+		switch {
+		case out.TimedOut: // inconclusive — keep the state
+		case testRunFailed(a.Command, out.Output, out.ExitCode, out.TimedOut):
+			env.TestFailed = true
+			if !env.TestSeen {
+				if f := findTestFile(out.Output); f != "" {
+					env.FailingTest = f
+				} else if env.FailingTest == "" {
+					env.FailingTest = "*_test.go"
+				}
+			}
+		default: // a green run ends the failing state
+			env.TestFailed, env.FailingTest = false, ""
+		}
+	}
 	return Result{Content: body + status, IsError: out.ExitCode != 0 || out.TimedOut,
 		Summary: fmt.Sprintf("%s %s", short, status), Detail: Truncate(out.Output, shellMaxOutput)}
+}
+
+// testRunners identify a test run from its command line (case-insensitive).
+var testRunners = []string{"go test", "pytest", "cargo test", "dotnet test", "npm test", "npm run test",
+	"yarn test", "jest", "vitest", "rspec", "phpunit", "mvn test", "gradle test", "make test", "rtk test"}
+
+// testRunCommand reports whether the command line runs tests.
+func testRunCommand(command string) bool {
+	lc := strings.ToLower(command)
+	for _, m := range testRunners {
+		if strings.Contains(lc, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// testRunFailed reports a failing test run: a runner marker in the command
+// and a failure signal (exit != 0, or `fail` in the output — piped runs mask
+// the exit code).
+func testRunFailed(command, output string, exit int, timedOut bool) bool {
+	return !timedOut && testRunCommand(command) &&
+		(exit != 0 || strings.Contains(strings.ToLower(output), "fail"))
+}
+
+// findTestFile returns the first *_test.go file named in test output
+// ("calc_test.go:17: Sum(...) = 5, want 6").
+func findTestFile(output string) string {
+	for i := 0; ; {
+		j := strings.Index(output[i:], "_test.go")
+		if j < 0 {
+			return ""
+		}
+		j += i
+		start := j
+		for start > 0 && isPathByte(output[start-1]) {
+			start--
+		}
+		if start < j {
+			return output[start : j+len("_test.go")]
+		}
+		i = j + len("_test.go")
+	}
+}
+
+func isPathByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' ||
+		b == '_' || b == '-' || b == '.' || b == '/'
 }

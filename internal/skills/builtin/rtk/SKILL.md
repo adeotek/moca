@@ -1,6 +1,6 @@
 ---
 name: rtk
-description: Token-compressed CLI proxy. Prefer it for shell commands whenever a wrapper exists — tests `rtk test go test ./...`, noisy builds `rtk err <cmd>`, git `rtk git …`, reads `rtk read <file>`, listings `rtk ls`/`rtk tree`, search `rtk grep`/`rtk find` — same signal, far fewer tokens.
+description: Token-compressed CLI proxy. Prefer it for shell command output whenever a wrapper exists — tests `rtk test go test ./...`, noisy builds `rtk err <cmd>`, git `rtk git …`, docker/k8s/gh listings — same signal, far fewer tokens. For files use moca's read/search/ls tools.
 ---
 # rtk — prefer compressed command output
 
@@ -11,11 +11,12 @@ description: Token-compressed CLI proxy. Prefer it for shell commands whenever a
 |---|---|
 | `git status` / `git log` / `git diff` | `rtk git status` / `rtk git log` / `rtk git diff` |
 | `go test ./...` / `pytest` / `npm test` | `rtk test go test ./...` (any runner; `--` before it also works) |
-| `ls -R`, `tree` | `rtk ls <dir>`, `rtk tree <dir>` |
-| `cat big.log` | `rtk read big.log` (`-l minimal`, or `-m 200` for a structural preview) |
-| `grep -r pat`, `find . -name x` | `rtk grep pat`, `rtk find . -name x` |
 | a noisy build or script | `rtk err <cmd>` (errors only) or `rtk summary <cmd>` |
 | `docker ps`, `gh pr list`, `kubectl get` | `rtk docker ps`, `rtk gh pr list`, `rtk kubectl get` |
+
+For files use moca's read/search/ls tools — reads are windowed and tracked
+(edit requires a tracked read of the file), and shell reads (`cat`, `rtk
+read`, …) do not count. rtk is for command output.
 
 Rules:
 - If rtk output is unusable (empty when output was expected, garbled, or contradicting the exit code), re-run as `rtk proxy <cmd>` for the raw output.

@@ -28,6 +28,21 @@ var BuiltinProviders = map[string]string{
 
 var Protocols = []string{"anthropic-messages", "openai-completions", "openai-responses"}
 
+// OAuthUnsupported lists providers whose subscription OAuth was rejected by
+// the phase-7 policy gate (docs/specs/oauth-verification.md): config
+// `auth: "oauth"` for one of these is an error citing the reason. openai's
+// Sign in with ChatGPT token sharing is supported, so it is not listed.
+var OAuthUnsupported = map[string]string{
+	"anthropic": "Anthropic does not permit third-party clients to use Claude subscription OAuth (docs/specs/oauth-verification.md); use an API key",
+}
+
+// OAuthProviders lists the providers whose subscription OAuth flow is
+// implemented — provider/oauth_providers.go holds the endpoint table and a
+// provider test pins the two lists together. `auth: "oauth"` for anything
+// else is a config error at load, not a request-time surprise with a
+// runtime exit code.
+var OAuthProviders = []string{"openai"}
+
 type Config struct {
 	Model     string                    `json:"model"`
 	ModelHard string                    `json:"modelHard"`
@@ -223,6 +238,12 @@ func (c Config) Validate() error {
 				return fmt.Errorf("providers.%s.apiKey must be an env: reference (e.g. \"env:MY_KEY\"), never a literal", name)
 			}
 		case "oauth":
+			if reason, ok := OAuthUnsupported[name]; ok {
+				return fmt.Errorf("providers.%s.auth \"oauth\" is not available: %s", name, reason)
+			}
+			if !slices.Contains(OAuthProviders, name) {
+				return fmt.Errorf("providers.%s.auth \"oauth\" is not available: no OAuth support for this provider; set \"api_key\"", name)
+			}
 		default:
 			return fmt.Errorf("providers.%s.auth must be \"api_key\" or \"oauth\", got %q", name, p.Auth)
 		}

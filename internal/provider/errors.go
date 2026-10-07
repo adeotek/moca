@@ -30,17 +30,26 @@ func (e *HTTPError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.Status,
 
 func newHTTPError(resp *http.Response) *HTTPError {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-	e := &HTTPError{Status: resp.StatusCode, Body: string(b)}
-	if s := resp.Header.Get("Retry-After"); s != "" {
-		if f, err := strconv.ParseFloat(s, 64); err == nil {
-			if f > 0 { // also rejects NaN
-				e.RetryAfter = time.Duration(min(f, 3600) * float64(time.Second))
-			}
-		} else if t, err := http.ParseTime(s); err == nil {
-			e.RetryAfter = max(time.Until(t), 0)
-		}
+	return &HTTPError{Status: resp.StatusCode, Body: string(b), RetryAfter: retryAfter(resp.Header)}
+}
+
+// retryAfter parses a Retry-After header (delta-seconds or an HTTP date);
+// zero when absent or unparseable.
+func retryAfter(h http.Header) time.Duration {
+	s := h.Get("Retry-After")
+	if s == "" {
+		return 0
 	}
-	return e
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		if f > 0 { // also rejects NaN
+			return time.Duration(min(f, 3600) * float64(time.Second))
+		}
+		return 0
+	}
+	if t, err := http.ParseTime(s); err == nil {
+		return max(time.Until(t), 0)
+	}
+	return 0
 }
 
 func retryable(err error) bool {
@@ -49,7 +58,14 @@ func retryable(err error) bool {
 	}
 	var he *HTTPError
 	if errors.As(err, &he) {
-		return he.Status == 408 || he.Status == 429 || he.Status >= 500
+		if he.Status == 408 || he.Status == 429 || he.Status >= 500 {
+			return true
+		}
+		// The opencode-go gateway frames some upstream failures as HTTP 400
+		// while labelling them server_error (the [1210] thinking-config
+		// flake observed in the live ship-gate runs): retry what the server
+		// itself calls a server error, bounded by the five-attempt budget.
+		return he.Status == http.StatusBadRequest && strings.Contains(he.Body, `"type":"server_error"`)
 	}
 	var ne net.Error
 	return errors.Is(err, ErrStall) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||

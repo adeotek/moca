@@ -231,6 +231,43 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 	}
 }
 
+func TestResponsesOAuthRouteShaping(t *testing.T) {
+	// On the subscription route (docs/specs/oauth-verification.md §2.4):
+	// no max_output_tokens, function tools grouped in one namespace, and
+	// store/stream as usual.
+	var body map[string]any
+	srv := sseServer(t, 200, responsesStream, &body, nil)
+	defer srv.Close()
+	m := Model{Provider: "openai", ID: "gpt", ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning}
+	cred := func(context.Context) (Credential, error) { return Credential{Token: "AT", OAuth: true}, nil }
+	a := newOpenAIResponses(m, srv.URL, cred, srv.Client())
+	_, err := a.Stream(context.Background(), llm.Request{Model: "gpt", System: "sys", MaxTokens: 500, Effort: llm.EffortLow,
+		Tools:    []llm.ToolSpec{{Name: "read", Description: "d", Schema: json.RawMessage(`{"type":"object"}`)}},
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "q"}}}},
+	}, func(llm.Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["max_output_tokens"]; ok {
+		t.Fatalf("subscription route must omit max_output_tokens: %v", body)
+	}
+	tools, ok := body["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools: %v", body["tools"])
+	}
+	ns, _ := tools[0].(map[string]any)
+	if ns["type"] != "namespace" || ns["name"] != "moca" || ns["description"] == "" {
+		t.Fatalf("tools must be namespaced on the subscription route: %v", ns)
+	}
+	inner, _ := ns["tools"].([]any)
+	if len(inner) != 1 || inner[0].(map[string]any)["name"] != "read" {
+		t.Fatalf("inner tools: %v", inner)
+	}
+	if body["store"] != false || body["stream"] != true || body["instructions"] != "sys" {
+		t.Fatalf("store/stream/instructions: %v", body)
+	}
+}
+
 func TestResponsesCredentialHeaders(t *testing.T) {
 	var hdr http.Header
 	srv := sseServer(t, 200, `event: response.completed

@@ -45,10 +45,18 @@ quoting model or option tables; the Unix analyser stays the reference.
 
 ## graphify
 
-`graphify` (codebase knowledge graph) is in the default allowlist. Until
-`graphify install --platform moca` lands upstream, install its skill
-manually. Copy it — symlinked skill directories are skipped by design
-(skill bodies load through the read jail):
+`graphify` (codebase knowledge graph) is in the default allowlist.
+
+    graphify install --platform moca
+
+writes the skill to `~/.config/moca/skills/graphify/` (honoring
+`$XDG_CONFIG_HOME`; `--project` targets `<repo>/.moca/skills/graphify/`).
+Contributed upstream in
+[Graphify-Labs/graphify#4174](https://github.com/Graphify-Labs/graphify/pull/4174) —
+it works from a graphify build that includes that PR; until it lands in a
+graphify release, install the skill manually. Copy it — symlinked skill
+directories are skipped by design (skill bodies load through the read
+jail):
 
     mkdir -p ~/.config/moca/skills
     cp -r ~/.claude/skills/graphify ~/.config/moca/skills/
