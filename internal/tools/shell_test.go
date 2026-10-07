@@ -91,7 +91,7 @@ func TestShellToolHintsFailingTestRun(t *testing.T) {
 		[]byte("package x\n\nimport \"testing\"\n\nfunc TestFail(t *testing.T) { t.Fatal(\"boom\") }\n"), 0o644)
 	r := run(t, shellTool{}, env, map[string]any{"command": "go test ./..."})
 	if !r.IsError || !strings.Contains(r.Content, "--- FAIL") ||
-		!strings.Contains(r.Content, "[hint: when tests fail, read the failing test file with the read tool") ||
+		!strings.Contains(r.Content, "[hint: tests failed: (1) read the failing test file with the read tool, (2) locate the cause with the search tool") ||
 		!strings.Contains(r.Content, "[exit 1]") {
 		t.Fatalf("failing test run must carry the read-the-test hint: %q", r.Content)
 	}

@@ -1219,3 +1219,15 @@ or `fail` in the output — piped runs mask the exit code). The checker, the
 frozen task prompt and the tool schemas are untouched; pinned by
 `TestTestFailureHint` (pure) and `TestShellToolHintsFailingTestRun` (a real
 red `go test` through the tool); the rehearsals stay green.
+
+## Live-run iteration 4 (2026-10-07 — fifth live run)
+
+The hint worked: the fifth live run read `calc/calc_test.go` and
+`calc/stats_test.go` right after the failing suite run (gate 1 green) — but
+gate 2 surfaced next: the model never used the search tool (shell `ls calc` +
+reading all four files, then editing). Both remaining misses share a shape:
+a compound sentence loses its second half. The hint is now a numbered
+protocol — *"(1) read the failing test file with the read tool, (2) locate
+the cause with the search tool, (3) only then edit"* — and the working-style
+line is split into two bullets (read the test; locate with search) so
+neither step rides on the other's coattails.

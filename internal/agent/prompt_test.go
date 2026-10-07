@@ -16,7 +16,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 	})
 	for _, want := range []string{"/w", "Linux x86_64", "2026-10-04", "branch main", "`shell` is stateless",
 		"read/search/ls for files, not shell cat/grep/find/ls",
-		"read the failing test file with the read tool", "locate the cause with search",
+		"read the failing test file with the read tool", "Locate the cause with the search tool before editing",
 		"commit when the task asks",
 		"rtk", "- rtk: compressed output (/d/rtk/SKILL.md)", "- context7: docs lookup", "Use tabs.", "moca 0.1.0"} {
 		if !strings.Contains(p, want) {

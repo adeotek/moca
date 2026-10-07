@@ -117,5 +117,5 @@ func testFailureHint(command, output string, exit int, timedOut bool) string {
 	if !run || (exit == 0 && !strings.Contains(strings.ToLower(output), "fail")) {
 		return ""
 	}
-	return "[hint: when tests fail, read the failing test file with the read tool and locate the cause with search before changing code]\n"
+	return "[hint: tests failed: (1) read the failing test file with the read tool, (2) locate the cause with the search tool, (3) only then edit]\n"
 }
