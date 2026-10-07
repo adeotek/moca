@@ -88,7 +88,7 @@ make test           # go test ./... -race -count=1
 make release        # five cross-compiled binaries in dist/
 ```
 
-`make` falls back to `mise x go -- go` when `go` is not on the PATH.
+`make` falls back to `mise x go -- go` when `go` is not on the PATH; with mise, the same targets run as `mise run build|test|vet|fmt|release|clean`.
 
 ## Phases
 

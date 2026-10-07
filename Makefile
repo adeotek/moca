@@ -4,6 +4,9 @@
 # version is pinned in go.mod's `toolchain` directive, which mise reads);
 # GORUN falls back to `mise x go -- go` when no go binary is found, so
 # `make build` works either way.
+#
+# The targets below are mirrored as mise tasks in mise.toml (`mise run
+# <task>`) — keep the two in sync.
 GORUN := $(shell command -v go >/dev/null 2>&1 && echo go || echo "mise x go -- go")
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 LDFLAGS := -s -w -X github.com/adeotek/moca/internal/config.Version=$(VERSION)

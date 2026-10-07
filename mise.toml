@@ -3,3 +3,43 @@
 # [tools] entry; requires a recent mise).
 [settings]
 idiomatic_version_file_enable_tools = ["go"]
+
+# These tasks mirror the Makefile targets — keep the two in sync. `make`
+# stays the canonical interface for machines without mise.
+[tasks.build]
+description = "Build bin/moca (version stamped from git describe)"
+run = '''
+VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)}"
+go build -trimpath -ldflags "-s -w -X github.com/adeotek/moca/internal/config.Version=$VERSION" -o bin/moca ./cmd/moca
+'''
+
+[tasks.test]
+description = "Run all tests (-race)"
+run = "go test ./... -race -count=1"
+
+[tasks.vet]
+description = "go vet ./..."
+run = "go vet ./..."
+
+[tasks.fmt]
+description = "go fmt ./..."
+run = "go fmt ./..."
+
+[tasks.release]
+description = "Cross-compile release binaries into dist/"
+run = '''
+VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)}"
+mkdir -p dist
+for p in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; do
+  os="${p%/*}"; arch="${p#*/}"
+  ext=""
+  if [ "$os" = "windows" ]; then ext=".exe"; fi
+  GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-s -w -X github.com/adeotek/moca/internal/config.Version=$VERSION" \
+    -o "dist/moca-$VERSION-$os-$arch$ext" ./cmd/moca
+done
+'''
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "rm -rf bin dist"

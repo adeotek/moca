@@ -34,6 +34,7 @@ CI (`.github/workflows/ci.yml`) runs the same gate set — the gofmt check, `go 
 - Version stamp: `config.Version`, set by the Makefile from `git describe --tags --always --dirty` via `-ldflags "-X github.com/adeotek/moca/internal/config.Version=…"`; a plain `go build` keeps the `"0.0.0-dev"` default.
 - Repo flow: `main` is PR-only (local pre-push hook blocks pushes to `refs/heads/main`); one branch + PR per phase (`phase/N-<slug>`) or chore (`chore/<slug>`); conventional commits; one version bump per PR (v0.1.0 at phase 7, pending the ship gate).
 - Gate scripts for the phase-1 style mock checks are not in the repo; a mock SSE server + a config pointing `baseUrl` at it reproduces them (see §10).
+- The `make` targets are mirrored as mise tasks defined in `mise.toml` (`mise run build|test|vet|fmt|release|clean`); `make` stays canonical for machines without mise.
 
 ### Package layout (implemented)
 
