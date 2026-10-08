@@ -2,6 +2,7 @@ package tui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/tools"
@@ -9,7 +10,7 @@ import (
 
 func TestItems(t *testing.T) {
 	var s Items
-	th := s.AddThinking("a\nb\nc")
+	th := s.AddThinking("a\nb\nc", 0)
 	if th.N != 1 || th.Line != "⋯ #1 thinking 3 lines" {
 		t.Fatal(th.Line)
 	}
@@ -34,6 +35,13 @@ func TestItems(t *testing.T) {
 	if pct.Line != "▸ #4 shell echo 100% [exit 0]" {
 		t.Fatal("summaries are never format strings:", pct.Line)
 	}
+	// A streamed thinking block carries its duration; a zero one omits it.
+	if d := s.AddThinking("x", 12*time.Second); d.Line != "⋯ #5 thinking 1 lines · 12s" {
+		t.Fatal(d.Line)
+	}
+	if d := s.AddThinking("x", 500*time.Millisecond); d.Line != "⋯ #6 thinking 1 lines · <1s" {
+		t.Fatal(d.Line)
+	}
 }
 
 func TestLastOfKind(t *testing.T) {
@@ -41,7 +49,7 @@ func TestLastOfKind(t *testing.T) {
 	if _, ok := s.LastOfKind("thinking"); ok {
 		t.Fatal("empty")
 	}
-	s.AddThinking("one")
+	s.AddThinking("one", 0)
 	s.AddTool(llm.ToolCall{Name: "ls"}, tools.Result{Summary: "x"})
 	th, ok := s.LastOfKind("thinking")
 	if !ok || th.N != 1 {

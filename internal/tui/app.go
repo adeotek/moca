@@ -61,10 +61,14 @@ type model struct {
 	items    Items
 	live     strings.Builder
 	thinking strings.Builder
-	running  bool
-	toolBusy string
-	cancel   context.CancelFunc
-	approval *approvalMsg
+	// thinkStart is when the open thinking block's first delta arrived; the
+	// item line reports the block's duration (zero when the block was not
+	// accumulated from deltas — e.g. a resumed or test-built one).
+	thinkStart time.Time
+	running    bool
+	toolBusy   string
+	cancel     context.CancelFunc
+	approval   *approvalMsg
 	// login is the active /login//logout interaction (modal, like approval).
 	login *loginState
 	// drop is the live /command autocomplete state (derived from the draft;
@@ -160,9 +164,13 @@ type padGuard struct {
 type settleMsg struct{}
 
 var (
-	dim  = lipgloss.NewStyle().Faint(true)
-	red  = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-	bold = lipgloss.NewStyle().Bold(true)
+	dim = lipgloss.NewStyle().Faint(true)
+	red = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	// orange marks the product name in the welcome line. One shade serves
+	// both light and dark terminals: the welcome prints before the terminal
+	// reports its background, and #d97706 keeps ≥3:1 contrast on white and
+	// 4.4+ on the common dark backgrounds.
+	orange = lipgloss.NewStyle().Foreground(lipgloss.Color("#d97706")).Bold(true)
 )
 
 func newModel(o AppOptions, a *agent.Agent) *model {
@@ -255,9 +263,10 @@ func (m *model) Init() tea.Cmd {
 }
 
 // welcomeText opens the scrollback of a session: title + version, then the
-// greeting.
+// greeting. The product name renders in orange (readable on light and dark
+// backgrounds alike — the welcome prints before the background is known).
 func welcomeText() string {
-	return bold.Render("moca") + " " + dim.Render(config.Version) + "\n" + "How can I help you today?"
+	return orange.Render("moca") + " " + dim.Render(config.Version) + "\n" + "How can I help you today?"
 }
 
 // commitLive moves every completed line out of the live buffer and returns
@@ -901,12 +910,19 @@ func (m *model) handleShellDone(msg shellDoneMsg) tea.Cmd {
 func (m *model) handleAgent(e agent.Event) tea.Cmd {
 	switch e := e.(type) {
 	case agent.TextDelta:
+		// The thinking block that preceded this text is done: close it into
+		// its item line FIRST, so the scrollback reads thinking → response.
+		flush := m.flushThinking()
 		m.live.WriteString(e.Text)
+		var commit tea.Cmd
 		if lines := m.commitLive(); len(lines) > 0 {
-			return m.printlnResponse(strings.Join(lines, "\n"))
+			commit = m.printlnResponse(strings.Join(lines, "\n"))
 		}
-		return nil
+		return tea.Sequence(flush, commit)
 	case agent.ThinkingDelta:
+		if m.thinking.Len() == 0 {
+			m.thinkStart = m.now()
+		}
 		m.thinking.WriteString(e.Text)
 		return nil
 	case agent.StreamReset:
@@ -915,7 +931,9 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		return m.printlnMuted("[stream interrupted — retrying]")
 	case agent.ToolStart:
 		m.toolBusy = e.Call.Name
-		return nil
+		// A tool call ends any open thinking block: print its line before
+		// the tool's own item (which lands on ToolEnd).
+		return m.flushThinking()
 	case agent.ToolEnd:
 		m.toolBusy = ""
 		it := m.items.AddTool(e.Call, e.Result)
@@ -928,11 +946,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 			cmds = append(cmds, m.printlnResponse(rest))
 		}
 		m.live.Reset()
-		if m.thinking.Len() > 0 {
-			it := m.items.AddThinking(m.thinking.String())
-			cmds = append(cmds, m.printlnMuted(it.Line+thinkingHint))
-		}
-		m.thinking.Reset()
+		cmds = append(cmds, m.flushThinking())
 		m.lastAssistant = llm.TextOf(e.Message)
 		m.status.Transient = ""
 		m.refreshStatus()
@@ -959,6 +973,24 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		return m.println("yolo mode off: permission checks restored")
 	}
 	return nil
+}
+
+// flushThinking closes the open thinking block (if any) into a numbered item
+// and prints its line — in place, before whatever follows: the response text,
+// a tool item, the turn end. Waiting for TurnEnd (the old behaviour) stranded
+// the line after the response it preceded.
+func (m *model) flushThinking() tea.Cmd {
+	if m.thinking.Len() == 0 {
+		return nil
+	}
+	dur := time.Duration(0)
+	if !m.thinkStart.IsZero() {
+		dur = m.now().Sub(m.thinkStart)
+	}
+	it := m.items.AddThinking(m.thinking.String(), dur)
+	m.thinking.Reset()
+	m.thinkStart = time.Time{}
+	return m.printlnMuted(it.Line + thinkingHint)
 }
 
 func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
@@ -1112,6 +1144,19 @@ func fmtElapsed(d time.Duration) string {
 		return fmt.Sprintf("%dm %02ds", s/60, s%60)
 	}
 	return fmt.Sprintf("%dh %02dm", s/3600, s%3600/60)
+}
+
+// fmtThinkDuration renders a thinking block's duration for its item line:
+// sub-second blocks read "<1s", and a zero duration (the block was not
+// accumulated from deltas) is omitted entirely.
+func fmtThinkDuration(d time.Duration) string {
+	switch {
+	case d <= 0:
+		return ""
+	case d < time.Second:
+		return "<1s"
+	}
+	return fmtElapsed(d)
 }
 
 // statusLine renders the two-line bar; in yolo mode a red YOLO field leads

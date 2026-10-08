@@ -15,6 +15,8 @@ Polish, a credential store in the config dir, `/` autocomplete, and a bigger cat
 
 - **`/` autocomplete dropdown** — typing `/` lists every built-in command and loaded prompt template (with one-line hints), filtered as you type; `↑`/`↓` pick, `tab` completes, `enter` on an exact name runs it, `esc` dismisses. Built-ins win name collisions with templates.
 - **Commands echo as messages** — a submitted `/` command prints in the scrollback with the same `›` band as user messages, then its output (refusals included).
+- **Welcome line**: the `moca` product name renders in orange (`#d97706`).
+- **Thinking blocks** now print their item line when the block ends — before the response or tool item that follows, not after — and show how long they streamed (`⋯ #6 thinking 8 lines · 12s`).
 - Two-line status bar from the first frame: `version · cwd · branch` and `provider/model · effort · ctx % · in/out · cost`.
 - Full-width rules around the input area (no prompt prefix), compact welcome lines, full-row backgrounds for submitted messages and assistant responses, muted tool/thinking lines, `/exit` (`/q`/`/quit` aliases).
 - Shrinking frames can no longer strand stale rows in the scrollback when keystrokes coalesce into one rendered frame (the inline-renderer shrink guard now remembers the last frame the renderer actually flushed).

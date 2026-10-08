@@ -100,7 +100,8 @@ func TestThinkingCollapsedOnTurnEnd(t *testing.T) {
 	}
 	m.Update(agentEventMsg{agent.TurnEnd{Message: llm.Message{}}})
 	it, ok := m.items.Last()
-	if !ok || it.Kind != "thinking" || it.Line != "⋯ #1 thinking 2 lines" {
+	// The block streamed from deltas, so its line carries the duration.
+	if !ok || it.Kind != "thinking" || it.Line != "⋯ #1 thinking 2 lines · <1s" {
 		t.Fatal(it)
 	}
 }

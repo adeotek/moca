@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/tools"
@@ -27,9 +28,15 @@ func (s *Items) add(kind, mark, text, body string) Item {
 	return it
 }
 
-func (s *Items) AddThinking(text string) Item {
+// AddThinking numbers a thinking block; dur is how long it streamed (zero —
+// e.g. a block not accumulated from deltas — omits the duration).
+func (s *Items) AddThinking(text string, dur time.Duration) Item {
 	n := strings.Count(strings.TrimRight(text, "\n"), "\n") + 1
-	return s.add("thinking", "⋯", fmt.Sprintf("thinking %d lines", n), text)
+	desc := fmt.Sprintf("thinking %d lines", n)
+	if d := fmtThinkDuration(dur); d != "" {
+		desc += " · " + d
+	}
+	return s.add("thinking", "⋯", desc, text)
 }
 
 func (s *Items) AddTool(call llm.ToolCall, r tools.Result) Item {
