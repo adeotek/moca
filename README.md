@@ -61,7 +61,8 @@ moca -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
 | `enter` | send |
 | `shift+enter` (`alt+enter` / `ctrl+j` fallback) | newline |
 | `esc` | interrupt the run |
-| `ctrl+o` | pager (full item bodies) |
+| `ctrl+o` | pager on the latest item (full tool output / diff) |
+| `alt+t` | pager on the latest thinking block (the whole reasoning chain) |
 | `alt+p` | paste chips (large pastes collapsed, buffer intact) |
 | `ctrl+c` ×2 | quit (or `/exit`) |
 | `a` / `ctrl+a` / `d` | approval: allow once / allow always / deny |
