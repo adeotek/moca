@@ -51,6 +51,9 @@ type model struct {
 	status   StatusInfo
 	width    int
 	height   int
+	// darkBG: the terminal's reported background (defaults dark) — picks the
+	// scrollback message background variants (tea.BackgroundColorMsg).
+	darkBG bool
 	// kbdEnhanced: the terminal reports key disambiguation (shift+enter).
 	kbdEnhanced   bool
 	hintShown     bool
@@ -96,7 +99,7 @@ func newModel(o AppOptions, a *agent.Agent) *model {
 	ta.Prompt = ""
 	ta.SetHeight(3)
 	ta.Focus()
-	m := &model{opts: o, start: o.Start, agent: a, input: NewInput(), ta: ta, now: time.Now}
+	m := &model{opts: o, start: o.Start, agent: a, input: NewInput(), ta: ta, now: time.Now, darkBG: true}
 	m.refreshStatus()
 	return m
 }
@@ -132,7 +135,11 @@ func (m *model) branchCmd() tea.Cmd {
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(println(welcomeText()), m.branchCmd(), tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return hintCheckMsg{} }))
+	// RequestBackgroundColor asks the terminal for its background (OSC 11);
+	// the reply arrives as tea.BackgroundColorMsg and picks the message
+	// background variants. No reply (unsupported terminal) keeps the dark
+	// default set in newModel.
+	return tea.Batch(println(welcomeText()), m.branchCmd(), tea.RequestBackgroundColor, tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return hintCheckMsg{} }))
 }
 
 // welcomeText opens the scrollback of a session: title + version, then the
@@ -171,7 +178,7 @@ func (m *model) startRun(text string) tea.Cmd {
 	m.thinking.Reset()
 	m.toolBusy = ""
 	a := m.agent
-	return tea.Sequence(printlnContent("› "+text), func() tea.Msg {
+	return tea.Sequence(m.printlnUser("› "+text), func() tea.Msg {
 		defer close(done)
 		out, err := a.Run(ctx, text)
 		return runDoneMsg{out: out, err: err}
@@ -189,6 +196,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyboardEnhancementsMsg:
 		m.kbdEnhanced = msg.SupportsKeyDisambiguation()
+		return m, nil
+	case tea.BackgroundColorMsg:
+		m.darkBG = msg.IsDark()
 		return m, nil
 	case hintCheckMsg:
 		if !m.kbdEnhanced && !m.hintShown {
@@ -698,7 +708,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 	case agent.TextDelta:
 		m.live.WriteString(e.Text)
 		if lines := m.commitLive(); len(lines) > 0 {
-			return printlnContent(strings.Join(lines, "\n"))
+			return m.printlnResponse(strings.Join(lines, "\n"))
 		}
 		return nil
 	case agent.ThinkingDelta:
@@ -720,7 +730,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.toolBusy = ""
 		var cmds []tea.Cmd
 		if rest := m.live.String(); rest != "" {
-			cmds = append(cmds, printlnContent(rest))
+			cmds = append(cmds, m.printlnResponse(rest))
 		}
 		m.live.Reset()
 		if m.thinking.Len() > 0 {
@@ -767,7 +777,7 @@ func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
 	// leaving it in the live region would freeze it there and the next run
 	// would silently drop it.
 	if m.live.Len() > 0 {
-		cmds = append(cmds, printlnContent(m.live.String()))
+		cmds = append(cmds, m.printlnResponse(m.live.String()))
 	}
 	m.live.Reset()
 	m.thinking.Reset()
