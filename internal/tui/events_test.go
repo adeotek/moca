@@ -13,6 +13,7 @@ func TestCompactedAndResumedLines(t *testing.T) {
 	if got := printed(cmd); !strings.Contains(got, "compacted: 26896 → 14500 tokens") {
 		t.Fatalf("compacted line: %q", got)
 	}
+	ack(m)
 	_, cmd = m.Update(agentEventMsg{agent.Resumed{ID8: "deadbeef", Messages: 12}})
 	if got := printed(cmd); !strings.Contains(got, "resumed deadbeef (12 messages)") {
 		t.Fatalf("resumed line: %q", got)

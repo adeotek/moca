@@ -310,6 +310,7 @@ func TestAllowAlwaysPersists(t *testing.T) {
 	if !strings.Contains(printed(cmd), "always allowing") {
 		t.Fatalf("confirmation line: %q", printed(cmd))
 	}
+	ack(m)
 	// A failing write is reported, but the command is still allowed.
 	m.opts.ConfigPath = t.TempDir() // a directory: unwritable as a file
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "node", CanAlways: true}, reply: reply})

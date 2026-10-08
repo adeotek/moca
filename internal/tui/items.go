@@ -55,3 +55,14 @@ func (s *Items) Get(n int) (Item, bool) {
 }
 
 func (s *Items) Last() (Item, bool) { return s.Get(len(s.list)) }
+
+// LastOfKind returns the most recent item of the given kind ("tool" or
+// "thinking").
+func (s *Items) LastOfKind(kind string) (Item, bool) {
+	for i := len(s.list) - 1; i >= 0; i-- {
+		if s.list[i].Kind == kind {
+			return s.list[i], true
+		}
+	}
+	return Item{}, false
+}

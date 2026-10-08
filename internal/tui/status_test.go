@@ -51,3 +51,19 @@ func TestRenderStatusNarrow(t *testing.T) {
 		t.Fatal("ctx % survives at 60 cols")
 	}
 }
+
+// The context percentage keeps one decimal below 10% so a small conversation
+// in a large window does not read as a stuck "0%".
+func TestFmtPercent(t *testing.T) {
+	for _, c := range []struct {
+		used, window int
+		want         string
+	}{
+		{0, 1_000_000, "0%"}, {10, 1_000_000, "<0.1%"}, {4_200, 1_000_000, "0.4%"}, {50_000, 1_000_000, "5.0%"},
+		{99_999, 1_000_000, "10%"}, {230_000, 1_000_000, "23%"}, {1_300_000, 1_000_000, "130%"}, {5, 0, "0%"},
+	} {
+		if got := FmtPercent(c.used, c.window); got != c.want {
+			t.Errorf("FmtPercent(%d, %d) = %q, want %q", c.used, c.window, got, c.want)
+		}
+	}
+}

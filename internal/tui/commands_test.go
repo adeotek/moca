@@ -31,6 +31,11 @@ func TestParseInput(t *testing.T) {
 			t.Errorf("ParseInput(%q) = %+v, %v; want %+v", c.in, got, err, c.want)
 		}
 	}
+	// An alias never hides a prompt template that owns the name.
+	owned := []skills.Prompt{{Name: "q", Body: "Question $1"}}
+	if got, _ := ParseInput("/q why", owned); got.Kind != KindPrompt || got.Text != "Question why" {
+		t.Fatalf("a prompt named like an alias must win: %+v", got)
+	}
 	if _, err := ParseInput("/nope", prompts); err == nil || !strings.Contains(err.Error(), "/help") {
 		t.Fatal(err)
 	}

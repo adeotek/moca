@@ -34,6 +34,24 @@ type AppOptions struct {
 
 type hintCheckMsg struct{}
 
+// printedMsg acknowledges that a scrollback flush reached the renderer; the
+// next queued output may go out (see emit).
+type printedMsg struct{}
+
+// releaseMsg ends the pager's hold on scrollback output once the renderer has
+// left the alt screen; pagerSettle is a few renderer frames.
+type releaseMsg struct{}
+
+const pagerSettle = 50 * time.Millisecond
+
+// spinMsg advances the activity spinner; gen ties it to one run so a stale
+// tick from a finished run never starts a second chain.
+type spinMsg struct{ gen int }
+
+const spinInterval = 100 * time.Millisecond
+
+var spinFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
 type model struct {
 	opts     AppOptions         // Workdir/ConfigPath/Prompts/Home for rendering and commands
 	start    agent.StartOptions // opts.Start with Emit/Ask wired; /clear restarts from this copy
@@ -81,10 +99,51 @@ type model struct {
 	// runDone closes when the run goroutine returns (quit waits for the abort
 	// to reach the transcript).
 	runDone chan struct{}
+	// outq holds scrollback output waiting for the in-flight flush to land;
+	// outBusy says one is in flight (see emit).
+	outq    []string
+	outBusy bool
+	// pipe is the ordered path into the event loop (nil in unit tests): the
+	// run's completion goes through it so it cannot overtake streamed events.
+	pipe *eventPipe
+	// recent are the cursor rows of the last few rendered Views and settling
+	// says a settleMsg is already scheduled (padForShrink).
+	recent   []cursorSample
+	settling bool
+	// runStart, runGen and spin drive the activity line: when the run began,
+	// which run's ticks are live, and the spinner frame.
+	runStart time.Time
+	runGen   int
+	spin     int
 }
+
+// thinkingHint is appended to a printed thinking line: the scrollback is
+// immutable, so the full reasoning opens in the pager.
+const thinkingHint = " · alt+t to read"
 
 // approvalIdle is the typing pause required before `a`/`d` answer a prompt.
 const approvalIdle = 700 * time.Millisecond
+
+// inputChrome is the number of terminal rows the input box leaves for the
+// rest of the screen: it grows with the draft but never past height minus
+// this, so the frame always fits and the top of the scrollback stays visible.
+// Longer drafts scroll inside the box.
+const inputChrome = 8
+
+// guardWindow is how long a frame's cursor row is remembered as "possibly the
+// renderer's current row" (see padForShrink); it comfortably exceeds the
+// renderer's flush interval.
+const guardWindow = 60 * time.Millisecond
+
+// cursorSample is the cursor row of one rendered View and when it was built.
+type cursorSample struct {
+	y  int
+	at time.Time
+}
+
+// settleMsg re-renders once the shrink-guard window has passed, dropping the
+// padding rows (see padForShrink).
+type settleMsg struct{}
 
 var (
 	dim  = lipgloss.NewStyle().Faint(true)
@@ -97,7 +156,20 @@ func newModel(o AppOptions, a *agent.Agent) *model {
 	ta.ShowLineNumbers = false
 	// No prompt prefix: the input area renders the text alone (§11).
 	ta.Prompt = ""
-	ta.SetHeight(3)
+	ta.Placeholder = "Message moca…  (/help for commands)"
+	// The box grows and shrinks with the draft, from one row up to what fits
+	// on screen (MaxHeight follows the window size), then scrolls.
+	// MaxContentHeight lifts the legacy rule that also blocks newlines once
+	// MaxHeight logical lines exist (MaxHeight then only sizes the viewport).
+	// The default cursor-line highlight (a black band) is dropped. The cursor
+	// is the terminal's own (see View).
+	ta.DynamicHeight, ta.MinHeight, ta.MaxHeight, ta.MaxContentHeight = true, 1, 8, 10000
+	ta.SetVirtualCursor(false)
+	st := textarea.DefaultStyles(true)
+	st.Focused.CursorLine = lipgloss.NewStyle()
+	st.Focused.Placeholder = mutedFg
+	st.Blurred.Placeholder = mutedFg
+	ta.SetStyles(st)
 	ta.Focus()
 	m := &model{opts: o, start: o.Start, agent: a, input: NewInput(), ta: ta, now: time.Now, darkBG: true}
 	m.refreshStatus()
@@ -107,14 +179,40 @@ func newModel(o AppOptions, a *agent.Agent) *model {
 func (m *model) syncTextarea() { m.ta.SetValue(m.input.Buffer()) }
 func (m *model) pullTextarea() { m.input.SetBuffer(m.ta.Value()) }
 
+// emit queues s for the scrollback and returns the command that prints it
+// (nil while an earlier flush is still in flight — that flush's
+// acknowledgement sends the queue on). Bubble Tea runs every command Update
+// returns on its own goroutine, so two plain tea.Println commands returned by
+// back-to-back Updates — a burst of streamed lines — can reach the renderer
+// out of order. One flush at a time, acknowledged through printedMsg, keeps
+// the scrollback in emission order.
+func (m *model) emit(s string) tea.Cmd {
+	m.outq = append(m.outq, s)
+	if m.outBusy {
+		return nil
+	}
+	return m.flush()
+}
+
+// flush takes the whole queue as one print followed by its acknowledgement.
+func (m *model) flush() tea.Cmd {
+	if len(m.outq) == 0 {
+		m.outBusy = false
+		return nil
+	}
+	body := strings.Join(m.outq, "\n")
+	m.outq, m.outBusy = nil, true
+	return tea.Sequence(tea.Println(body), func() tea.Msg { return printedMsg{} })
+}
+
 // println prints a trusted or already-styled line into the scrollback.
-func println(s string) tea.Cmd { return tea.Println(s) }
+func (m *model) println(s string) tea.Cmd { return m.emit(s) }
 
 // printlnContent is println for untrusted content (model output, tool output,
 // user input, error strings): control bytes are neutralized so the terminal
 // never interprets them. Styled lines must use println — running lipgloss
 // output through Sanitize would display the escape codes as text.
-func printlnContent(s string) tea.Cmd { return tea.Println(Sanitize(s)) }
+func (m *model) printlnContent(s string) tea.Cmd { return m.emit(Sanitize(s)) }
 
 func (m *model) refreshStatus() {
 	m.status.Version = config.Version
@@ -139,7 +237,7 @@ func (m *model) Init() tea.Cmd {
 	// the reply arrives as tea.BackgroundColorMsg and picks the message
 	// background variants. No reply (unsupported terminal) keeps the dark
 	// default set in newModel.
-	return tea.Batch(println(welcomeText()), m.branchCmd(), tea.RequestBackgroundColor, tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return hintCheckMsg{} }))
+	return tea.Batch(m.println(welcomeText()), m.branchCmd(), tea.RequestBackgroundColor, tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return hintCheckMsg{} }))
 }
 
 // welcomeText opens the scrollback of a session: title + version, then the
@@ -177,23 +275,54 @@ func (m *model) startRun(text string) tea.Cmd {
 	m.live.Reset()
 	m.thinking.Reset()
 	m.toolBusy = ""
-	a := m.agent
-	return tea.Sequence(m.printlnUser("› "+text), func() tea.Msg {
+	m.runStart, m.spin = m.now(), 0
+	m.runGen++
+	a, pipe := m.agent, m.pipe
+	return tea.Batch(tea.Sequence(m.printlnUser("› "+text), func() tea.Msg {
 		defer close(done)
 		out, err := a.Run(ctx, text)
-		return runDoneMsg{out: out, err: err}
-	})
+		msg := runDoneMsg{out: out, err: err}
+		if pipe != nil {
+			pipe.send(msg) // behind every event the run emitted
+			return nil
+		}
+		return msg
+	}), m.spinTick())
+}
+
+// spinTick schedules the next spinner frame of the current run.
+func (m *model) spinTick() tea.Cmd {
+	gen := m.runGen
+	return tea.Tick(spinInterval, func(time.Time) tea.Msg { return spinMsg{gen} })
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.ta.SetWidth(max(10, msg.Width-2))
+		m.ta.MaxHeight = max(1, msg.Height-inputChrome)
+		m.ta.SetWidth(max(10, msg.Width)) // also re-fits the box height
 		if m.pager != nil {
 			m.pager.resize(msg.Width, msg.Height)
 		}
 		return m, nil
+	case releaseMsg:
+		if m.pager != nil {
+			return m, nil // reopened meanwhile: keep holding
+		}
+		return m, m.release()
+	case settleMsg:
+		m.settling = false
+		return m, nil
+	case printedMsg:
+		m.outBusy = false
+		return m, m.hold(m.flush())
+	case spinMsg:
+		if !m.running || msg.gen != m.runGen {
+			return m, nil
+		}
+		m.spin = (m.spin + 1) % len(spinFrames)
+		return m, m.spinTick()
 	case tea.KeyboardEnhancementsMsg:
 		m.kbdEnhanced = msg.SupportsKeyDisambiguation()
 		return m, nil
@@ -203,7 +332,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case hintCheckMsg:
 		if !m.kbdEnhanced && !m.hintShown {
 			m.hintShown = true
-			return m, m.hold(println("hint: this terminal can't report shift+enter; use alt+enter or ctrl+j for a newline"))
+			return m, m.hold(m.printlnMuted("hint: this terminal can't report shift+enter; use alt+enter or ctrl+j for a newline"))
 		}
 		return m, nil
 	case tea.PasteMsg:
@@ -295,7 +424,10 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		open, cmd := m.pager.update(k)
 		if !open {
 			m.pager = nil
-			return tea.Batch(cmd, m.release())
+			// Not released at once: the renderer leaves the alt screen on its
+			// next flush, and a Println that lands before that is written to
+			// the alt screen and lost (see releaseMsg).
+			return tea.Batch(cmd, tea.Tick(pagerSettle, func(time.Time) tea.Msg { return releaseMsg{} }))
 		}
 		return cmd
 	}
@@ -330,6 +462,11 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "ctrl+o":
 		if it, ok := m.items.Last(); ok {
+			m.openPager(it)
+		}
+		return nil
+	case "alt+t":
+		if it, ok := m.items.LastOfKind("thinking"); ok {
 			m.openPager(it)
 		}
 		return nil
@@ -396,9 +533,9 @@ func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 			// makes it permanent.
 			m.start.Config.Shell.Allow = append(slices.Clone(m.start.Config.Shell.Allow), q.Subject)
 			if err := config.AppendString(path, []string{"shell", "allow"}, q.Subject, config.DefaultShellAllow); err != nil {
-				return printlnContent("error: allow-always not saved: " + err.Error()), true
+				return m.printlnError("error: allow-always not saved: " + err.Error()), true
 			}
-			return printlnContent(fmt.Sprintf("always allowing %q (saved to %s)", q.Subject, path)), true
+			return m.printlnContent(fmt.Sprintf("always allowing %q (saved to %s)", q.Subject, path)), true
 		case "mcp":
 			// Subject is server/tool. The running session already learned it
 			// from the AllowAlways answer; the config makes it survive /clear
@@ -412,9 +549,9 @@ func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 				m.start.Config.MCP.Servers[server] = s
 			}
 			if err := config.AppendString(path, []string{"mcp", "servers", server, "approve"}, tool, nil); err != nil {
-				return printlnContent("error: allow-always not saved: " + err.Error()), true
+				return m.printlnError("error: allow-always not saved: " + err.Error()), true
 			}
-			return printlnContent(fmt.Sprintf("always allowing %s (saved to %s)", q.Subject, path)), true
+			return m.printlnContent(fmt.Sprintf("always allowing %s (saved to %s)", q.Subject, path)), true
 		}
 		return nil, true
 	}
@@ -435,7 +572,7 @@ func (m *model) submit() tea.Cmd {
 	m.input.Submit()
 	m.syncTextarea()
 	if err != nil {
-		return printlnContent("error: " + err.Error())
+		return m.printlnError("error: " + err.Error())
 	}
 	switch parsed.Kind {
 	case KindText, KindPrompt:
@@ -443,10 +580,10 @@ func (m *model) submit() tea.Cmd {
 			if m.agent != nil {
 				m.agent.Steer(parsed.Text)
 			}
-			return printlnContent("↳ queued: " + firstLineOf(parsed.Text))
+			return m.printlnMuted("↳ queued: " + firstLineOf(parsed.Text))
 		}
 		if m.compacting {
-			return println("a /compact is still running — wait for it to finish")
+			return m.println("a /compact is still running — wait for it to finish")
 		}
 		if m.shellBusy {
 			return m.refuseBusy()
@@ -459,13 +596,13 @@ func (m *model) submit() tea.Cmd {
 			// `!` output enters the transcript; appending it between a tool
 			// batch's results would diverge from the wire ordering the
 			// rebuild guarantees. `!!` (local-only) stays available.
-			return printlnContent("finish or interrupt the run first (esc) — !! runs locally now")
+			return m.printlnContent("finish or interrupt the run first (esc) — !! runs locally now")
 		}
 		if m.compacting {
 			// A note appended while a compaction summarizes could be excluded
 			// from the summary (and land before the cut boundary, vanishing
 			// from the rebuilt context).
-			return println("a /compact is still running — wait for it to finish")
+			return m.println("a /compact is still running — wait for it to finish")
 		}
 		if m.shellBusy {
 			return m.refuseBusy()
@@ -478,22 +615,24 @@ func (m *model) submit() tea.Cmd {
 	return nil
 }
 
-// refuseRunning guards commands that mutate the running conversation.
-func (m *model) refuseRunning() tea.Cmd {
-	if m.shellBusy {
-		return m.refuseBusy()
+// refuseRunning guards commands that mutate the running conversation: when
+// one must not run now it returns the explanation to print and true. (The
+// print command can be nil while earlier output is in flight, so the bool —
+// not the command — says whether the request was refused.)
+func (m *model) refuseRunning() (tea.Cmd, bool) {
+	switch {
+	case m.shellBusy:
+		return m.refuseBusy(), true
+	case m.compacting:
+		return m.println("a /compact is still running — wait for it to finish"), true
+	case m.running:
+		return m.println("finish or interrupt the run first (esc)"), true
 	}
-	if m.compacting {
-		return println("a /compact is still running — wait for it to finish")
-	}
-	if !m.running {
-		return nil
-	}
-	return println("finish or interrupt the run first (esc)")
+	return nil, false
 }
 
 func (m *model) refuseBusy() tea.Cmd {
-	return println("a ! command is still running — wait for it to finish")
+	return m.println("a ! command is still running — wait for it to finish")
 }
 
 func (m *model) runCommand(c Parsed) tea.Cmd {
@@ -512,65 +651,65 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 				}
 				lines = append(lines, mark+mo.Qualified())
 			}
-			return printlnContent(strings.Join(lines, "\n"))
+			return m.printlnContent(strings.Join(lines, "\n"))
 		}
-		if cmd := m.refuseRunning(); cmd != nil {
+		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
 		if err := m.agent.SetModel(c.Args, ""); err != nil {
-			return printlnContent("error: " + err.Error())
+			return m.printlnError("error: " + err.Error())
 		}
 		m.refreshStatus()
 		s := m.agent.Status()
-		return printlnContent(fmt.Sprintf("switched to %s · effort %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
+		return m.printlnContent(fmt.Sprintf("switched to %s · effort %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
 	case "effort":
 		if c.Args == "" {
-			return printlnContent(fmt.Sprintf("effort %s — supported: %s", AbbrevEffort(st.Effort), supportedEfforts(st.Model)))
+			return m.printlnContent(fmt.Sprintf("effort %s — supported: %s", AbbrevEffort(st.Effort), supportedEfforts(st.Model)))
 		}
-		if cmd := m.refuseRunning(); cmd != nil {
+		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
 		want, err := llm.ParseEffort(c.Args)
 		if err != nil {
-			return printlnContent("error: " + err.Error())
+			return m.printlnError("error: " + err.Error())
 		}
 		got, err := m.agent.SetEffort(want)
 		if err != nil {
-			return printlnContent("error: " + err.Error())
+			return m.printlnError("error: " + err.Error())
 		}
 		m.refreshStatus()
 		note := ""
 		if got != want {
 			note = fmt.Sprintf(" (clamped from %s)", want)
 		}
-		return printlnContent("effort " + AbbrevEffort(got) + note)
+		return m.printlnContent("effort " + AbbrevEffort(got) + note)
 	case "hard":
-		if cmd := m.refuseRunning(); cmd != nil {
+		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
 		on, err := m.agent.ToggleHard()
 		if err != nil {
-			return printlnContent("error: " + err.Error())
+			return m.printlnError("error: " + err.Error())
 		}
 		m.refreshStatus()
 		s := m.agent.Status()
 		if on {
-			return printlnContent(fmt.Sprintf("hard mode on: %s · %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
+			return m.printlnContent(fmt.Sprintf("hard mode on: %s · %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
 		}
-		return printlnContent(fmt.Sprintf("hard mode off: back to %s · %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
+		return m.printlnContent(fmt.Sprintf("hard mode off: back to %s · %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
 	case "yolo":
-		if cmd := m.refuseRunning(); cmd != nil {
+		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
 		m.agent.SetYolo(!m.agent.Yolo()) // YoloChanged prints + refreshes
 		return nil
 	case "clear":
-		if cmd := m.refuseRunning(); cmd != nil {
+		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
 		return m.restartSession()
 	case "compact":
-		if cmd := m.refuseRunning(); cmd != nil {
+		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
 		m.compacting = true
@@ -578,35 +717,35 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		return m.compactCmd()
 	case "cost":
 		u := st.Usage
-		return println(fmt.Sprintf("in %d · out %d · cache read %d · cache write %d · $%.4f", u.Input, u.Output, u.CacheRead, u.CacheWrite, st.Cost))
+		return m.println(fmt.Sprintf("in %d · out %d · cache read %d · cache write %d · $%.4f", u.Input, u.Output, u.CacheRead, u.CacheWrite, st.Cost))
 	case "undo":
 		msg, err := m.agent.Undo()
 		if err != nil {
-			return printlnContent("error: " + err.Error())
+			return m.printlnError("error: " + err.Error())
 		}
-		return printlnContent(msg)
+		return m.printlnContent(msg)
 	case "copy":
 		if m.lastAssistant == "" {
-			return println("nothing to copy yet")
+			return m.printlnMuted("nothing to copy yet")
 		}
-		return tea.Sequence(tea.SetClipboard(m.lastAssistant), println(fmt.Sprintf("copied %d chars (OSC 52)", len(m.lastAssistant))))
+		return tea.Sequence(tea.SetClipboard(m.lastAssistant), m.printlnMuted(fmt.Sprintf("copied %d chars (OSC 52)", len(m.lastAssistant))))
 	case "show":
 		n, err := strconv.Atoi(c.Args)
 		if err != nil {
-			return println("usage: /show <n>")
+			return m.println("usage: /show <n>")
 		}
 		it, ok := m.items.Get(n)
 		if !ok {
-			return println(fmt.Sprintf("no item #%d yet", n))
+			return m.println(fmt.Sprintf("no item #%d yet", n))
 		}
 		m.openPager(it)
 		return nil
 	case "exit":
 		return m.quit()
 	case "help":
-		return printlnContent(HelpText(m.opts.Prompts))
+		return m.printlnContent(HelpText(m.opts.Prompts))
 	}
-	return println("unknown command /" + c.Name)
+	return m.println("unknown command /" + c.Name)
 }
 
 // compactCmd runs a manual compaction off the event loop. The Compacted
@@ -630,11 +769,11 @@ func (m *model) handleCompactDone(msg compactDoneMsg) tea.Cmd {
 	case msg.err == nil:
 		return nil // the Compacted event line reports the result
 	case errors.Is(msg.err, context.Canceled):
-		return println("compaction cancelled")
+		return m.printlnMuted("compaction cancelled")
 	case errors.Is(msg.err, agent.ErrNothingToCompact):
-		return println("nothing to compact")
+		return m.printlnMuted("nothing to compact")
 	default:
-		return printlnContent("error: " + msg.err.Error())
+		return m.printlnError("error: " + msg.err.Error())
 	}
 }
 
@@ -650,7 +789,7 @@ func (m *model) restartSession() tea.Cmd {
 	}
 	a, err := agent.Start(opts)
 	if err != nil {
-		return printlnContent("error: " + err.Error())
+		return m.printlnError("error: " + err.Error())
 	}
 	if m.agent != nil {
 		m.agent.Close()
@@ -663,7 +802,7 @@ func (m *model) restartSession() tea.Cmd {
 	m.status.Transient = ""
 	m.refreshStatus()
 	// The bar's branch survives /clear; re-resolve it for the new session.
-	return tea.Sequence(println(fmt.Sprintf("new session %s (previous stays resumable)", a.Session().ID8())), m.branchCmd())
+	return tea.Sequence(m.printlnMuted(fmt.Sprintf("new session %s (previous stays resumable)", a.Session().ID8())), m.branchCmd())
 }
 
 func (m *model) shellCmd(local bool, cmd string) tea.Cmd {
@@ -683,7 +822,7 @@ func (m *model) handleShellDone(msg shellDoneMsg) tea.Cmd {
 	lines = append(lines, "$ "+Sanitize(msg.cmd))
 	if msg.err != nil {
 		lines = append(lines, "error: "+Sanitize(msg.err.Error()))
-		return println(strings.Join(lines, "\n"))
+		return m.println(strings.Join(lines, "\n"))
 	}
 	body := tools.Truncate(msg.out.Output, 30_000)
 	if b := strings.TrimRight(Sanitize(body), "\n"); b != "" {
@@ -700,7 +839,7 @@ func (m *model) handleShellDone(msg shellDoneMsg) tea.Cmd {
 			lines = append(lines, "error: "+Sanitize(err.Error()))
 		}
 	}
-	return println(strings.Join(lines, "\n"))
+	return m.println(strings.Join(lines, "\n"))
 }
 
 func (m *model) handleAgent(e agent.Event) tea.Cmd {
@@ -717,7 +856,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 	case agent.StreamReset:
 		m.live.Reset()
 		m.thinking.Reset()
-		return println("[stream interrupted — retrying]")
+		return m.printlnMuted("[stream interrupted — retrying]")
 	case agent.ToolStart:
 		m.toolBusy = e.Call.Name
 		return nil
@@ -725,7 +864,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.toolBusy = ""
 		it := m.items.AddTool(e.Call, e.Result)
 		m.refreshStatus()
-		return printlnTool(it.Line)
+		return m.printlnMuted(it.Line)
 	case agent.TurnEnd:
 		m.toolBusy = ""
 		var cmds []tea.Cmd
@@ -735,7 +874,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.live.Reset()
 		if m.thinking.Len() > 0 {
 			it := m.items.AddThinking(m.thinking.String())
-			cmds = append(cmds, printlnTool(it.Line))
+			cmds = append(cmds, m.printlnMuted(it.Line+thinkingHint))
 		}
 		m.thinking.Reset()
 		m.lastAssistant = llm.TextOf(e.Message)
@@ -747,21 +886,21 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.status.Transient = fmt.Sprintf("retry %d/%d · %s", e.Notice.Attempt, e.Notice.Max, e.Notice.Wait.Round(1e8))
 		return nil
 	case agent.Warning:
-		return printlnContent("warning: " + e.Text)
+		return m.printlnWarn("warning: " + e.Text)
 	case agent.Compacted:
 		m.status.Transient = ""
 		m.refreshStatus()
-		return println(fmt.Sprintf("⋯ compacted: %d → %d tokens", e.TokensBefore, e.TokensAfter))
+		return m.printlnMuted(fmt.Sprintf("⋯ compacted: %d → %d tokens", e.TokensBefore, e.TokensAfter))
 	case agent.Resumed:
-		return printlnContent(fmt.Sprintf("resumed %s (%d messages) — earlier output is in the session file", e.ID8, e.Messages))
+		return m.printlnMuted(fmt.Sprintf("resumed %s (%d messages) — earlier output is in the session file", e.ID8, e.Messages))
 	case agent.SteeringApplied:
-		return printlnContent("↳ sent: " + strings.Join(e.Texts, " · "))
+		return m.printlnMuted("↳ sent: " + strings.Join(e.Texts, " · "))
 	case agent.YoloChanged:
 		m.refreshStatus()
 		if e.On {
-			return println(red.Render("yolo mode on: all permission checks are off"))
+			return m.println(red.Render("yolo mode on: all permission checks are off"))
 		}
-		return println("yolo mode off: permission checks restored")
+		return m.println("yolo mode off: permission checks restored")
 	}
 	return nil
 }
@@ -770,12 +909,12 @@ func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
 	m.running, m.cancel = false, nil
 	m.toolBusy = ""
 	var cmds []tea.Cmd
-	// The event pipe decouples delivery, so this can run before the final
-	// TurnEnd is processed. Flush the trailing partial line unconditionally:
-	// on an errored/interrupted run it is the visible tail of what the model
-	// streamed (display-only; the transcript holds the persisted text) —
-	// leaving it in the live region would freeze it there and the next run
-	// would silently drop it.
+	// The completion is queued behind the run's events (eventPipe.send), so
+	// every delta has been handled by now. Flush the trailing partial line
+	// unconditionally: on an errored/interrupted run it is the visible tail of
+	// what the model streamed (display-only; the transcript holds the
+	// persisted text) — leaving it in the live region would freeze it there
+	// and the next run would silently drop it.
 	if m.live.Len() > 0 {
 		cmds = append(cmds, m.printlnResponse(m.live.String()))
 	}
@@ -792,9 +931,9 @@ func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
 	}
 	if msg.err != nil {
 		if errors.Is(msg.err, context.Canceled) {
-			cmds = append(cmds, println("[interrupted]"))
+			cmds = append(cmds, m.printlnMuted("[interrupted]"))
 		} else {
-			cmds = append(cmds, printlnContent("error: "+msg.err.Error()))
+			cmds = append(cmds, m.printlnError("error: "+msg.err.Error()))
 		}
 	}
 	m.refreshStatus()
@@ -810,27 +949,106 @@ func (m *model) View() tea.View {
 	}
 	var sb strings.Builder
 	if m.live.Len() > 0 {
-		sb.WriteString(Sanitize(m.live.String()))
+		sb.WriteString(m.liveResponse(m.live.String()))
 		sb.WriteString("\n")
 	}
-	if m.running && m.toolBusy != "" {
-		sb.WriteString(dim.Render("… "+Sanitize(m.toolBusy)) + "\n")
-	}
-	if m.thinking.Len() > 0 && m.running {
-		sb.WriteString(dim.Render("⋯ thinking…") + "\n")
-	}
 	if m.approval != nil {
-		sb.WriteString(approvalPrompt(m.approval.q) + "\n")
+		sb.WriteString(warnFg.Render("? ") + approvalPrompt(m.approval.q) + "\n")
+	} else if m.running {
+		sb.WriteString(m.activityLine() + "\n")
 	}
 	sb.WriteString(m.rule())
+	inputTop := strings.Count(sb.String(), "\n")
 	sb.WriteString(m.ta.View())
 	sb.WriteString("\n")
 	sb.WriteString(m.rule())
 	sb.WriteString(m.statusLine())
+	rows := strings.Count(sb.String(), "\n") + 1
+	cursorY := rows - 1
+	cur := m.ta.Cursor()
+	if cur != nil {
+		cur.Position.Y += inputTop
+		cursorY = cur.Position.Y
+	}
+	sb.WriteString(m.padForShrink(rows, cursorY))
 	v := tea.NewView(sb.String())
+	// The terminal's own cursor, parked in the input box: besides showing the
+	// caret it pins the renderer's remembered cursor row inside the frame
+	// after every render (see padForShrink).
+	v.Cursor = cur
 	// Ask for full key disambiguation so shift+enter is distinguishable.
 	v.KeyboardEnhancements = tea.KeyboardEnhancements{ReportAllKeysAsEscapeCodes: true}
 	return v
+}
+
+// padForShrink returns the blank rows to append below a frame of the given
+// height whose cursor sits on cursorY, and records that cursor row.
+//
+// Bubble Tea's inline renderer remembers the row its cursor was left on, and
+// when the next frame is shorter it clamps that row to the new height before
+// moving back to the frame's top. A remembered row below the new frame
+// (the box was tall and the draft was cleared or submitted, a long streamed
+// line was committed) is clamped wrongly, the move falls short and the old
+// frame's top rows are stranded in the scrollback. So a frame is never
+// shorter than the deepest cursor row rendered in the last guardWindow (any
+// of those may be the one the renderer remembers): the difference is blank
+// rows below the status bar, dropped by the settleMsg that follows once the
+// remembered row is back near the top.
+func (m *model) padForShrink(rows, cursorY int) string {
+	now := m.now()
+	deepest := cursorY
+	// The most recent sample always counts, however old: with no newer frame
+	// it is the one the renderer remembers.
+	if n := len(m.recent); n > 0 {
+		deepest = max(deepest, m.recent[n-1].y)
+	}
+	kept := m.recent[:0]
+	for _, s := range m.recent {
+		if now.Sub(s.at) < guardWindow {
+			kept = append(kept, s)
+			deepest = max(deepest, s.y)
+		}
+	}
+	m.recent = append(kept, cursorSample{cursorY, now})
+	pad := deepest + 1 - rows
+	if m.height > 0 {
+		pad = min(pad, m.height-rows) // never taller than the screen
+	}
+	if pad <= 0 {
+		return ""
+	}
+	if !m.settling && m.pipe != nil {
+		m.settling = true
+		pipe := m.pipe
+		time.AfterFunc(2*guardWindow, func() { pipe.send(settleMsg{}) })
+	}
+	return strings.Repeat("\n", pad)
+}
+
+// activityLine is the live progress row of a run: spinner, what the agent is
+// doing (tool name, thinking, or just working), elapsed time and the
+// interrupt key.
+func (m *model) activityLine() string {
+	what := "working"
+	switch {
+	case m.toolBusy != "":
+		what = Sanitize(m.toolBusy)
+	case m.thinking.Len() > 0 && m.live.Len() == 0:
+		what = "thinking"
+	}
+	return spinFrames[m.spin%len(spinFrames)] + " " + dim.Render(fmt.Sprintf("%s… %s · esc to interrupt", what, fmtElapsed(m.now().Sub(m.runStart))))
+}
+
+// fmtElapsed renders a run duration: 7s · 1m 05s · 1h 02m.
+func fmtElapsed(d time.Duration) string {
+	s := int(d.Seconds())
+	switch {
+	case s < 60:
+		return fmt.Sprintf("%ds", s)
+	case s < 3600:
+		return fmt.Sprintf("%dm %02ds", s/60, s%60)
+	}
+	return fmt.Sprintf("%dh %02dm", s/3600, s%3600/60)
 }
 
 // statusLine renders the two-line bar; in yolo mode a red YOLO field leads
@@ -905,6 +1123,7 @@ func Run(ctx context.Context, o AppOptions) error {
 		o.Start.Workdir = a.Workdir()
 	}
 	m := newModel(o, a)
+	m.pipe = pipe
 	m.refreshStatus()
 	// main's signal context already delivers SIGINT/SIGTERM; Bubble Tea's own
 	// handler would race it at shutdown (and can deadlock Program.Run).

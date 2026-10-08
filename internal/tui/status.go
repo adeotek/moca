@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -44,10 +45,6 @@ func RenderStatus(s StatusInfo, width int) (string, string) {
 			branch += "*"
 		}
 	}
-	pct := 0
-	if s.Window > 0 {
-		pct = s.Used * 100 / s.Window
-	}
 	cost := fmt.Sprintf("$%.4f", s.Cost)
 	if s.Sub {
 		cost = "sub"
@@ -58,10 +55,27 @@ func RenderStatus(s StatusInfo, width int) (string, string) {
 	l1 := renderLine([]field{{s.Version, 0}, {s.Cwd, 1}, {branch, 2}}, width, 0)
 	l2 := renderLine([]field{
 		{s.Model, 0}, {AbbrevEffort(s.Effort), 0},
-		{"ctx " + FmtWindow(s.Window), 0}, {fmt.Sprintf("%d%%", pct), 0},
+		{"ctx " + FmtWindow(s.Window), 0}, {FmtPercent(s.Used, s.Window), 0},
 		{FmtTokens(s.In) + "/" + FmtTokens(s.Out), 3}, {cost, 0},
 	}, width, 0)
 	return l1, l2
+}
+
+// FmtPercent renders context usage as a percentage of the window: whole
+// numbers from 10% up, one decimal below that (a 4k conversation in a 1M
+// window is 0.4%, not a stuck "0%"), and "<0.1%" for a sliver.
+func FmtPercent(used, window int) string {
+	if window <= 0 || used <= 0 {
+		return "0%"
+	}
+	p := float64(used) * 100 / float64(window)
+	switch r := math.Round(p*10) / 10; {
+	case p < 0.05:
+		return "<0.1%"
+	case r < 10:
+		return fmt.Sprintf("%.1f%%", r)
+	}
+	return fmt.Sprintf("%d%%", int(math.Round(p)))
 }
 
 // renderLine joins the non-empty fields with " · " and shrinks them to at

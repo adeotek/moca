@@ -29,8 +29,9 @@ type Parsed struct {
 // BuiltinCommands win over prompt templates on a name collision (§10).
 var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "clear", "compact", "cost", "undo", "copy", "show", "help", "exit"}
 
-// builtinAliases resolve to their built-in before the lookup
-// (`/q`, `/quit` → `/exit`).
+// builtinAliases resolve to their built-in unless a prompt template already
+// owns the name (`/q`, `/quit` → `/exit`) — only the full built-in names are
+// reserved.
 var builtinAliases = map[string]string{"q": "exit", "quit": "exit"}
 
 var builtinHelp = map[string]string{
@@ -63,7 +64,7 @@ func ParseInput(s string, prompts []skills.Prompt) (Parsed, error) {
 	case strings.HasPrefix(s, "/"):
 		name, args, _ := strings.Cut(s[1:], " ")
 		args = strings.TrimSpace(args)
-		if t := builtinAliases[name]; t != "" {
+		if t := builtinAliases[name]; t != "" && !slices.ContainsFunc(prompts, func(p skills.Prompt) bool { return p.Name == name }) {
 			name = t
 		}
 		if slices.Contains(BuiltinCommands, name) {
@@ -91,6 +92,6 @@ func HelpText(prompts []skills.Prompt) string {
 		fmt.Fprintf(&sb, "/%-8s %s %s\n", p.Name, p.ArgumentHint, p.Description)
 	}
 	sb.WriteString("!cmd     run cmd, output goes to the model   !!cmd  run cmd locally only\n")
-	sb.WriteString("enter send · shift+enter newline · esc interrupt · ctrl+o pager · alt+p paste chips · ctrl+c×2 quit")
+	sb.WriteString("enter send · shift+enter newline · esc interrupt · ctrl+o pager (latest item) · alt+t read the latest thinking · alt+p paste chips · ctrl+c×2 quit")
 	return sb.String()
 }
