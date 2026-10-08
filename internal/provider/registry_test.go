@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -187,8 +186,8 @@ func TestNoSessionHeaderOutsideOpenCodeGo(t *testing.T) {
 // OAuth (Sign in with ChatGPT) is store-backed: with a token in auth.json
 // and auth "oauth", requests carry the stored access token as a bearer.
 func TestOAuthCredentialFromStore(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	store := NewStore(filepath.Join(config.DataDir(), "auth.json"))
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	store := NewDefaultStore()
 	if err := store.Put("openai", Token{Access: "AT-1", Expiry: time.Now().Add(time.Hour), ClientID: "oaiapp_x"}); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +216,7 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 }
 
 func TestOAuthNotLoggedIn(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := mustCfg(t, `{"model":"openai/gpt-6-astra","providers":{"openai":{"auth":"oauth"}}}`)
 	r, err := NewRegistry(cfg, http.DefaultClient, nil)
 	if err != nil {
@@ -259,7 +258,7 @@ func (c countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 // provider it must only confirm a login exists. An expired token is the first
 // request's job to refresh, not a blocking, uncancellable network call here.
 func TestCheckCredentialOAuthDoesNotTouchNetwork(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	f := newFakeAS(t)
 	orig := oauthProviders["openai"]
 	oauthProviders["openai"] = f.config()
@@ -274,7 +273,7 @@ func TestCheckCredentialOAuthDoesNotTouchNetwork(t *testing.T) {
 	if err := r.CheckCredential("openai/gpt-6-astra"); err == nil || !strings.Contains(err.Error(), "moca login openai") {
 		t.Fatalf("no stored login must point at `moca login openai`: %v", err)
 	}
-	store := NewStore(filepath.Join(config.DataDir(), "auth.json"))
+	store := NewDefaultStore()
 	if err := store.Put("openai", Token{Access: "OLD", Refresh: "RT", ClientID: "oaiapp_x", Expiry: time.Now().Add(-time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
@@ -286,5 +285,101 @@ func TestCheckCredentialOAuthDoesNotTouchNetwork(t *testing.T) {
 	}
 	if tok, _, _ := store.Get("openai"); tok.Access != "OLD" {
 		t.Fatalf("CheckCredential must not rewrite the store: %+v", tok)
+	}
+}
+
+// A key stored in auth.json (via /login or `moca login`) wins over the
+// config's env: reference — the explicit per-provider credential outranks an
+// inherited environment; clearing the store restores the env fallback.
+func TestAPIKeyStoreWinsOverEnv(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("MOCA_T_ANTHROPIC", "from-env")
+	if err := NewDefaultStore().PutAPIKey("anthropic", "from-store"); err != nil {
+		t.Fatal(err)
+	}
+	var hdr http.Header
+	srv := sseServer(t, 200, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", nil, &hdr)
+	defer srv.Close()
+	cfg := mustCfg(t, fmt.Sprintf(
+		`{"model":"anthropic/claude-haiku-4-5","providers":{"anthropic":{"apiKey":"env:MOCA_T_ANTHROPIC","baseUrls":{"anthropic-messages":%q}}}}`, srv.URL))
+	r, err := NewRegistry(cfg, srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, a, err := r.Resolve("anthropic/claude-haiku-4-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := llm.Request{Model: m.ID, MaxTokens: 16}
+	if _, err := a.Stream(context.Background(), req, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if hdr.Get("x-api-key") != "from-store" {
+		t.Fatalf("stored key must win over the env value: %q", hdr.Get("x-api-key"))
+	}
+	if err := NewDefaultStore().Delete("anthropic"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Stream(context.Background(), req, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if hdr.Get("x-api-key") != "from-env" {
+		t.Fatalf("after logout the env value must serve: %q", hdr.Get("x-api-key"))
+	}
+}
+
+// Neither a stored key nor a usable env value: the error names both fixes.
+func TestAPIKeyMissingMentionsLogin(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("MOCA_T_MISSING", "")
+	cfg := mustCfg(t, `{"model":"anthropic/claude-haiku-4-5","providers":{"anthropic":{"apiKey":"env:MOCA_T_MISSING"}}}`)
+	r, err := NewRegistry(cfg, http.DefaultClient, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, a, err := r.Resolve("anthropic/claude-haiku-4-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.Stream(context.Background(), llm.Request{Model: m.ID, MaxTokens: 16}, func(llm.Event) {})
+	if err == nil || !strings.Contains(err.Error(), "/login") || !strings.Contains(err.Error(), "moca login anthropic") {
+		t.Fatalf("missing-key error must name both entry points: %v", err)
+	}
+	// CheckCredential must surface the same gap without any network call.
+	if err := r.CheckCredential("anthropic/claude-haiku-4-5"); err == nil || !strings.Contains(err.Error(), "/login") {
+		t.Fatalf("CheckCredential: %v", err)
+	}
+}
+
+// A custom provider without any apiKey configured (store-only) resolves from
+// the credential store and errors with the login hint when nothing is stored.
+func TestStoreOnlyAPIKeyConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var hdr http.Header
+	srv := sseServer(t, 200, "data: [DONE]\n\n", nil, &hdr)
+	defer srv.Close()
+	cfg := mustCfg(t, fmt.Sprintf(
+		`{"model":"vllm/m","providers":{"vllm":{"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","models":{"m":{"contextWindow":65536}}}}}`, srv.URL))
+	r, err := NewRegistry(cfg, srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, a, err := r.Resolve("vllm/m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.Stream(context.Background(), llm.Request{Model: m.ID, MaxTokens: 16}, func(llm.Event) {})
+	if err == nil || !strings.Contains(err.Error(), "/login") {
+		t.Fatalf("store-only config without a stored key must point at /login: %v", err)
+	}
+	if err := NewDefaultStore().PutAPIKey("vllm", "sk-vllm"); err != nil {
+		t.Fatal(err)
+	}
+	// The store is read per request: the same adapter picks the key up.
+	if _, err := a.Stream(context.Background(), llm.Request{Model: m.ID, MaxTokens: 16}, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if hdr.Get("Authorization") != "Bearer sk-vllm" {
+		t.Fatalf("bearer: %q", hdr.Get("Authorization"))
 	}
 }

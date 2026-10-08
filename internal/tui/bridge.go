@@ -32,6 +32,25 @@ type compactDoneMsg struct {
 	err error
 }
 
+// loginProgressMsg carries one output line of the running OAuth flow into the
+// scrollback (the flow writes from its own goroutine).
+type loginProgressMsg struct{ line string }
+
+// loginDoneMsg reports the finished OAuth flow (or the store write).
+type loginDoneMsg struct {
+	provider string
+	email    string
+	err      error
+}
+
+// logoutDoneMsg reports a finished /logout (revocation + store delete).
+type logoutDoneMsg struct {
+	provider string
+	had      bool // something was stored
+	warn     error
+	err      error
+}
+
 // newAsker bridges the agent's blocking approval callback to the TUI: the
 // question is sent to the program, the answer comes back on a channel (ctx
 // cancellation — esc or quit — denies). It is called from the agent's run

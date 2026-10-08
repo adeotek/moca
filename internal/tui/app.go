@@ -61,14 +61,23 @@ type model struct {
 	items    Items
 	live     strings.Builder
 	thinking strings.Builder
-	running  bool
-	toolBusy string
-	cancel   context.CancelFunc
-	approval *approvalMsg
-	pager    *pagerModel
-	status   StatusInfo
-	width    int
-	height   int
+	// thinkStart is when the open thinking block's first delta arrived; the
+	// item line reports the block's duration (zero when the block was not
+	// accumulated from deltas — e.g. a resumed or test-built one).
+	thinkStart time.Time
+	running    bool
+	toolBusy   string
+	cancel     context.CancelFunc
+	approval   *approvalMsg
+	// login is the active /login//logout interaction (modal, like approval).
+	login *loginState
+	// drop is the live /command autocomplete state (derived from the draft;
+	// see dropdown.go).
+	drop   *dropState
+	pager  *pagerModel
+	status StatusInfo
+	width  int
+	height int
 	// darkBG: the terminal's reported background (defaults dark) — picks the
 	// scrollback message background variants (tea.BackgroundColorMsg).
 	darkBG bool
@@ -106,9 +115,9 @@ type model struct {
 	// pipe is the ordered path into the event loop (nil in unit tests): the
 	// run's completion goes through it so it cannot overtake streamed events.
 	pipe *eventPipe
-	// recent are the cursor rows of the last few rendered Views and settling
-	// says a settleMsg is already scheduled (padForShrink).
-	recent   []cursorSample
+	// guard bounds the cursor row the inline renderer may still remember and
+	// settling says a settleMsg is already scheduled (padForShrink).
+	guard    padGuard
 	settling bool
 	// runStart, runGen and spin drive the activity line: when the run began,
 	// which run's ticks are live, and the spinner frame.
@@ -130,15 +139,24 @@ const approvalIdle = 700 * time.Millisecond
 // Longer drafts scroll inside the box.
 const inputChrome = 8
 
-// guardWindow is how long a frame's cursor row is remembered as "possibly the
-// renderer's current row" (see padForShrink); it comfortably exceeds the
-// renderer's flush interval.
+// guardWindow is the gap between Views that proves the renderer flushed the
+// earlier frame: frames are drawn at most one frame interval apart, so after
+// guardWindow the previous View is what the renderer remembers. A shorter gap
+// means the Views may coalesce and only the burst's last one gets drawn (see
+// padForShrink); it comfortably exceeds the renderer's flush interval.
 const guardWindow = 60 * time.Millisecond
 
-// cursorSample is the cursor row of one rendered View and when it was built.
-type cursorSample struct {
-	y  int
-	at time.Time
+// padGuard tracks cursor rows across Views for padForShrink. lastRow is the
+// row of the most recent View, prevRow the row of the last View before the
+// current burst of Views, and burstRow the deepest row seen within the burst.
+// A gap of at least guardWindow between Views starts a new burst: by then the
+// renderer has certainly flushed the earlier frame, so its row is the one it
+// remembers; within a burst the remembered row is still prevRow.
+type padGuard struct {
+	lastRow  int
+	lastAt   time.Time
+	prevRow  int
+	burstRow int
 }
 
 // settleMsg re-renders once the shrink-guard window has passed, dropping the
@@ -146,9 +164,13 @@ type cursorSample struct {
 type settleMsg struct{}
 
 var (
-	dim  = lipgloss.NewStyle().Faint(true)
-	red  = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-	bold = lipgloss.NewStyle().Bold(true)
+	dim = lipgloss.NewStyle().Faint(true)
+	red = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	// orange marks the product name in the welcome line. One shade serves
+	// both light and dark terminals: the welcome prints before the terminal
+	// reports its background, and #d97706 keeps ≥3:1 contrast on white and
+	// 4.4+ on the common dark backgrounds.
+	orange = lipgloss.NewStyle().Foreground(lipgloss.Color("#d97706")).Bold(true)
 )
 
 func newModel(o AppOptions, a *agent.Agent) *model {
@@ -241,9 +263,10 @@ func (m *model) Init() tea.Cmd {
 }
 
 // welcomeText opens the scrollback of a session: title + version, then the
-// greeting.
+// greeting. The product name renders in orange (readable on light and dark
+// backgrounds alike — the welcome prints before the background is known).
 func welcomeText() string {
-	return bold.Render("moca") + " " + dim.Render(config.Version) + "\n" + "How can I help you today?"
+	return orange.Render("moca") + " " + dim.Render(config.Version) + "\n" + "How can I help you today?"
 }
 
 // commitLive moves every completed line out of the live buffer and returns
@@ -336,6 +359,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.PasteMsg:
+		if m.login != nil {
+			switch m.login.step {
+			case loginEnterKey:
+				m.login.appendKey(msg.Content)
+				return m, nil
+			case loginBusy:
+				// Falls through: the paste lands in the composer so the
+				// redirect URL or code can be sent with enter.
+			default:
+				return m, nil
+			}
+		}
 		if m.pager == nil {
 			// Insert at the cursor like typed text; a chip's marker goes there too.
 			m.ta.InsertString(m.input.Prepare(msg.Content))
@@ -344,6 +379,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyPressMsg:
+		if m.login != nil {
+			return m, m.loginKey(msg)
+		}
 		return m, m.handleKey(msg)
 	case agentEventMsg:
 		return m, m.hold(m.handleAgent(msg.e))
@@ -352,6 +390,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case approvalMsg:
 		m.approval = &msg
 		return m, nil
+	case loginProgressMsg:
+		if m.login == nil {
+			return m, nil
+		}
+		return m, m.hold(m.printlnContent(msg.line))
+	case loginDoneMsg:
+		return m, m.hold(m.handleLoginDone(msg))
+	case logoutDoneMsg:
+		return m, m.hold(m.handleLogoutDone(msg))
 	case branchMsg:
 		m.status.Branch, m.status.Dirty, m.status.Git = msg.branch, msg.dirty, msg.git
 		return m, nil
@@ -385,6 +432,10 @@ func (m *model) release() tea.Cmd {
 // quit cancels an in-flight run or compaction (its abort/return is recorded
 // before exit) and exits.
 func (m *model) quit() tea.Cmd {
+	if m.login != nil {
+		m.login.shutdown()
+		m.login = nil
+	}
 	if m.compactCancel != nil {
 		m.compactCancel()
 	}
@@ -437,6 +488,11 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		}
 		// Anything else (typing, enter, ctrl+c…) behaves as usual: the input
 		// box is never dead while a prompt is shown.
+	}
+	if d := m.dropdown(); d != nil {
+		if cmd, handled := m.dropdownKey(d, k); handled {
+			return cmd
+		}
 	}
 	switch k.String() {
 	case "enter":
@@ -590,7 +646,10 @@ func (m *model) submit() tea.Cmd {
 		}
 		return m.startRun(parsed.Text)
 	case KindCommand:
-		return m.runCommand(parsed)
+		// A submitted command echoes into the scrollback as a user message
+		// (same `›` band) before it runs, so the transcript reads as
+		// everything the user sent — refusals and output follow it.
+		return tea.Sequence(m.printlnUser("› "+text), m.runCommand(parsed))
 	case KindShell:
 		if m.running {
 			// `!` output enters the transcript; appending it between a tool
@@ -636,6 +695,12 @@ func (m *model) refuseBusy() tea.Cmd {
 }
 
 func (m *model) runCommand(c Parsed) tea.Cmd {
+	switch c.Name {
+	case "login":
+		return m.runLogin(c.Args)
+	case "logout":
+		return m.runLogout(c.Args)
+	}
 	if m.agent == nil {
 		return nil
 	}
@@ -845,12 +910,19 @@ func (m *model) handleShellDone(msg shellDoneMsg) tea.Cmd {
 func (m *model) handleAgent(e agent.Event) tea.Cmd {
 	switch e := e.(type) {
 	case agent.TextDelta:
+		// The thinking block that preceded this text is done: close it into
+		// its item line FIRST, so the scrollback reads thinking → response.
+		flush := m.flushThinking()
 		m.live.WriteString(e.Text)
+		var commit tea.Cmd
 		if lines := m.commitLive(); len(lines) > 0 {
-			return m.printlnResponse(strings.Join(lines, "\n"))
+			commit = m.printlnResponse(strings.Join(lines, "\n"))
 		}
-		return nil
+		return tea.Sequence(flush, commit)
 	case agent.ThinkingDelta:
+		if m.thinking.Len() == 0 {
+			m.thinkStart = m.now()
+		}
 		m.thinking.WriteString(e.Text)
 		return nil
 	case agent.StreamReset:
@@ -859,7 +931,9 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		return m.printlnMuted("[stream interrupted — retrying]")
 	case agent.ToolStart:
 		m.toolBusy = e.Call.Name
-		return nil
+		// A tool call ends any open thinking block: print its line before
+		// the tool's own item (which lands on ToolEnd).
+		return m.flushThinking()
 	case agent.ToolEnd:
 		m.toolBusy = ""
 		it := m.items.AddTool(e.Call, e.Result)
@@ -872,11 +946,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 			cmds = append(cmds, m.printlnResponse(rest))
 		}
 		m.live.Reset()
-		if m.thinking.Len() > 0 {
-			it := m.items.AddThinking(m.thinking.String())
-			cmds = append(cmds, m.printlnMuted(it.Line+thinkingHint))
-		}
-		m.thinking.Reset()
+		cmds = append(cmds, m.flushThinking())
 		m.lastAssistant = llm.TextOf(e.Message)
 		m.status.Transient = ""
 		m.refreshStatus()
@@ -903,6 +973,24 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		return m.println("yolo mode off: permission checks restored")
 	}
 	return nil
+}
+
+// flushThinking closes the open thinking block (if any) into a numbered item
+// and prints its line — in place, before whatever follows: the response text,
+// a tool item, the turn end. Waiting for TurnEnd (the old behaviour) stranded
+// the line after the response it preceded.
+func (m *model) flushThinking() tea.Cmd {
+	if m.thinking.Len() == 0 {
+		return nil
+	}
+	dur := time.Duration(0)
+	if !m.thinkStart.IsZero() {
+		dur = m.now().Sub(m.thinkStart)
+	}
+	it := m.items.AddThinking(m.thinking.String(), dur)
+	m.thinking.Reset()
+	m.thinkStart = time.Time{}
+	return m.printlnMuted(it.Line + thinkingHint)
 }
 
 func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
@@ -952,10 +1040,14 @@ func (m *model) View() tea.View {
 		sb.WriteString(m.liveResponse(m.live.String()))
 		sb.WriteString("\n")
 	}
-	if m.approval != nil {
+	if m.login != nil {
+		sb.WriteString(m.loginPanel() + "\n")
+	} else if m.approval != nil {
 		sb.WriteString(warnFg.Render("? ") + approvalPrompt(m.approval.q) + "\n")
 	} else if m.running {
 		sb.WriteString(m.activityLine() + "\n")
+	} else if d := m.dropdown(); d != nil {
+		sb.WriteString(m.dropdownPanel(d) + "\n")
 	}
 	sb.WriteString(m.rule())
 	inputTop := strings.Count(sb.String(), "\n")
@@ -984,32 +1076,35 @@ func (m *model) View() tea.View {
 // padForShrink returns the blank rows to append below a frame of the given
 // height whose cursor sits on cursorY, and records that cursor row.
 //
-// Bubble Tea's inline renderer remembers the row its cursor was left on, and
-// when the next frame is shorter it clamps that row to the new height before
-// moving back to the frame's top. A remembered row below the new frame
-// (the box was tall and the draft was cleared or submitted, a long streamed
-// line was committed) is clamped wrongly, the move falls short and the old
-// frame's top rows are stranded in the scrollback. So a frame is never
-// shorter than the deepest cursor row rendered in the last guardWindow (any
-// of those may be the one the renderer remembers): the difference is blank
-// rows below the status bar, dropped by the settleMsg that follows once the
-// remembered row is back near the top.
+// Bubble Tea's inline renderer parks its cursor on the View's cursor row and
+// remembers it; when a later frame is shorter it clamps that remembered row
+// to the new height before moving back to the frame's top, the move falls
+// short by the clamp difference, and the old frame's top rows are stranded in
+// the scrollback. So a frame must never be shorter than rememberedRow+1.
+//
+// The remembered row is not just the previous View's row: the renderer
+// coalesces Views, so when several Views arrive within a frame interval only
+// the burst's last one is drawn — and while it is drawn the remembered row is
+// still the one of the last frame flushed before the burst (typing "lo" over
+// a tall dropdown in one batch is exactly this). A gap of guardWindow proves
+// the earlier frame was flushed, so the remembered row is bounded by the
+// deeper of the previous burst's last View and the deepest row in the current
+// burst (mid-burst flushes can only remember rows of the burst). The
+// difference is blank rows below the status bar, dropped by the settleMsg
+// that follows once the remembered row is safe again.
 func (m *model) padForShrink(rows, cursorY int) string {
 	now := m.now()
-	deepest := cursorY
-	// The most recent sample always counts, however old: with no newer frame
-	// it is the one the renderer remembers.
-	if n := len(m.recent); n > 0 {
-		deepest = max(deepest, m.recent[n-1].y)
+	g := &m.guard
+	if now.Sub(g.lastAt) >= guardWindow {
+		// The gap flushed the previous View's frame: it is what the renderer
+		// remembers now, and this View starts a new burst.
+		g.prevRow = g.lastRow
+		g.burstRow = cursorY
+	} else {
+		g.burstRow = max(g.burstRow, cursorY)
 	}
-	kept := m.recent[:0]
-	for _, s := range m.recent {
-		if now.Sub(s.at) < guardWindow {
-			kept = append(kept, s)
-			deepest = max(deepest, s.y)
-		}
-	}
-	m.recent = append(kept, cursorSample{cursorY, now})
+	g.lastRow, g.lastAt = cursorY, now
+	deepest := max(g.prevRow, g.burstRow)
 	pad := deepest + 1 - rows
 	if m.height > 0 {
 		pad = min(pad, m.height-rows) // never taller than the screen
@@ -1049,6 +1144,19 @@ func fmtElapsed(d time.Duration) string {
 		return fmt.Sprintf("%dm %02ds", s/60, s%60)
 	}
 	return fmt.Sprintf("%dh %02dm", s/3600, s%3600/60)
+}
+
+// fmtThinkDuration renders a thinking block's duration for its item line:
+// sub-second blocks read "<1s", and a zero duration (the block was not
+// accumulated from deltas) is omitted entirely.
+func fmtThinkDuration(d time.Duration) string {
+	switch {
+	case d <= 0:
+		return ""
+	case d < time.Second:
+		return "<1s"
+	}
+	return fmtElapsed(d)
 }
 
 // statusLine renders the two-line bar; in yolo mode a red YOLO field leads

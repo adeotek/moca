@@ -16,16 +16,12 @@ func TestCompactNothing(t *testing.T) {
 	if !m.compacting || cmd == nil {
 		t.Fatal("compact must mark the model busy and return a command")
 	}
-	msg := cmd()
-	if _, ok := msg.(compactDoneMsg); !ok {
-		t.Fatalf("compact cmd returned %T", msg)
-	}
-	_, done := m.Update(msg)
+	out, _ := simulate(m, cmd)
 	if m.compacting {
 		t.Fatal("the busy flag clears when the compaction finishes")
 	}
-	if !strings.Contains(printed(done), "nothing to compact") {
-		t.Fatalf("expected a nothing-to-compact note, got %q", printed(done))
+	if !strings.Contains(out, "nothing to compact") {
+		t.Fatalf("expected a nothing-to-compact note, got %q", out)
 	}
 }
 
@@ -39,6 +35,7 @@ func TestCompactingBlocksRun(t *testing.T) {
 	if !m.compacting {
 		t.Fatal("setup: compact in flight")
 	}
+	settle(m) // flush the command echo the dropped enter cmd left in flight
 	old := m.agent
 	m.input.SetBuffer("hello")
 	m.syncTextarea()
@@ -77,6 +74,7 @@ func TestCompactEscapeCancels(t *testing.T) {
 	if !m.compacting || m.compactCancel == nil {
 		t.Fatal("compact must be cancellable")
 	}
+	settle(m) // flush the command echo the dropped enter cmd left in flight
 	cancelled := false
 	m.compactCancel = func() { cancelled = true }
 	m.Update(key("esc"))

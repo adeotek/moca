@@ -10,9 +10,17 @@ import (
 	"syscall"
 
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/provider"
 )
 
 func main() {
+	// Credentials moved to ~/.config/moca/auth.json; a v0.1 store in the data
+	// dir is moved once, before anything reads it. A failure leaves the old
+	// file in place (nothing is lost) and only warns. (In main, not run(), so
+	// tests never touch a real user store.)
+	if err := provider.MigrateLegacyStore(); err != nil {
+		fmt.Fprintln(os.Stderr, "moca: warning: could not move the old auth store into the config dir:", err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	os.Exit(run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))

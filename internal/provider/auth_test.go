@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/adeotek/moca/internal/config"
 )
 
 func TestStoreRoundTripAndMode(t *testing.T) {
@@ -317,5 +319,93 @@ func TestTransientRefreshFailureFallsBack(t *testing.T) {
 	revoked := func(context.Context, Token) (Token, error) { return Token{}, ErrInvalidGrant }
 	if _, err := s.CredentialFor("x", revoked)(context.Background()); !errors.Is(err, ErrInvalidGrant) {
 		t.Fatalf("a revoked session must not fall back to the old token: %v", err)
+	}
+}
+
+// API keys live in the same store, beside OAuth tokens; the value is
+// validated (empty and control-byte keys are refused) and logout clears
+// whichever credential kind the provider has.
+func TestAPIKeyStore(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "auth.json")
+	s := NewStore(p)
+	if err := s.PutAPIKey("anthropic", "sk-ant-1"); err != nil {
+		t.Fatal(err)
+	}
+	if k, ok, err := s.GetAPIKey("anthropic"); err != nil || !ok || k != "sk-ant-1" {
+		t.Fatalf("round-trip: %q %v %v", k, ok, err)
+	}
+	if err := s.PutAPIKey("anthropic", "sk-ant-2"); err != nil {
+		t.Fatal(err)
+	}
+	if k, _, _ := s.GetAPIKey("anthropic"); k != "sk-ant-2" {
+		t.Fatalf("replace: %q", k)
+	}
+	for _, bad := range []string{"", "a\nb", "a\x00b", "a\x7fb"} {
+		if err := s.PutAPIKey("anthropic", bad); err == nil {
+			t.Fatalf("key %q must be refused", bad)
+		}
+	}
+	fi, err := os.Stat(p)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode: %v %v", fi, err)
+	}
+	// Both credential kinds can coexist; Delete clears both.
+	if err := s.Put("anthropic", Token{Access: "a", Expiry: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete("anthropic"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.GetAPIKey("anthropic"); ok {
+		t.Fatal("api key must be gone")
+	}
+	if _, ok, _ := s.Get("anthropic"); ok {
+		t.Fatal("token must be gone")
+	}
+}
+
+// The v0.1 store lived in the data dir; the migration moves it to the config
+// dir, is a no-op when the new file exists (or nothing is to move), and
+// preserves the content and the 0600 mode.
+func TestMigrateLegacyStore(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	legacy := filepath.Join(config.DataDir(), "auth.json")
+	if err := os.MkdirAll(config.DataDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(`{"hostId":"urn:uuid:x","providers":{"openai":{"access":"AT"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLegacyStore(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy file must be gone: %v", err)
+	}
+	tok, ok, err := NewDefaultStore().Get("openai")
+	if err != nil || !ok || tok.Access != "AT" {
+		t.Fatalf("migrated token: %+v %v %v", tok, ok, err)
+	}
+	if fi, err := os.Stat(config.AuthFile()); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("migrated mode: %v %v", fi, err)
+	}
+	if h, err := NewDefaultStore().HostID(); err != nil || h != "urn:uuid:x" {
+		t.Fatalf("host id lost: %q %v", h, err)
+	}
+	// Second run: nothing to move.
+	if err := MigrateLegacyStore(); err != nil {
+		t.Fatal(err)
+	}
+	// A new file wins over a leftover legacy one.
+	if err := os.WriteFile(legacy, []byte(`{"providers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLegacyStore(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		t.Fatal("the new store exists: the legacy file must be left alone")
 	}
 }

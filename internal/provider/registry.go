@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -104,12 +103,12 @@ func (r *Registry) CheckCredential(qualified string) error {
 	}
 	if r.cfg.Providers[pname].Auth == "oauth" && r.oauth[pname] == nil {
 		if _, ok := oauthProviders[pname]; ok {
-			_, found, err := NewStore(filepath.Join(config.DataDir(), "auth.json")).Get(pname)
+			_, found, err := NewDefaultStore().Get(pname)
 			if err != nil {
 				return err
 			}
 			if !found {
-				return fmt.Errorf("not logged in to %s: run moca login %s", pname, pname)
+				return fmt.Errorf("not logged in to %s: run /login in the TUI, or moca login %s", pname, pname)
 			}
 			return nil
 		}
@@ -164,7 +163,7 @@ func (r *Registry) credential(provider string) CredentialFunc {
 		if oc, ok := oauthProviders[provider]; ok {
 			// Store-backed subscription credentials: read auth.json (0600),
 			// refresh under the cross-process lock near expiry.
-			fn := NewStore(filepath.Join(config.DataDir(), "auth.json")).CredentialFor(provider, oc.refresher(r.hc))
+			fn := NewDefaultStore().CredentialFor(provider, oc.refresher(r.hc))
 			return func(ctx context.Context) (Credential, error) {
 				c, err := fn(ctx)
 				if err != nil {
@@ -177,12 +176,35 @@ func (r *Registry) credential(provider string) CredentialFunc {
 			return Credential{}, fmt.Errorf("provider %s: OAuth is not available; set auth \"api_key\"", provider)
 		}
 	}
+	// api_key: a key stored with /login (TUI) or `moca login <provider>` wins
+	// over the config's env: reference — an explicit, per-provider credential
+	// outranks an inherited environment, and /logout restores the fallback.
+	// The store is read per request, so a key stored mid-session is used by
+	// the next request without restarting anything.
+	store := NewDefaultStore()
 	return func(context.Context) (Credential, error) {
-		v, err := config.ResolveEnv(p.APIKey)
-		if err != nil {
-			return Credential{}, fmt.Errorf("provider %s: %w", provider, err)
+		key, found, serr := store.GetAPIKey(provider)
+		if serr == nil && found {
+			return withExtra(Credential{Token: key}), nil
 		}
-		return withExtra(Credential{Token: v}), nil
+		var eerr error
+		if p.APIKey != "" {
+			if v, err := config.ResolveEnv(p.APIKey); err == nil {
+				return withExtra(Credential{Token: v}), nil
+			} else {
+				eerr = err
+			}
+		}
+		switch {
+		case serr != nil:
+			// A corrupt store and no env fallback: the store error is the
+			// actionable one (it says how to reset the file).
+			return Credential{}, fmt.Errorf("provider %s: %w", provider, serr)
+		case eerr != nil:
+			return Credential{}, fmt.Errorf("provider %s: %w; store a key with /login in the TUI or moca login %s", provider, eerr, provider)
+		default:
+			return Credential{}, fmt.Errorf("provider %s: no API key stored and providers.%s.apiKey is not set; add one with /login in the TUI or moca login %s", provider, provider, provider)
+		}
 	}
 }
 

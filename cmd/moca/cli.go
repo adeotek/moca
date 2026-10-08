@@ -35,8 +35,10 @@ usage:
     --resume <id8|last>        resume a session
     --continue                 latest session in this workdir
     --config <path>            config file (dev/test)
-  moca login <provider>        OAuth login (openai) [--no-browser]
-  moca logout <provider>       clear a stored login
+  moca login <provider>        sign in (subscription OAuth where permitted) or store an API key
+    --api-key                  prompt for an API key instead of the OAuth flow
+    --no-browser               headless OAuth: print the URL, read the pasted code from stdin
+  moca logout <provider>       clear a stored login or API key
   moca mcp import              import MCP servers from Claude Code / OpenCode / Pi configs
   moca mcp index               prebuild the persisted MCP discovery index
   moca --version

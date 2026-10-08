@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
+	"os"
 	"strings"
 	"time"
 
@@ -26,37 +26,51 @@ var revokeTimeout = 15 * time.Second
 // part of it.
 var loginHTTPTimeout = 30 * time.Second
 
-// runLogin implements `moca login <provider> [--no-browser]`: the SIWC
-// authorization-code flow (openai only — policy gate, §3), then the token
-// store write, then an offer to flip the provider's config to auth "oauth".
+// runLogin implements `moca login <provider> [--api-key] [--no-browser]`.
+// A provider with an OAuth flow (openai) runs the SIWC authorization-code
+// flow unless --api-key is given; any provider can have an API key stored
+// instead. Both credential kinds live in auth.json (~/.config/moca/). The
+// OAuth path then offers to flip the provider's config to auth "oauth"; the
+// key path notes when the configured auth mode would ignore the key.
 func runLogin(ctx context.Context, o Options, cfg config.Config, cfgPath string, stdin io.Reader, stdout, stderr io.Writer) int {
-	noBrowser := false
+	noBrowser, wantKey := false, false
 	var rest []string
 	for _, a := range o.Sub[1:] {
-		if a == "--no-browser" {
+		switch a {
+		case "--no-browser":
 			noBrowser = true
-			continue
+		case "--api-key":
+			wantKey = true
+		default:
+			rest = append(rest, a)
 		}
-		rest = append(rest, a)
 	}
 	if len(rest) != 1 {
-		fmt.Fprintln(stderr, "moca: usage: moca login <provider> [--no-browser]")
+		fmt.Fprintln(stderr, "moca: usage: moca login <provider> [--api-key] [--no-browser]")
 		return exitUsage
 	}
 	p := rest[0]
-	oc, ok := oauthLookup(p)
-	if !ok {
-		if reason, unsupported := config.OAuthUnsupported[p]; unsupported {
-			fmt.Fprintf(stderr, "moca: providers.%s cannot use OAuth: %s\n", p, reason)
-		} else if _, known := cfg.Providers[p]; !known {
-			fmt.Fprintf(stderr, "moca: unknown provider %q\n", p)
-		} else {
-			fmt.Fprintf(stderr, "moca: no OAuth for %s — set auth \"api_key\" for providers.%s\n", p, p)
-		}
+	pc, known := cfg.Providers[p]
+	if !known {
+		fmt.Fprintf(stderr, "moca: unknown provider %q\n", p)
 		return exitUsage
 	}
+	// One line reader for the whole command: the API-key prompt, the paste
+	// prompt and the "switch auth?" prompt share it, so an unanswered read
+	// can never swallow the next answer.
+	var lines *provider.LineReader
+	if stdin != nil {
+		lines = provider.NewLineReader(stdin)
+	}
+	store := provider.NewDefaultStore()
+	oc, hasOAuth := oauthLookup(p)
+	if reason, unsupported := config.OAuthUnsupported[p]; unsupported && !hasOAuth && !wantKey {
+		fmt.Fprintf(stdout, "note: %s cannot use subscription OAuth: %s\n", p, reason)
+	}
+	if wantKey || !hasOAuth {
+		return loginAPIKey(p, pc.Auth, store, stdin, lines, stdout, stderr)
+	}
 
-	store := provider.NewStore(filepath.Join(config.DataDir(), "auth.json"))
 	saved, hasSaved, err := store.Get(p)
 	if err != nil {
 		fmt.Fprintln(stderr, "moca:", err)
@@ -72,13 +86,6 @@ func runLogin(ctx context.Context, o Options, cfg config.Config, cfgPath string,
 		return exitRuntime
 	}
 	oc.HostID = hostID
-	// One line reader for the whole command: the paste prompt and the
-	// "switch auth?" prompt share it, so an unanswered paste read can never
-	// swallow the second answer.
-	var lines *provider.LineReader
-	if stdin != nil {
-		lines = provider.NewLineReader(stdin)
-	}
 	lio := provider.LoginIO{Out: stdout, Lines: lines, Headless: noBrowser || provider.Headless()}
 	if !noBrowser {
 		lio.OpenURL = provider.OpenBrowser
@@ -97,7 +104,7 @@ func runLogin(ctx context.Context, o Options, cfg config.Config, cfgPath string,
 	} else {
 		fmt.Fprintf(stdout, "logged in to %s\n", p)
 	}
-	if cfg.Providers[p].Auth != "oauth" {
+	if pc.Auth != "oauth" {
 		fmt.Fprintf(stdout, "Set \"auth\": \"oauth\" for providers.%s in %s to use your subscription.\n", p, cfgPath)
 		if yesNo(lines, stdout, "Switch it now? [y/N] ") {
 			if _, err := config.SetString(cfgPath, []string{"providers", p}, "auth", "oauth"); err != nil {
@@ -110,9 +117,40 @@ func runLogin(ctx context.Context, o Options, cfg config.Config, cfgPath string,
 	return exitOK
 }
 
+// loginAPIKey prompts for one API key line and stores it. The prompt is
+// shown only when stdin is a terminal (`echo -n "$KEY" | moca login <p>`
+// stores silently); a nil or exhausted stdin is a usage error.
+func loginAPIKey(p, authMode string, store *provider.Store, stdin io.Reader, lines *provider.LineReader, stdout, stderr io.Writer) int {
+	if lines == nil {
+		fmt.Fprintf(stderr, "moca: login %s needs stdin for the API key — run /login in the TUI, or set providers.%s.apiKey\n", p, p)
+		return exitUsage
+	}
+	if f, ok := stdin.(*os.File); ok {
+		if fi, err := f.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+			fmt.Fprintf(stdout, "API key for %s: ", p)
+		}
+	}
+	line, _ := lines.Next(nil)
+	key := strings.TrimSpace(line)
+	if key == "" {
+		fmt.Fprintln(stderr, "moca: no API key given")
+		return exitUsage
+	}
+	if err := store.PutAPIKey(p, key); err != nil {
+		fmt.Fprintln(stderr, "moca:", err)
+		return exitRuntime
+	}
+	fmt.Fprintf(stdout, "stored API key for %s in %s\n", p, store.Path())
+	if authMode == "oauth" {
+		fmt.Fprintf(stdout, "note: providers.%s.auth is \"oauth\" — set it to \"api_key\" to use this key\n", p)
+	}
+	return exitOK
+}
+
 // runLogout implements `moca logout <provider>`: best-effort remote
-// revocation, then clear the local registration. Idempotent, and a corrupt
-// store is reset rather than blocking (its error says to run this).
+// revocation of a stored OAuth session, then clears the provider's entry
+// (token and API key). Idempotent, and a corrupt store is reset rather than
+// blocking (its error says to run this).
 func runLogout(ctx context.Context, o Options, cfg config.Config, stdout, stderr io.Writer) int {
 	args := o.Sub[1:]
 	if len(args) != 1 {
@@ -124,7 +162,7 @@ func runLogout(ctx context.Context, o Options, cfg config.Config, stdout, stderr
 		fmt.Fprintf(stderr, "moca: unknown provider %q\n", p)
 		return exitUsage
 	}
-	store := provider.NewStore(filepath.Join(config.DataDir(), "auth.json"))
+	store := provider.NewDefaultStore()
 	tok, ok, err := store.Get(p)
 	if err != nil {
 		fmt.Fprintf(stderr, "moca: warning: %v\n", err)

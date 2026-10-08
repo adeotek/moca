@@ -99,3 +99,49 @@ func settle(m *model) {
 		ack(m)
 	}
 }
+
+// printLineType is the message type tea.Println commands produce. The runtime
+// intercepts it before Update (it goes to the renderer); simulate mirrors
+// that.
+var printLineType = reflect.TypeOf(tea.Println("")())
+
+// simulate drives a submitted command like the running event loop: it runs
+// the command, expands sequences/batches, feeds every other message back
+// through Update (following the commands Update returns) and collects the
+// scrollback prints. Use it when a submission's flow includes messages the
+// model must see (printedMsg, compactDoneMsg, runDoneMsg, …). The bool
+// reports whether the flow ended in tea.Quit.
+func simulate(m *model, cmd tea.Cmd) (out string, quit bool) {
+	var sb strings.Builder
+	queue := []tea.Cmd{cmd}
+	for len(queue) > 0 {
+		c := queue[0]
+		queue = queue[1:]
+		if c == nil {
+			continue
+		}
+		msg := c()
+		if msg == nil {
+			continue
+		}
+		if v := reflect.ValueOf(msg); v.Kind() == reflect.Slice && v.Type().Elem() == cmdType {
+			for i := 0; i < v.Len(); i++ {
+				if cc, _ := v.Index(i).Interface().(tea.Cmd); cc != nil {
+					queue = append(queue, cc)
+				}
+			}
+			continue
+		}
+		if reflect.TypeOf(msg) == printLineType {
+			sb.WriteString(fmt.Sprint(msg))
+			continue
+		}
+		if _, ok := msg.(tea.QuitMsg); ok {
+			quit = true
+			continue
+		}
+		_, next := m.Update(msg)
+		queue = append(queue, next)
+	}
+	return sb.String(), quit
+}

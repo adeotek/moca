@@ -105,6 +105,18 @@ func TestOAuthAllowedForOpenAI(t *testing.T) {
 	}
 }
 
+// apiKey is optional: with the key stored (auth.json, /login) and no env
+// reference, the provider config still validates.
+func TestAPIKeyOptional(t *testing.T) {
+	c, err := Parse([]byte(`{"providers":{"vllm":{"baseUrl":"http://x/v1","protocol":"openai-completions","auth":"api_key"}}}`))
+	if err != nil || c.Providers["vllm"].APIKey != "" {
+		t.Fatalf("apiKey-less provider must parse: %v", err)
+	}
+	if _, err := Parse([]byte(`{"providers":{"vllm":{"baseUrl":"http://x/v1","protocol":"openai-completions","auth":"api_key","apiKey":"sk-literal"}}}`)); err == nil || !strings.Contains(err.Error(), "env:") {
+		t.Fatalf("a literal apiKey must still be refused: %v", err)
+	}
+}
+
 func TestOAuthRejectedForNonOAuthProvider(t *testing.T) {
 	// OAuth exists only where the policy gate permits it: `auth: "oauth"`
 	// for anything else is a config error at load, not a request-time
