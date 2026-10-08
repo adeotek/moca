@@ -54,6 +54,7 @@ func TestCompactingBlocksRun(t *testing.T) {
 	}
 	// A `!` note would race the compaction (excluded from its summary, or
 	// dropped by the rebuilt context behind its cut boundary).
+	settle(m)
 	m.input.SetBuffer("!ls")
 	m.syncTextarea()
 	_, cmd = m.Update(key("enter"))

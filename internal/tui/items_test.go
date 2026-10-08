@@ -35,3 +35,19 @@ func TestItems(t *testing.T) {
 		t.Fatal("summaries are never format strings:", pct.Line)
 	}
 }
+
+func TestLastOfKind(t *testing.T) {
+	var s Items
+	if _, ok := s.LastOfKind("thinking"); ok {
+		t.Fatal("empty")
+	}
+	s.AddThinking("one")
+	s.AddTool(llm.ToolCall{Name: "ls"}, tools.Result{Summary: "x"})
+	th, ok := s.LastOfKind("thinking")
+	if !ok || th.N != 1 {
+		t.Fatalf("last thinking: %+v", th)
+	}
+	if tl, _ := s.LastOfKind("tool"); tl.N != 2 {
+		t.Fatalf("last tool: %+v", tl)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/adeotek/moca/internal/agent"
+	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/tools"
 )
@@ -129,5 +130,47 @@ func TestApprovalPromptSanitized(t *testing.T) {
 	}
 	if strings.Contains(got, "second line") {
 		t.Fatal("only the first detail line is shown")
+	}
+}
+
+// The scrollback opens with the title + version and the greeting.
+func TestWelcomeLines(t *testing.T) {
+	w := welcomeText()
+	for _, want := range []string{"moca", config.Version, "How can I help you today?"} {
+		if !strings.Contains(w, want) {
+			t.Fatalf("welcome %q missing %q", w, want)
+		}
+	}
+}
+
+// /exit and its /q, /quit aliases quit (same path as ctrl+c twice).
+func TestExitCommandQuits(t *testing.T) {
+	m := newAgentModel(t)
+	for _, in := range []string{"/exit", "/q", "/quit"} {
+		m.input.Insert(in)
+		m.syncTextarea()
+		cmd := m.submit()
+		if cmd == nil {
+			t.Fatalf("%s: no command", in)
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Fatalf("%s: want QuitMsg, got %T", in, cmd())
+		}
+	}
+}
+
+// The input area renders without a prompt and is separated from the output
+// and the status bar by two full-width rules.
+func TestInputRulesAndNoPrefix(t *testing.T) {
+	m := newTestModel()
+	v := m.View().Content
+	if m.ta.Prompt != "" {
+		t.Fatalf("input prompt %q", m.ta.Prompt)
+	}
+	if strings.Contains(v, "›") {
+		t.Fatalf("input prefix leaked into the view:\n%s", v)
+	}
+	if rule := strings.Repeat("─", 120); strings.Count(v, rule) != 2 {
+		t.Fatalf("want two full-width rules:\n%s", v)
 	}
 }

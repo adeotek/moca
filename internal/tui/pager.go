@@ -13,6 +13,9 @@ type pagerModel struct {
 
 func newPager(it Item, w, h int) *pagerModel {
 	vp := viewport.New(viewport.WithWidth(w), viewport.WithHeight(max(3, h-1)))
+	// Reasoning and tool output are long prose lines: wrap them instead of
+	// cutting them off at the right edge.
+	vp.SoftWrap = true
 	vp.SetContent(it.Body)
 	return &pagerModel{vp: vp, title: it.Line}
 }

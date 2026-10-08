@@ -58,3 +58,21 @@ func TestEventPipeBuffersUntilStarted(t *testing.T) {
 	}
 	close(p.stop)
 }
+
+// The run's completion rides the event pipe: it must arrive after every event
+// emitted before it, or the trailing-line flush would cut a streamed line in
+// two.
+func TestPipeSendKeepsOrderWithEvents(t *testing.T) {
+	p := newEventPipe()
+	rec := make(chan tea.Msg, 3)
+	p.start(func(msg tea.Msg) { rec <- msg })
+	p.emit(agent.TextDelta{Text: "tail"})
+	p.send(runDoneMsg{})
+	if _, ok := (<-rec).(agentEventMsg); !ok {
+		t.Fatal("the event must come first")
+	}
+	if _, ok := (<-rec).(runDoneMsg); !ok {
+		t.Fatal("the completion must follow the event")
+	}
+	close(p.stop)
+}
