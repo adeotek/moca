@@ -63,10 +63,10 @@ moca -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
 | `esc` | interrupt the run |
 | `ctrl+o` | pager (full item bodies) |
 | `alt+p` | paste chips (large pastes collapsed, buffer intact) |
-| `ctrl+c` ×2 | quit |
+| `ctrl+c` ×2 | quit (or `/exit`) |
 | `a` / `ctrl+a` / `d` | approval: allow once / allow always / deny |
 
-**Slash commands**: `/model` · `/effort` · `/hard` · `/yolo` · `/clear` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/help` — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results.
+**Slash commands**: `/model` · `/effort` · `/hard` · `/yolo` · `/clear` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results.
 
 ## Extend
 
