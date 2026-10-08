@@ -725,7 +725,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.toolBusy = ""
 		it := m.items.AddTool(e.Call, e.Result)
 		m.refreshStatus()
-		return println(it.Line)
+		return printlnTool(it.Line)
 	case agent.TurnEnd:
 		m.toolBusy = ""
 		var cmds []tea.Cmd
@@ -735,7 +735,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.live.Reset()
 		if m.thinking.Len() > 0 {
 			it := m.items.AddThinking(m.thinking.String())
-			cmds = append(cmds, println(it.Line))
+			cmds = append(cmds, printlnTool(it.Line))
 		}
 		m.thinking.Reset()
 		m.lastAssistant = llm.TextOf(e.Message)

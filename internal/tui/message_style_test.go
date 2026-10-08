@@ -9,16 +9,19 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/adeotek/moca/internal/agent"
+	"github.com/adeotek/moca/internal/llm"
+	"github.com/adeotek/moca/internal/tools"
 )
 
 // Submitted messages and assistant responses print on distinct scrollback
-// backgrounds; light and dark variants differ; blank lines keep a band.
+// backgrounds (the palette is pinned); light and dark variants differ; blank
+// lines keep a band.
 func TestScrollbackMessageBackgrounds(t *testing.T) {
 	m := newTestModel()
 	user := printed(m.printlnUser("› hi"))
 	resp := printed(m.printlnResponse("answer"))
-	if !strings.Contains(user, "48;2;") || !strings.Contains(resp, "48;2;") {
-		t.Fatalf("background missing: %q / %q", user, resp)
+	if !strings.Contains(user, "48;2;61;67;76") || !strings.Contains(resp, "48;2;33;59;73") {
+		t.Fatalf("palette changed: %q / %q", user, resp)
 	}
 	if user == resp {
 		t.Fatal("user and response backgrounds must differ")
@@ -32,6 +35,21 @@ func TestScrollbackMessageBackgrounds(t *testing.T) {
 	}
 	if bands := printed(m.printlnResponse("a\n\nb")); strings.Count(bands, "48;2;") != 3 {
 		t.Fatalf("blank line band missing: %q", bands)
+	}
+}
+
+// Tool-usage and thinking item lines render in muted #96a0a4 with no
+// background — the tool item path through Update included.
+func TestToolLinesMutedForegroundNoBackground(t *testing.T) {
+	m := newTestModel()
+	_, cmd := m.Update(agentEventMsg{agent.ToolEnd{Call: llm.ToolCall{Name: "ls"}, Result: tools.Result{Summary: "2 entries"}}})
+	got := printed(cmd)
+	if !strings.Contains(got, "▸ #1 ls 2 entries") || !strings.Contains(got, "38;2;150;160;164") || strings.Contains(got, "48;") {
+		t.Fatalf("tool line styling: %q", got)
+	}
+	line := printed(printlnTool("⋯ #2 thinking 3 lines"))
+	if !strings.Contains(line, "38;2;150;160;164") || strings.Contains(line, "48;") {
+		t.Fatalf("thinking line styling: %q", line)
 	}
 }
 

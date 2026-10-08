@@ -15,8 +15,10 @@ import (
 var (
 	userBgDark, userFgDark   = lipgloss.Color("#3d434c"), lipgloss.Color("#edf0f4")
 	userBgLight, userFgLight = lipgloss.Color("#dfe3e8"), lipgloss.Color("#1c2026")
-	respBgDark, respFgDark   = lipgloss.Color("#2e5079"), lipgloss.Color("#e9f1fc")
+	respBgDark, respFgDark   = lipgloss.Color("#213b49"), lipgloss.Color("#e9f1fc")
 	respBgLight, respFgLight = lipgloss.Color("#c9ddfb"), lipgloss.Color("#17304d")
+	// toolFg styles the tool-usage and thinking item lines (no background).
+	toolFg = lipgloss.NewStyle().Foreground(lipgloss.Color("#96a0a4"))
 )
 
 func userMsgStyle(dark bool) lipgloss.Style {
@@ -61,4 +63,11 @@ func (m *model) printlnUser(s string) tea.Cmd {
 // printlnResponse prints assistant response lines (full-row background).
 func (m *model) printlnResponse(s string) tea.Cmd {
 	return tea.Println(styleBlock(respMsgStyle(m.darkBG), s, m.width))
+}
+
+// printlnTool prints a tool-usage or thinking item line: muted foreground,
+// no background. Items.add already sanitized the line; Sanitize runs again
+// for the print-path invariant (§3.5).
+func printlnTool(s string) tea.Cmd {
+	return tea.Println(toolFg.Render(Sanitize(s)))
 }
