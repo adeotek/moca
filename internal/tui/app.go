@@ -84,14 +84,16 @@ type model struct {
 const approvalIdle = 700 * time.Millisecond
 
 var (
-	dim = lipgloss.NewStyle().Faint(true)
-	red = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	dim  = lipgloss.NewStyle().Faint(true)
+	red  = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	bold = lipgloss.NewStyle().Bold(true)
 )
 
 func newModel(o AppOptions, a *agent.Agent) *model {
 	ta := textarea.New()
 	ta.ShowLineNumbers = false
-	ta.Prompt = "› "
+	// No prompt prefix: the input area renders the text alone (§11).
+	ta.Prompt = ""
 	ta.SetHeight(3)
 	ta.Focus()
 	m := &model{opts: o, start: o.Start, agent: a, input: NewInput(), ta: ta, now: time.Now}
@@ -112,6 +114,7 @@ func println(s string) tea.Cmd { return tea.Println(s) }
 func printlnContent(s string) tea.Cmd { return tea.Println(Sanitize(s)) }
 
 func (m *model) refreshStatus() {
+	m.status.Version = config.Version
 	if m.agent == nil {
 		return
 	}
@@ -129,7 +132,13 @@ func (m *model) branchCmd() tea.Cmd {
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(m.branchCmd(), tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return hintCheckMsg{} }))
+	return tea.Batch(println(welcomeText()), m.branchCmd(), tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return hintCheckMsg{} }))
+}
+
+// welcomeText opens the scrollback of a session: title + version, then the
+// greeting.
+func welcomeText() string {
+	return bold.Render("moca") + " " + dim.Render(config.Version) + "\n" + "How can I help you today?"
 }
 
 // commitLive moves every completed line out of the live buffer and returns
@@ -582,6 +591,8 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		}
 		m.openPager(it)
 		return nil
+	case "exit":
+		return m.quit()
 	case "help":
 		return printlnContent(HelpText(m.opts.Prompts))
 	}
@@ -801,8 +812,10 @@ func (m *model) View() tea.View {
 	if m.approval != nil {
 		sb.WriteString(approvalPrompt(m.approval.q) + "\n")
 	}
+	sb.WriteString(m.rule())
 	sb.WriteString(m.ta.View())
 	sb.WriteString("\n")
+	sb.WriteString(m.rule())
 	sb.WriteString(m.statusLine())
 	v := tea.NewView(sb.String())
 	// Ask for full key disambiguation so shift+enter is distinguishable.
@@ -810,14 +823,22 @@ func (m *model) View() tea.View {
 	return v
 }
 
-// statusLine renders the bar; in yolo mode a red YOLO field leads it and is
-// never dropped — the rest gets the remaining width.
+// statusLine renders the two-line bar; in yolo mode a red YOLO field leads
+// line 1 and is never dropped — the rest gets the remaining width.
 func (m *model) statusLine() string {
 	w := max(20, m.width)
 	if m.agent != nil && m.agent.Yolo() {
-		return red.Render("YOLO") + dim.Render(" · "+Sanitize(RenderStatus(m.status, w-7)))
+		l1, l2 := RenderStatus(m.status, max(13, w-7))
+		return red.Render("YOLO") + dim.Render(" · "+Sanitize(l1)) + "\n" + dim.Render(Sanitize(l2))
 	}
-	return dim.Render(Sanitize(RenderStatus(m.status, w)))
+	l1, l2 := RenderStatus(m.status, w)
+	return dim.Render(Sanitize(l1)) + "\n" + dim.Render(Sanitize(l2))
+}
+
+// rule is the full-width dim separator between the scrollback output, the
+// input area and the status bar.
+func (m *model) rule() string {
+	return dim.Render(strings.Repeat("─", max(20, m.width))) + "\n"
 }
 
 func approvalPrompt(q tools.Question) string {

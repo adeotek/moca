@@ -27,7 +27,11 @@ type Parsed struct {
 }
 
 // BuiltinCommands win over prompt templates on a name collision (§10).
-var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "clear", "compact", "cost", "undo", "copy", "show", "help"}
+var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "clear", "compact", "cost", "undo", "copy", "show", "help", "exit"}
+
+// builtinAliases resolve to their built-in before the lookup
+// (`/q`, `/quit` → `/exit`).
+var builtinAliases = map[string]string{"q": "exit", "quit": "exit"}
 
 var builtinHelp = map[string]string{
 	"model":   "[provider/model]  list models or switch (forfeits prompt cache)",
@@ -41,6 +45,7 @@ var builtinHelp = map[string]string{
 	"copy":    "copy the last assistant message (OSC 52)",
 	"show":    "<n>  open item #n in the pager",
 	"help":    "this help",
+	"exit":    "quit (/q, /quit — same as ctrl+c twice)",
 }
 
 // ParseInput classifies one input line. Rules: `!!x` → local shell, `!x` →
@@ -58,6 +63,9 @@ func ParseInput(s string, prompts []skills.Prompt) (Parsed, error) {
 	case strings.HasPrefix(s, "/"):
 		name, args, _ := strings.Cut(s[1:], " ")
 		args = strings.TrimSpace(args)
+		if t := builtinAliases[name]; t != "" {
+			name = t
+		}
 		if slices.Contains(BuiltinCommands, name) {
 			return Parsed{Kind: KindCommand, Name: name, Args: args}, nil
 		}

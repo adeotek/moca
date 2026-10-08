@@ -368,11 +368,14 @@ func TestTrustPromptCancel(t *testing.T) {
 }
 
 func TestStatusWideRunesNeverExceedWidth(t *testing.T) {
-	s := StatusInfo{Cwd: "~/プロジェクト/日本語のとても長い名前", Branch: "feature/絵文字🙂", Git: true,
+	s := StatusInfo{Version: "v0.1.0-alpha-1-gc392fac", Cwd: "~/プロジェクト/日本語のとても長い名前", Branch: "feature/絵文字🙂", Git: true,
 		Model: "fake/m", Effort: "high", Window: 128 * 1024, Used: 1000, In: 1000, Out: 100, Cost: 0.5}
 	for _, w := range []int{100, 60, 40, 25, 20} {
-		if got := lipgloss.Width(RenderStatus(s, w)); got > w {
-			t.Errorf("width %d: rendered %d cells", w, got)
+		l1, l2 := RenderStatus(s, w)
+		for _, l := range []string{l1, l2} {
+			if got := lipgloss.Width(l); got > w {
+				t.Errorf("width %d: rendered %d cells", w, got)
+			}
 		}
 	}
 }

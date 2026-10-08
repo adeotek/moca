@@ -21,6 +21,9 @@ func TestParseInput(t *testing.T) {
 		{"!!ls", Parsed{Kind: KindShellLocal, Text: "ls"}},
 		{"//etc/hosts is odd", Parsed{Kind: KindText, Text: "/etc/hosts is odd"}},
 		{"  /show 7 ", Parsed{Kind: KindCommand, Name: "show", Args: "7"}},
+		{"/exit", Parsed{Kind: KindCommand, Name: "exit"}},
+		{"/q", Parsed{Kind: KindCommand, Name: "exit"}},
+		{"/quit now", Parsed{Kind: KindCommand, Name: "exit", Args: "now"}},
 	}
 	for _, c := range cases {
 		got, err := ParseInput(c.in, prompts)
@@ -36,5 +39,8 @@ func TestParseInput(t *testing.T) {
 	}
 	if !strings.Contains(HelpText(prompts), "/review") {
 		t.Fatal("help lists prompts")
+	}
+	if !strings.Contains(HelpText(prompts), "/exit") {
+		t.Fatal("help lists /exit")
 	}
 }
