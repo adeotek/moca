@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -53,10 +55,47 @@ func newAgentModel(t *testing.T) *model {
 	return m
 }
 
-// printed renders what a print cmd would put in the scrollback.
+// printed renders what a print cmd would put in the scrollback: the scrollback
+// body of a flush ({body}), or the concatenated bodies of a sequence of them
+// (the acknowledgement that follows a flush prints nothing).
 func printed(cmd tea.Cmd) string {
 	if cmd == nil {
 		return ""
 	}
-	return fmt.Sprint(cmd())
+	return flatten(cmd())
+}
+
+var cmdType = reflect.TypeOf((tea.Cmd)(nil))
+
+func flatten(msg tea.Msg) string {
+	if msg == nil {
+		return ""
+	}
+	if _, ok := msg.(printedMsg); ok {
+		return ""
+	}
+	if v := reflect.ValueOf(msg); v.Kind() == reflect.Slice && v.Type().Elem() == cmdType {
+		var sb strings.Builder
+		for i := 0; i < v.Len(); i++ {
+			if c, _ := v.Index(i).Interface().(tea.Cmd); c != nil {
+				sb.WriteString(flatten(c()))
+			}
+		}
+		return sb.String()
+	}
+	return fmt.Sprint(msg)
+}
+
+// ack lets the next queued scrollback flush out, as the renderer's
+// acknowledgement does in the running program.
+func ack(m *model) tea.Cmd {
+	_, cmd := m.Update(printedMsg{})
+	return cmd
+}
+
+// settle acknowledges until the scrollback queue is idle.
+func settle(m *model) {
+	for m.outBusy {
+		ack(m)
+	}
 }

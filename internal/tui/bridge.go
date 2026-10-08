@@ -64,14 +64,18 @@ func newAsker(send func(tea.Msg)) tools.Asker {
 // loop itself to be stalled; that is deliberate backpressure (dropping
 // streamed text deltas would corrupt the answer, and a stalled loop cannot
 // process esc either).
+//
+// The run's completion travels the same pipe (send): a message returned from
+// a command takes its own route to the event loop and could overtake events
+// still queued here, flushing a half-streamed line before its tail arrived.
 type eventPipe struct {
-	ch   chan agent.Event
+	ch   chan tea.Msg
 	stop chan struct{}
 	prog chan func(tea.Msg)
 }
 
 func newEventPipe() *eventPipe {
-	p := &eventPipe{ch: make(chan agent.Event, 1024), stop: make(chan struct{}), prog: make(chan func(tea.Msg), 1)}
+	p := &eventPipe{ch: make(chan tea.Msg, 1024), stop: make(chan struct{}), prog: make(chan func(tea.Msg), 1)}
 	go func() {
 		var send func(tea.Msg)
 		select {
@@ -81,8 +85,8 @@ func newEventPipe() *eventPipe {
 		}
 		for {
 			select {
-			case e := <-p.ch:
-				send(agentEventMsg{e})
+			case msg := <-p.ch:
+				send(msg)
 			case <-p.stop:
 				return
 			}
@@ -95,9 +99,12 @@ func newEventPipe() *eventPipe {
 // before it existed.
 func (p *eventPipe) start(send func(tea.Msg)) { p.prog <- send }
 
-func (p *eventPipe) emit(e agent.Event) {
+func (p *eventPipe) emit(e agent.Event) { p.send(agentEventMsg{e}) }
+
+// send enqueues any message behind everything emitted so far.
+func (p *eventPipe) send(msg tea.Msg) {
 	select {
-	case p.ch <- e:
+	case p.ch <- msg:
 	case <-p.stop:
 	}
 }

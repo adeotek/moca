@@ -27,7 +27,12 @@ type Parsed struct {
 }
 
 // BuiltinCommands win over prompt templates on a name collision (§10).
-var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "clear", "compact", "cost", "undo", "copy", "show", "help"}
+var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "clear", "compact", "cost", "undo", "copy", "show", "help", "exit"}
+
+// builtinAliases resolve to their built-in unless a prompt template already
+// owns the name (`/q`, `/quit` → `/exit`) — only the full built-in names are
+// reserved.
+var builtinAliases = map[string]string{"q": "exit", "quit": "exit"}
 
 var builtinHelp = map[string]string{
 	"model":   "[provider/model]  list models or switch (forfeits prompt cache)",
@@ -41,6 +46,7 @@ var builtinHelp = map[string]string{
 	"copy":    "copy the last assistant message (OSC 52)",
 	"show":    "<n>  open item #n in the pager",
 	"help":    "this help",
+	"exit":    "quit (/q, /quit — same as ctrl+c twice)",
 }
 
 // ParseInput classifies one input line. Rules: `!!x` → local shell, `!x` →
@@ -58,6 +64,9 @@ func ParseInput(s string, prompts []skills.Prompt) (Parsed, error) {
 	case strings.HasPrefix(s, "/"):
 		name, args, _ := strings.Cut(s[1:], " ")
 		args = strings.TrimSpace(args)
+		if t := builtinAliases[name]; t != "" && !slices.ContainsFunc(prompts, func(p skills.Prompt) bool { return p.Name == name }) {
+			name = t
+		}
 		if slices.Contains(BuiltinCommands, name) {
 			return Parsed{Kind: KindCommand, Name: name, Args: args}, nil
 		}
@@ -83,6 +92,6 @@ func HelpText(prompts []skills.Prompt) string {
 		fmt.Fprintf(&sb, "/%-8s %s %s\n", p.Name, p.ArgumentHint, p.Description)
 	}
 	sb.WriteString("!cmd     run cmd, output goes to the model   !!cmd  run cmd locally only\n")
-	sb.WriteString("enter send · shift+enter newline · esc interrupt · ctrl+o pager · alt+p paste chips · ctrl+c×2 quit")
+	sb.WriteString("enter send · shift+enter newline · esc interrupt · ctrl+o pager (latest item) · alt+t read the latest thinking · alt+p paste chips · ctrl+c×2 quit")
 	return sb.String()
 }
