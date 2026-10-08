@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/adeotek/moca/internal/agent"
 )
@@ -22,7 +23,7 @@ func TestScrollbackMessageBackgrounds(t *testing.T) {
 	if user == resp {
 		t.Fatal("user and response backgrounds must differ")
 	}
-	if got, want := printed(m.printlnUser("x")), styleBlock(userMsgStyle(true), "x"); !strings.Contains(got, want) {
+	if got, want := printed(m.printlnUser("x")), styleBlock(userMsgStyle(true), "x", m.width); !strings.Contains(got, want) {
 		t.Fatalf("user style plumbing: %q want %q", got, want)
 	}
 	m.darkBG = false
@@ -31,6 +32,22 @@ func TestScrollbackMessageBackgrounds(t *testing.T) {
 	}
 	if bands := printed(m.printlnResponse("a\n\nb")); strings.Count(bands, "48;2;") != 3 {
 		t.Fatalf("blank line band missing: %q", bands)
+	}
+}
+
+// Every styled row spans the full terminal width (the background covers the
+// entire row); longer lines are left unpadded.
+func TestMessageBackgroundsCoverTheFullRow(t *testing.T) {
+	m := newTestModel()
+	strip := func(s string) string { return strings.TrimSuffix(strings.TrimPrefix(s, "{"), "}") }
+	for _, l := range strings.Split(strip(printed(m.printlnResponse("a\n\nb"))), "\n") {
+		if w := lipgloss.Width(l); w != m.width {
+			t.Fatalf("row is %d cells, want %d", w, m.width)
+		}
+	}
+	long := strings.Repeat("x", m.width+1)
+	if w := lipgloss.Width(styleBlock(respMsgStyle(true), long, m.width)); w != m.width+2 {
+		t.Fatalf("long row width %d, want %d", w, m.width+2)
 	}
 }
 

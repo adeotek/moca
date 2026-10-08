@@ -7,15 +7,16 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Scrollback message backgrounds (§11): submitted messages and assistant
-// responses are printed on distinct background colors; thinking and tool
-// lines stay plain. Light and dark pairs — dark is the default until the
-// terminal reports its background (tea.BackgroundColorMsg).
+// Scrollback message backgrounds (§11): submitted messages (slate) and
+// assistant responses (steel blue) are printed on distinct full-row
+// background colors; thinking and tool lines stay plain. Light and dark
+// pairs — dark is the default until the terminal reports its background
+// (tea.BackgroundColorMsg).
 var (
-	userBgDark, userFgDark   = lipgloss.Color("#223a5e"), lipgloss.Color("#d6e4f5")
-	userBgLight, userFgLight = lipgloss.Color("#dbeafe"), lipgloss.Color("#1e3a5f")
-	respBgDark, respFgDark   = lipgloss.Color("#2d2f34"), lipgloss.Color("#e3e3e7")
-	respBgLight, respFgLight = lipgloss.Color("#eef0f3"), lipgloss.Color("#24292f")
+	userBgDark, userFgDark   = lipgloss.Color("#3d434c"), lipgloss.Color("#edf0f4")
+	userBgLight, userFgLight = lipgloss.Color("#dfe3e8"), lipgloss.Color("#1c2026")
+	respBgDark, respFgDark   = lipgloss.Color("#2e5079"), lipgloss.Color("#e9f1fc")
+	respBgLight, respFgLight = lipgloss.Color("#c9ddfb"), lipgloss.Color("#17304d")
 )
 
 func userMsgStyle(dark bool) lipgloss.Style {
@@ -32,23 +33,32 @@ func respMsgStyle(dark bool) lipgloss.Style {
 	return lipgloss.NewStyle().Background(respBgLight).Foreground(respFgLight)
 }
 
-// styleBlock renders every line of s with st, one leading space per line;
-// blank lines keep a one-cell band so a multi-line message reads as one
-// block. Untrusted content is sanitized before styling (§3.5).
-func styleBlock(st lipgloss.Style, s string) string {
+// styleBlock renders every line of s with st, padded to the full terminal
+// width (width ≤ 0 = no padding) so the background covers the whole row;
+// blank lines keep a full-width band so a multi-line message reads as one
+// block. Lines already at or beyond the width are left unpadded — the
+// terminal soft-wraps them and the background continues (Bubble Tea writes
+// each printed line as content + erase-to-EOL + CRLF, so an exactly
+// full-width line never double-advances). Untrusted content is sanitized
+// before styling (§3.5).
+func styleBlock(st lipgloss.Style, s string, width int) string {
 	lines := strings.Split(Sanitize(s), "\n")
 	for i, l := range lines {
-		lines[i] = st.Render(" " + l)
+		row := " " + l
+		if pad := width - lipgloss.Width(row); pad > 0 {
+			row += strings.Repeat(" ", pad)
+		}
+		lines[i] = st.Render(row)
 	}
 	return strings.Join(lines, "\n")
 }
 
-// printlnUser prints a submitted user message line (background field).
+// printlnUser prints a submitted user message line (full-row background).
 func (m *model) printlnUser(s string) tea.Cmd {
-	return tea.Println(styleBlock(userMsgStyle(m.darkBG), s))
+	return tea.Println(styleBlock(userMsgStyle(m.darkBG), s, m.width))
 }
 
-// printlnResponse prints assistant response lines (background field).
+// printlnResponse prints assistant response lines (full-row background).
 func (m *model) printlnResponse(s string) tea.Cmd {
-	return tea.Println(styleBlock(respMsgStyle(m.darkBG), s))
+	return tea.Println(styleBlock(respMsgStyle(m.darkBG), s, m.width))
 }
