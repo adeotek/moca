@@ -22,7 +22,7 @@ func ConfigDir() string {
 }
 
 // DataDir is ~/.local/share/moca (or $XDG_DATA_HOME/moca): sessions,
-// snapshots, auth.json, trust.json, mcp-index.json, builtin-skills.
+// snapshots, trust.json, mcp-index.json, builtin-skills.
 func DataDir() string {
 	if x := os.Getenv("XDG_DATA_HOME"); x != "" {
 		return filepath.Join(x, "moca")
@@ -30,4 +30,12 @@ func DataDir() string {
 	return filepath.Join(home(), ".local", "share", "moca")
 }
 
+// ConfigFile is ~/.config/moca/config.jsonc.
 func ConfigFile() string { return filepath.Join(ConfigDir(), "config.jsonc") }
+
+// AuthFile is ~/.config/moca/auth.json: the credential store — API keys
+// stored with /login (TUI) or `moca login <provider>`, and OAuth tokens
+// (file 0600). It lives beside the config file so one directory holds
+// everything the user manages; a v0.1 store in the data dir is migrated
+// once (provider.MigrateLegacyStore).
+func AuthFile() string { return filepath.Join(ConfigDir(), "auth.json") }

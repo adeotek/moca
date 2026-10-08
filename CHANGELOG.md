@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.1.1 (2026-10-08)
+
+Polish, a credential store in the config dir, `/` autocomplete, and a bigger catalog — still one binary, still no framework.
+
+### Credentials & login (TUI `/login`, API keys for `moca login`)
+
+- **`/login` in the TUI** — pick a provider, then paste an API key (masked, never echoed, never written to the transcript) or sign in to a subscription in the browser; while a sign-in is in flight the pasted redirect URL/code from the input box feeds the flow and `esc` cancels it. After a successful ChatGPT sign-in the wizard offers to flip `providers.openai.auth` to `"oauth"` for you. **`/logout`** revokes a subscription session best-effort and clears the stored token/API key.
+- **Credentials live in `~/.config/moca/auth.json`** (0600) — beside the config file now, not the data dir (a v0.1 store is migrated automatically on first run); API keys and OAuth tokens share the file.
+- **`apiKey` is optional in the config**: a key stored with `/login` or the CLI wins over the `env:VAR` reference, which stays as the fallback — an env var set by an external process still works, and `/logout` restores it. The stored key applies from the running session's next request.
+- **`moca login <provider>` stores API keys too**: providers without an OAuth flow (e.g. `anthropic` — the recorded policy reason is printed, then the key prompt) prompt for one; the prompt shows only on a terminal, so `echo -n "$KEY" | moca login anthropic` stores silently. `--api-key` forces the key path for `openai`; `moca logout <provider>` clears token and key.
+
+### TUI polish
+
+- **`/` autocomplete dropdown** — typing `/` lists every built-in command and loaded prompt template (with one-line hints), filtered as you type; `↑`/`↓` pick, `tab` completes, `enter` on an exact name runs it, `esc` dismisses. Built-ins win name collisions with templates.
+- **Commands echo as messages** — a submitted `/` command prints in the scrollback with the same `›` band as user messages, then its output (refusals included).
+- **Welcome line**: the `moca` product name renders in orange (`#d97706`).
+- **Thinking blocks** now print their item line when the block ends — before the response or tool item that follows, not after — and show how long they streamed (`⋯ #6 thinking 8 lines · 12s`).
+- Two-line status bar from the first frame: `version · cwd · branch` and `provider/model · effort · ctx % · in/out · cost`.
+- Full-width rules around the input area (no prompt prefix), compact welcome lines, full-row backgrounds for submitted messages and assistant responses, muted tool/thinking lines, `/exit` (`/q`/`/quit` aliases).
+- Shrinking frames can no longer strand stale rows in the scrollback when keystrokes coalesce into one rendered frame (the inline-renderer shrink guard now remembers the last frame the renderer actually flushed).
+
+### Catalog & tooling
+
+- +10 `opencode-go` models (deepseek v4.1/v4 flash & pro, kimi-k2.7-code, mimo-v2.6, qwen3.8 & qwen3.7), all live-verified; Go version pinned once in `go.mod`; the `make` targets mirrored as `mise run` tasks; `make vet` now includes the `gofmt` check; documentation trimmed to the two living specs.
+
 ## v0.1.0-alpha (2026-10-07)
 
 First release. A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, seven tools, no framework.

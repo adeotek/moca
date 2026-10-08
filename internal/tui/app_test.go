@@ -43,6 +43,8 @@ func keyMsg(s string) tea.KeyPressMsg {
 		k.Code = tea.KeyUp
 	case "down":
 		k.Code = tea.KeyDown
+	case "tab":
+		k.Code = tea.KeyTab
 	default:
 		r := []rune(body)
 		k.Code = r[len(r)-1]
@@ -98,7 +100,8 @@ func TestThinkingCollapsedOnTurnEnd(t *testing.T) {
 	}
 	m.Update(agentEventMsg{agent.TurnEnd{Message: llm.Message{}}})
 	it, ok := m.items.Last()
-	if !ok || it.Kind != "thinking" || it.Line != "⋯ #1 thinking 2 lines" {
+	// The block streamed from deltas, so its line carries the duration.
+	if !ok || it.Kind != "thinking" || it.Line != "⋯ #1 thinking 2 lines · <1s" {
 		t.Fatal(it)
 	}
 }
@@ -143,7 +146,8 @@ func TestWelcomeLines(t *testing.T) {
 	}
 }
 
-// /exit and its /q, /quit aliases quit (same path as ctrl+c twice).
+// /exit and its /q, /quit aliases quit (same path as ctrl+c twice). The
+// submission is an echo-print-then-quit sequence, so drive it.
 func TestExitCommandQuits(t *testing.T) {
 	m := newAgentModel(t)
 	for _, in := range []string{"/exit", "/q", "/quit"} {
@@ -153,8 +157,8 @@ func TestExitCommandQuits(t *testing.T) {
 		if cmd == nil {
 			t.Fatalf("%s: no command", in)
 		}
-		if _, ok := cmd().(tea.QuitMsg); !ok {
-			t.Fatalf("%s: want QuitMsg, got %T", in, cmd())
+		if _, quit := simulate(m, cmd); !quit {
+			t.Fatalf("%s: the submission must quit", in)
 		}
 	}
 }

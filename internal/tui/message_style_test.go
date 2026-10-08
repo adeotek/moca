@@ -51,6 +51,35 @@ func TestUserMessageStartsWithBlankLine(t *testing.T) {
 	}
 }
 
+// A submitted / command echoes into the scrollback as a user message — the
+// same `›` band and blank line — and its output follows the echo.
+func TestCommandEchoesAsUserMessage(t *testing.T) {
+	m := newAgentModel(t)
+	out := drained(m, tuiCmd(t, m, "/help"))
+	band := styleBlock(userMsgStyle(true), "› /help", m.width)
+	iBand := strings.Index(out, band)
+	if iBand < 0 {
+		t.Fatalf("no user-message band for the command:\n%q", out)
+	}
+	if !strings.HasPrefix(out, "{\n") {
+		t.Fatalf("the echo must start with a blank line:\n%q", out)
+	}
+	marker := "type / for the command dropdown"
+	iHelp := strings.Index(out, marker)
+	if iHelp < 0 || iHelp < iBand {
+		t.Fatalf("the command output must follow the echo:\n%q", out)
+	}
+	// A refused command echoes too, before the refusal.
+	m.running = true
+	out = drained(m, tuiCmd(t, m, "/clear"))
+	if !strings.Contains(out, styleBlock(userMsgStyle(true), "› /clear", m.width)) {
+		t.Fatalf("refused command must echo:\n%q", out)
+	}
+	if !strings.Contains(out, "finish or interrupt the run first") {
+		t.Fatalf("refusal missing:\n%q", out)
+	}
+}
+
 // Tool-usage, thinking and notice lines render in muted #96a0a4 with no
 // background — the tool item path through Update included; errors are red
 // and warnings yellow.

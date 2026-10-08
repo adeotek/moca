@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -156,7 +155,7 @@ func TestLoginCLISwitchesAuthAfterCallback(t *testing.T) {
 	if err != nil || c.Providers["openai"].Auth != "oauth" {
 		t.Fatalf("auth not switched: %v %+v", err, c.Providers["openai"])
 	}
-	tok, ok, err := provider.NewStore(config.DataDir() + "/auth.json").Get("openai")
+	tok, ok, err := provider.NewDefaultStore().Get("openai")
 	if err != nil || !ok || tok.Access != "AT" || tok.ClientID != "oaiapp_t" {
 		t.Fatalf("stored token: %+v %v %v", tok, ok, err)
 	}
@@ -227,7 +226,7 @@ func TestLogoutRevokeIsBounded(t *testing.T) {
 	revokeTimeout = 100 * time.Millisecond
 	defer func() { revokeTimeout = oldTimeout }()
 	cfg := writeCfg(t, `{}`)
-	store := provider.NewStore(filepath.Join(config.DataDir(), "auth.json"))
+	store := provider.NewDefaultStore()
 	if err := store.Put("openai", provider.Token{Access: "a", Refresh: "r", ClientID: "c", Expiry: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}

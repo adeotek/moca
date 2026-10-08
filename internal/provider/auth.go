@@ -9,7 +9,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/adeotek/moca/internal/config"
 )
 
 // Token is one provider registration's credentials. The store keeps one
@@ -46,15 +49,66 @@ var (
 
 // storeFile is the on-disk shape of auth.json. hostId is this host's
 // ext_agent_host_id (Sign in with ChatGPT): stable per host, opaque, not a
-// credential; it survives logout so a later sign-in reuses it.
+// credential; it survives logout so a later sign-in reuses it. providers
+// holds OAuth tokens (one entry per provider); apiKeys holds provider API
+// keys stored with /login (TUI) or `moca login <provider>` — the store-first
+// credential for api_key providers, with the config's env: reference as the
+// fallback.
 type storeFile struct {
-	HostID    string           `json:"hostId,omitempty"`
-	Providers map[string]Token `json:"providers"`
+	HostID    string            `json:"hostId,omitempty"`
+	Providers map[string]Token  `json:"providers"`
+	APIKeys   map[string]string `json:"apiKeys,omitempty"`
 }
 
 type Store struct{ path string }
 
 func NewStore(path string) *Store { return &Store{path: path} }
+
+// NewDefaultStore is the process-wide credential store: auth.json in the
+// moca config dir (~/.config/moca/auth.json).
+func NewDefaultStore() *Store { return NewStore(config.AuthFile()) }
+
+// Path is the store's file path (for messages).
+func (s *Store) Path() string { return s.path }
+
+// MigrateLegacyStore moves a v0.1 auth store from the data dir
+// (~/.local/share/moca/auth.json) to the config dir, where credentials live
+// now. Best-effort and idempotent: a no-op when the new file exists or no
+// old file does; the old file is only removed once the new one is in place.
+// Returns an error only when a needed migration failed (the caller warns;
+// the old store is left untouched then, so nothing is lost).
+func MigrateLegacyStore() error {
+	newPath, oldPath := config.AuthFile(), filepath.Join(config.DataDir(), "auth.json")
+	if oldPath == newPath {
+		return nil
+	}
+	if _, err := os.Stat(newPath); err == nil {
+		return nil // the new store exists: it wins, even if empty
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return nil // can't tell — leave both files alone
+	}
+	b, err := os.ReadFile(oldPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("reading the old auth store %s: %w", oldPath, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o700); err != nil {
+		return err
+	}
+	if err := os.Rename(oldPath, newPath); err == nil {
+		return nil // same filesystem: atomic, the old file is gone
+	}
+	// Cross-device fallback: copy, force 0600, then drop the old file.
+	if err := os.WriteFile(newPath, b, 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(newPath, 0o600); err != nil {
+		return err
+	}
+	return os.Remove(oldPath)
+}
 
 func (s *Store) read() (storeFile, error) {
 	f := storeFile{Providers: map[string]Token{}}
@@ -129,6 +183,18 @@ func (s *Store) Get(p string) (Token, bool, error) {
 	return t, ok, nil
 }
 
+// GetAPIKey returns the API key stored for p, if any. Like Get it is a plain
+// read (no lock): a missing or corrupt file reports "not found" / the read
+// error, never blocks.
+func (s *Store) GetAPIKey(p string) (string, bool, error) {
+	f, err := s.read()
+	if err != nil {
+		return "", false, err
+	}
+	k, ok := f.APIKeys[p]
+	return k, ok && k != "", nil
+}
+
 func (s *Store) Put(p string, t Token) error {
 	return s.withLock(context.Background(), func() error {
 		f, err := s.read()
@@ -140,7 +206,38 @@ func (s *Store) Put(p string, t Token) error {
 	})
 }
 
-// Delete removes a provider's registration (logout). A corrupt store is
+// PutAPIKey stores (or replaces) p's API key in auth.json (0600, atomic).
+// The key is validated: empty keys and keys carrying control bytes are
+// refused — a newline in a credential would end up in an HTTP header.
+func (s *Store) PutAPIKey(p, key string) error {
+	if err := validateAPIKey(key); err != nil {
+		return err
+	}
+	return s.withLock(context.Background(), func() error {
+		f, err := s.read()
+		if err != nil {
+			return err
+		}
+		if f.APIKeys == nil {
+			f.APIKeys = map[string]string{}
+		}
+		f.APIKeys[p] = key
+		return s.write(f)
+	})
+}
+
+func validateAPIKey(k string) error {
+	if k == "" {
+		return errors.New("empty API key")
+	}
+	if strings.ContainsFunc(k, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return errors.New("the API key contains control characters")
+	}
+	return nil
+}
+
+// Delete removes a provider's registration — both its OAuth token and its
+// API key (logout clears whatever credential is stored). A corrupt store is
 // reset rather than blocking logout; the host id is kept when readable.
 func (s *Store) Delete(p string) error {
 	return s.withLock(context.Background(), func() error {
@@ -149,6 +246,7 @@ func (s *Store) Delete(p string) error {
 			f = storeFile{Providers: map[string]Token{}}
 		}
 		delete(f.Providers, p)
+		delete(f.APIKeys, p)
 		return s.write(f)
 	})
 }
@@ -205,7 +303,7 @@ func (s *Store) CredentialFor(p string, refresh Refresher) CredentialFunc {
 			}
 			t, ok := f.Providers[p]
 			if !ok {
-				return fmt.Errorf("not logged in to %s: run moca login %s", p, p)
+				return fmt.Errorf("not logged in to %s: run /login in the TUI, or moca login %s", p, p)
 			}
 			if time.Until(t.Expiry) > time.Minute || refresh == nil {
 				tok = t
@@ -215,10 +313,10 @@ func (s *Store) CredentialFor(p string, refresh Refresher) CredentialFunc {
 			nt, err := refresh(rctx, t)
 			cancel()
 			if errors.Is(err, ErrInvalidGrant) {
-				return fmt.Errorf("session expired for %s: run moca login %s: %w", p, p, ErrInvalidGrant)
+				return fmt.Errorf("session expired for %s: run /login in the TUI, or moca login %s: %w", p, p, ErrInvalidGrant)
 			}
 			if errors.Is(err, ErrInvalidClient) {
-				return fmt.Errorf("stored client registration for %s was rejected: run moca logout %s then moca login %s: %w", p, p, p, ErrInvalidClient)
+				return fmt.Errorf("stored client registration for %s was rejected: run /logout in the TUI (or moca logout %s), then log in again: %w", p, p, ErrInvalidClient)
 			}
 			if err != nil {
 				// A transient failure (network, 429/5xx, timeout) inside the

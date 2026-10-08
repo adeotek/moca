@@ -234,8 +234,12 @@ func (c Config) Validate() error {
 	for name, p := range c.Providers {
 		switch p.Auth {
 		case "api_key":
-			if !strings.HasPrefix(p.APIKey, envPrefix) {
-				return fmt.Errorf("providers.%s.apiKey must be an env: reference (e.g. \"env:MY_KEY\"), never a literal", name)
+			// apiKey is an optional env indirection: omitted, the provider
+			// resolves from the credential store (a key saved with /login or
+			// `moca login <provider>`), which also wins over the env value
+			// when both exist.
+			if p.APIKey != "" && !strings.HasPrefix(p.APIKey, envPrefix) {
+				return fmt.Errorf("providers.%s.apiKey must be an env: reference (e.g. \"env:MY_KEY\"), never a literal (omit it to rely on the key stored by /login)", name)
 			}
 		case "oauth":
 			if reason, ok := OAuthUnsupported[name]; ok {

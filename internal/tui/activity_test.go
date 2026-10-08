@@ -179,6 +179,45 @@ func TestShrinkIsPaddedUntilTheGuardWindowPasses(t *testing.T) {
 	}
 }
 
+// When several Views coalesce into one rendered frame (keystrokes arriving in
+// one batch), the pad decision must remember the cursor row of the last frame
+// that was actually flushed — not just the previous View's row, which the
+// coalesced-away frames have already overwritten. Regression: typing "lo"
+// over a tall dropdown stranded its top rows.
+func TestCoalescedShrinkRemembersTheLastFlushedRow(t *testing.T) {
+	m := newTestModel()
+	clock := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return clock }
+	for i := 0; i < 11; i++ {
+		m.Update(key("alt+enter"))
+	}
+	tall := m.View() // flushed at the next frame interval
+	cursorY := tall.Cursor.Position.Y
+	rows := func(v tea.View) int { return strings.Count(v.Content, "\n") + 1 }
+
+	// A long pause: the tall frame is certainly the one the renderer
+	// remembers, and it has long left any time window.
+	clock = clock.Add(10 * time.Second)
+	m.input.SetBuffer("")
+	m.syncTextarea()
+	mid := m.View() // the first frame of the new burst shrinks...
+	clock = clock.Add(2 * time.Millisecond)
+	small := m.View() // ...and a second, coalesced frame shrinks further
+
+	for name, v := range map[string]tea.View{"mid": mid, "small": small} {
+		if got := rows(v); got != cursorY+1 {
+			t.Fatalf("%s frame is %d rows, want %d (padded to the last flushed cursor row)", name, got, cursorY+1)
+		}
+	}
+
+	// Once a frame has certainly been flushed (gap > guardWindow), the pad
+	// follows it down and settles.
+	clock = clock.Add(3 * guardWindow)
+	if got := rows(m.View()); got != 1+1+1+2 {
+		t.Fatalf("settled frame is %d rows, want 5", got)
+	}
+}
+
 // The padding never makes a frame taller than the screen.
 func TestShrinkPaddingFitsTheScreen(t *testing.T) {
 	m := newTestModel()
