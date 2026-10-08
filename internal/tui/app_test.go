@@ -43,6 +43,8 @@ func keyMsg(s string) tea.KeyPressMsg {
 		k.Code = tea.KeyUp
 	case "down":
 		k.Code = tea.KeyDown
+	case "tab":
+		k.Code = tea.KeyTab
 	default:
 		r := []rune(body)
 		k.Code = r[len(r)-1]

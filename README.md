@@ -32,7 +32,7 @@ or take a release binary (linux/amd64 · linux/arm64 · darwin/amd64 · darwin/a
 }
 ```
 
-Secrets never appear as literals: `apiKey` is an `env:VAR` reference — or skip it entirely and use the OAuth store below.
+Secrets never appear as literals: `apiKey` is an optional `env:VAR` reference — or drop it and store the credential with `/login` (TUI) / `moca login` below. A stored key wins over the env reference.
 
 ### Providers
 
@@ -43,7 +43,7 @@ Secrets never appear as literals: `apiKey` is an `env:VAR` reference — or skip
 | `openai` | `OPENAI_API_KEY` **or** `moca login openai` | ChatGPT Plus/Pro subscription login via OpenAI's "Sign in with ChatGPT" open-source flow |
 | any name | `baseUrl` + `protocol` | custom providers: vLLM, LM Studio, Ollama, OpenAI-compatible gateways |
 
-`moca login openai` opens the browser for consent (SSH/headless: it prints the URL and accepts a pasted code — `--no-browser` forces that mode). Tokens live in `~/.local/share/moca/auth.json` (mode 0600, auto-refreshed under a cross-process lock) and `moca logout openai` revokes and clears them. Set `"auth": "oauth"` for `providers.openai` to use the subscription. The subscription route serves the Responses API only, and model slugs must be available to your ChatGPT account — declare them under `providers.openai.models` when they are not in the built-in catalog.
+**Credentials live in `~/.config/moca/auth.json`** (0600, never committed): `/login` in the TUI — pick a provider, then paste the API key (masked, never echoed) or sign in to a subscription in the browser — or `moca login <provider>` on the CLI (`--api-key` for a key; `echo -n "$KEY" | moca login anthropic` stores silently on a pipe). A stored key is used ahead of any `apiKey` env reference, and `moca logout <provider>` (or the TUI `/logout`) clears it. `moca login openai` opens the browser for consent (SSH/headless: it prints the URL and accepts a pasted code — `--no-browser` forces that mode); tokens are auto-refreshed under a cross-process lock. Set `"auth": "oauth"` for `providers.openai` to use the subscription — after a successful TUI sign-in the wizard offers to flip it for you. The subscription route serves the Responses API only, and model slugs must be available to your ChatGPT account — declare them under `providers.openai.models` when they are not in the built-in catalog.
 
 ## Use
 
@@ -66,8 +66,9 @@ moca -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
 | `alt+p` | paste chips (large pastes collapsed, buffer intact) |
 | `ctrl+c` ×2 | quit (or `/exit`) |
 | `a` / `ctrl+a` / `d` | approval: allow once / allow always / deny |
+| `↑`/`↓` · `tab` · `esc` | in the `/` dropdown: pick · complete · dismiss |
 
-**Slash commands**: `/model` · `/effort` · `/hard` · `/yolo` · `/clear` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results.
+**Slash commands**: `/model` · `/effort` · `/hard` · `/yolo` · `/clear` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). Typing `/` opens a dropdown of every command and loaded template as you type — `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results.
 
 ## Extend
 
@@ -105,4 +106,4 @@ make release        # five cross-compiled binaries in dist/
 
 ## Docs
 
-[`docs/specs/SPECS.md`](docs/specs/SPECS.md) — the current implemented state · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) — the v1 contract · [`docs/plans/`](docs/plans/) — per-phase plans · [`docs/external-tools.md`](docs/external-tools.md) — rtk, graphify, skills, prompts.
+[`docs/specs/SPECS.md`](docs/specs/SPECS.md) — the current implemented state · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) — the v1 contract · [`docs/external-tools.md`](docs/external-tools.md) — rtk, graphify, skills, prompts.

@@ -233,10 +233,11 @@ func TestExitCodes(t *testing.T) {
 
 func TestSubcommandBeforeConfig(t *testing.T) {
 	// Subcommand stubs must not trip the "no model configured" check on a
-	// fresh install; anthropic OAuth is refused by the §3 policy gate.
+	// fresh install; anthropic has no OAuth flow, so `login` falls to the
+	// API-key path and stops at the missing stdin.
 	var out, errb bytes.Buffer
 	code := run(context.Background(), []string{"--config", filepath.Join(t.TempDir(), "none.jsonc"), "login", "anthropic"}, nil, &out, &errb)
-	if code != 2 || !strings.Contains(errb.String(), "cannot use OAuth") || !strings.Contains(errb.String(), "does not permit") {
+	if code != 2 || !strings.Contains(errb.String(), "needs stdin") {
 		t.Fatalf("code %d stderr %q", code, errb.String())
 	}
 }
@@ -252,9 +253,52 @@ func TestLoginLogoutCLI(t *testing.T) {
 	if code := run(context.Background(), []string{"--config", cfg, "login", "nosuch"}, nil, &out, &errb); code != 2 || !strings.Contains(errb.String(), "unknown provider") {
 		t.Fatalf("unknown provider: %d %q", code, errb.String())
 	}
+	// A provider without an OAuth flow stores an API key instead; piped
+	// stdin is read silently (no prompt) and the key lands in auth.json in
+	// the config dir.
+	out.Reset()
 	errb.Reset()
-	if code := run(context.Background(), []string{"--config", cfg, "login", "opencode-go"}, nil, &out, &errb); code != 2 || !strings.Contains(errb.String(), "no OAuth for opencode-go") {
-		t.Fatalf("provider without OAuth: %d %q", code, errb.String())
+	if code := run(context.Background(), []string{"--config", cfg, "login", "opencode-go"}, strings.NewReader("sk-ocg-1\n"), &out, &errb); code != 0 {
+		t.Fatalf("store API key: %d %q", code, out.String()+errb.String())
+	}
+	if !strings.Contains(out.String(), "stored API key for opencode-go in "+config.AuthFile()) {
+		t.Fatalf("stdout %q", out.String())
+	}
+	store := provider.NewDefaultStore()
+	if k, ok, _ := store.GetAPIKey("opencode-go"); !ok || k != "sk-ocg-1" {
+		t.Fatalf("stored key %q %v", k, ok)
+	}
+	// anthropic is api_key-only by policy: the recorded reason is printed,
+	// then the key prompt runs.
+	out.Reset()
+	errb.Reset()
+	if code := run(context.Background(), []string{"--config", cfg, "login", "anthropic"}, strings.NewReader("sk-ant-1\n"), &out, &errb); code != 0 || !strings.Contains(out.String(), "cannot use subscription OAuth") {
+		t.Fatalf("anthropic login: %d %q", code, out.String()+errb.String())
+	}
+	if k, ok, _ := store.GetAPIKey("anthropic"); !ok || k != "sk-ant-1" {
+		t.Fatalf("anthropic key %q %v", k, ok)
+	}
+	// No stdin: a usage error pointing at /login and the config key.
+	errb.Reset()
+	if code := run(context.Background(), []string{"--config", cfg, "login", "opencode-go"}, nil, &out, &errb); code != 2 || !strings.Contains(errb.String(), "needs stdin") {
+		t.Fatalf("login without stdin: %d %q", code, errb.String())
+	}
+	// --api-key forces the key path even for an OAuth-capable provider.
+	out.Reset()
+	errb.Reset()
+	if code := run(context.Background(), []string{"--config", cfg, "login", "openai", "--api-key"}, strings.NewReader("sk-oa-1\n"), &out, &errb); code != 0 {
+		t.Fatalf("openai --api-key: %d %q", code, out.String()+errb.String())
+	}
+	if k, ok, _ := store.GetAPIKey("openai"); !ok || k != "sk-oa-1" {
+		t.Fatalf("openai key %q %v", k, ok)
+	}
+	// logout clears a stored API key too.
+	out.Reset()
+	if code := run(context.Background(), []string{"--config", cfg, "logout", "opencode-go"}, nil, &out, &errb); code != 0 || !strings.Contains(out.String(), "logged out of opencode-go") {
+		t.Fatalf("logout api key: %d %q", code, out.String()+errb.String())
+	}
+	if _, ok, _ := store.GetAPIKey("opencode-go"); ok {
+		t.Fatal("stored API key must be cleared by logout")
 	}
 	// logout is idempotent and offline-safe: no stored token → nothing to
 	// revoke, still exit 0.
@@ -265,7 +309,6 @@ func TestLoginLogoutCLI(t *testing.T) {
 	}
 	// A stored registration without a refresh token is cleared without any
 	// network call (revocation needs a refresh token).
-	store := provider.NewStore(filepath.Join(config.DataDir(), "auth.json"))
 	if err := store.Put("openai", provider.Token{Access: "a", Expiry: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +320,7 @@ func TestLoginLogoutCLI(t *testing.T) {
 		t.Fatal("token must be deleted")
 	}
 	// A corrupt store must not block logout (its error message says so).
-	if err := os.WriteFile(filepath.Join(config.DataDir(), "auth.json"), []byte("{oops"), 0o600); err != nil {
+	if err := os.WriteFile(config.AuthFile(), []byte("{oops"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out.Reset()
