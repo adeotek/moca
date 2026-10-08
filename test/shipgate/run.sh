@@ -11,8 +11,8 @@ GATE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$GATE/../.." && pwd)"
 MOCA="${MOCA:-$REPO/bin/moca}"
 
-# Go lives under mise on some hosts (mise.toml pins it); the session's shell
-# tool needs it on PATH.
+# Go lives under mise on some hosts (go.mod pins it; mise reads it); the
+# session's shell tool needs it on PATH.
 if ! command -v go >/dev/null 2>&1; then
   gobin="$(mise where go 2>/dev/null || true)"
   [ -n "${gobin:-}" ] && export PATH="$gobin/bin:$PATH"

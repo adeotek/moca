@@ -77,21 +77,32 @@ func costM(in, out, cr, cw float64) config.CostConfig {
 }
 
 var (
-	anthropicAdaptive = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortMax: "max"}
-	anthropicBudget   = map[llm.Effort]string{llm.EffortOff: "", llm.EffortLow: "", llm.EffortMedium: "", llm.EffortHigh: "", llm.EffortMax: ""}
-	openaiReasoning   = map[llm.Effort]string{llm.EffortMinimal: "minimal", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
-	glmThinking       = map[llm.Effort]string{llm.EffortOff: "none", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
+	anthropicAdaptive   = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortMax: "max"}
+	anthropicBudget     = map[llm.Effort]string{llm.EffortOff: "", llm.EffortLow: "", llm.EffortMedium: "", llm.EffortHigh: "", llm.EffortMax: ""}
+	openaiReasoning     = map[llm.Effort]string{llm.EffortMinimal: "minimal", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
+	glmThinking         = map[llm.Effort]string{llm.EffortOff: "none", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
+	deepseekThinking    = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortHigh: "high", llm.EffortMax: "max"}
+	deepseekProThinking = map[llm.Effort]string{llm.EffortHigh: "high", llm.EffortMax: "max"}
+	qwenThinking        = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortXHigh: "xhigh"}
+	basicThinking       = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
 )
 
-// builtinCatalog — prices/limits verified 2026-10-04. Sources:
+// builtinCatalog — prices/limits verified 2026-10-04 (phase 1) and 2026-10-07
+// (opencode-go expansion rows). Sources:
 //   - opencode-go: Pi 1.0.1 shipped catalog (pi-ai providers/data/opencode-go.json)
-//   - opencode.ai/docs/zen (protocol per model). Cost is standard (non-tiered) rates.
+//   - opencode.ai/docs/zen and /docs/go (protocol per model, go-tier endpoint
+//     table). Cost is standard (non-tiered) rates; the deepseek rows use the
+//     off-peak rate (peak hours are 2x — not modelled), qwen3.7-plus the <=256K tier.
 //   - anthropic: docs.anthropic.com models overview + pricing (opus/sonnet 5.5 = adaptive,
 //     haiku 4.5 = budget; cacheWrite = 5-minute write rate; cacheRead = hit rate).
 //   - openai: platform.openai.com models + developers.openai.com pricing (standard,
 //     short-context rates; long-context tiers exist and are not modelled in v1).
 var builtinCatalog = []Model{
-	// opencode-go — mixed protocol, one row per DESIGN.md §3 model.
+	// opencode-go — mixed protocol: the DESIGN.md §3 models, plus the 2026-10-07
+	// expansion (deepseek family, kimi-k2.7-code, mimo-v2.6-pro/flash,
+	// qwen3.8-max/flash, qwen3.7-plus). Routes and effort values live-verified
+	// 2026-10-07 — incl. qwen3.8-max on openai-completions (the /docs/go endpoint
+	// table lists /messages) and kimi-k2.7-code/mimo-v2.6-* rejecting off/minimal.
 	{Provider: "opencode-go", ID: "glm-5.3", Protocol: "openai-completions",
 		ContextWindow: 1_000_000, MaxOutput: 131072, Cost: costM(1.4, 4.4, 0.26, 0),
 		ThinkingMode: "openai", ThinkingLevelMap: glmThinking},
@@ -110,6 +121,37 @@ var builtinCatalog = []Model{
 	{Provider: "opencode-go", ID: "grok-4.7", Protocol: "openai-responses",
 		ContextWindow: 500_000, MaxOutput: 500_000, Cost: costM(2, 6, 0.5, 0),
 		ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning},
+
+	{Provider: "opencode-go", ID: "deepseek-v4.1-flash", Protocol: "openai-completions",
+		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.15, 0.6, 0.003, 0),
+		ThinkingMode: "openai", ThinkingLevelMap: deepseekThinking},
+	{Provider: "opencode-go", ID: "deepseek-v4-flash", Protocol: "openai-completions",
+		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.15, 0.6, 0.003, 0),
+		ThinkingMode: "openai", ThinkingLevelMap: deepseekThinking},
+	{Provider: "opencode-go", ID: "deepseek-v4-pro", Protocol: "openai-completions",
+		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.66, 1.98, 0.022, 0),
+		ThinkingMode: "openai", ThinkingLevelMap: deepseekProThinking},
+	{Provider: "opencode-go", ID: "deepseek-v4-flash-vision-exp", Protocol: "openai-completions",
+		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.15, 0.6, 0.003, 0),
+		ThinkingMode: "openai", ThinkingLevelMap: deepseekThinking},
+	{Provider: "opencode-go", ID: "kimi-k2.7-code", Protocol: "openai-completions",
+		ContextWindow: 262144, MaxOutput: 262144, Cost: costM(0.95, 4, 0.19, 0),
+		ThinkingMode: "openai", ThinkingLevelMap: basicThinking},
+	{Provider: "opencode-go", ID: "mimo-v2.6-pro", Protocol: "openai-completions",
+		ContextWindow: 1_048_576, MaxOutput: 131072, Cost: costM(0.435, 0.87, 0.003625, 0),
+		ThinkingMode: "openai", ThinkingLevelMap: basicThinking},
+	{Provider: "opencode-go", ID: "mimo-v2.6-flash", Protocol: "openai-completions",
+		ContextWindow: 1_048_576, MaxOutput: 131072, Cost: costM(0.14, 0.28, 0.0028, 0),
+		ThinkingMode: "openai", ThinkingLevelMap: basicThinking},
+	{Provider: "opencode-go", ID: "qwen3.8-max", Protocol: "openai-completions",
+		ContextWindow: 1_000_000, MaxOutput: 131072, Cost: costM(2, 6, 0.25, 2.5),
+		ThinkingMode: "openai", ThinkingLevelMap: qwenThinking},
+	{Provider: "opencode-go", ID: "qwen3.8-flash", Protocol: "anthropic-messages",
+		ContextWindow: 1_000_000, MaxOutput: 131072, Cost: costM(0.15, 0.47, 0.016, 0.2),
+		ThinkingMode: "budget", ThinkingLevelMap: anthropicBudget},
+	{Provider: "opencode-go", ID: "qwen3.7-plus", Protocol: "anthropic-messages",
+		ContextWindow: 1_000_000, MaxOutput: 65536, Cost: costM(0.4, 1.6, 0.04, 0.5),
+		ThinkingMode: "budget", ThinkingLevelMap: anthropicBudget},
 
 	// anthropic — current generation (Opus/Sonnet adaptive, Haiku 4.5 budget).
 	{Provider: "anthropic", ID: "claude-opus-5-5", Protocol: "anthropic-messages",

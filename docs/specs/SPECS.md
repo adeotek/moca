@@ -10,7 +10,7 @@
 
 ## 1. Overview
 
-moca is a minimal, token-efficient, provider-agnostic coding agent. Go 1.27.1 (pinned via `mise.toml`), stdlib + one parsing dependency (`mvdan.cc/sh/v3`). Module `github.com/adeotek/moca`, binary `moca`.
+moca is a minimal, token-efficient, provider-agnostic coding agent. Go 1.27.1 (pinned once in `go.mod`'s `toolchain` directive, which mise reads), stdlib + one parsing dependency (`mvdan.cc/sh/v3`). Module `github.com/adeotek/moca`, binary `moca`.
 
 **Implemented:** phase 1 — streaming via three hand-rolled protocol codecs, JSONC config, catalog, retry, registry. Phase 2 — the seven frozen tools, symlink-resolving path jail + parsed shell analysis, approvals/trust/yolo, skills + AGENTS.md in a once-built system prompt, append-only JSONL sessions with pre-edit snapshots and undo, and the agent loop behind `moca -p`. Phase 3 — the interactive TUI (`moca` with no `-p`): inline immutable scrollback with numbered `▸`/`⋯` items and a pager, multi-line input with bracketed paste + chips, the status bar, steering during runs, interactive approvals, `!`/`!!`, and slash commands incl. cross-provider `/model` switching. Phase 4 — the context manager: token-denominated budgets with small-window scaling, a usage-anchored estimate, token-triggered compaction (structured summary + cumulative file lists, cut points that never orphan tool results, split-turn merge) with a loop guard, one compact-and-retry on provider overflow, `/compact` in the TUI, and `--resume <id8|last>` / `--continue` for both `-p` and the TUI (stored system prompt reused verbatim, model/effort restored from `model_change`, crash-repair for unanswered tool calls). Phase 5 — the MCP lazy proxy: `internal/mcp` (JSON-RPC 2.0 over stdio + streamable HTTP, a persisted name+description discovery index, a manager with lazy start / idle stop / restart, the real `mcp` tool with read-only/approve/session gating and 30K-truncated rendering), `Agent.Close` stopping server processes, the TUI `ctrl+a` persistence to `mcp.servers.<name>.approve`, and the `moca mcp import` / `moca mcp index` subcommands (§10.5). Phase 6 — the rtk/graphify/skills ecosystem: the shell analyser unwraps `rtk <cmd>` (`rtk` and the wrapped command are both classified; runners and shell strings fail closed), the built-in `rtk` skill is verified against the real CLI, SKILL.md / prompt-template files written for pi, Claude Code and OpenCode load unchanged (vendored corpus + `SOURCES.md`), and skill read-roots cover whole skill directories even when they appear after session start. Phase 7 — subscription OAuth behind the DESIGN §3 policy gate (verified live 2026-10-06, `docs/specs/oauth-verification.md`): **anthropic ships `api_key` only** (the policy refusal is a config error carrying the recorded reason); **openai ships OAuth** via Sign in with ChatGPT token sharing on the `openai-responses` route — dynamic client registration, PKCE S256, loopback + headless login, nonce/RS256/JWKS ID-token validation, a 0600 token store with cross-process locked rotating refresh, `moca login|logout`; the subscription route omits `max_output_tokens` and groups the seven tools in a namespace (§6.5). Plus the upstream `graphify install --platform moca` PR (Graphify-Labs/graphify#4174), version stamping from `git describe` + `make release`, `--help`, and the automated §14 ship gate (`test/shipgate/`) — checker + scripted rehearsal, and the live legs: consecutive green unattended runs on real `glm-5.3-flash` (2026-10-07) once the failing-test investigation protocol (§7) and provider robustness fixes (`§8`, bounded header wait) made the §14 loop's read/search steps structural.
 
@@ -19,7 +19,7 @@ moca is a minimal, token-efficient, provider-agnostic coding agent. Go 1.27.1 (p
 ## 2. Build, test, verify
 
 ```bash
-mise install                      # Go 1.27.1; `go` is not on the global PATH
+mise install                      # provisions Go 1.27.1 from go.mod; `go` is not on the global PATH
 export PATH="$(mise where go)/bin:$PATH"
 make build                        # bin/moca, version-stamped from `git describe` (or: go build ./...)
 make test                         # go test ./... -race -count=1
@@ -34,6 +34,7 @@ CI (`.github/workflows/ci.yml`) runs the same gate set — the gofmt check, `go 
 - Version stamp: `config.Version`, set by the Makefile from `git describe --tags --always --dirty` via `-ldflags "-X github.com/adeotek/moca/internal/config.Version=…"`; a plain `go build` keeps the `"0.0.0-dev"` default.
 - Repo flow: `main` is PR-only (local pre-push hook blocks pushes to `refs/heads/main`); one branch + PR per phase (`phase/N-<slug>`) or chore (`chore/<slug>`); conventional commits; one version bump per PR (v0.1.0 at phase 7, pending the ship gate).
 - Gate scripts for the phase-1 style mock checks are not in the repo; a mock SSE server + a config pointing `baseUrl` at it reproduces them (see §10).
+- The `make` targets are mirrored as mise tasks defined in `mise.toml` (`mise run build|test|vet|fmt|release|clean`); `make` stays canonical for machines without mise.
 
 ### Package layout (implemented)
 
@@ -117,7 +118,7 @@ Inline Bubble Tea v2 TUI (no alt-screen except the pager). Layout top→bottom: 
 
 `internal/provider/catalog.go` — `Model{Provider, ID, Protocol, ContextWindow, MaxOutput, Cost(USD/M input/output/cacheRead/cacheWrite), ThinkingMode, ThinkingLevelMap}`.
 
-**Built-in catalog** (prices/limits verified 2026-10-04 — re-verify against the sources listed in the file's comment when vendor pages change; cost = standard non-tiered rates):
+**Built-in catalog** (prices/limits verified 2026-10-04, opencode-go expansion rows 2026-10-07 — re-verify against the sources listed in the file's comment when vendor pages change; cost = standard rates; the deepseek rows use the off-peak rate):
 
 | provider | model | protocol | ctx | max out | in/out/cacheR/cacheW $/M | thinking |
 |---|---|---|---|---|---|---|
@@ -127,6 +128,16 @@ Inline Bubble Tea v2 TUI (no alt-screen except the pager). Layout top→bottom: 
 | opencode-go | kimi-k3 | openai-completions | 1,048,576 | 131,072 | 3 / 15 / 0.3 / 0 | openai + glmThinking |
 | opencode-go | gpt-6-luna | openai-responses | 1,050,000 | 128,000 | 0.1 / 0.5 / 0.01 / 0.125 | openai + openaiReasoning |
 | opencode-go | grok-4.7 | openai-responses | 500,000 | 500,000 | 2 / 6 / 0.5 / 0 | openai + openaiReasoning |
+| opencode-go | deepseek-v4.1-flash | openai-completions | 1,000,000 | 384,000 | 0.15 / 0.6 / 0.003 / 0 | openai + deepseekThinking |
+| opencode-go | deepseek-v4-flash | openai-completions | 1,000,000 | 384,000 | 0.15 / 0.6 / 0.003 / 0 | openai + deepseekThinking |
+| opencode-go | deepseek-v4-pro | openai-completions | 1,000,000 | 384,000 | 0.66 / 1.98 / 0.022 / 0 | openai + deepseekProThinking |
+| opencode-go | deepseek-v4-flash-vision-exp | openai-completions | 1,000,000 | 384,000 | 0.15 / 0.6 / 0.003 / 0 | openai + deepseekThinking |
+| opencode-go | kimi-k2.7-code | openai-completions | 262,144 | 262,144 | 0.95 / 4 / 0.19 / 0 | openai + basicThinking |
+| opencode-go | mimo-v2.6-pro | openai-completions | 1,048,576 | 131,072 | 0.435 / 0.87 / 0.003625 / 0 | openai + basicThinking |
+| opencode-go | mimo-v2.6-flash | openai-completions | 1,048,576 | 131,072 | 0.14 / 0.28 / 0.0028 / 0 | openai + basicThinking |
+| opencode-go | qwen3.8-max | openai-completions | 1,000,000 | 131,072 | 2 / 6 / 0.25 / 2.5 | openai + qwenThinking |
+| opencode-go | qwen3.8-flash | anthropic-messages | 1,000,000 | 131,072 | 0.15 / 0.47 / 0.016 / 0.2 | budget |
+| opencode-go | qwen3.7-plus | anthropic-messages | 1,000,000 | 65,536 | 0.4 / 1.6 / 0.04 / 0.5 | budget |
 | anthropic | claude-opus-5-5 | anthropic-messages | 1,000,000 | 128,000 | 4 / 20 / 0.2 / 5 | adaptive |
 | anthropic | claude-sonnet-5-5 | anthropic-messages | 1,000,000 | 128,000 | 2 / 10 / 0.2 / 2.5 | adaptive |
 | anthropic | claude-haiku-4-5 | anthropic-messages | 200,000 | 64,000 | 1 / 5 / 0.1 / 1.25 | budget |
@@ -138,7 +149,7 @@ Inline Bubble Tea v2 TUI (no alt-screen except the pager). Layout top→bottom: 
 - `none` — no thinking; every effort clamps to `off`.
 - `budget` (anthropic manual mode) — sends `thinking: {type:"enabled", budget_tokens:N}`; omitted when effort is `off` **or** `N == 0`.
 - `adaptive` (current Claude) — sends `thinking: {type:"adaptive", display:"summarized"}` + `output_config.effort`; map `anthropicAdaptive` = {low, medium, high, max} (so `off`/`minimal` clamp up to `low`; `xhigh` clamps down to `high`).
-- `openai` — completions: `reasoning_effort`; responses: `reasoning: {effort, summary:"auto"}`. Maps: `openaiReasoning` = {minimal, low, medium, high}; `glmThinking` = {off:"none", low, medium, high}.
+- `openai` — completions: `reasoning_effort`; responses: `reasoning: {effort, summary:"auto"}`. Maps: `openaiReasoning` = {minimal, low, medium, high}; `glmThinking` = {off:"none", low, medium, high}; `deepseekThinking` = {low, high, max}; `deepseekProThinking` = {high, max}; `qwenThinking` = {low, medium, xhigh}; `basicThinking` = {low, medium, high} (models whose gateway rejects `off`/`minimal` — kimi-k2.7-code, mimo-v2.6-*).
 
 **Effort clamping** (`Model.ClampEffort`): nearest supported level **at or below** the request; if none is below, the lowest supported; `off` on a model that cannot disable → lowest supported.
 
