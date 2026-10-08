@@ -145,7 +145,8 @@ func TestWelcomeLines(t *testing.T) {
 	}
 }
 
-// /exit and its /q, /quit aliases quit (same path as ctrl+c twice).
+// /exit and its /q, /quit aliases quit (same path as ctrl+c twice). The
+// submission is an echo-print-then-quit sequence, so drive it.
 func TestExitCommandQuits(t *testing.T) {
 	m := newAgentModel(t)
 	for _, in := range []string{"/exit", "/q", "/quit"} {
@@ -155,8 +156,8 @@ func TestExitCommandQuits(t *testing.T) {
 		if cmd == nil {
 			t.Fatalf("%s: no command", in)
 		}
-		if _, ok := cmd().(tea.QuitMsg); !ok {
-			t.Fatalf("%s: want QuitMsg, got %T", in, cmd())
+		if _, quit := simulate(m, cmd); !quit {
+			t.Fatalf("%s: the submission must quit", in)
 		}
 	}
 }

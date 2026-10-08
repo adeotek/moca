@@ -637,7 +637,10 @@ func (m *model) submit() tea.Cmd {
 		}
 		return m.startRun(parsed.Text)
 	case KindCommand:
-		return m.runCommand(parsed)
+		// A submitted command echoes into the scrollback as a user message
+		// (same `›` band) before it runs, so the transcript reads as
+		// everything the user sent — refusals and output follow it.
+		return tea.Sequence(m.printlnUser("› "+text), m.runCommand(parsed))
 	case KindShell:
 		if m.running {
 			// `!` output enters the transcript; appending it between a tool

@@ -68,7 +68,7 @@ moca -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
 | `a` / `ctrl+a` / `d` | approval: allow once / allow always / deny |
 | `↑`/`↓` · `tab` · `esc` | in the `/` dropdown: pick · complete · dismiss |
 
-**Slash commands**: `/model` · `/effort` · `/hard` · `/yolo` · `/clear` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). Typing `/` opens a dropdown of every command and loaded template as you type — `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results.
+**Slash commands**: `/model` · `/effort` · `/hard` · `/yolo` · `/clear` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). Typing `/` opens a dropdown of every command and loaded template as you type — `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results.
 
 ## Extend
 
