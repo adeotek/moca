@@ -60,8 +60,16 @@ jobs:
             -ldflags "-s -w -X github.com/adeotek/moca/internal/config.Version=$version" \
             -o "dist/pkg/moca$ext" ./cmd/moca
           if [ "$GOOS" = "linux" ]; then
-            out="$(./dist/pkg/moca --version)"
-            [ "$out" = "moca $version" ] || { echo "version stamp mismatch: $out (want moca $version)"; exit 1; }
+            if [ "$GOARCH" = "$(go env GOHOSTARCH)" ]; then
+              # only the runner's own architecture can be executed here
+              out="$(./dist/pkg/moca --version)"
+              [ "$out" = "moca $version" ] || { echo "version stamp mismatch: $out (want moca $version)"; exit 1; }
+            else
+              # cross-compiled (linux/arm64): executing it on this runner is
+              # an Exec format error — check the binary is a well-formed
+              # build for the target architecture instead
+              file -b dist/pkg/moca | grep -qi aarch64 || { echo "not an aarch64 binary:"; file dist/pkg/moca; exit 1; }
+            fi
           fi
           cp LICENSE dist/pkg/
           ( cd dist/pkg
