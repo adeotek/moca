@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -149,11 +150,13 @@ func TestOllamaDiscovery(t *testing.T) {
 	if m.MaxOutput != 8192 {
 		t.Fatalf("max output is a quarter of the window: %d", m.MaxOutput)
 	}
-	// The server reported nothing for these: the window is assumed, and flagged.
+	// The server reported nothing for this one: the window is assumed.
 	if m, _, _ := r.Resolve("ollama/mystery:7b"); m.ContextWindow != ollamaAssumedWindow || m.ThinkingMode != "none" {
 		t.Fatalf("mystery: %+v", m)
 	}
-	if got := strings.Join(d.Assumed, " "); got != "llama3.1:8b mystery:7b" {
+	// llama3.1:8b went unreported too, but its window is declared — a
+	// decision, not a guess — so only mystery:7b is flagged as assumed.
+	if got := strings.Join(d.Assumed, " "); got != "mystery:7b" {
 		t.Fatalf("assumed windows: %q", got)
 	}
 	// A declared window overrides the discovered/assumed one; a declared-only
@@ -318,6 +321,23 @@ func TestOllamaUnauthorizedAndWrongServer(t *testing.T) {
 	if _, err := r.DiscoverOllama(context.Background()); err == nil || !strings.Contains(err.Error(), "is that an Ollama server") {
 		t.Fatalf("404: %v", err)
 	}
+}
+
+// Discovery (the TUI's /model refresh, a /clear restart) and Verify (a
+// session start) can run concurrently on a live registry: the failure
+// bookkeeping they share must be synchronized.
+func TestOllamaDiscoveryVerifyConcurrent(t *testing.T) {
+	f := newFakeOllama(t)
+	url := f.URL
+	f.Close() // every discovery fails, recording why
+	r := ollamaRegistry(t, url, `,"models":{"declared:3b":{}}`)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); _, _ = r.DiscoverOllama(context.Background()) }()
+		go func() { defer wg.Done(); _ = r.Verify() }()
+	}
+	wg.Wait()
 }
 
 func TestNoOllamaNoProbe(t *testing.T) {

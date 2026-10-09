@@ -100,6 +100,28 @@ func TestOllamaReportedWindowIsQuiet(t *testing.T) {
 	}
 }
 
+// A declared contextWindow fills the gap when the Modelfile states no
+// num_ctx: the startup hint must stay quiet — it exists to tell the user to
+// do what they already did.
+func TestOllamaDeclaredWindowIsQuiet(t *testing.T) {
+	srv := ollamaServer(t, "")
+	var evs []Event
+	cfg := `{"providers":{"ollama":{"baseUrl":"` + srv.URL + `","models":{"llama3.1:8b":{"contextWindow":32768}}}}}`
+	a, err := ollamaStart(t, cfg, "ollama/llama3.1:8b", &evs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	for _, e := range evs {
+		if w, ok := e.(Warning); ok {
+			t.Fatalf("a declared window must not warn: %s", w.Text)
+		}
+	}
+	if a.Status().Window != 32768 {
+		t.Fatalf("declared window not in use: %d", a.Status().Window)
+	}
+}
+
 func TestOllamaTinyWindowWarns(t *testing.T) {
 	srv := ollamaServer(t, "num_ctx 4096")
 	var evs []Event

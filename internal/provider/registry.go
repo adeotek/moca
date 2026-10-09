@@ -33,8 +33,9 @@ type Registry struct {
 	hc     *http.Client
 	notify func(RetryNotice)
 	getenv func(string) string // OLLAMA_HOST; a field so tests do not touch the process env
-	// mu guards models: a discovery run (TUI /model) rewrites the ollama
-	// entries while the agent may resolve models.
+	// mu guards models and ollamaErr: a discovery run (TUI /model, a /clear
+	// restart) rewrites the ollama entries and the recorded failure while
+	// the agent may resolve models and Verify may read the failure.
 	mu        sync.RWMutex
 	models    map[string]Model
 	oauth     map[string]CredentialFunc

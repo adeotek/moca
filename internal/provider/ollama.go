@@ -120,8 +120,8 @@ var numCtxRe = regexp.MustCompile(`(?m)^\s*num_ctx\s+(\d+)`)
 type Discovery struct {
 	Base    string
 	Models  []string
-	Assumed []string       // model ids whose window is a guess (server reported none)
-	Windows map[string]int // model id → context window (reported or assumed)
+	Assumed []string       // model ids whose window is a guess (server reported none, none declared)
+	Windows map[string]int // model id → context window (the server's answer: reported or assumed)
 }
 
 // modelFromShow builds the catalog entry for a pulled model: the zero Model
@@ -168,10 +168,15 @@ func (r *Registry) DiscoverOllama(ctx context.Context) (Discovery, error) {
 	}
 	var tags ollamaTags
 	if err := r.ollamaJSON(ctx, http.MethodGet, ollamaRoot(base)+"/api/tags", hdr, nil, &tags); err != nil {
-		r.ollamaErr = ollamaUnreachable(base, err)
-		return d, r.ollamaErr
+		uerr := ollamaUnreachable(base, err)
+		r.mu.Lock()
+		r.ollamaErr = uerr
+		r.mu.Unlock()
+		return d, uerr
 	}
+	r.mu.Lock()
 	r.ollamaErr = nil
+	r.mu.Unlock()
 	type found struct {
 		m       Model
 		window  int
@@ -217,7 +222,16 @@ func (r *Registry) DiscoverOllama(ctx context.Context) (Discovery, error) {
 	if err := r.applyModelOverrides("ollama", p); err != nil {
 		return d, err
 	}
+	// A declared window is a decision, not a guess: it never raises the
+	// "assumed" hint (the hint tells the user to declare a window).
+	// Windows keeps the server's own answer — ground truth for the
+	// too-small check, so an override cannot mask a small num_ctx.
+	d.Assumed = slices.DeleteFunc(d.Assumed, func(id string) bool {
+		o, ok := p.Models[id]
+		return ok && o.ContextWindow != 0
+	})
 	slices.Sort(d.Models)
+	slices.Sort(d.Assumed)
 	return d, nil
 }
 
