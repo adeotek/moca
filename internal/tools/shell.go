@@ -62,6 +62,9 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	if strings.TrimSpace(a.Command) == "" {
 		return errorf("empty command")
 	}
+	if env.Plan {
+		return errorf("%s", planShellRefusal)
+	}
 	need, every, err := env.Commands.Check(a.Command)
 	if err != nil {
 		return errorf("refused: %v", err)

@@ -32,6 +32,7 @@ usage:
     --effort <level>           override effort for this session (off|minimal|low|medium|high|xhigh|max)
     --approve | --no-approve   project trust for this run (-p default: --no-approve)
     --yolo | --no-yolo         all permission checks off/on for this run (overrides config yolo)
+    --plan                     plan mode: analyze the request and write an implementation plan to docs/plans/, change nothing else
     --resume <id8|last>        resume a session
     --continue                 latest session in this workdir
     --config <path>            config file (dev/test)
@@ -54,6 +55,7 @@ type Options struct {
 	Effort     string
 	Approve    *bool
 	Yolo       *bool
+	Plan       bool
 	Resume     string
 	Continue   bool
 	Version    bool
@@ -82,6 +84,7 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 	noApprove := fs.Bool("no-approve", false, "skip project resources for this run")
 	yolo := fs.Bool("yolo", false, "turn all permission checks off for this run")
 	noYolo := fs.Bool("no-yolo", false, "keep permission checks on (overrides config yolo)")
+	fs.BoolVar(&o.Plan, "plan", false, "plan mode: write an implementation plan to docs/plans/, change nothing else")
 	fs.StringVar(&o.Resume, "resume", "", "resume session id8 | last")
 	fs.BoolVar(&o.Continue, "continue", false, "resume latest session in this workdir")
 	fs.BoolVar(&o.Version, "version", false, "print version")

@@ -38,6 +38,7 @@ type Header struct {
 
 type PermissionMode struct {
 	Yolo bool `json:"yolo"`
+	Plan bool `json:"plan,omitempty"`
 }
 
 type ToolUse struct {

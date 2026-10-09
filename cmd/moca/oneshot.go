@@ -95,9 +95,12 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 	if yolo {
 		fmt.Fprintln(stderr, "yolo mode: all permission checks are off")
 	}
+	if o.Plan {
+		fmt.Fprintln(stderr, "plan mode: the run writes an implementation plan to docs/plans/ and changes nothing else")
+	}
 	var a *agent.Agent
 	so := agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model,
-		Trusted: trusted, Yolo: yolo, Emit: emit, Slug: session.Slug(o.Prompt)}
+		Trusted: trusted, Yolo: yolo, Plan: o.Plan, Emit: emit, Slug: session.Slug(o.Prompt)}
 	if resumePath != "" {
 		a, err = agent.Resume(so, resumePath)
 	} else {

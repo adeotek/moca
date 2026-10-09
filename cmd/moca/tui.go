@@ -87,7 +87,7 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 	pdirs = append(pdirs, skills.Dir{Path: promptsDir, Source: "global"})
 	home, _ := os.UserHomeDir()
 	err = tui.Run(ctx, tui.AppOptions{
-		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Yolo: yolo, Slug: "tui"},
+		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Yolo: yolo, Plan: o.Plan, Slug: "tui"},
 		ConfigPath: cfgPath, Prompts: skills.LoadPrompts(pdirs), PromptDirs: pdirs, Home: home,
 		ResumePath:  resumePath,
 		HintsPath:   filepath.Join(config.DataDir(), "hints.json"),

@@ -35,6 +35,7 @@ type StartOptions struct {
 	Effort  string
 	Trusted bool
 	Yolo    bool
+	Plan    bool
 	Ask     tools.Asker
 	Emit    func(Event)
 	HTTP    *http.Client
@@ -149,6 +150,9 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	}
 	if o.Yolo {
 		a.applyYolo(true)
+	}
+	if o.Plan {
+		a.applyPlan(true)
 	}
 	return a, nil
 }

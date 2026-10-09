@@ -49,6 +49,7 @@ type Agent struct {
 	usage   llm.Usage
 	cost    float64
 	yolo    bool
+	plan    bool
 	hard    *savedModel
 	// mu guards the fields the TUI reads while a run is in progress from
 	// another goroutine: the steering queue, the transcript mirror, the
@@ -146,7 +147,7 @@ func (a *Agent) request(choice llm.ToolChoice) llm.Request {
 	return llm.Request{
 		Model:      a.model.ID,
 		System:     a.opts.System,
-		Messages:   TransformHistory(msgs, a.model.Qualified()),
+		Messages:   withPlanEnvelope(TransformHistory(msgs, a.model.Qualified()), a.plan),
 		Tools:      a.opts.Tools.Specs(),
 		ToolChoice: choice,
 		MaxTokens:  a.model.MaxTokens(a.opts.Config.Context.ReserveTokens),
@@ -283,6 +284,12 @@ func (a *Agent) turnWithRecovery(ctx context.Context, choice llm.ToolChoice) (ll
 }
 
 func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
+	if a.plan {
+		// Each plan run must land its deliverable (rev 20): the tools set
+		// PlanWrote when a write/edit succeeds under docs/plans/.
+		a.opts.Env.PlanWrote = false
+	}
+	nudged := false
 	if err := a.maybeCompact(ctx); err != nil {
 		return Outcome{}, err
 	}
@@ -314,6 +321,17 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 			}
 			if queued {
 				continue
+			}
+			if a.plan && !a.opts.Env.PlanWrote {
+				if !nudged {
+					// One bounded retry: a plan run must end with its file.
+					nudged = true
+					if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(planNudge)}); err != nil {
+						return Outcome{}, err
+					}
+					continue
+				}
+				a.emit(Warning{"plan mode: the run finished without a plan file under docs/plans/ — the deliverable is missing"})
 			}
 			return Outcome{Text: llm.TextOf(resp.Message)}, nil
 		}

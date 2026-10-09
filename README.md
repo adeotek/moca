@@ -5,7 +5,7 @@
 **A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, eight tools, no framework.**
 Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface area. It competes on *cost per task* and *read-the-whole-codebase-in-an-hour transparency*, not features: prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap; the agent ships MCP support that never floods the prompt (one ~200-token lazy proxy), loads Agent-Skills `SKILL.md` files written for other tools unchanged, searches the web and fetches pages without another tool (keyless by default), and prefers external token-savers (`rtk`, `graphify`) when they are installed.
 
-**Status: v0.3.0-beta** — first-run setup mode (a bare config opens the TUI with `/login` + `/model`), a `web` tool (page fetch + search, keyless out of the box), self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
+**Status: v0.3.0-beta** — first-run setup mode (a bare config opens the TUI with `/login` + `/model`), a `web` tool (page fetch + search, keyless out of the box), plan mode (`--plan`/`/plan` writes `docs/plans/`, nothing else), self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
 
 ## Install
 
@@ -114,7 +114,7 @@ moca -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
 | `a` / `ctrl+a` / `d` | approval: allow once / allow always / deny |
 | `↑`/`↓` · `tab` · `esc` | in the `/` dropdown: pick · complete · dismiss |
 
-**Slash commands**: `/model` · `/effort` · `/hard` · `/yolo` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). Typing `/` opens a dropdown of every command and loaded template as you type — `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. The first run drops a starter **`/create-command`** template into that directory: run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands are usable the moment the run that wrote them finishes — no restart. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results.
+**Slash commands**: `/model` · `/effort` · `/hard` · `/yolo` · `/plan` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). Typing `/` opens a dropdown of every command and loaded template as you type — `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. The first run drops a starter **`/create-command`** template into that directory: run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands are usable the moment the run that wrote them finishes — no restart. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results. **`/plan <request>`** (or `--plan`) turns a run into **plan mode**: the agent reads, writes an implementation plan to `docs/plans/`, and changes nothing else — shell, MCP calls and every write outside `docs/plans/*.md` are refused.
 
 ## Extend
 
@@ -125,7 +125,7 @@ moca -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
 
 ## Non-goals (v1, probably forever)
 
-subagents · hooks · plan mode · LSP · image gen · voice · telemetry · binary plugin system
+subagents · hooks · LSP · image gen · voice · telemetry · binary plugin system
 
 ## Development
 

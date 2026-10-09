@@ -43,6 +43,13 @@ func TestParseArgs(t *testing.T) {
 	if o.Yolo == nil || *o.Yolo || o.YoloOn(config.Config{Yolo: true}) {
 		t.Fatal("--no-yolo overrides config")
 	}
+	o, _ = parseArgs([]string{"--plan", "-p", "x"}, nil)
+	if !o.Plan || !o.OneShot {
+		t.Fatalf("--plan: %+v", o)
+	}
+	if o, _ = parseArgs([]string{"-p", "x"}, nil); o.Plan {
+		t.Fatal("plan mode must default off")
+	}
 	o, _ = parseArgs([]string{"-p", "x"}, nil)
 	if o.YoloOn(config.Config{}) || !o.YoloOn(config.Config{Yolo: true}) {
 		t.Fatal("no flag → config decides")

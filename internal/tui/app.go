@@ -248,6 +248,8 @@ type settleMsg struct{}
 var (
 	dim = lipgloss.NewStyle().Faint(true)
 	red = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	// planFg is the plan-mode badge/notice color (blue).
+	planFg = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true)
 	// orange marks the product name in the welcome line. One shade serves
 	// both light and dark terminals: the welcome prints before the terminal
 	// reports its background, and #d97706 keeps ≥3:1 contrast on white and
@@ -1024,6 +1026,20 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		}
 		m.agent.SetYolo(!m.agent.Yolo()) // YoloChanged prints + refreshes
 		return nil
+	case "plan":
+		if cmd, refused := m.refuseRunning(); refused {
+			return cmd
+		}
+		if req := strings.TrimSpace(c.Args); req != "" {
+			// `/plan <request>` plans it now (mode on if it was off); the
+			// plain toggle prints via PlanChanged.
+			if !m.agent.Plan() {
+				m.agent.SetPlan(true)
+			}
+			return m.startRun(req)
+		}
+		m.agent.SetPlan(!m.agent.Plan()) // PlanChanged prints + refreshes
+		return nil
 	case "clear":
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
@@ -1363,6 +1379,12 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 			return m.println(red.Render("yolo mode on: all permission checks are off"))
 		}
 		return m.println("yolo mode off: permission checks restored")
+	case agent.PlanChanged:
+		m.refreshStatus()
+		if e.On {
+			return m.println(planFg.Render("plan mode on: runs analyze and write an implementation plan to docs/plans/ — shell, mcp calls and every other write are refused"))
+		}
+		return m.println("plan mode off")
 	}
 	return nil
 }
@@ -1594,13 +1616,21 @@ func fmtThinkDuration(d time.Duration) string {
 	return fmtElapsed(d)
 }
 
-// statusLine renders the two-line bar; in yolo mode a red YOLO field leads
-// line 1 and is never dropped — the rest gets the remaining width.
+// statusLine renders the two-line bar; yolo/plan badges lead line 1 and are
+// never dropped — the rest gets the remaining width.
 func (m *model) statusLine() string {
 	w := max(20, m.width)
+	var badges []string
+	extra := 0
 	if m.agent != nil && m.agent.Yolo() {
-		l1, l2 := RenderStatus(m.status, max(13, w-7))
-		return red.Render("YOLO") + dim.Render(" · "+Sanitize(l1)) + "\n" + m.styleL2(l2)
+		badges, extra = append(badges, red.Render("YOLO")), extra+7 // "YOLO · "
+	}
+	if m.agent != nil && m.agent.Plan() {
+		badges, extra = append(badges, planFg.Render("PLAN")), extra+7 // "PLAN · "
+	}
+	if len(badges) > 0 {
+		l1, l2 := RenderStatus(m.status, max(13, w-extra))
+		return strings.Join(badges, dim.Render(" · ")) + dim.Render(" · "+Sanitize(l1)) + "\n" + m.styleL2(l2)
 	}
 	l1, l2 := RenderStatus(m.status, w)
 	return dim.Render(Sanitize(l1)) + "\n" + m.styleL2(l2)

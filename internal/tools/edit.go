@@ -42,6 +42,9 @@ func (editTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result
 	if err != nil {
 		return errorf("%v", err)
 	}
+	if env.Plan && !planAllows(env, abs) {
+		return errorf("%s", planWriteRefusal)
+	}
 	orig, err := os.ReadFile(abs)
 	if err != nil {
 		return errorf("%v (edit changes existing files; use write to create one)", err)
@@ -58,6 +61,9 @@ func (editTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result
 	}
 	if err := guardedWrite(env, abs, out); err != nil {
 		return errorf("%v", err)
+	}
+	if env.Plan {
+		env.PlanWrote = true
 	}
 	norm := func(b []byte) []string {
 		return splitLines(strings.ReplaceAll(strings.TrimPrefix(string(b), "\ufeff"), "\r\n", "\n"))

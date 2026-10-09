@@ -109,6 +109,11 @@ type Env struct {
 	// tool (tavily|exa; the empty key is tavily's keyless mode).
 	WebProvider string
 	WebKey      string
+	// Plan/PlanWrote drive plan mode (rev 20): Plan refuses shell and mcp
+	// calls and confines write/edit to docs/plans/*.md; PlanWrote is set by
+	// a successful write/edit there and read by the agent at run end.
+	Plan      bool
+	PlanWrote bool
 	// TestSeen/TestFailed/FailingTest/Searched drive the investigation hints:
 	// a failing test run sets TestFailed and FailingTest (the file name parsed
 	// from its output); reading any *_test.go sets TestSeen and clears

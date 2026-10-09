@@ -70,6 +70,11 @@ func (writeTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 		return *r
 	}
 	abs, err := env.Paths.Resolve(a.Path, true)
+	if env.Plan && (err != nil || !planAllows(env, abs)) {
+		// Plan mode (rev 20): the ask-write roots stay closed too — only
+		// docs/plans/*.md may change.
+		return errorf("%s", planWriteRefusal)
+	}
 	if err != nil {
 		abs, err = askOutsideWrite(ctx, env, a.Path, err)
 	}
@@ -87,6 +92,9 @@ func (writeTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	}
 	if err := guardedWrite(env, abs, []byte(a.Content)); err != nil {
 		return errorf("%v", err)
+	}
+	if env.Plan {
+		env.PlanWrote = true
 	}
 	n := countLines(a.Content)
 	if !hasPrev {
