@@ -21,7 +21,17 @@ const (
 	maxMentionRows  = 50   // matches kept for the dropdown
 )
 
-type filesLoadedMsg struct{ files []string }
+type filesLoadedMsg struct {
+	files []string
+	gen   int
+}
+
+// invalidateFiles drops the @mention index (and any walk in flight) so the
+// next mention re-indexes.
+func (m *model) invalidateFiles() {
+	m.files, m.filesLoading = nil, false
+	m.filesGen++
+}
 
 // mentionQuery returns the fragment after the `@` of the draft's last word
 // and the byte offset of that `@`; ok=false when the last word is not a
@@ -45,9 +55,9 @@ func (m *model) maybeLoadFiles() tea.Cmd {
 		return nil
 	}
 	m.filesLoading = true
-	dir := m.opts.Start.Workdir
+	dir, gen := m.opts.Start.Workdir, m.filesGen
 	return func() tea.Msg {
-		return filesLoadedMsg{files: append([]string{}, tools.ListFiles(context.Background(), dir, maxMentionFiles)...)}
+		return filesLoadedMsg{gen: gen, files: append([]string{}, tools.ListFiles(context.Background(), dir, maxMentionFiles)...)}
 	}
 }
 

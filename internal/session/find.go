@@ -135,27 +135,36 @@ const previewScanLines = 60
 // most limit, skipping the session with id skipID8 (the one in use) and
 // sessions that never received a user message. Unreadable files are skipped.
 func List(dir, workdir, skipID8 string, limit int) []Info {
-	return list(dir, workdir, skipID8, limit, true)
+	out, _ := list(dir, workdir, skipID8, limit, true, false)
+	return out
 }
 
 // ListAll is List for the session manager: every stored session that started
 // in workdir — the one in use included (its Preview may be empty), nothing
-// filtered but unreadable files. Newest first, at most limit.
-func ListAll(dir, workdir string, limit int) []Info {
-	return list(dir, workdir, "", limit, false)
+// filtered but unreadable files. Newest first, at most limit; total counts
+// every match, past the limit too (those cost a header read each).
+func ListAll(dir, workdir string, limit int) (out []Info, total int) {
+	return list(dir, workdir, "", limit, false, true)
 }
 
-func list(dir, workdir, skipID8 string, limit int, requirePreview bool) []Info {
+// list collects up to limit matches; with countAll it keeps scanning past the
+// limit, reading only headers, so total is the full match count.
+func list(dir, workdir, skipID8 string, limit int, requirePreview, countAll bool) (out []Info, total int) {
 	canon := ""
 	if workdir != "" {
 		canon = canonical(workdir)
 	}
-	var out []Info
 	for _, f := range listNewestFirst(dir) {
-		if len(out) >= limit {
-			break
-		}
 		if idOf(f.path) == skipID8 {
+			continue
+		}
+		if len(out) >= limit {
+			if !countAll {
+				break
+			}
+			if h, err := header(f.path); err == nil && (canon == "" || h.Workdir == canon) {
+				total++
+			}
 			continue
 		}
 		h, preview := headerAndPreview(f.path)
@@ -166,8 +175,9 @@ func list(dir, workdir, skipID8 string, limit int, requirePreview bool) []Info {
 			continue
 		}
 		out = append(out, Info{Path: f.path, ID8: idOf(f.path), Modified: time.Unix(0, f.mod), Workdir: h.Workdir, Preview: preview})
+		total++
 	}
-	return out
+	return out, total
 }
 
 // headerAndPreview reads the session header and the first line of the first
@@ -178,7 +188,9 @@ func headerAndPreview(path string) (*Header, string) {
 		return nil, ""
 	}
 	defer f.Close()
-	r := bufio.NewReaderSize(f, 1<<20)
+	// The default buffer: ReadBytes accumulates longer lines anyway, and this
+	// runs once per stored session on every listing.
+	r := bufio.NewReader(f)
 	var h *Header
 	for i := 0; i < previewScanLines; i++ {
 		line, err := r.ReadBytes('\n')

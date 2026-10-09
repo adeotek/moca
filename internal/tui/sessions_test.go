@@ -200,3 +200,31 @@ func TestSessionsRefusedWhileRunning(t *testing.T) {
 		t.Fatal("no picker while running")
 	}
 }
+
+// sessionIDOf is a session file's 8-char id (session.idOf's shape).
+func sessionIDOf(path string) string {
+	b := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	return b[max(0, len(b)-8):]
+}
+
+func TestSessionsTitleShowsTotalPastLimit(t *testing.T) {
+	m := newAgentModel(t)
+	canon, err := filepath.EvalSymlinks(m.opts.Start.Workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < sessionsLimit; i++ { // plus the agent's own session
+		w, err := session.Create(sessionsDir(), session.Header{Workdir: canon}, "t")
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Close()
+	}
+	openSessionPicker(t, m)
+	if len(m.pick.items) != sessionsLimit {
+		t.Fatalf("items: %d", len(m.pick.items))
+	}
+	if want := "newest 100 of 101"; !strings.Contains(m.pick.title, want) {
+		t.Fatalf("title %q lacks %q", m.pick.title, want)
+	}
+}

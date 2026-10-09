@@ -93,6 +93,8 @@ type model struct {
 	// stale; filesLoading says a walk is in flight).
 	files        []string
 	filesLoading bool
+	// filesGen discards a walk that was in flight when the index went stale.
+	filesGen int
 	// histSearch: ctrl+r is searching the prompt history (the draft is the
 	// query; see dropdown.go).
 	histSearch bool
@@ -552,6 +554,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.openModelPicker(m.agent.Status().Model.Qualified())
 		return m, m.hold(warn)
 	case filesLoadedMsg:
+		if msg.gen != m.filesGen {
+			return m, nil // started before the index went stale
+		}
 		m.files, m.filesLoading = msg.files, false
 		if m.files == nil {
 			m.files = []string{} // loaded, but empty: do not walk again every key
@@ -1193,8 +1198,10 @@ func (m *model) shellCmd(local bool, cmd string) tea.Cmd {
 }
 
 func (m *model) handleShellDone(msg shellDoneMsg) tea.Cmd {
-	// A `!` command can edit prompt templates: pick the change up.
+	// A `!` command can edit prompt templates (and create files): pick the
+	// change up.
 	m.reloadPrompts()
+	m.invalidateFiles()
 	if !msg.local {
 		m.shellBusy, m.shellText, m.shellCancel = false, "", nil
 	}
@@ -1285,7 +1292,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.status.Transient = ""
 		m.refreshStatus()
 		cmds = append(cmds, m.branchCmd())
-		m.files = nil // the turn may have created files; re-index on the next @
+		m.invalidateFiles() // the turn may have created files; re-index on the next @
 		return tea.Sequence(cmds...)
 	case agent.Retry:
 		m.status.Transient = fmt.Sprintf("retry %d/%d · %s", e.Notice.Attempt, e.Notice.Max, e.Notice.Wait.Round(1e8))

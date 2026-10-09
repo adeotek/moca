@@ -25,5 +25,10 @@ func Delete(path string) error {
 		}
 		return fmt.Errorf("%s: %w", path, err)
 	}
+	if !lockSupported {
+		// No lock was taken, and Windows refuses to unlink a file this very
+		// process still holds open (no FILE_SHARE_DELETE): close it first.
+		f.Close()
+	}
 	return os.Remove(path)
 }

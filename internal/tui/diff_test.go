@@ -23,6 +23,10 @@ func TestDiffPreview(t *testing.T) {
 	if !strings.Contains(capped, "… 2 more changed lines · ctrl+o") || strings.Count(capped, "\n") != 2 {
 		t.Fatalf("overflow: %q", capped)
 	}
+	// Inside a hunk, "----" is a removed "---" line, not a file header.
+	if got := ansi.Strip(diffPreview("--- a.md\n+++ a.md\n@@ -1,1 +0,0 @@\n----\n", 80, 8)); got != "    ----" {
+		t.Fatalf("removed --- line: %q", got)
+	}
 	if diffPreview("--- a\n+++ a\n", 80, 8) != "" || diffPreview("", 80, 8) != "" {
 		t.Fatal("no changes, no preview")
 	}

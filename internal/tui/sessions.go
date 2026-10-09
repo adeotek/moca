@@ -8,8 +8,7 @@ package tui
 
 import (
 	"errors"
-	"path/filepath"
-	"strings"
+	"strconv"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,7 +16,8 @@ import (
 	"github.com/adeotek/moca/internal/session"
 )
 
-// sessionsLimit caps the picker list (it windows; the counter shows the total).
+// sessionsLimit caps the picker list; the title names the real total when
+// more are stored.
 const sessionsLimit = 100
 
 // runSessions is `/sessions`.
@@ -31,22 +31,34 @@ func (m *model) runSessions() tea.Cmd {
 // openSessions (re)builds and opens the picker; the delete callback reopens
 // it so the list stays live minus the deleted row.
 func (m *model) openSessions() tea.Cmd {
-	list := session.ListAll(sessionsDir(), m.opts.Start.Workdir, sessionsLimit)
+	list, total := session.ListAll(sessionsDir(), m.opts.Start.Workdir, sessionsLimit)
 	if len(list) == 0 {
+		m.pick = nil // reopened after the last delete: drop the stale list
 		return m.printlnMuted("no sessions for this directory")
 	}
 	cur := ""
 	if m.agent != nil {
 		cur = m.agent.Session().ID8()
 	}
+	ids := make(map[string]string, len(list)) // path → id8
+	for _, s := range list {
+		ids[s.Path] = s.ID8
+	}
+	title := "sessions in " + AbbrevHome(m.opts.Start.Workdir, m.opts.Home)
+	if total > len(list) {
+		title += " · newest " + strconv.Itoa(len(list)) + " of " + strconv.Itoa(total)
+	}
 	p := &pickState{
-		title:      "sessions in " + AbbrevHome(m.opts.Start.Workdir, m.opts.Home),
+		title:      title,
 		enterLabel: "switch",
 		cancelNote: "sessions closed",
 		onChoose:   m.resumeSession,
+		confirmPrompt: func(path string) string {
+			return "delete session " + ids[path] + "? the file is removed from disk — this cannot be undone"
+		},
 	}
 	p.onDelete = func(path string) tea.Cmd {
-		id := sessionIDOf(path)
+		id := ids[path]
 		if id == cur {
 			return tea.Batch(m.printlnMuted("the current session cannot be deleted — /clear starts a new one"), m.openSessions())
 		}
@@ -72,11 +84,4 @@ func (m *model) openSessions() tea.Cmd {
 	}
 	m.openPicker(p)
 	return nil
-}
-
-// sessionIDOf is a session file's 8-char id — the basename's last 8 chars
-// before .jsonl (session.idOf's shape).
-func sessionIDOf(path string) string {
-	b := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-	return b[max(0, len(b)-8):]
 }

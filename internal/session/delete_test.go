@@ -54,8 +54,8 @@ func TestListAll(t *testing.T) {
 	b := seed("/w") // never got a message
 	c := seed("/other", "elsewhere")
 
-	all := ListAll(dir, "/w", 10)
-	if len(all) != 2 {
+	all, total := ListAll(dir, "/w", 10)
+	if len(all) != 2 || total != 2 {
 		t.Fatalf("ListAll: %d rows (%v)", len(all), all)
 	}
 	byID := map[string]string{}
@@ -71,11 +71,12 @@ func TestListAll(t *testing.T) {
 	if _, ok := byID[c.ID8()]; ok {
 		t.Fatal("another workdir's session must not be listed")
 	}
-	if len(ListAll(dir, "", 10)) != 3 {
+	if all, total := ListAll(dir, "", 10); len(all) != 3 || total != 3 {
 		t.Fatal("any-workdir ListAll")
 	}
-	if len(ListAll(dir, "/w", 1)) != 1 {
-		t.Fatal("limit")
+	// Past the limit the total still counts every match (in this workdir only).
+	if all, total := ListAll(dir, "/w", 1); len(all) != 1 || total != 2 {
+		t.Fatalf("limit: %d rows, total %d", len(all), total)
 	}
 	// List keeps its own contract: skipID8 honoured, message-less filtered.
 	if got := List(dir, "/w", a.ID8(), 10); len(got) != 0 {

@@ -23,9 +23,14 @@ var (
 // is untrusted file content and goes through Sanitize before styling.
 func diffPreview(detail string, width, rows int) string {
 	var changed []string
+	inHunk := false
 	for _, l := range strings.Split(Sanitize(detail), "\n") {
-		if strings.HasPrefix(l, "+++") || strings.HasPrefix(l, "---") {
-			continue // file headers
+		if strings.HasPrefix(l, "@@") {
+			inHunk = true
+			continue
+		}
+		if !inHunk {
+			continue // the ---/+++ file headers (a removed "-- x" line is content)
 		}
 		if strings.HasPrefix(l, "+") || strings.HasPrefix(l, "-") {
 			changed = append(changed, strings.ReplaceAll(l, "\t", strings.Repeat(" ", tabWidth)))

@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -183,6 +184,13 @@ func (c Client) endpoint(path string) string {
 	return strings.TrimSuffix(base, "/") + path
 }
 
+// sameHost reports whether two URLs share scheme and host.
+func sameHost(a, b string) bool {
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	return errA == nil && errB == nil && ua.Scheme == ub.Scheme && strings.EqualFold(ua.Host, ub.Host)
+}
+
 // get performs one GET with the GitHub API headers and maps the error
 // responses an update run can realistically meet to readable messages.
 func (c Client) get(ctx context.Context, u string) ([]byte, error) {
@@ -192,7 +200,9 @@ func (c Client) get(ctx context.Context, u string) ([]byte, error) {
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "moca-update")
-	if c.Token != "" {
+	// The token goes to the API host only: asset URLs come from the release
+	// payload and may point anywhere.
+	if c.Token != "" && sameHost(u, c.endpoint("")) {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	resp, err := c.httpClient().Do(req)
@@ -301,7 +311,7 @@ func ExtractBinary(archive []byte, name string) ([]byte, error) {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
 		for _, f := range zr.File {
-			if filepath.Base(f.Name) != "moca.exe" {
+			if filepath.Base(f.Name) != "moca.exe" || !f.Mode().IsRegular() {
 				continue
 			}
 			rc, err := f.Open()
@@ -327,7 +337,7 @@ func ExtractBinary(archive []byte, name string) ([]byte, error) {
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}
-			if filepath.Base(hdr.Name) != "moca" {
+			if filepath.Base(hdr.Name) != "moca" || hdr.Typeflag != tar.TypeReg {
 				continue
 			}
 			return readBinary(tr, name)

@@ -30,6 +30,8 @@ type pickState struct {
 	// enterLabel names the enter action in the legend ("switch" for
 	// /sessions; "choose" when empty).
 	enterLabel string
+	// confirmPrompt words the delete confirmation for a row's key.
+	confirmPrompt func(key string) string
 	// confirm is true while the delete confirmation is showing; pickKey
 	// routes every key to it then.
 	confirm bool
@@ -112,15 +114,11 @@ func (m *model) pickerPanel() string {
 	start, end := windowRange(p.cursor, len(p.items), limit)
 	var b strings.Builder
 	if p.confirm {
-		// The sessions picker's labels start with the session id — name the
-		// file about to be removed, not just "this row".
-		id := ""
-		if p.cursor >= 0 && p.cursor < len(p.items) {
-			if f := strings.Fields(p.items[p.cursor].label); len(f) > 0 {
-				id = f[0]
-			}
+		q := "delete this entry?"
+		if p.confirmPrompt != nil && p.cursor >= 0 && p.cursor < len(p.items) {
+			q = p.confirmPrompt(p.items[p.cursor].key)
 		}
-		b.WriteString(warnFg.Render("? ") + Sanitize("delete session "+id+"? the file is removed from disk — this cannot be undone") + "\n")
+		b.WriteString(warnFg.Render("? ") + Sanitize(q) + "\n")
 	} else {
 		b.WriteString(warnFg.Render("? ") + Sanitize(p.title) + "\n")
 	}

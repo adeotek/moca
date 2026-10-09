@@ -379,3 +379,47 @@ func TestIsTemporary(t *testing.T) {
 		t.Fatal("/usr/local/bin is not temporary")
 	}
 }
+
+func TestExtractBinarySkipsNonRegular(t *testing.T) {
+	want := "#!/bin/sh\necho moca\n"
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	// A moca/ directory (basename "moca") precedes the real binary.
+	if err := tw.WriteHeader(&tar.Header{Name: "moca/", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "moca/moca", Mode: 0o755, Size: int64(len(want))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(want)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ExtractBinary(buf.Bytes(), "moca-v9.9.9-linux-amd64.tar.gz"); err != nil || string(got) != want {
+		t.Fatalf("extract = %q, %v", got, err)
+	}
+}
+
+func TestSameHost(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"https://api.github.com/repos/x", "https://api.github.com/", true},
+		{"https://API.github.com/x", "https://api.github.com/", true},
+		{"https://github.com/x/releases/download/a", "https://api.github.com/", false},
+		{"http://api.github.com/x", "https://api.github.com/", false},
+		{"https://evil.example/pkg", "https://api.github.com/", false},
+	}
+	for _, c := range cases {
+		if got := sameHost(c.a, c.b); got != c.want {
+			t.Errorf("sameHost(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+}
