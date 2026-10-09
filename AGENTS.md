@@ -1,6 +1,6 @@
 # AGENTS.md — moca
 
-One Go binary: a minimal TUI coding agent (`github.com/adeotek/moca`, binary `moca`). 177 Go files across 12 `internal/` packages.
+One Go binary: a minimal TUI coding agent (`github.com/adeotek/moca`, binary `moca`). 210 Go files across 12 `internal/` packages.
 
 ## Ground truth (read before changing behavior)
 
@@ -17,18 +17,20 @@ make test                                   # go test ./... -race -count=1
 make vet                                    # go vet ./... + gofmt -l . (both must be clean)
 make fmt                                    # go fmt ./...
 make release                                # 5 cross-compiled binaries in dist/
+bin/moca update --check                     # self-update: compare with the latest GitHub release
 mise run <task>                             # the make targets, as mise tasks
 ```
 
 - `make` falls back to `mise x go -- go` when `go` is missing from PATH; the make targets are mirrored as mise tasks (invoke as `mise run <task>` — bare `mise fmt` is mise's own config formatter).
 - **CI gate** (`.github/workflows/ci.yml`): `gofmt -l .` empty, `go vet ./...`, `go build ./...`, `go test ./... -race`. `make vet` runs the first two locally.
+- **Release workflow** (`.github/workflows/release.yml`): a `v*` tag push (or a manual dispatch) packages linux/amd64, linux/arm64, windows/amd64 + `checksums.txt` into a GitHub Release; the asset names (`moca-<version>-<os>-<arch>.tar.gz|zip`) are a contract with `internal/update` (`moca update`).
 - Single package/test: `go test ./internal/agent -run TestName -race -count=1`.
 - **Ship gate** (not in CI, needs repo `.env` with `OPENCODE_GO_KEY`, and a build first): `make build && bash test/shipgate/run.sh`. The checker is `//go:build shipgate`, so plain `go test ./...` skips it. Several `internal/tools` tests are `//go:build !windows`.
 
 ## Layout & dependency rules
 
-- Entrypoint `cmd/moca/main.go`; `run()` is the testable core. Sibling files handle `-p`, the TUI, login and `mcp` subcommands.
-- Strict import direction: `llm`/`config` import nothing internal → `provider` (llm, config) → `mcp` (tools, config, llm) → `agent` (everything) → `tui` (agent + pure pkgs). Never reverse. `tools`/`permissions`/`session`/`skills`/`compact` are mutually independent and use structural interfaces, not shared types.
+- Entrypoint `cmd/moca/main.go`; `run()` is the testable core. Sibling files handle `-p`, the TUI, login, `mcp` and `update` subcommands.
+- Strict import direction: `llm`/`config`/`update` import nothing internal → `provider` (llm, config) → `mcp` (tools, config, llm) → `agent` (everything) → `tui` (agent + pure pkgs). Never reverse. `tools`/`permissions`/`session`/`skills`/`compact` are mutually independent and use structural interfaces, not shared types.
 - Exactly **seven frozen tools**; schemas are golden (`internal/tools/testdata/schemas.golden.json`). Changing a schema is a v2 discussion.
 
 ## Conventions & gotchas

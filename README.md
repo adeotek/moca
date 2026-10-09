@@ -13,7 +13,16 @@ Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface 
 go install github.com/adeotek/moca/cmd/moca@latest
 ```
 
-or take a release binary (linux/amd64 · linux/arm64 · darwin/amd64 · darwin/arm64 · windows/amd64) from the [releases page](https://github.com/adeotek/moca/releases).
+or take a package from the [releases page](https://github.com/adeotek/moca/releases) — linux/amd64 · linux/arm64 · windows/amd64 are built and published on every `v*` tag; other platforms (e.g. darwin) build from source with `make release`.
+
+Keep an installed copy current:
+
+```bash
+moca update           # replace the binary with the latest release package for this platform
+moca update --check   # only report whether a newer release exists
+```
+
+`moca update` verifies the package against the release's `checksums.txt` when published, then swaps the binary in place — your config, credentials and sessions are never touched, and a running session keeps working (the new version starts on the next launch).
 
 ## Configure
 

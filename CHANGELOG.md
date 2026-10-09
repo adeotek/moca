@@ -9,7 +9,7 @@
 
 ### TUI features
 
-+- **`/create-command`** — a starter command template, written on the first TUI run into `~/.config/moca/prompts/` (an existing file is never overwritten): run it and the agent creates or updates a saved slash command for you — personal ones in that directory (it asks you to approve the write, since it is outside the workdir — once per write, never persisted) or project ones in `.moca/prompts/`; new commands are usable as soon as the run finishes — no restart.
+- **`/create-command`** — a starter command template, written on the first TUI run into `~/.config/moca/prompts/` (an existing file is never overwritten): run it and the agent creates or updates a saved slash command for you — personal ones in that directory (it asks you to approve the write, since it is outside the workdir — once per write, never persisted) or project ones in `.moca/prompts/`; new commands are usable as soon as the run finishes — no restart.
 - **Markdown-lite responses** — `**bold**`, `` `code` ``, headings, bullets, quotes and fenced code blocks (a darker band, never word-wrapped) instead of raw markdown; `/copy` still copies the raw text.
 - **Inline edit diffs** — a successful `edit` prints its changed lines (red/green, ≤ 8) under its item line.
 - **Resume picks up where you left off** — `--resume`/`--continue` replay the last 3 turns into the scrollback; new **`/resume`** picker (this directory's other sessions) or `/resume <id8>`.
@@ -31,6 +31,11 @@
 - The status bar shows the branch of a fresh `git init` (no commit yet) instead of `-`.
 - `/cost` uses the bar's compact token format and breaks the input down (fresh · cache read · cache write); `subscription` for OAuth.
 - `/copy` keeps the last answer when the final turn had no text; failed tool items get a red `✗`; `thinking 1 line` (was `1 lines`); the pager title is clamped to one row and shows the scroll position.
+
+### Self-update & release packages
+
+- **`moca update`** — replace the installed binary with the latest GitHub release package. It checks the newest release, picks the package for your platform (linux/amd64 · linux/arm64 · windows/amd64), verifies it against the release's `checksums.txt`, and swaps the binary in place (atomic; sessions, config and credentials are never touched — the new version takes over on the next launch). `moca update --check` only reports. A development or `-dirty` build, or one newer than the release, reports "not newer"; a platform without a package (e.g. darwin — use `make release`) and an unparseable version are clear errors. It runs before the config is loaded, so a broken config cannot block an update.
+- **Release workflow** — a `v*` tag push (or a manual dispatch of the new **Release** action) builds and publishes the linux/amd64, linux/arm64 and windows/amd64 packages plus `checksums.txt` as a GitHub Release — exactly what `moca update` consumes; re-running replaces the release's assets in place.
 
 ## v0.1.1 (2026-10-08)
 
