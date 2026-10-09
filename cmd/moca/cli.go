@@ -32,7 +32,7 @@ usage:
     --effort <level>           override effort for this session (off|minimal|low|medium|high|xhigh|max)
     --approve | --no-approve   project trust for this run (-p default: --no-approve)
     --yolo | --no-yolo         all permission checks off/on for this run (overrides config yolo)
-    --plan                     plan mode: analyze the request and write an implementation plan to docs/plans/, change nothing else
+    --plan                     plan mode: analyze the request and write an implementation plan to docs/plans/ (no other writes)
     --resume <id8|last>        resume a session
     --continue                 latest session in this workdir
     --config <path>            config file (dev/test)

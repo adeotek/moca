@@ -1382,7 +1382,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 	case agent.PlanChanged:
 		m.refreshStatus()
 		if e.On {
-			return m.println(planFg.Render("plan mode on: runs analyze and write an implementation plan to docs/plans/ — shell, mcp calls and every other write are refused"))
+			return m.println(planFg.Render("plan mode on: runs write an implementation plan to docs/plans/ — every other write is refused (shell/mcp/web inspect as usual)"))
 		}
 		return m.println("plan mode off")
 	}

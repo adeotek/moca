@@ -96,7 +96,7 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		fmt.Fprintln(stderr, "yolo mode: all permission checks are off")
 	}
 	if o.Plan {
-		fmt.Fprintln(stderr, "plan mode: the run writes an implementation plan to docs/plans/ and changes nothing else")
+		fmt.Fprintln(stderr, "plan mode: the run writes an implementation plan to docs/plans/ (no other writes)")
 	}
 	var a *agent.Agent
 	so := agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model,

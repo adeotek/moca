@@ -20,8 +20,9 @@ func (a *Agent) applyPlan(on bool) {
 }
 
 // SetPlan toggles plan mode between runs (never during Run). The tools layer
-// enforces it (shell and mcp calls refused, write/edit confined to
-// docs/plans/*.md); the envelope rides every request built while it is on.
+// enforces the write confinement (write/edit only reach docs/plans/*.md);
+// shell, mcp, web and the read tools stay available under their normal
+// permission rules; the envelope rides every request while it is on.
 func (a *Agent) SetPlan(on bool) {
 	a.applyPlan(on)
 	a.append(session.Entry{Type: session.TypePermissionMode, PermissionMode: &session.PermissionMode{Plan: on}})
@@ -33,7 +34,8 @@ func (a *Agent) SetPlan(on bool) {
 // cross-provider thinking transform): the transcript keeps exactly what the
 // user wrote.
 const planEnvelope = "[plan mode] You are producing an implementation plan, not making changes. " +
-	"Analyze the request and the code with read/search/ls (shell, mcp calls and every write outside docs/plans are refused). " +
+	"Investigate with read/search/ls/shell/web/mcp as needed — shell and mcp run under the normal permission rules, and you must use them only to inspect, never to change anything. " +
+	"Every write outside docs/plans is refused. " +
 	"Then write the plan to docs/plans/<kebab-case-slug>.md with the write tool (edit to update an existing one) and stop with a 3-5 line summary naming the file. " +
 	"Plan format: a one-paragraph goal; current state (file paths); numbered steps as `- [ ]` checkboxes (each: what changes, which files, how it is verified); then verification, out-of-scope and risks/decisions sections. " +
 	"Do not modify any other file."

@@ -109,9 +109,10 @@ type Env struct {
 	// tool (tavily|exa; the empty key is tavily's keyless mode).
 	WebProvider string
 	WebKey      string
-	// Plan/PlanWrote drive plan mode (rev 20): Plan refuses shell and mcp
-	// calls and confines write/edit to docs/plans/*.md; PlanWrote is set by
-	// a successful write/edit there and read by the agent at run end.
+	// Plan/PlanWrote drive plan mode (rev 20): Plan confines write/edit to
+	// docs/plans/*.md and suppresses the failing-test investigation banner
+	// (plan runs inspect, they don't fix); PlanWrote is set by a successful
+	// write/edit there and read by the agent at run end.
 	Plan      bool
 	PlanWrote bool
 	// TestSeen/TestFailed/FailingTest/Searched drive the investigation hints:
@@ -177,6 +178,11 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 // fix. State: shell.go (TestFailed/FailingTest, cleared by a green run),
 // read.go (TestSeen/FailingTest), search.go (Searched).
 func investigationHint(env *Env) string {
+	if env.Plan {
+		// Plan mode inspects, it does not fix: a failing test run during
+		// planning must not nag the fix-loop protocol on every result.
+		return ""
+	}
 	if env.FailingTest != "" {
 		return fmt.Sprintf("\n[hint: tests failed: (1) read the failing test file (%s) with the read tool, (2) locate the cause with the search tool, (3) only then edit]", env.FailingTest)
 	}
@@ -191,6 +197,11 @@ func investigationHint(env *Env) string {
 // weak models treat "read the file"/"locate the cause" as satisfied by
 // shell equivalents (cat/sed), so hints alone lose; the guard is what binds.
 func investigationRefusal(env *Env) string {
+	if env.Plan {
+		// Edits in plan mode can only touch docs/plans/*.md — the fix-loop
+		// protocol governs code edits and must not block plan updates.
+		return ""
+	}
 	if !env.TestFailed || (env.TestSeen && env.Searched) {
 		return ""
 	}

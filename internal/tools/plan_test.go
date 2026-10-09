@@ -1,18 +1,47 @@
 package tools
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestPlanModeRefusesShell(t *testing.T) {
+func TestPlanModeShellRunsUnderNormalRules(t *testing.T) {
+	env, _ := testEnv(t)
+	env.ShellEnv = os.Environ()
+	env.Plan = true
+	env.Commands = &fakeCmds{} // allowlisted: runs
+	r := run(t, shellTool{}, env, map[string]any{"command": "echo plan-ok"})
+	if r.IsError || !strings.Contains(r.Content, "plan-ok") || !strings.Contains(r.Content, "[exit 0]") {
+		t.Fatalf("shell must run in plan mode: %+v", r)
+	}
+	// The normal ladder still applies: a non-allowlisted command asks, and a
+	// denial refuses.
+	env.Commands = &fakeCmds{need: []string{"python"}}
+	env.Ask = func(context.Context, Question) Answer { return Deny }
+	r = run(t, shellTool{}, env, map[string]any{"command": "python -c 1"})
+	if !r.IsError || !strings.Contains(r.Content, "did not approve") {
+		t.Fatalf("plan mode must keep the normal ask ladder: %+v", r)
+	}
+}
+
+func TestPlanModeWebStaysAvailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		io.WriteString(w, "<h1>Plan research</h1>")
+	}))
+	defer srv.Close()
 	env, _ := testEnv(t)
 	env.Plan = true
-	r := run(t, shellTool{}, env, map[string]any{"command": "ls"})
-	if !r.IsError || !strings.Contains(r.Content, "plan mode disables the shell") {
-		t.Fatalf("shell must be refused in plan mode: %+v", r)
+	r := webTool{}.Run(context.Background(), env, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`"}`))
+	if r.IsError || !strings.Contains(r.Content, "Plan research") {
+		t.Fatalf("web must stay available in plan mode: %+v", r)
 	}
 }
 
@@ -85,5 +114,24 @@ func TestPlanModeReadsAndSearchStayAvailable(t *testing.T) {
 	}
 	if r := run(t, searchTool{}, env, map[string]any{"pattern": "package"}); r.IsError {
 		t.Fatalf("search in plan mode: %+v", r)
+	}
+}
+
+// TestPlanModeSuppressesInvestigationProtocol: plan runs inspect, they do not
+// fix — a failing test run during planning must not arm the fix-loop banner
+// or block plan-file edits with it.
+func TestPlanModeSuppressesInvestigationProtocol(t *testing.T) {
+	env, _ := testEnv(t)
+	env.Plan = true
+	env.TestFailed, env.FailingTest = true, "calc_test.go"
+	if h := investigationHint(env); h != "" {
+		t.Fatalf("no hint in plan mode: %q", h)
+	}
+	if msg := investigationRefusal(env); msg != "" {
+		t.Fatalf("no refusal in plan mode: %q", msg)
+	}
+	env.Plan = false
+	if investigationHint(env) == "" || investigationRefusal(env) == "" {
+		t.Fatal("the protocol must engage without plan mode")
 	}
 }

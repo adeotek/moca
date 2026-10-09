@@ -121,9 +121,6 @@ func (p *ProxyTool) Run(ctx context.Context, env *tools.Env, input json.RawMessa
 			a.Server, t.Name, t.Description, isTrue(t.Annotations.ReadOnlyHint), isTrue(t.Annotations.DestructiveHint), schema),
 			Summary: "describe " + a.Server + "/" + a.Tool}
 	case "call":
-		if env.Plan {
-			return errResult("refused: plan mode disables mcp calls (search/describe are fine) — write the plan to docs/plans/<name>.md, then stop")
-		}
 		if a.Server == "" || a.Tool == "" {
 			return errResult("action=call needs server and tool")
 		}

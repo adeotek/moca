@@ -81,11 +81,11 @@ func TestPlanModeWriteLandsAndSkipsNudge(t *testing.T) {
 	}
 }
 
-// TestPlanModeShellRefusedThroughAgent: the refusal reaches the model as the
-// tool result (and the run still lands its file afterwards).
-func TestPlanModeShellRefusedThroughAgent(t *testing.T) {
+// TestPlanModeShellRunsThroughAgent: shell works in plan mode under the
+// normal allowlist (ls is allowlisted) — and the run still lands its file.
+func TestPlanModeShellRunsThroughAgent(t *testing.T) {
 	s := newScript(t,
-		toolTurn([2]string{"shell", `{"command":"git status"}`}),
+		toolTurn([2]string{"shell", `{"command":"ls"}`}),
 		toolTurn([2]string{"write", `{"path":"docs/plans/p.md","content":"# p"}`}),
 		textTurn("done"),
 	)
@@ -95,12 +95,12 @@ func TestPlanModeShellRefusedThroughAgent(t *testing.T) {
 	}
 	found := false
 	for _, e := range a.entries {
-		if e.ToolResult != nil && e.ToolResult.IsError && strings.Contains(e.ToolResult.Content, "plan mode disables the shell") {
+		if e.ToolResult != nil && !e.ToolResult.IsError && strings.Contains(e.ToolResult.Content, "[exit 0]") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("shell refusal not persisted as a tool result")
+		t.Fatal("shell result missing or erroring in plan mode")
 	}
 }
 

@@ -10,7 +10,7 @@ First-run setup mode and a web tool: a config without a model opens the TUI with
 
 ### Plan mode
 
-- **`--plan` / `/plan` — the agent writes the plan, not the code.** A plan-mode run analyzes the request and the codebase read-only, then writes an implementation plan to `docs/plans/<slug>.md` (goal · current state · `- [ ]` steps · verification · out of scope · risks) and stops — the shell, MCP calls and every write outside `docs/plans/*.md` are refused, so nothing else can change. `moca --plan -p "<request>"` for one-shot; `/plan` toggles it in the TUI (blue `PLAN` status field) and `/plan <request>` plans immediately. A run that would finish without the file is nudged once, then warned. Plan mode is a scope, not a permission — `--yolo` does not lift it.
+- **`--plan` / `/plan` — the agent writes the plan, not the code.** A plan-mode run analyzes the request and the codebase, then writes an implementation plan to `docs/plans/<slug>.md` (goal · current state · `- [ ]` steps · verification · out of scope · risks) and stops — writes are confined to `docs/plans/*.md`, so nothing else is modified (shell, web and MCP stay available for investigation under their normal permission rules). `moca --plan -p "<request>"` for one-shot; `/plan` toggles it in the TUI (blue `PLAN` status field) and `/plan <request>` plans immediately. A run that would finish without the file is nudged once, then warned. The write confinement is not a permission — `--yolo` does not lift it.
 
 ### TUI
 
