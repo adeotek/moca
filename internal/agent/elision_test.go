@@ -9,8 +9,10 @@ import (
 	"testing"
 
 	"github.com/adeotek/moca/internal/compact"
+	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/session"
+	"github.com/adeotek/moca/internal/tools"
 )
 
 func TestStaleResults(t *testing.T) {
@@ -71,5 +73,40 @@ func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestOverflowIsPerSession: each session spills into its own directory and
+// its jail can read only that one — another session's (or project's) saved
+// tool output in the shared overflow area, which may hold secrets, stays out
+// of reach.
+func TestOverflowIsPerSession(t *testing.T) {
+	a, _, _ := startTest(t, newScript(t), 40)
+	own := filepath.Join(a.opts.Env.SpillDir, "shell-1.txt")
+	os.MkdirAll(a.opts.Env.SpillDir, 0o700)
+	writeFile(t, a.opts.Env.SpillDir, "shell-1.txt", "mine\n")
+	if _, err := a.opts.Env.Paths.Resolve(own, false); err != nil {
+		t.Fatalf("own spill file must be readable: %v", err)
+	}
+	area := filepath.Join(config.DataDir(), "overflow")
+	for _, other := range []string{filepath.Join(area, "deadbeef-shell-1.txt"), filepath.Join(area, "0123456789abcdef", "shell-1.txt")} {
+		os.MkdirAll(filepath.Dir(other), 0o700)
+		os.WriteFile(other, []byte("TOKEN=secret\n"), 0o600)
+		if _, err := a.opts.Env.Paths.Resolve(other, false); err == nil {
+			t.Fatalf("another session's spill file %s must be outside the jail", other)
+		}
+	}
+	// The path a real tools.Spill note names resolves in the same jail.
+	note := tools.Spill(a.opts.Env, "shell", "full text\n")
+	i, j := strings.Index(note, "saved to "), strings.LastIndex(note, " — read it")
+	if i < 0 || j < i {
+		t.Fatalf("spill note shape: %q", note)
+	}
+	p := note[i+len("saved to ") : j]
+	if !strings.HasPrefix(p, a.opts.Env.SpillDir) {
+		t.Fatalf("spill path %s not under %s", p, a.opts.Env.SpillDir)
+	}
+	if _, err := a.opts.Env.Paths.Resolve(p, false); err != nil {
+		t.Fatalf("spilled file must resolve in the jail: %v", err)
 	}
 }

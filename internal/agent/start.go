@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
@@ -50,6 +52,7 @@ type setup struct {
 	reg        *provider.Registry
 	builtinDir string
 	jail       *permissions.Jail
+	spillDir   string // this process's overflow dir — the only one its jail can read
 }
 
 func prepare(o StartOptions, jailRoot string) (*setup, error) {
@@ -88,13 +91,19 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	// command it is shown). askWrite: a write there — outside the workdir —
 	// needs the user's approval (the write/edit tools ask; the shell's
 	// redirect check does not).
-	// The overflow dir is readable too: over-cap tool outputs are saved there
-	// in full and the cut result names the file (tools.Spill).
-	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir, promptsDir, overflowDir()}, []string{promptsDir})
+	// This process's overflow dir is readable too: over-cap tool outputs are
+	// saved there in full and the cut result names the file (tools.Spill).
+	// Only its own dir — other sessions' outputs (other projects, possibly
+	// secrets) share the overflow area and must stay out of reach.
+	spillDir, err := newSpillDir()
 	if err != nil {
 		return nil, &StartError{err}
 	}
-	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail}, nil
+	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir, promptsDir, spillDir}, []string{promptsDir})
+	if err != nil {
+		return nil, &StartError{err}
+	}
+	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail, spillDir: spillDir}, nil
 }
 
 // discoverLocal reads a configured Ollama server's models into the registry
@@ -135,7 +144,7 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
 		ShellEnv:    tools.ShellEnv(os.Environ(), config.EnvRefs(cfg)),
 		WebProvider: cfg.Web.Search.Provider, WebKey: webKey,
-		SpillDir: overflowDir(), SpillPrefix: w.ID8() + "-"}
+		SpillDir: st.spillDir, SpillPrefix: w.ID8() + "-"}
 	reg := tools.NewRegistry(tools.Builtins()...)
 	// With servers configured, the frozen `mcp` stub is replaced by the lazy
 	// proxy (§10.5): nothing starts here, and no server tool schema ever
@@ -160,10 +169,38 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	return a, nil
 }
 
-// overflowDir holds the full text of over-cap tool outputs (§10), one flat
-// directory pruned with the snapshot retention; file names carry the session
-// id8.
+// overflowDir is the area holding the full text of over-cap tool outputs
+// (§10): one random subdirectory per process, pruned with the snapshot
+// retention.
 func overflowDir() string { return filepath.Join(config.DataDir(), "overflow") }
+
+// newSpillDir names this process's overflow subdirectory (created lazily by
+// tools.Spill). Random, so no other session can guess or share it.
+func newSpillDir() (string, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return filepath.Join(overflowDir(), hex.EncodeToString(b)), nil
+}
+
+// pruneOverflow removes overflow entries (per-process dirs, and flat files of
+// the first rev-21 layout) older than days; 0 keeps everything.
+func pruneOverflow(days int) {
+	if days <= 0 {
+		return
+	}
+	cutoff := time.Now().AddDate(0, 0, -days)
+	ents, err := os.ReadDir(overflowDir())
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		if fi, err := e.Info(); err == nil && fi.ModTime().Before(cutoff) {
+			os.RemoveAll(filepath.Join(overflowDir(), e.Name()))
+		}
+	}
+}
 
 // webSearchKey resolves web.search.apiKey at session start: a configured
 // but unset env: variable is a config error (exit 2), matching the
@@ -216,7 +253,7 @@ func Start(o StartOptions) (*Agent, error) {
 		RTK: toolOnPath("rtk"), Skills: sk, Servers: servers, Instructions: instr})
 
 	session.Prune(filepath.Join(config.DataDir(), "snapshot"), cfg.RetentionDays())
-	session.Prune(overflowDir(), cfg.RetentionDays())
+	pruneOverflow(cfg.RetentionDays())
 	m, _, err := reg.Resolve(cfg.Model)
 	if err != nil {
 		return nil, err
