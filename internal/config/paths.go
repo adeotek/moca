@@ -33,6 +33,13 @@ func DataDir() string {
 // ConfigFile is ~/.config/moca/config.jsonc.
 func ConfigFile() string { return filepath.Join(ConfigDir(), "config.jsonc") }
 
+// PromptsDir is ~/.config/moca/prompts: the user's prompt templates — one
+// `<name>.md` per slash command. The first TUI run seeds the starter
+// create-command template here (skills.SeedUserPrompts) and the jail allows
+// the agent to read them and to write them with the user's approval
+// (permissions.NewJail's ask-write root).
+func PromptsDir() string { return filepath.Join(ConfigDir(), "prompts") }
+
 // AuthFile is ~/.config/moca/auth.json: the credential store — API keys
 // stored with /login (TUI) or `moca login <provider>`, and OAuth tokens
 // (file 0600). It lives beside the config file so one directory holds

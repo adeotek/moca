@@ -19,7 +19,7 @@ func main() {
 	// dangling symlink to external dir then subpath
 	os.Symlink("/tmp/moca-ext2", "/tmp/moca-int/link-dir")
 
-	j, _ := permissions.NewJail("/tmp/moca-int", nil)
+	j, _ := permissions.NewJail("/tmp/moca-int", nil, nil)
 	for _, p := range []string{"link-out", "link-dangle", "link-dir/newfile"} {
 		res, err := j.Resolve(p, true)
 		if err != nil {

@@ -8,7 +8,7 @@ import (
 
 func newTestShell(t *testing.T) *Shell {
 	root, _, _ := setup(t)
-	j, _ := NewJail(root, nil)
+	j, _ := NewJail(root, nil, nil)
 	return NewShell([]string{"go", "git", "make", "grep", "cat", "tee", "ls"}, j, "linux")
 }
 
@@ -115,7 +115,7 @@ func TestAllowAndRmNeverAllowlistable(t *testing.T) {
 
 func TestWindowsBestEffort(t *testing.T) {
 	root, _, _ := setup(t)
-	j, _ := NewJail(root, nil)
+	j, _ := NewJail(root, nil, nil)
 	s := NewShell([]string{"go", "git"}, j, "windows")
 	if need, every, err := s.Check("go test ./...; Remove-Item x"); err != nil || len(need) != 0 || !slices.Equal(every, []string{"remove-item"}) {
 		t.Fatal(need, every, err)

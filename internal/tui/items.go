@@ -32,7 +32,7 @@ func (s *Items) add(kind, mark, text, body string) Item {
 // e.g. a block not accumulated from deltas — omits the duration).
 func (s *Items) AddThinking(text string, dur time.Duration) Item {
 	n := strings.Count(strings.TrimRight(text, "\n"), "\n") + 1
-	desc := fmt.Sprintf("thinking %d lines", n)
+	desc := fmt.Sprintf("thinking %d %s", n, plural(n, "line"))
 	if d := fmtThinkDuration(dur); d != "" {
 		desc += " · " + d
 	}
@@ -72,4 +72,12 @@ func (s *Items) LastOfKind(kind string) (Item, bool) {
 		}
 	}
 	return Item{}, false
+}
+
+// plural returns word, with an "s" unless n is exactly one.
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }

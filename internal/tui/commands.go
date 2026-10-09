@@ -27,7 +27,7 @@ type Parsed struct {
 }
 
 // BuiltinCommands win over prompt templates on a name collision (§10).
-var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "clear", "compact", "cost", "undo", "copy", "show", "login", "logout", "help", "exit"}
+var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "clear", "resume", "sessions", "compact", "cost", "undo", "copy", "show", "login", "logout", "help", "exit"}
 
 // builtinAliases resolve to their built-in unless a prompt template already
 // owns the name (`/q`, `/quit` → `/exit`) — only the full built-in names are
@@ -35,20 +35,22 @@ var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "clear", "comp
 var builtinAliases = map[string]string{"q": "exit", "quit": "exit"}
 
 var builtinHelp = map[string]string{
-	"model":   "[provider/model]  list models or switch (forfeits prompt cache)",
-	"effort":  "[level]  show or set effort (off|minimal|low|medium|high|xhigh|max)",
-	"hard":    "toggle modelHard + high effort",
-	"yolo":    "toggle yolo mode: ALL permission checks off (between runs only)",
-	"clear":   "start a new session (the old one stays resumable)",
-	"compact": "summarize older context now",
-	"cost":    "session token and cost detail",
-	"undo":    "revert the last write/edit of this session",
-	"copy":    "copy the last assistant message (OSC 52)",
-	"show":    "<n>  open item #n in the pager",
-	"login":   "[provider]  store an API key or sign in to a subscription provider",
-	"logout":  "[provider]  remove a stored login or API key",
-	"help":    "this help",
-	"exit":    "quit (/q, /quit — same as ctrl+c twice)",
+	"model":    "[provider/model]  pick a model or switch (forfeits prompt cache)",
+	"effort":   "[level]  show or set effort (off|minimal|low|medium|high|xhigh|max)",
+	"hard":     "toggle modelHard + high effort",
+	"yolo":     "toggle yolo mode: ALL permission checks off (between runs only)",
+	"clear":    "start a new session (the old one stays resumable)",
+	"resume":   "[id]  pick an earlier session of this directory to continue",
+	"sessions": "list, switch or delete this directory's sessions",
+	"compact":  "summarize older context now",
+	"cost":     "session token and cost detail",
+	"undo":     "revert the last write/edit of this session",
+	"copy":     "copy the last assistant message (OSC 52)",
+	"show":     "<n>  open item #n in the pager",
+	"login":    "[provider]  store an API key or sign in to a subscription provider",
+	"logout":   "[provider]  remove a stored login or API key",
+	"help":     "this help",
+	"exit":     "quit (/q, /quit — same as ctrl+c twice)",
 }
 
 // ParseInput classifies one input line. Rules: `!!x` → local shell, `!x` →
@@ -95,6 +97,6 @@ func HelpText(prompts []skills.Prompt) string {
 	}
 	sb.WriteString("!cmd     run cmd, output goes to the model   !!cmd  run cmd locally only\n")
 	sb.WriteString("type / for the command dropdown — ↑/↓ pick · tab completes · enter on an exact name sends\n")
-	sb.WriteString("enter send · shift+enter newline · esc interrupt · ctrl+o pager (latest item) · alt+t read the latest thinking · alt+p paste chips · ctrl+c×2 quit")
+	sb.WriteString("enter send · shift+enter newline · esc interrupt · ctrl+o pager (latest item) · alt+t read the latest thinking · alt+p paste chips · ctrl+r search history · ctrl+c×2 quit")
 	return sb.String()
 }

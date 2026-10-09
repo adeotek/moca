@@ -241,7 +241,7 @@ func TestThinkingReadableInPager(t *testing.T) {
 	long := "First I consider the options. " + strings.Repeat("The reasoning goes on and on. ", 12) + "END-OF-CHAIN"
 	m.thinking.WriteString(long)
 	_, cmd := m.Update(agentEventMsg{agent.TurnEnd{Message: llm.Message{Role: llm.RoleAssistant}}})
-	if got := printed(cmd); !strings.Contains(got, "thinking 1 lines · alt+t to read") {
+	if got := printed(cmd); !strings.Contains(got, "thinking 1 line · alt+t to read") {
 		t.Fatalf("thinking line lacks the hint: %q", got)
 	}
 	m.items.AddTool(llm.ToolCall{Name: "ls"}, tools.Result{Summary: "2 entries"})
@@ -249,8 +249,8 @@ func TestThinkingReadableInPager(t *testing.T) {
 	if m.pager == nil {
 		t.Fatal("alt+t must open the pager on the thinking block")
 	}
-	view := ansi.Strip(m.pager.view())
-	if !strings.Contains(view, "thinking 1 lines") || !strings.Contains(view, "END-OF-CHAIN") {
+	view := ansi.Strip(m.pager.view(false))
+	if !strings.Contains(view, "thinking 1 line") || !strings.Contains(view, "END-OF-CHAIN") {
 		t.Fatalf("pager must show the whole reasoning (wrapped), got:\n%s", view)
 	}
 	m.pager = nil

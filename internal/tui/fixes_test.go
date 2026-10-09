@@ -166,8 +166,8 @@ func TestShellRefusedWhileRunning(t *testing.T) {
 	m.input.SetBuffer("!ls")
 	m.syncTextarea()
 	_, cmd := m.Update(key("enter"))
-	if m.shellBusy || !strings.Contains(printed(cmd), "!!") {
-		t.Fatalf("`!` is refused mid-run: %q", printed(cmd))
+	if out, _ := simulate(m, cmd); m.shellBusy || !strings.Contains(out, "!!") || !strings.Contains(out, "› !ls") {
+		t.Fatalf("`!` echoes, then is refused mid-run: %q", out)
 	}
 }
 

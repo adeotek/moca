@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os/exec"
 	"testing"
 
 	"github.com/adeotek/moca/internal/llm"
@@ -34,5 +35,16 @@ func TestGitBranch(t *testing.T) {
 	}
 	if _, _, isGit := GitBranch(t.TempDir()); isGit {
 		t.Fatal("a plain temp dir is not a git repo")
+	}
+}
+
+// A fresh `git init` (no commit yet) still reports its unborn branch.
+func TestGitBranchUnborn(t *testing.T) {
+	dir := t.TempDir()
+	if err := exec.Command("git", "-C", dir, "init", "-q", "-b", "trunk").Run(); err != nil {
+		t.Skip("git unavailable:", err)
+	}
+	if b, _, isGit := GitBranch(dir); !isGit || b != "trunk" {
+		t.Fatalf("got %q git=%v", b, isGit)
 	}
 }

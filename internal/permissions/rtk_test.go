@@ -12,7 +12,7 @@ import (
 // 0.51.0) — see rtk.go.
 func TestRtkUnwrap(t *testing.T) {
 	root, _, _ := setup(t)
-	j, _ := NewJail(root, nil)
+	j, _ := NewJail(root, nil, nil)
 	s := NewShell([]string{"rtk", "git", "go", "make", "docker", "tee"}, j, "linux")
 	cases := map[string]verdict{
 		"rtk":                            {},

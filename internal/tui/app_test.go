@@ -124,15 +124,21 @@ func TestRunDoneClearsTransient(t *testing.T) {
 	}
 }
 
-// The approval prompt is model-supplied text: it must be sanitized like every
-// other untrusted surface, and only the first detail line is shown.
+// The approval panel is model-supplied text: it must be sanitized like every
+// other untrusted surface. The command is shown in full up to the row cap
+// (an approved interpreter runs the heredoc below its first line), and the
+// overflow is counted.
 func TestApprovalPromptSanitized(t *testing.T) {
-	got := approvalPrompt(tools.Question{Subject: "seq", Detail: "seq 'x\x1b[2Jy'\nsecond line"})
-	if strings.ContainsRune(got, 0x1b) || !strings.Contains(got, "^[[2J") {
+	got := approvalPanel(tools.Question{Subject: "seq", Detail: "seq 'x\x1b[2Jy'\nsecond line"}, 80, 6)
+	if strings.Contains(got, "\x1b[2J") {
 		t.Fatalf("unescaped control byte in prompt: %q", got)
 	}
-	if strings.Contains(got, "second line") {
-		t.Fatal("only the first detail line is shown")
+	if !strings.Contains(got, "^[[2J") || !strings.Contains(got, "second line") {
+		t.Fatalf("every detail line is shown, sanitized: %q", got)
+	}
+	long := approvalPanel(tools.Question{Subject: "python3", Detail: "python3 - <<'EOF'\na\nb\nc\nd\ne\nf\nEOF"}, 80, 4)
+	if !strings.Contains(long, "a") || strings.Contains(long, "│ d") || !strings.Contains(long, "+5 lines") {
+		t.Fatalf("overflow must be capped and counted: %q", long)
 	}
 }
 

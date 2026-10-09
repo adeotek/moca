@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -54,6 +56,11 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	if o.Model != "" {
 		cfg.Model = o.Model
 	}
+	// `--model ollama/x` or /clear after a switch: a local provider needs no
+	// config entry, naming one of its models is the opt-in.
+	if pn, _, err := config.SplitModel(cfg.Model); err == nil {
+		cfg.UseProvider(pn)
+	}
 	hc := o.HTTP
 	if hc == nil {
 		hc = defaultHTTPClient()
@@ -67,16 +74,47 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := discoverLocal(reg, cfg, emit); err != nil {
+		return nil, err
+	}
 	builtinDir, err := skills.ExtractBuiltins(config.DataDir())
 	if err != nil {
 		return nil, &StartError{err}
 	}
 	globalSkills := filepath.Join(config.ConfigDir(), "skills")
-	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir})
+	promptsDir := config.PromptsDir()
+	// readOnly: the prompt templates are readable (the agent may update a
+	// command it is shown). askWrite: a write there — outside the workdir —
+	// needs the user's approval (the write/edit tools ask; the shell's
+	// redirect check does not).
+	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir, promptsDir}, []string{promptsDir})
 	if err != nil {
 		return nil, &StartError{err}
 	}
 	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail}, nil
+}
+
+// discoverLocal reads a configured Ollama server's models into the registry
+// and then checks that the configured models exist. A server that is down is
+// not an error by itself — only if the default or hard model lives on it
+// (Verify says why). Warnings concern the model in use only: a window the
+// server did not report is a guess, and one under the minimum an agent can
+// work in will truncate the prompt silently.
+func discoverLocal(reg *provider.Registry, cfg config.Config, emit func(Event)) error {
+	if _, ok := cfg.Providers["ollama"]; ok {
+		d, _ := reg.DiscoverOllama(context.Background())
+		if pn, id, err := config.SplitModel(cfg.Model); err == nil && pn == "ollama" && emit != nil {
+			if w, found := d.Windows[id]; found {
+				switch {
+				case w < config.MinContextWindow:
+					emit(Warning{fmt.Sprintf("ollama/%s has a %d-token context window, too small for an agent (system prompt and tools alone need several thousand): raise num_ctx in its Modelfile or start the server with OLLAMA_CONTEXT_LENGTH=32768", id, w)})
+				case slices.Contains(d.Assumed, id):
+					emit(Warning{fmt.Sprintf("ollama/%s: the server reported no context window; assuming %d. If its num_ctx is smaller, long sessions are silently truncated — start the server with OLLAMA_CONTEXT_LENGTH or set providers.ollama.models.%s.contextWindow to match", id, w, id)})
+				}
+			}
+		}
+	}
+	return reg.Verify()
 }
 
 // build constructs everything Start and Resume share past setup: shell

@@ -127,3 +127,7 @@ func (p *eventPipe) send(msg tea.Msg) {
 	case <-p.stop:
 	}
 }
+
+// modelsRefreshedMsg reports a re-read of the local server's models (the
+// /model picker opens after it).
+type modelsRefreshedMsg struct{ err error }

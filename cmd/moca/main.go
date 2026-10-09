@@ -45,6 +45,12 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return exitOK
 	}
 	if len(o.Sub) > 0 {
+		// `update` runs before the config is loaded: updating the binary
+		// must not depend on a parseable config (that may be exactly what
+		// is broken).
+		if o.Sub[0] == "update" {
+			return runUpdate(ctx, o, stdout, stderr)
+		}
 		// mcp/login/logout subcommands need config but no model.
 		path := o.ConfigPath
 		if path == "" {

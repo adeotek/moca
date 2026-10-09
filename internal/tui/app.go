@@ -13,8 +13,10 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 
 	"github.com/adeotek/moca/internal/agent"
+	"github.com/adeotek/moca/internal/compact"
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/provider"
@@ -26,7 +28,16 @@ type AppOptions struct {
 	Start      agent.StartOptions
 	ConfigPath string
 	Prompts    []skills.Prompt
+	// PromptDirs re-reads Prompts when a run or `!` command finishes: a
+	// command written during the run (the create-command workflow) must be
+	// usable without a restart. Empty = Prompts stays as given.
+	PromptDirs []skills.Dir
 	Home       string
+	// HistoryPath is the persistent prompt history ("" = in-memory only).
+	HistoryPath string
+	// HintsPath is the file remembering which one-time hints were shown
+	// ("" = not persisted).
+	HintsPath string
 	// ResumePath opens this session file (--resume/--continue) instead of
 	// starting a new one.
 	ResumePath string
@@ -67,10 +78,26 @@ type model struct {
 	thinkStart time.Time
 	running    bool
 	toolBusy   string
-	cancel     context.CancelFunc
-	approval   *approvalMsg
+	// toolArg is the running tool's operand (command, path, pattern) and
+	// runChars the characters streamed this run (the activity row's token
+	// estimate).
+	toolArg  string
+	runChars int
+	cancel   context.CancelFunc
+	approval *approvalMsg
 	// login is the active /login//logout interaction (modal, like approval).
 	login *loginState
+	// pick is the active modal list picker (/model, /resume).
+	pick *pickState
+	// files is the workdir's file index for @mentions (nil = not loaded or
+	// stale; filesLoading says a walk is in flight).
+	files        []string
+	filesLoading bool
+	// filesGen discards a walk that was in flight when the index went stale.
+	filesGen int
+	// histSearch: ctrl+r is searching the prompt history (the draft is the
+	// query; see dropdown.go).
+	histSearch bool
 	// drop is the live /command autocomplete state (derived from the draft;
 	// see dropdown.go).
 	drop   *dropState
@@ -95,7 +122,11 @@ type model struct {
 	now func() time.Time
 	// shellBusy: a `!` command is in flight; its note must not land in the
 	// middle of a run (or in the session /clear is about to replace).
-	shellBusy bool
+	// shellText is that command (for the activity row) and shellCancel
+	// kills it (esc, quit).
+	shellBusy   bool
+	shellText   string
+	shellCancel context.CancelFunc
 	// compacting: a /compact request is in flight; runs and state-changing
 	// commands must wait for it (it appends to the transcript).
 	compacting bool
@@ -115,6 +146,18 @@ type model struct {
 	// pipe is the ordered path into the event loop (nil in unit tests): the
 	// run's completion goes through it so it cannot overtake streamed events.
 	pipe *eventPipe
+	// md is the markdown state (inside a code fence) of the response text
+	// being printed; it resets with each run, turn and stream restart.
+	md mdState
+	// profile is the terminal's color support (tea.ColorProfileMsg; NO_COLOR
+	// gives ASCII). Scrollback text bypasses the renderer's downsampling, so
+	// flush applies it (see downsample).
+	profile colorprofile.Profile
+	// blurred: the terminal reports it lost focus (tea.BlurMsg) — notifications
+	// fire only then.
+	blurred bool
+	// lastKind is what the scrollback printed last (see printlnResponse).
+	lastKind int
 	// guard bounds the cursor row the inline renderer may still remember and
 	// settling says a settleMsg is already scheduled (padForShrink).
 	guard    padGuard
@@ -124,6 +167,42 @@ type model struct {
 	runStart time.Time
 	runGen   int
 	spin     int
+	// sessionUsed: the current session holds something worth resuming (a
+	// run, a `!` note, or it was resumed); the exit line then names it.
+	sessionUsed bool
+	// quitting: the program is exiting; the last frame drops the input box
+	// so the exit line lands below the status bar, not over a stale draft.
+	quitting bool
+}
+
+// quitHintMsg re-renders once the ctrl+c quit window has passed, dropping
+// the "press ctrl+c again" hint.
+type quitHintMsg struct{}
+
+// notifyAfter is how long a run must take before finishing it notifies an
+// unfocused terminal.
+const notifyAfter = 30 * time.Second
+
+// notify asks the terminal to alert the user — only when it has reported
+// losing focus (a focused user is already looking). OSC 9 is the desktop
+// notification escape most modern terminals understand; the bell is the
+// fallback for the rest.
+func (m *model) notify(text string) tea.Cmd {
+	if !m.blurred {
+		return nil
+	}
+	switch m.start.Config.TUI.Notify {
+	case "off":
+		return nil
+	case "bell":
+		return tea.Raw("\a")
+	}
+	return tea.Raw("\x1b]9;" + strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1 // no control bytes inside the escape
+		}
+		return r
+	}, text) + "\a")
 }
 
 // thinkingHint is appended to a printed thinking line: the scrollback is
@@ -193,7 +272,8 @@ func newModel(o AppOptions, a *agent.Agent) *model {
 	st.Blurred.Placeholder = mutedFg
 	ta.SetStyles(st)
 	ta.Focus()
-	m := &model{opts: o, start: o.Start, agent: a, input: NewInput(), ta: ta, now: time.Now, darkBG: true}
+	m := &model{opts: o, start: o.Start, agent: a, input: NewInput(), ta: ta, now: time.Now, darkBG: true, profile: colorprofile.TrueColor}
+	m.input.LoadHistory(loadHistory(o.HistoryPath, o.Start.Workdir))
 	m.refreshStatus()
 	return m
 }
@@ -222,19 +302,40 @@ func (m *model) flush() tea.Cmd {
 		m.outBusy = false
 		return nil
 	}
-	body := strings.Join(m.outq, "\n")
+	body := m.downsample(strings.Join(m.outq, "\n"))
 	m.outq, m.outBusy = nil, true
 	return tea.Sequence(tea.Println(body), func() tea.Msg { return printedMsg{} })
 }
 
+// downsample converts scrollback text to what the terminal can show:
+// 256/16-color approximations of the truecolor bands, no colors at all under
+// NO_COLOR (bold and faint stay), plain text for a non-terminal. tea.Println
+// writes its string as is — the renderer only downsamples what it draws
+// itself.
+func (m *model) downsample(s string) string {
+	if m.profile == colorprofile.TrueColor || m.profile == colorprofile.Unknown {
+		return s
+	}
+	var sb strings.Builder
+	w := &colorprofile.Writer{Forward: &sb, Profile: m.profile}
+	w.WriteString(s)
+	return sb.String()
+}
+
 // println prints a trusted or already-styled line into the scrollback.
-func (m *model) println(s string) tea.Cmd { return m.emit(s) }
+func (m *model) println(s string) tea.Cmd {
+	m.lastKind = kindNotice
+	return m.emit(s)
+}
 
 // printlnContent is println for untrusted content (model output, tool output,
 // user input, error strings): control bytes are neutralized so the terminal
 // never interprets them. Styled lines must use println — running lipgloss
 // output through Sanitize would display the escape codes as text.
-func (m *model) printlnContent(s string) tea.Cmd { return m.emit(Sanitize(s)) }
+func (m *model) printlnContent(s string) tea.Cmd {
+	m.lastKind = kindNotice
+	return m.emit(Sanitize(s))
+}
 
 func (m *model) refreshStatus() {
 	m.status.Version = config.Version
@@ -245,6 +346,8 @@ func (m *model) refreshStatus() {
 	m.status.Cwd = AbbrevHome(m.opts.Start.Workdir, m.opts.Home)
 	m.status.Model, m.status.Effort = st.Model.Qualified(), st.Effort
 	m.status.Window, m.status.Used = st.Window, st.ContextTokens
+	cc := m.start.Config.Context
+	m.status.Trigger = compact.NewBudget(st.Window, cc.ReserveTokens, cc.KeepRecentTokens).Trigger()
 	m.status.In = st.Usage.Input + st.Usage.CacheRead + st.Usage.CacheWrite
 	m.status.Out, m.status.Cost, m.status.Sub = st.Usage.Output, st.Cost, st.Sub
 }
@@ -296,10 +399,11 @@ func (m *model) startRun(text string) tea.Cmd {
 	done := make(chan struct{})
 	m.runDone = done
 	m.live.Reset()
+	m.md = mdState{}
 	m.thinking.Reset()
-	m.toolBusy = ""
-	m.runStart, m.spin = m.now(), 0
-	m.runGen++
+	m.toolBusy, m.toolArg, m.runChars = "", "", 0
+	m.sessionUsed = true
+	spin := m.beginActivity()
 	a, pipe := m.agent, m.pipe
 	return tea.Batch(tea.Sequence(m.printlnUser("› "+text), func() tea.Msg {
 		defer close(done)
@@ -310,10 +414,22 @@ func (m *model) startRun(text string) tea.Cmd {
 			return nil
 		}
 		return msg
-	}), m.spinTick())
+	}), spin)
 }
 
-// spinTick schedules the next spinner frame of the current run.
+// busy reports whether the activity row is up: a run, a /compact or a `!`
+// command is in flight.
+func (m *model) busy() bool { return m.running || m.compacting || m.shellBusy }
+
+// beginActivity restarts the activity row's clock and spinner for a new
+// run, compaction or `!` command and returns its first tick.
+func (m *model) beginActivity() tea.Cmd {
+	m.runStart, m.spin = m.now(), 0
+	m.runGen++
+	return m.spinTick()
+}
+
+// spinTick schedules the next spinner frame of the current activity.
 func (m *model) spinTick() tea.Cmd {
 	gen := m.runGen
 	return tea.Tick(spinInterval, func(time.Time) tea.Msg { return spinMsg{gen} })
@@ -337,15 +453,26 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case settleMsg:
 		m.settling = false
 		return m, nil
+	case quitHintMsg:
+		return m, nil // the re-render drops an expired hint
 	case printedMsg:
 		m.outBusy = false
 		return m, m.hold(m.flush())
 	case spinMsg:
-		if !m.running || msg.gen != m.runGen {
+		if !m.busy() || msg.gen != m.runGen {
 			return m, nil
 		}
 		m.spin = (m.spin + 1) % len(spinFrames)
 		return m, m.spinTick()
+	case tea.ColorProfileMsg:
+		m.profile = msg.Profile
+		return m, nil
+	case tea.FocusMsg:
+		m.blurred = false
+		return m, nil
+	case tea.BlurMsg:
+		m.blurred = true
+		return m, nil
 	case tea.KeyboardEnhancementsMsg:
 		m.kbdEnhanced = msg.SupportsKeyDisambiguation()
 		return m, nil
@@ -353,11 +480,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.darkBG = msg.IsDark()
 		return m, nil
 	case hintCheckMsg:
-		if !m.kbdEnhanced && !m.hintShown {
-			m.hintShown = true
-			return m, m.hold(m.printlnMuted("hint: this terminal can't report shift+enter; use alt+enter or ctrl+j for a newline"))
+		if m.kbdEnhanced {
+			return m, nil
 		}
-		return m, nil
+		// The placeholder always names the fallback; the scrollback hint is
+		// shown once per machine, not on every launch.
+		m.ta.Placeholder = "Message moca…  (ctrl+j newline · /help)"
+		if m.hintShown || hintSeen(m.opts.HintsPath, "shiftEnter") {
+			return m, nil
+		}
+		m.hintShown = true
+		markHint(m.opts.HintsPath, "shiftEnter")
+		return m, m.hold(m.printlnMuted("hint: this terminal can't report shift+enter; use alt+enter or ctrl+j for a newline (shown once)"))
 	case tea.PasteMsg:
 		if m.login != nil {
 			switch m.login.step {
@@ -371,7 +505,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		if m.pager == nil {
+		if m.pager == nil && m.pick == nil {
 			// Insert at the cursor like typed text; a chip's marker goes there too.
 			m.ta.InsertString(m.input.Prepare(msg.Content))
 			m.pullTextarea()
@@ -382,14 +516,22 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.login != nil {
 			return m, m.loginKey(msg)
 		}
+		if m.pick != nil {
+			return m, m.pickKey(msg)
+		}
 		return m, m.handleKey(msg)
 	case agentEventMsg:
 		return m, m.hold(m.handleAgent(msg.e))
 	case runDoneMsg:
-		return m, m.hold(m.handleRunDone(msg))
+		took := m.now().Sub(m.runStart)
+		cmd := m.hold(m.handleRunDone(msg))
+		if took >= notifyAfter {
+			cmd = tea.Batch(cmd, m.notify("moca: run finished"))
+		}
+		return m, cmd
 	case approvalMsg:
 		m.approval = &msg
-		return m, nil
+		return m, m.notify("moca: approval needed — allow `" + Sanitize(msg.q.Subject) + "`?")
 	case loginProgressMsg:
 		if m.login == nil {
 			return m, nil
@@ -399,6 +541,27 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.hold(m.handleLoginDone(msg))
 	case logoutDoneMsg:
 		return m, m.hold(m.handleLogoutDone(msg))
+	case modelsRefreshedMsg:
+		m.status.Transient = ""
+		if m.agent == nil || m.busy() || m.pick != nil || m.login != nil {
+			return m, nil
+		}
+		var warn tea.Cmd
+		if msg.err != nil {
+			// The listing still opens: cloud models and declared ones work.
+			warn = m.printlnWarn("warning: " + msg.err.Error())
+		}
+		m.openModelPicker(m.agent.Status().Model.Qualified())
+		return m, m.hold(warn)
+	case filesLoadedMsg:
+		if msg.gen != m.filesGen {
+			return m, nil // started before the index went stale
+		}
+		m.files, m.filesLoading = msg.files, false
+		if m.files == nil {
+			m.files = []string{} // loaded, but empty: do not walk again every key
+		}
+		return m, nil
 	case branchMsg:
 		m.status.Branch, m.status.Dirty, m.status.Git = msg.branch, msg.dirty, msg.git
 		return m, nil
@@ -432,12 +595,16 @@ func (m *model) release() tea.Cmd {
 // quit cancels an in-flight run or compaction (its abort/return is recorded
 // before exit) and exits.
 func (m *model) quit() tea.Cmd {
+	m.quitting = true
 	if m.login != nil {
 		m.login.shutdown()
 		m.login = nil
 	}
 	if m.compactCancel != nil {
 		m.compactCancel()
+	}
+	if m.shellCancel != nil {
+		m.shellCancel()
 	}
 	if m.cancel != nil {
 		m.cancel()
@@ -461,16 +628,13 @@ func (m *model) forward(k tea.KeyPressMsg) tea.Cmd {
 	m.ta = ta
 	m.pullTextarea()
 	m.lastTyped = m.now()
-	return cmd
+	return tea.Batch(cmd, m.maybeLoadFiles())
 }
 
 func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	if m.pager != nil {
 		if k.String() == "ctrl+c" {
-			if m.input.CtrlC(time.Now()) {
-				return m.quit()
-			}
-			return nil
+			return m.ctrlC()
 		}
 		open, cmd := m.pager.update(k)
 		if !open {
@@ -506,17 +670,22 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 			m.compactCancel()
 			return nil
 		}
+		if m.shellBusy && m.shellCancel != nil {
+			m.shellCancel()
+			return nil
+		}
 		if m.running && m.cancel != nil {
 			m.cancel()
 		}
 		return nil
 	case "ctrl+c":
-		if m.input.CtrlC(time.Now()) {
-			return m.quit()
-		}
-		m.syncTextarea()
-		return nil
+		return m.ctrlC()
 	case "ctrl+o":
+		if m.approval != nil {
+			// The pending question's whole command (the panel shows a few lines).
+			m.openPager(Item{Kind: "approval", Line: "? `" + Sanitize(m.approval.q.Subject) + "` awaits approval — the whole command", Body: Sanitize(m.approval.q.Detail)})
+			return nil
+		}
 		if it, ok := m.items.Last(); ok {
 			m.openPager(it)
 		}
@@ -525,6 +694,15 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		if it, ok := m.items.LastOfKind("thinking"); ok {
 			m.openPager(it)
 		}
+		return nil
+	case "shift+tab":
+		return m.cycleEffort()
+	case "ctrl+r":
+		if m.login != nil || m.pager != nil || m.busy() {
+			return nil
+		}
+		m.histSearch = !m.histSearch
+		m.drop = nil
 		return nil
 	case "alt+p":
 		m.input.ToggleChips()
@@ -544,6 +722,21 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		return m.forward(k)
 	}
 	return m.forward(k)
+}
+
+// ctrlC clears a non-empty draft, or arms quit on an empty one (a second
+// press within a second quits); the armed state shows a hint until it
+// expires.
+func (m *model) ctrlC() tea.Cmd {
+	m.histSearch = false
+	if m.input.CtrlC(m.now()) {
+		return m.quit()
+	}
+	m.syncTextarea()
+	if m.input.QuitArmed(m.now()) {
+		return tea.Tick(time.Second+50*time.Millisecond, func(time.Time) tea.Msg { return quitHintMsg{} })
+	}
+	return nil
 }
 
 // approvalKey answers the shown prompt. `a`/`d` count only after a typing
@@ -626,6 +819,8 @@ func (m *model) submit() tea.Cmd {
 	}
 	parsed, err := ParseInput(text, m.opts.Prompts)
 	m.input.Submit()
+	m.histSearch = false
+	appendHistory(m.opts.HistoryPath, m.opts.Start.Workdir, text)
 	m.syncTextarea()
 	if err != nil {
 		return m.printlnError("error: " + err.Error())
@@ -650,6 +845,17 @@ func (m *model) submit() tea.Cmd {
 		// (same `›` band) before it runs, so the transcript reads as
 		// everything the user sent — refusals and output follow it.
 		return tea.Sequence(m.printlnUser("› "+text), m.runCommand(parsed))
+	case KindShell, KindShellLocal:
+		// Shell input echoes like any other input; the command itself is
+		// not repeated above its output.
+		return tea.Sequence(m.printlnUser(userMarker+text), m.submitShell(parsed))
+	}
+	return nil
+}
+
+// submitShell starts (or refuses) a `!` / `!!` command.
+func (m *model) submitShell(parsed Parsed) tea.Cmd {
+	switch parsed.Kind {
 	case KindShell:
 		if m.running {
 			// `!` output enters the transcript; appending it between a tool
@@ -666,8 +872,8 @@ func (m *model) submit() tea.Cmd {
 		if m.shellBusy {
 			return m.refuseBusy()
 		}
-		m.shellBusy = true
-		return m.shellCmd(false, parsed.Text)
+		m.shellBusy, m.shellText = true, parsed.Text
+		return tea.Batch(m.shellCmd(false, parsed.Text), m.beginActivity())
 	case KindShellLocal:
 		return m.shellCmd(true, parsed.Text)
 	}
@@ -696,6 +902,10 @@ func (m *model) refuseBusy() tea.Cmd {
 
 func (m *model) runCommand(c Parsed) tea.Cmd {
 	switch c.Name {
+	case "resume":
+		return m.runResume(c.Args)
+	case "sessions":
+		return m.runSessions()
 	case "login":
 		return m.runLogin(c.Args)
 	case "logout":
@@ -707,26 +917,29 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 	st := m.agent.Status()
 	switch c.Name {
 	case "model":
-		if c.Args == "" {
-			var lines []string
-			for _, mo := range m.agent.Models() {
-				mark := "  "
-				if mo.Qualified() == st.Model.Qualified() {
-					mark = "* "
-				}
-				lines = append(lines, mark+mo.Qualified())
-			}
-			return m.printlnContent(strings.Join(lines, "\n"))
-		}
 		if cmd, refused := m.refuseRunning(); refused {
+			if c.Args == "" {
+				// Listing is harmless mid-run; only the switch is refused.
+				return m.printlnContent(m.modelList(st.Model.Qualified()))
+			}
 			return cmd
 		}
-		if err := m.agent.SetModel(c.Args, ""); err != nil {
-			return m.printlnError("error: " + err.Error())
+		if c.Args == "" {
+			if _, local := m.start.Config.Providers["ollama"]; local {
+				// Models pulled since startup should show up: ask the
+				// server first (a few seconds at most), then open the picker.
+				m.status.Transient = "reading models…"
+				a := m.agent
+				return func() tea.Msg {
+					ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+					defer cancel()
+					return modelsRefreshedMsg{err: a.RefreshModels(ctx)}
+				}
+			}
+			m.openModelPicker(st.Model.Qualified())
+			return nil
 		}
-		m.refreshStatus()
-		s := m.agent.Status()
-		return m.printlnContent(fmt.Sprintf("switched to %s · effort %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
+		return m.switchModel(c.Args)
 	case "effort":
 		if c.Args == "" {
 			return m.printlnContent(fmt.Sprintf("effort %s — supported: %s", AbbrevEffort(st.Effort), supportedEfforts(st.Model)))
@@ -779,10 +992,15 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		}
 		m.compacting = true
 		m.status.Transient = "compacting…"
-		return m.compactCmd()
+		return tea.Batch(m.compactCmd(), m.beginActivity())
 	case "cost":
 		u := st.Usage
-		return m.println(fmt.Sprintf("in %d · out %d · cache read %d · cache write %d · $%.4f", u.Input, u.Output, u.CacheRead, u.CacheWrite, st.Cost))
+		cost := fmt.Sprintf("$%.4f", st.Cost)
+		if st.Sub {
+			cost = "subscription"
+		}
+		return m.println(fmt.Sprintf("in %s (fresh %s · cache read %s · cache write %s) · out %s · %s",
+			FmtTokens(u.Input+u.CacheRead+u.CacheWrite), FmtTokens(u.Input), FmtTokens(u.CacheRead), FmtTokens(u.CacheWrite), FmtTokens(u.Output), cost))
 	case "undo":
 		msg, err := m.agent.Undo()
 		if err != nil {
@@ -811,6 +1029,97 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		return m.printlnContent(HelpText(m.opts.Prompts))
 	}
 	return m.println("unknown command /" + c.Name)
+}
+
+// cycleEffort is shift+tab: the next effort level the current model
+// supports, wrapping around — the quick form of /effort for the one knob most
+// worth tuning per task. Refused where /effort is.
+func (m *model) cycleEffort() tea.Cmd {
+	if m.agent == nil {
+		return nil
+	}
+	if cmd, refused := m.refuseRunning(); refused {
+		return cmd
+	}
+	st := m.agent.Status()
+	var levels []llm.Effort
+	for _, e := range llm.Efforts {
+		if _, ok := st.Model.ThinkingLevelMap[e]; ok {
+			levels = append(levels, e)
+		}
+	}
+	if len(levels) < 2 {
+		return m.printlnMuted("this model has no effort levels to cycle")
+	}
+	next := levels[(slices.Index(levels, st.Effort)+1)%len(levels)] // not found (-1) → the first
+	got, err := m.agent.SetEffort(next)
+	if err != nil {
+		return m.printlnError("error: " + err.Error())
+	}
+	m.refreshStatus()
+	return m.printlnMuted("effort " + AbbrevEffort(got))
+}
+
+// modelList is the plain listing of /model during a run (the picker is
+// modal and a switch is refused then anyway).
+func (m *model) modelList(cur string) string {
+	var lines []string
+	for _, mo := range m.agent.Models() {
+		mark := "  "
+		if mo.Qualified() == cur {
+			mark = "* "
+		}
+		lines = append(lines, mark+mo.Qualified())
+	}
+	return strings.Join(lines, "\n")
+}
+
+// openModelPicker lists every model, the current one preselected; models of
+// a provider with no credential are marked (picking one reports the missing
+// key rather than switching).
+func (m *model) openModelPicker(cur string) {
+	p := &pickState{title: "switch to which model?  (prompt cache is forfeited)", cancelNote: "model unchanged", onChoose: m.switchModel}
+	creds := map[string]bool{}
+	for i, mo := range m.agent.Models() {
+		q := mo.Qualified()
+		ok, seen := creds[mo.Provider]
+		if !seen {
+			ok = m.agent.HasCredential(q)
+			creds[mo.Provider] = ok
+		}
+		label := q
+		switch {
+		case q == cur:
+			label += "  — current"
+			p.cursor = i
+		case !ok:
+			label += "  — no key (/login " + mo.Provider + ")"
+		}
+		p.items = append(p.items, pickItem{key: q, label: label})
+	}
+	m.openPicker(p)
+}
+
+// switchModel is /model <id>.
+func (m *model) switchModel(q string) tea.Cmd {
+	if err := m.agent.SetModel(q, ""); err != nil {
+		return m.printlnError("error: " + err.Error())
+	}
+	m.refreshStatus()
+	s := m.agent.Status()
+	return m.printlnContent(fmt.Sprintf("switched to %s · effort %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
+}
+
+// reloadPrompts re-reads the prompt-template dirs when a run or `!` command
+// finishes: the agent can write a new command during a run (the
+// create-command workflow), and it must be usable without a restart. An
+// empty PromptDirs (unit tests, callers that pass literal prompts) is a
+// no-op.
+func (m *model) reloadPrompts() {
+	if len(m.opts.PromptDirs) == 0 {
+		return
+	}
+	m.opts.Prompts = skills.LoadPrompts(m.opts.PromptDirs)
 }
 
 // compactCmd runs a manual compaction off the event loop. The Compacted
@@ -861,8 +1170,10 @@ func (m *model) restartSession() tea.Cmd {
 	}
 	m.agent = a
 	m.start = opts
+	m.sessionUsed = false
 	m.items = Items{}
 	m.live.Reset()
+	m.md = mdState{}
 	m.thinking.Reset()
 	m.status.Transient = ""
 	m.refreshStatus()
@@ -870,22 +1181,35 @@ func (m *model) restartSession() tea.Cmd {
 	return tea.Sequence(m.printlnMuted(fmt.Sprintf("new session %s (previous stays resumable)", a.Session().ID8())), m.branchCmd())
 }
 
+// shellCmd runs a `!`/`!!` command off the event loop; a `!` one can be
+// killed with esc (shellCancel).
 func (m *model) shellCmd(local bool, cmd string) tea.Cmd {
 	wd := m.opts.Start.Workdir
 	env := tools.ShellEnv(os.Environ(), config.EnvRefs(m.opts.Start.Config))
+	ctx, cancel := context.WithCancel(context.Background())
+	if !local {
+		m.shellCancel = cancel
+	}
 	return func() tea.Msg {
-		out, err := tools.RunShell(context.Background(), wd, env, cmd, 30*time.Second)
+		defer cancel()
+		out, err := tools.RunShell(ctx, wd, env, cmd, 30*time.Second)
 		return shellDoneMsg{local: local, cmd: cmd, out: out, err: err}
 	}
 }
 
 func (m *model) handleShellDone(msg shellDoneMsg) tea.Cmd {
+	// A `!` command can edit prompt templates (and create files): pick the
+	// change up.
+	m.reloadPrompts()
+	m.invalidateFiles()
 	if !msg.local {
-		m.shellBusy = false
+		m.shellBusy, m.shellText, m.shellCancel = false, "", nil
 	}
 	var lines []string
-	lines = append(lines, "$ "+Sanitize(msg.cmd))
-	if msg.err != nil {
+	// esc (or quit) killed it: show what it printed, but do not hand an
+	// abandoned command to the model.
+	cancelled := errors.Is(msg.err, context.Canceled)
+	if msg.err != nil && !cancelled {
 		lines = append(lines, "error: "+Sanitize(msg.err.Error()))
 		return m.println(strings.Join(lines, "\n"))
 	}
@@ -894,12 +1218,16 @@ func (m *model) handleShellDone(msg shellDoneMsg) tea.Cmd {
 		lines = append(lines, b)
 	}
 	exit := fmt.Sprintf("[exit %d]", msg.out.ExitCode)
-	if msg.out.TimedOut {
+	switch {
+	case msg.out.TimedOut:
 		exit = "[timed out after 30s — process group killed]"
+	case cancelled:
+		exit = "[interrupted — process group killed]"
 	}
 	lines = append(lines, exit)
-	if !msg.local && m.agent != nil {
+	if !msg.local && !cancelled && m.agent != nil {
 		note := "$ " + msg.cmd + "\n" + body + "\n" + exit
+		m.sessionUsed = true
 		if err := m.agent.AddNote(note); err != nil {
 			lines = append(lines, "error: "+Sanitize(err.Error()))
 		}
@@ -913,6 +1241,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		// The thinking block that preceded this text is done: close it into
 		// its item line FIRST, so the scrollback reads thinking → response.
 		flush := m.flushThinking()
+		m.runChars += len(e.Text)
 		m.live.WriteString(e.Text)
 		var commit tea.Cmd
 		if lines := m.commitLive(); len(lines) > 0 {
@@ -920,6 +1249,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		}
 		return tea.Sequence(flush, commit)
 	case agent.ThinkingDelta:
+		m.runChars += len(e.Text)
 		if m.thinking.Len() == 0 {
 			m.thinkStart = m.now()
 		}
@@ -927,18 +1257,25 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		return nil
 	case agent.StreamReset:
 		m.live.Reset()
+		m.md = mdState{}
 		m.thinking.Reset()
 		return m.printlnMuted("[stream interrupted — retrying]")
 	case agent.ToolStart:
-		m.toolBusy = e.Call.Name
+		m.toolBusy, m.toolArg = e.Call.Name, toolArgSummary(e.Call)
 		// A tool call ends any open thinking block: print its line before
 		// the tool's own item (which lands on ToolEnd).
 		return m.flushThinking()
 	case agent.ToolEnd:
-		m.toolBusy = ""
+		m.toolBusy, m.toolArg = "", ""
 		it := m.items.AddTool(e.Call, e.Result)
 		m.refreshStatus()
-		return m.printlnMuted(it.Line)
+		item := m.printItem(it.Line, e.Result.IsError)
+		if e.Call.Name == "edit" && !e.Result.IsError {
+			if prev := diffPreview(e.Result.Detail, m.width, diffPreviewRows); prev != "" {
+				return tea.Sequence(item, m.emit(prev))
+			}
+		}
+		return item
 	case agent.TurnEnd:
 		m.toolBusy = ""
 		var cmds []tea.Cmd
@@ -946,11 +1283,16 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 			cmds = append(cmds, m.printlnResponse(rest))
 		}
 		m.live.Reset()
+		m.md = mdState{}
 		cmds = append(cmds, m.flushThinking())
-		m.lastAssistant = llm.TextOf(e.Message)
+		if t := llm.TextOf(e.Message); t != "" {
+			// A text-less final turn keeps the previous answer for /copy.
+			m.lastAssistant = t
+		}
 		m.status.Transient = ""
 		m.refreshStatus()
 		cmds = append(cmds, m.branchCmd())
+		m.invalidateFiles() // the turn may have created files; re-index on the next @
 		return tea.Sequence(cmds...)
 	case agent.Retry:
 		m.status.Transient = fmt.Sprintf("retry %d/%d · %s", e.Notice.Attempt, e.Notice.Max, e.Notice.Wait.Round(1e8))
@@ -962,7 +1304,12 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.refreshStatus()
 		return m.printlnMuted(fmt.Sprintf("⋯ compacted: %d → %d tokens", e.TokensBefore, e.TokensAfter))
 	case agent.Resumed:
-		return m.printlnMuted(fmt.Sprintf("resumed %s (%d messages) — earlier output is in the session file", e.ID8, e.Messages))
+		m.sessionUsed = true
+		head := m.printlnMuted(fmt.Sprintf("resumed %s (%d messages)", e.ID8, e.Messages))
+		if m.agent == nil {
+			return head
+		}
+		return tea.Sequence(head, m.replay(m.agent.History(), replayTurns))
 	case agent.SteeringApplied:
 		return m.printlnMuted("↳ sent: " + strings.Join(e.Texts, " · "))
 	case agent.YoloChanged:
@@ -990,12 +1337,15 @@ func (m *model) flushThinking() tea.Cmd {
 	it := m.items.AddThinking(m.thinking.String(), dur)
 	m.thinking.Reset()
 	m.thinkStart = time.Time{}
-	return m.printlnMuted(it.Line + thinkingHint)
+	return m.printItem(it.Line+thinkingHint, false)
 }
 
 func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
 	m.running, m.cancel = false, nil
 	m.toolBusy = ""
+	// The run may have written a slash command (the create-command
+	// workflow): it must be usable now, without a restart.
+	m.reloadPrompts()
 	var cmds []tea.Cmd
 	// The completion is queued behind the run's events (eventPipe.send), so
 	// every delta has been handled by now. Flush the trailing partial line
@@ -1007,6 +1357,7 @@ func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
 		cmds = append(cmds, m.printlnResponse(m.live.String()))
 	}
 	m.live.Reset()
+	m.md = mdState{}
 	m.thinking.Reset()
 	// A run that dies mid-retry (/clear aside) must not leave the transient
 	// in the cost field.
@@ -1030,8 +1381,17 @@ func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
 }
 
 func (m *model) View() tea.View {
+	if m.quitting {
+		// The last frame keeps the status bar (the session's final numbers)
+		// and drops the input box and hints; the trailing blank row is where
+		// the exit line prints. Padding keeps it from shrinking under the
+		// remembered cursor row (padForShrink).
+		body := m.rule() + m.statusLine() + "\n"
+		rows := strings.Count(body, "\n") + 1
+		return tea.NewView(body + m.padForShrink(rows, rows-1))
+	}
 	if m.pager != nil {
-		v := tea.NewView(m.pager.view())
+		v := tea.NewView(m.pager.view(m.approval != nil))
 		v.AltScreen = true
 		return v
 	}
@@ -1042,12 +1402,21 @@ func (m *model) View() tea.View {
 	}
 	if m.login != nil {
 		sb.WriteString(m.loginPanel() + "\n")
+	} else if m.pick != nil {
+		sb.WriteString(m.pickerPanel() + "\n")
 	} else if m.approval != nil {
-		sb.WriteString(warnFg.Render("? ") + approvalPrompt(m.approval.q) + "\n")
-	} else if m.running {
+		rows := approvalDetailRows
+		if m.height > 0 {
+			rows = min(rows, max(1, m.height-inputChrome-4))
+		}
+		sb.WriteString(approvalPanel(m.approval.q, max(20, m.width), rows) + "\n")
+	} else if m.busy() {
 		sb.WriteString(m.activityLine() + "\n")
 	} else if d := m.dropdown(); d != nil {
 		sb.WriteString(m.dropdownPanel(d) + "\n")
+	}
+	if m.input.QuitArmed(m.now()) {
+		sb.WriteString(dim.Render("press ctrl+c again to quit") + "\n")
 	}
 	sb.WriteString(m.rule())
 	inputTop := strings.Count(sb.String(), "\n")
@@ -1070,6 +1439,8 @@ func (m *model) View() tea.View {
 	v.Cursor = cur
 	// Ask for full key disambiguation so shift+enter is distinguishable.
 	v.KeyboardEnhancements = tea.KeyboardEnhancements{ReportAllKeysAsEscapeCodes: true}
+	// Focus reports tell us when to notify (see notify).
+	v.ReportFocus = true
 	return v
 }
 
@@ -1124,14 +1495,33 @@ func (m *model) padForShrink(rows, cursorY int) string {
 // doing (tool name, thinking, or just working), elapsed time and the
 // interrupt key.
 func (m *model) activityLine() string {
-	what := "working"
+	what, hint := "working", "esc to interrupt"
 	switch {
+	case m.compacting:
+		what, hint = "compacting", "esc to cancel"
+	case m.shellBusy && !m.running:
+		what = "$ " + clampRunes(Sanitize(firstLineOf(m.shellText)), max(10, m.width-40))
 	case m.toolBusy != "":
 		what = Sanitize(m.toolBusy)
+		if m.toolArg != "" {
+			what += " " + clampRunes(m.toolArg, max(10, m.width-50))
+		}
 	case m.thinking.Len() > 0 && m.live.Len() == 0:
 		what = "thinking"
 	}
-	return spinFrames[m.spin%len(spinFrames)] + " " + dim.Render(fmt.Sprintf("%s… %s · esc to interrupt", what, fmtElapsed(m.now().Sub(m.runStart))))
+	parts := []string{fmtElapsed(m.now().Sub(m.runStart))}
+	if m.running {
+		if n := m.runChars / 4; n > 0 {
+			parts = append(parts, "↓"+FmtTokens(n)+" tok")
+		}
+		if m.agent != nil {
+			if q := m.agent.PendingSteering(); q > 0 {
+				parts = append(parts, fmt.Sprintf("%d queued", q))
+			}
+		}
+	}
+	parts = append(parts, hint)
+	return spinFrames[m.spin%len(spinFrames)] + " " + dim.Render(what+"… "+strings.Join(parts, " · "))
 }
 
 // fmtElapsed renders a run duration: 7s · 1m 05s · 1h 02m.
@@ -1165,10 +1555,34 @@ func (m *model) statusLine() string {
 	w := max(20, m.width)
 	if m.agent != nil && m.agent.Yolo() {
 		l1, l2 := RenderStatus(m.status, max(13, w-7))
-		return red.Render("YOLO") + dim.Render(" · "+Sanitize(l1)) + "\n" + dim.Render(Sanitize(l2))
+		return red.Render("YOLO") + dim.Render(" · "+Sanitize(l1)) + "\n" + m.styleL2(l2)
 	}
 	l1, l2 := RenderStatus(m.status, w)
-	return dim.Render(Sanitize(l1)) + "\n" + dim.Render(Sanitize(l2))
+	return dim.Render(Sanitize(l1)) + "\n" + m.styleL2(l2)
+}
+
+// styleL2 dims status line 2 and colors the percent field by context
+// pressure (yellow from 70%, red from the auto-compaction trigger, where the
+// line also says /compact).
+func (m *model) styleL2(l2 string) string {
+	l2 = Sanitize(l2)
+	pct := FmtPercent(m.status.Used, m.status.Window)
+	var st lipgloss.Style
+	switch m.status.pressure() {
+	case pressureWarn:
+		st = warnFg
+	case pressureHot:
+		st = errFg.Bold(true)
+	default:
+		return dim.Render(l2)
+	}
+	needle := " · " + pct
+	i := strings.Index(l2, needle)
+	if i < 0 {
+		return dim.Render(l2) // truncated away
+	}
+	i += len(" · ")
+	return dim.Render(l2[:i]) + st.Render(pct) + dim.Render(l2[i+len(pct):])
 }
 
 // rule is the full-width dim separator between the scrollback output, the
@@ -1177,12 +1591,43 @@ func (m *model) rule() string {
 	return dim.Render(strings.Repeat("─", max(20, m.width))) + "\n"
 }
 
+// approvalDetailRows caps the command lines shown under an approval question;
+// the whole command opens in the pager (ctrl+o).
+const approvalDetailRows = 6
+
 func approvalPrompt(q tools.Question) string {
-	subject, detail := Sanitize(q.Subject), Sanitize(firstLineOf(q.Detail))
+	subject := Sanitize(q.Subject)
 	if q.CanAlways {
-		return fmt.Sprintf("allow `%s`?  [a] once  [ctrl+a] always  [d] deny   — %s", subject, detail)
+		return fmt.Sprintf("allow `%s`?  [a] once  [ctrl+a] always  [d] deny", subject)
 	}
-	return fmt.Sprintf("allow `%s` (asks every time)?  [a] once  [d] deny   — %s", subject, detail)
+	return fmt.Sprintf("allow `%s` (asks every time)?  [a] once  [d] deny", subject)
+}
+
+// approvalPanel renders the question and the command it is about. The whole
+// command is shown up to rows lines — the subject alone can hide what runs
+// (an approved `python3` executes the heredoc under it) — each clamped to
+// the width; the rest is counted and opens in the pager.
+func approvalPanel(q tools.Question, width, rows int) string {
+	var b strings.Builder
+	b.WriteString(warnFg.Render("? ") + approvalPrompt(q))
+	lines := strings.Split(strings.TrimRight(strings.ReplaceAll(Sanitize(q.Detail), "\t", "    "), "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return b.String()
+	}
+	shown := lines
+	if len(lines) > rows {
+		shown = lines[:max(1, rows-1)]
+	}
+	for _, l := range shown {
+		if lipgloss.Width(l) > width-4 {
+			l = truncCells(l, max(1, width-5)) + "…"
+		}
+		b.WriteString("\n" + dim.Render("  │ ") + l)
+	}
+	if rest := len(lines) - len(shown); rest > 0 {
+		b.WriteString("\n" + dim.Render(fmt.Sprintf("  │ … +%d %s · ctrl+o shows the whole command", rest, plural(rest, "line"))))
+	}
+	return b.String()
 }
 
 func firstLineOf(s string) string { l, _, _ := strings.Cut(s, "\n"); return l }
@@ -1232,6 +1677,10 @@ func Run(ctx context.Context, o AppOptions) error {
 	}
 	m := newModel(o, a)
 	m.pipe = pipe
+	// Known before the first print (the welcome lines go out in Init, ahead
+	// of the program's own ColorProfileMsg): the same detection Bubble Tea
+	// makes, so NO_COLOR and 256-color terminals hold from the first line.
+	m.profile = colorprofile.Detect(os.Stdout, os.Environ())
 	m.refreshStatus()
 	// main's signal context already delivers SIGINT/SIGTERM; Bubble Tea's own
 	// handler would race it at shutdown (and can deadlock Program.Run).
@@ -1245,8 +1694,21 @@ func Run(ctx context.Context, o AppOptions) error {
 	}
 	m.waitRun(2 * time.Second)
 	close(pipe.stop)
+	if line := m.exitLine(); line != "" {
+		fmt.Println(m.downsample(line)) // past the program: no renderer downsamples it
+	}
 	m.agent.Close()
 	return runResult(ctx, err)
+}
+
+// exitLine is printed below the final frame on exit: how to come back to a
+// session that holds something (empty when there is nothing to resume).
+func (m *model) exitLine() string {
+	if m.agent == nil || !m.sessionUsed {
+		return ""
+	}
+	id := m.agent.Session().ID8()
+	return mutedFg.Render(fmt.Sprintf("session %s · resume with: moca --resume %s", id, id))
 }
 
 // runResult maps Program.Run's error to the caller's: a clean quit is nil;

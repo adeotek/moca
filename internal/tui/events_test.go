@@ -55,12 +55,12 @@ func TestThinkingLinePrintsBeforeTheResponse(t *testing.T) {
 	clock = clock.Add(3 * time.Second)
 	_, cmd = m.Update(agentEventMsg{agent.ToolStart{Call: llm.ToolCall{Name: "ls"}}})
 	out = drained(m, cmd)
-	if !strings.Contains(out, "thinking 1 lines · 3s") {
+	if !strings.Contains(out, "thinking 1 line · 3s") {
 		t.Fatalf("tool-start flush missing:\n%q", out)
 	}
 	_, cmd = m.Update(agentEventMsg{agent.ToolEnd{Call: llm.ToolCall{Name: "ls"}, Result: tools.Result{Summary: "2 entries"}}})
 	out = drained(m, cmd)
-	if iThink, iTool := strings.Index(out, "thinking 1 lines · 3s"), strings.Index(out, "ls 2 entries"); iThink >= 0 || iTool < 0 {
+	if iThink, iTool := strings.Index(out, "thinking 1 line · 3s"), strings.Index(out, "ls 2 entries"); iThink >= 0 || iTool < 0 {
 		t.Fatalf("the tool item must follow its block's flush:\n%q", out)
 	}
 }

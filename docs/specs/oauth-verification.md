@@ -192,7 +192,7 @@ The phase plan (`docs/plans/phase-7-oauth-release.md`) was drafted before this v
    (`moca`). The adapter applies this only when the credential is OAuth; API-key traffic is unchanged.
 7. **Models on the subscription route** are the account-visible slugs; moca does not call `/v1/models` at
    runtime — the user declares models in config (catalog approach unchanged). Noted in README/SPECS.
-8. **Single registration per provider (v0.1 simplification)**: moca keeps one openai registration in the store
+8. **Single registration per provider (single-account simplification)**: moca keeps one openai registration in the store
    (no account picker). `moca login openai` while logged in = reauthorization with the saved client id;
    switching accounts = `moca logout openai` then `moca login openai` (fresh dynamic registration). Recorded in
-   SPECS as a known v0.1 limitation.
+   SPECS as a known limitation.

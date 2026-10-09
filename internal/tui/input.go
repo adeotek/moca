@@ -185,11 +185,27 @@ func (in *Input) CtrlC(now time.Time) bool {
 		in.lastEmptyCC = time.Time{}
 		return false
 	}
-	if !in.lastEmptyCC.IsZero() && now.Sub(in.lastEmptyCC) <= time.Second {
+	if in.QuitArmed(now) {
 		return true
 	}
 	in.lastEmptyCC = now
 	return false
+}
+
+// History is the remembered messages, oldest first (expanded text).
+func (in *Input) History() []string { return in.history }
+
+// LoadHistory seeds the recall list (from the previous sessions' file).
+func (in *Input) LoadHistory(h []string) { in.history, in.hpos = h, len(h) }
+
+// Recall puts a remembered message into the buffer like ↑ does (a message
+// with control bytes comes back behind a chip, never raw).
+func (in *Input) Recall(s string) { in.setFromHistory(s) }
+
+// QuitArmed reports whether a first ctrl+c on an empty input is waiting for
+// its confirming second press.
+func (in *Input) QuitArmed(now time.Time) bool {
+	return !in.lastEmptyCC.IsZero() && now.Sub(in.lastEmptyCC) <= time.Second
 }
 
 // Prepend puts returned steering texts above the current draft.

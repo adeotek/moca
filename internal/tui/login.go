@@ -172,6 +172,9 @@ func providerNames(cfg config.Config) []string {
 
 // providerRow labels a provider in the picker with its available methods.
 func providerRow(name string) string {
+	if config.IsLocalProvider(name) {
+		return name + "  — local server; a key is only needed behind an authenticating proxy"
+	}
 	if _, oauth := provider.OAuthProvider(name); oauth {
 		return name + "  — API key · subscription login"
 	}

@@ -24,6 +24,29 @@ type StatusInfo struct {
 	Cost         float64
 	Sub          bool
 	Transient    string
+	// Trigger is the context size at which auto-compaction fires (the
+	// window minus the reserve); the percent field turns red from there.
+	Trigger int
+}
+
+// Context pressure levels of the percent field.
+const (
+	pressureOK   = iota
+	pressureWarn // ≥ 70% of the window
+	pressureHot  // at or past the auto-compaction trigger
+)
+
+// pressure rates how full the context is.
+func (s StatusInfo) pressure() int {
+	switch {
+	case s.Window <= 0 || s.Used <= 0:
+		return pressureOK
+	case s.Trigger > 0 && s.Used >= s.Trigger:
+		return pressureHot
+	case s.Used*100 >= s.Window*70:
+		return pressureWarn
+	}
+	return pressureOK
 }
 
 // field is one status-bar field; drop is its shrink rank — rank 1 drops
@@ -53,9 +76,13 @@ func RenderStatus(s StatusInfo, width int) (string, string) {
 		cost = s.Transient
 	}
 	l1 := renderLine([]field{{s.Version, 0}, {s.Cwd, 1}, {branch, 2}}, width, 0)
+	hint := ""
+	if s.pressure() == pressureHot {
+		hint = "/compact" // the bar says what to do about a full context
+	}
 	l2 := renderLine([]field{
 		{s.Model, 0}, {AbbrevEffort(s.Effort), 0},
-		{"ctx " + FmtWindow(s.Window), 0}, {FmtPercent(s.Used, s.Window), 0},
+		{"ctx " + FmtWindow(s.Window), 0}, {FmtPercent(s.Used, s.Window), 0}, {hint, 2},
 		{FmtTokens(s.In) + "/" + FmtTokens(s.Out), 3}, {cost, 0},
 	}, width, 0)
 	return l1, l2
