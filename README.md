@@ -13,16 +13,28 @@ Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface 
 go install github.com/adeotek/moca/cmd/moca@latest
 ```
 
-or take a package from the [releases page](https://github.com/adeotek/moca/releases) — linux/amd64 · linux/arm64 · windows/amd64 are built and published on every `v*` tag; other platforms (e.g. darwin) build from source with `make release`.
+**Install script** — downloads the release package, verifies it against the release's `checksums.txt`, and installs the binary — to `~/.local/bin` (`%LOCALAPPDATA%\Programs\moca` on Windows, added to your user PATH), or next to an existing `moca` when one is already on PATH:
 
-Keep an installed copy current:
+```bash
+# Linux
+curl -fsSL https://raw.githubusercontent.com/adeotek/moca/main/install.sh | bash
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/adeotek/moca/main/install.ps1 | iex
+```
+
+Re-running the script is safe: an existing installation is updated in place, never an error. `--version vX.Y.Z` / `-Version vX.Y.Z` pins a release and `--dir <path>` / `-Dir <path>` picks the target directory (run the script directly for parameters). Or take a package from the [releases page](https://github.com/adeotek/moca/releases) — linux/amd64 · linux/arm64 · windows/amd64 are built and published on every `v*` tag; other platforms (e.g. darwin) build from source with `make release`.
+
+**Self-update** — an installed moca updates itself from the same releases:
 
 ```bash
 moca update           # replace the binary with the latest release package for this platform
 moca update --check   # only report whether a newer release exists
 ```
 
-`moca update` verifies the package against the release's `checksums.txt` when published, then swaps the binary in place — your config, credentials and sessions are never touched, and a running session keeps working (the new version starts on the next launch).
+`moca update` verifies the package against the release's `checksums.txt` when published, then swaps the binary in place (atomic) — your config, credentials and sessions are never touched, and a running session keeps working (the new version starts on the next launch).
 
 ## Configure
 

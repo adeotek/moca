@@ -36,6 +36,7 @@ Ollama support, a TUI review pass with saved `/` commands, and self-update from 
 
 ### Self-update & release packages
 
+- **Install scripts** — `install.sh` (Linux) and `install.ps1` (Windows) download the release package, verify it against the release's `checksums.txt`, and install `moca` to `~/.local/bin` (`%LOCALAPPDATA%\Programs\moca` on Windows, added to the user PATH) or next to an existing installation; re-running updates in place and never fails because moca is already installed (`--version`/`-Version` pins a release, `--dir`/`-Dir` picks the directory).
 - **`moca update`** — replace the installed binary with the latest GitHub release package. It checks the newest release, picks the package for your platform (linux/amd64 · linux/arm64 · windows/amd64), verifies it against the release's `checksums.txt`, and swaps the binary in place (atomic; sessions, config and credentials are never touched — the new version takes over on the next launch). `moca update --check` only reports. A development or `-dirty` build, or one newer than the release, reports "not newer"; a platform without a package (e.g. darwin — use `make release`) and an unparseable version are clear errors. It runs before the config is loaded, so a broken config cannot block an update.
 - **Release workflow** — a `v*` tag push (or a manual dispatch of the new **Release** action) builds and publishes the linux/amd64, linux/arm64 and windows/amd64 packages plus `checksums.txt` as a GitHub Release — exactly what `moca update` consumes; re-running replaces the release's assets in place.
 

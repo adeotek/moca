@@ -23,7 +23,7 @@ mise run <task>                             # the make targets, as mise tasks
 
 - `make` falls back to `mise x go -- go` when `go` is missing from PATH; the make targets are mirrored as mise tasks (invoke as `mise run <task>` — bare `mise fmt` is mise's own config formatter).
 - **CI gate** (`.github/workflows/ci.yml`): `gofmt -l .` empty, `go vet ./...`, `go build ./...`, `go test ./... -race`. `make vet` runs the first two locally.
-- **Release workflow** (`.github/workflows/release.yml`): a `v*` tag push (or a manual dispatch) packages linux/amd64, linux/arm64, windows/amd64 + `checksums.txt` into a GitHub Release; the asset names (`moca-<version>-<os>-<arch>.tar.gz|zip`) are a contract with `internal/update` (`moca update`).
+- **Release workflow** (`.github/workflows/release.yml`): a `v*` tag push (or a manual dispatch) packages linux/amd64, linux/arm64, windows/amd64 + `checksums.txt` into a GitHub Release; the asset names (`moca-<version>-<os>-<arch>.tar.gz|zip`) are a contract with `internal/update` (`moca update`). `install.sh` / `install.ps1` (repo root) install and update from those packages (in-place, safe to re-run).
 - Single package/test: `go test ./internal/agent -run TestName -race -count=1`.
 - **Ship gate** (not in CI, needs repo `.env` with `OPENCODE_GO_KEY`, and a build first): `make build && bash test/shipgate/run.sh`. The checker is `//go:build shipgate`, so plain `go test ./...` skips it. Several `internal/tools` tests are `//go:build !windows`.
 
