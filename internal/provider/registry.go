@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/adeotek/moca/internal/config"
 )
@@ -17,6 +19,7 @@ var ErrUnknownModel = errors.New("unknown model")
 
 var defaultBaseURLs = map[string]map[string]string{
 	"anthropic": {"anthropic-messages": "https://api.anthropic.com"},
+	"ollama":    {"openai-completions": ollamaDefaultHost + "/v1"},
 	"openai":    {"openai-responses": "https://api.openai.com/v1", "openai-completions": "https://api.openai.com/v1"},
 	"opencode-go": {
 		"anthropic-messages": "https://opencode.ai/zen/go",
@@ -26,47 +29,39 @@ var defaultBaseURLs = map[string]map[string]string{
 }
 
 type Registry struct {
-	cfg       config.Config
-	hc        *http.Client
-	notify    func(RetryNotice)
+	cfg    config.Config
+	hc     *http.Client
+	notify func(RetryNotice)
+	getenv func(string) string // OLLAMA_HOST; a field so tests do not touch the process env
+	// mu guards models: a discovery run (TUI /model) rewrites the ollama
+	// entries while the agent may resolve models.
+	mu        sync.RWMutex
 	models    map[string]Model
 	oauth     map[string]CredentialFunc
 	sessionID string
+	// ollamaErr is why the last discovery failed (nil when it succeeded or
+	// never ran); Verify cites it when a configured ollama model is missing.
+	ollamaErr error
 }
 
 func NewRegistry(cfg config.Config, hc *http.Client, notify func(RetryNotice)) (*Registry, error) {
-	r := &Registry{cfg: cfg, hc: hc, notify: notify, models: map[string]Model{}, oauth: map[string]CredentialFunc{}, sessionID: rand.Text()}
+	r := &Registry{cfg: cfg, hc: hc, notify: notify, getenv: os.Getenv, models: map[string]Model{}, oauth: map[string]CredentialFunc{}, sessionID: rand.Text()}
 	for _, m := range builtinCatalog {
 		r.models[m.Qualified()] = m
 	}
 	for pname, p := range cfg.Providers {
-		for mid, o := range p.Models {
-			q := pname + "/" + mid
-			m, ok := r.models[q]
-			if !ok {
-				m = Model{Provider: pname, ID: mid, Protocol: p.Protocol, ThinkingMode: "none", MaxOutput: 8192}
-			}
-			if o.Protocol != "" {
-				m.Protocol = o.Protocol
-			}
-			if m.Protocol == "" {
-				return nil, fmt.Errorf("model %q: declare its protocol under providers.%s.models.%s.protocol (%s)",
-					q, pname, mid, strings.Join(config.Protocols, "|"))
-			}
-			if o.ContextWindow != 0 {
-				m.ContextWindow = o.ContextWindow
-			}
-			if o.MaxOutputTokens != 0 {
-				m.MaxOutput = o.MaxOutputTokens
-			}
-			if o.Cost != nil {
-				m.Cost = *o.Cost
-			}
-			r.models[q] = m
+		if err := r.applyModelOverrides(pname, p); err != nil {
+			return nil, err
 		}
 	}
 	for _, q := range []string{cfg.Model, cfg.ModelHard} {
 		if q == "" {
+			continue
+		}
+		// A local provider's models are discovered from its server after
+		// construction (NewRegistry makes no network call); Verify checks
+		// them then.
+		if pn, _, err := config.SplitModel(q); err == nil && config.IsLocalProvider(pn) {
 			continue
 		}
 		if _, ok := r.models[q]; !ok {
@@ -76,9 +71,71 @@ func NewRegistry(cfg config.Config, hc *http.Client, notify func(RetryNotice)) (
 	return r, nil
 }
 
+// applyModelOverrides merges a provider's declared models (and per-model
+// overrides of catalog or discovered ones) into the registry. The caller
+// holds mu when the registry is live.
+func (r *Registry) applyModelOverrides(pname string, p config.ProviderConfig) error {
+	local := config.IsLocalProvider(pname)
+	for mid, o := range p.Models {
+		q := pname + "/" + mid
+		m, ok := r.models[q]
+		if !ok {
+			m = Model{Provider: pname, ID: mid, Protocol: p.Protocol, ThinkingMode: "none", MaxOutput: 8192}
+			if local {
+				// A declared local model with nothing else said: the OpenAI-
+				// compatible protocol and the assumed window.
+				m.Protocol, m.ContextWindow = "openai-completions", ollamaAssumedWindow
+			}
+		}
+		if o.Protocol != "" {
+			m.Protocol = o.Protocol
+		}
+		if m.Protocol == "" {
+			return fmt.Errorf("model %q: declare its protocol under providers.%s.models.%s.protocol (%s)",
+				q, pname, mid, strings.Join(config.Protocols, "|"))
+		}
+		if o.ContextWindow != 0 {
+			m.ContextWindow = o.ContextWindow
+		}
+		if o.MaxOutputTokens != 0 {
+			m.MaxOutput = o.MaxOutputTokens
+		}
+		if o.Cost != nil {
+			m.Cost = *o.Cost
+		}
+		r.models[q] = m
+	}
+	return nil
+}
+
+// Verify checks that the configured default and hard models exist. It runs
+// after discovery, which is what makes a local provider's models known.
+func (r *Registry) Verify() error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, q := range []string{r.cfg.Model, r.cfg.ModelHard} {
+		if q == "" {
+			continue
+		}
+		if _, ok := r.models[q]; ok {
+			continue
+		}
+		if pn, id, err := config.SplitModel(q); err == nil && pn == "ollama" {
+			if r.ollamaErr != nil {
+				return fmt.Errorf("model %q: %w", q, r.ollamaErr)
+			}
+			return fmt.Errorf("model %q: the ollama server at %s has no model %q with tool support — pull it (ollama pull %s) or declare it under providers.ollama.models", q, r.ollamaBase(), id, id)
+		}
+		return fmt.Errorf("model %q is not in the catalog; declare it under providers.<name>.models", q)
+	}
+	return nil
+}
+
 func (r *Registry) SetOAuth(provider string, fn CredentialFunc) { r.oauth[provider] = fn }
 
 func (r *Registry) Models() []Model {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make([]Model, 0, len(r.models))
 	for _, m := range r.models {
 		out = append(out, m)
@@ -98,7 +155,10 @@ func (r *Registry) CheckCredential(qualified string) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := r.models[qualified]; !ok {
+	r.mu.RLock()
+	_, ok := r.models[qualified]
+	r.mu.RUnlock()
+	if !ok {
 		return fmt.Errorf("%w %q", ErrUnknownModel, qualified)
 	}
 	if r.cfg.Providers[pname].Auth == "oauth" && r.oauth[pname] == nil {
@@ -119,6 +179,9 @@ func (r *Registry) CheckCredential(qualified string) error {
 
 func (r *Registry) baseURL(provider, protocol string) string {
 	p := r.cfg.Providers[provider]
+	if provider == "ollama" {
+		return r.ollamaBase()
+	}
 	if u := p.BaseURLs[protocol]; u != "" {
 		return u
 	}
@@ -202,6 +265,11 @@ func (r *Registry) credential(provider string) CredentialFunc {
 			return Credential{}, fmt.Errorf("provider %s: %w", provider, serr)
 		case eerr != nil:
 			return Credential{}, fmt.Errorf("provider %s: %w; store a key with /login in the TUI or moca login %s", provider, eerr, provider)
+		case config.IsLocalProvider(provider):
+			// A local server needs no key; one stored with /login (or an
+			// apiKey env reference) is sent when the server sits behind an
+			// authenticating proxy.
+			return Credential{}, nil
 		default:
 			return Credential{}, fmt.Errorf("provider %s: no API key stored and providers.%s.apiKey is not set; add one with /login in the TUI or moca login %s", provider, provider, provider)
 		}
@@ -213,7 +281,9 @@ func (r *Registry) Resolve(qualified string) (Model, Adapter, error) {
 	if err != nil {
 		return Model{}, nil, err
 	}
+	r.mu.RLock()
 	m, ok := r.models[qualified]
+	r.mu.RUnlock()
 	if !ok {
 		return Model{}, nil, fmt.Errorf("%w %q", ErrUnknownModel, qualified)
 	}
@@ -243,6 +313,9 @@ func (r *Registry) Resolve(qualified string) (Model, Adapter, error) {
 		a = newOpenAIResponses(m, base, cred, r.hc)
 	default:
 		return Model{}, nil, fmt.Errorf("model %s: unknown protocol %q", qualified, m.Protocol)
+	}
+	if pname == "ollama" {
+		a = ollamaGuard{inner: a, base: base}
 	}
 	return m, WithRetry(a, DefaultRetryPolicy(r.notify)), nil
 }

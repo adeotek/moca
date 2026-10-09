@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+### Ollama (local or LAN)
+
+- **New provider `ollama`** — a local or LAN [Ollama](https://ollama.com) server, no API key. Enable it by naming a model (`"model": "ollama/qwen3:8b"`, `--model ollama/…`) or with `"providers": { "ollama": {} }`; `baseUrl` or `$OLLAMA_HOST` points it at another machine. Models are discovered from the server (embedding and tool-less models are skipped; `thinking` models get effort levels) and `/model` re-reads them; models declared under `providers.ollama.models` override or add. See the README for the context-length caveat — moca warns when it has to assume the window.
+- A server that is down fails at once with how to start it (no retry ladder); a model that was never pulled says `ollama pull <name>`. A key (`/login ollama`) is optional, for servers behind an authenticating proxy. Nothing is probed unless you opt in.
+
+### TUI features
+
+- **Markdown-lite responses** — `**bold**`, `` `code` ``, headings, bullets, quotes and fenced code blocks (a darker band, never word-wrapped) instead of raw markdown; `/copy` still copies the raw text.
+- **Inline edit diffs** — a successful `edit` prints its changed lines (red/green, ≤ 8) under its item line.
+- **Resume picks up where you left off** — `--resume`/`--continue` replay the last 3 turns into the scrollback; new **`/resume`** picker (this directory's other sessions) or `/resume <id8>`.
+- **`/model` picker** (providers without a key are marked) and **argument completion** in the `/` dropdown for `/model`, `/effort`, `/login`, `/logout`, `/show`, `/resume`.
+- **`@path`** completes workdir files (gitignore-aware; the path is sent, the model reads the file itself).
+- **Persistent prompt history** (`history.jsonl`, per workdir) and **`ctrl+r`** history search.
+- **Context pressure** in the status bar: the percent turns yellow at 70%, red (with `/compact`) where auto-compaction fires.
+- Richer activity row (tool operand, streamed-token estimate, queued steering count); pager search (`/`, `n`/`N`) and an "approval pending" marker; `shift+tab` cycles effort.
+- Desktop notification / bell for a finished long run or a waiting approval while the terminal is unfocused (`tui.notify`, default `osc9`).
+- Calmer layout: a blank row between tool items and the response, `›` messages hang their text, item lines stay on one row, `!cmd` echoes like other input, and the shift+enter hint shows once per machine.
+- Scrollback colors follow the terminal's profile: `NO_COLOR` is honored, and 256-color terminals get approximated band colors instead of raw truecolor.
+
+### TUI fixes
+
+- **Approvals show the whole command** — up to 6 lines under the question (overflow counted), and `ctrl+o` pages all of it; the prompt used to show only the first line, so approving `python3` hid the heredoc it would run.
+- **`esc` kills a running `!cmd`**, which now gets the activity row (spinner, elapsed time) like runs and `/compact` (`compacting… · esc to cancel`).
+- **`ctrl+c` on an empty draft says `press ctrl+c again to quit`**; inside the pager it now also clears the textarea (the draft used to come back on the next key).
+- **Exit** keeps the final status bar on screen and prints `session <id8> · resume with: moca --resume <id8>`.
+- The status bar shows the branch of a fresh `git init` (no commit yet) instead of `-`.
+- `/cost` uses the bar's compact token format and breaks the input down (fresh · cache read · cache write); `subscription` for OAuth.
+- `/copy` keeps the last answer when the final turn had no text; failed tool items get a red `✗`; `thinking 1 line` (was `1 lines`); the pager title is clamped to one row and shows the scroll position.
+
 ## v0.1.1 (2026-10-08)
 
 Polish, a credential store in the config dir, `/` autocomplete, and a bigger catalog — still one binary, still no framework.

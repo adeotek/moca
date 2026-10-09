@@ -10,6 +10,9 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
+
+	"github.com/adeotek/moca/internal/llm"
 )
 
 var id8re = regexp.MustCompile(`^[0-9a-f]{8}$`)
@@ -89,15 +92,92 @@ func header(path string) (*Header, error) {
 // FindForWorkdir resolves --continue: the newest session whose header workdir
 // is this directory (canonical paths, the same comparison the jail uses).
 func FindForWorkdir(dir, workdir string) (string, error) {
-	abs, _ := filepath.Abs(workdir)
-	canon, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		canon = abs
-	}
+	canon := canonical(workdir)
 	for _, f := range listNewestFirst(dir) {
 		if h, err := header(f.path); err == nil && h.Workdir == canon {
 			return f.path, nil
 		}
 	}
 	return "", fmt.Errorf("no session for %s; start one with moca", canon)
+}
+
+// canonical is the symlink-resolved absolute form of a workdir, the same
+// comparison the jail uses.
+func canonical(workdir string) string {
+	abs, _ := filepath.Abs(workdir)
+	canon, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return abs
+	}
+	return canon
+}
+
+// Info describes one stored session for pickers.
+type Info struct {
+	Path, ID8 string
+	Modified  time.Time
+	Workdir   string
+	Preview   string // first line of the first user message
+}
+
+// previewScanLines bounds how far into a file List looks for the first user
+// message (a header, then usually the very next entry).
+const previewScanLines = 60
+
+// List returns the newest sessions that started in workdir ("" = any), at
+// most limit, skipping the session with id skipID8 (the one in use) and
+// sessions that never received a user message. Unreadable files are skipped.
+func List(dir, workdir, skipID8 string, limit int) []Info {
+	canon := ""
+	if workdir != "" {
+		canon = canonical(workdir)
+	}
+	var out []Info
+	for _, f := range listNewestFirst(dir) {
+		if len(out) >= limit {
+			break
+		}
+		if idOf(f.path) == skipID8 {
+			continue
+		}
+		h, preview := headerAndPreview(f.path)
+		if h == nil || preview == "" || (canon != "" && h.Workdir != canon) {
+			continue
+		}
+		out = append(out, Info{Path: f.path, ID8: idOf(f.path), Modified: time.Unix(0, f.mod), Workdir: h.Workdir, Preview: preview})
+	}
+	return out
+}
+
+// headerAndPreview reads the session header and the first line of the first
+// real user message (a compaction summary is not one).
+func headerAndPreview(path string) (*Header, string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, ""
+	}
+	defer f.Close()
+	r := bufio.NewReaderSize(f, 1<<20)
+	var h *Header
+	for i := 0; i < previewScanLines; i++ {
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 {
+			var e Entry
+			if json.Unmarshal(line, &e) == nil {
+				switch {
+				case e.Session != nil:
+					h = e.Session
+				case e.Type == TypeMessage && e.Message != nil && e.Message.Role == llm.RoleUser:
+					if t := strings.TrimSpace(llm.TextOf(*e.Message)); t != "" && !strings.HasPrefix(t, "[Summary of earlier") {
+						first, _, _ := strings.Cut(t, "\n")
+						return h, strings.TrimSpace(first)
+					}
+				}
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return h, ""
 }

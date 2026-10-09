@@ -82,7 +82,9 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 	err = tui.Run(ctx, tui.AppOptions{
 		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Yolo: yolo, Slug: "tui"},
 		ConfigPath: cfgPath, Prompts: skills.LoadPrompts(pdirs), Home: home,
-		ResumePath: resumePath,
+		ResumePath:  resumePath,
+		HintsPath:   filepath.Join(config.DataDir(), "hints.json"),
+		HistoryPath: filepath.Join(config.DataDir(), "history.jsonl"),
 	})
 	if err != nil {
 		if ctx.Err() == nil { // SIGINT/SIGTERM: no message, just 130

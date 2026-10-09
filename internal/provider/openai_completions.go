@@ -108,7 +108,9 @@ func (a *completionsAdapter) Stream(ctx context.Context, req llm.Request, emit f
 		return llm.Response{}, err
 	}
 	hdr := http.Header{}
-	hdr.Set("Authorization", "Bearer "+cred.Token)
+	if cred.Token != "" { // a local server (ollama) may need no key at all
+		hdr.Set("Authorization", "Bearer "+cred.Token)
+	}
 	for k, v := range cred.Headers {
 		hdr.Set(k, v)
 	}

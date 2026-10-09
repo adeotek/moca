@@ -55,7 +55,7 @@ func TestDefaultsApplied(t *testing.T) {
 	if c.Context.ReserveTokens != 16384 || c.Context.KeepRecentTokens != 20000 || c.Context.MaxSteps != 40 {
 		t.Fatalf("context defaults: %+v", c.Context)
 	}
-	if c.MCP.IdleTimeout != 600 || c.RetentionDays() != 30 {
+	if c.MCP.IdleTimeout != 600 || c.RetentionDays() != 30 || c.TUI.Notify != "osc9" {
 		t.Fatal("scalar defaults")
 	}
 	if !slices.Equal(c.Shell.Allow, DefaultShellAllow) {
@@ -89,6 +89,7 @@ func TestValidationErrors(t *testing.T) {
 		`{"modle":"x/y"}`:             "unknown field",
 		`{"context":{"maxSteps":-1}}`: "maxSteps",
 		`{"mcp":{"idleTimeout":-5}}`:  "mcp.idleTimeout",
+		`{"tui":{"notify":"sms"}}`:    "tui.notify",
 	}
 	for in, want := range cases {
 		_, err := Parse([]byte(in))
@@ -187,5 +188,54 @@ func TestPathsHonourXDG(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", "/data")
 	if ConfigFile() != "/cfg/moca/config.jsonc" || DataDir() != "/data/moca" {
 		t.Fatal(ConfigFile(), DataDir())
+	}
+}
+
+func TestTUINotifyModes(t *testing.T) {
+	for _, mode := range NotifyModes {
+		c, err := Parse([]byte(`{"tui":{"notify":"` + mode + `"}}`))
+		if err != nil || c.TUI.Notify != mode {
+			t.Fatalf("%s: %v %+v", mode, err, c.TUI)
+		}
+	}
+}
+
+func TestOllamaProviderIsOptIn(t *testing.T) {
+	c, err := Parse([]byte(`{"model":"anthropic/x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.Providers["ollama"]; ok {
+		t.Fatal("ollama must not exist unless the user opts in")
+	}
+	// An entry is enough: no baseUrl, protocol, key or model list needed.
+	c, err = Parse([]byte(`{"providers":{"ollama":{}}}`))
+	if err != nil || c.Providers["ollama"].Auth != "api_key" {
+		t.Fatalf("empty entry: %v %+v", err, c.Providers["ollama"])
+	}
+	// So is a model reference (default or hard model).
+	c, err = Parse([]byte(`{"model":"anthropic/x","modelHard":"ollama/llama3.1"}`))
+	if err != nil || c.Providers["ollama"].Auth != "api_key" {
+		t.Fatalf("model reference: %v", err)
+	}
+	// A remote host, a declared model, a key reference — all optional.
+	c, err = Parse([]byte(`{"providers":{"ollama":{"baseUrl":"http://nas:11434","apiKey":"env:OLLAMA_KEY","models":{"qwen3:8b":{"contextWindow":32768}}}}}`))
+	if err != nil || c.Providers["ollama"].Models["qwen3:8b"].ContextWindow != 32768 {
+		t.Fatalf("full entry: %v", err)
+	}
+	// Other unknown providers are still rejected.
+	if _, err := Parse([]byte(`{"model":"llamacpp/x"}`)); err == nil {
+		t.Fatal("unknown provider")
+	}
+	// UseProvider copies the map rather than mutating a shared one.
+	shared := map[string]ProviderConfig{"anthropic": {Auth: "api_key"}}
+	d := Config{Providers: shared}
+	d.UseProvider("ollama")
+	if _, ok := shared["ollama"]; ok || d.Providers["ollama"].Auth != "api_key" {
+		t.Fatal("UseProvider must not mutate the original map")
+	}
+	d.UseProvider("not-local")
+	if _, ok := d.Providers["not-local"]; ok {
+		t.Fatal("only local providers are implicit")
 	}
 }

@@ -145,3 +145,5 @@ func simulate(m *model, cmd tea.Cmd) (out string, quit bool) {
 	}
 	return sb.String(), quit
 }
+
+func agentEvent(text string) agent.Event { return agent.TextDelta{Text: text} }

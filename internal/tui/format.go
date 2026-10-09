@@ -67,7 +67,11 @@ func GitBranch(dir string) (string, bool, bool) {
 	defer cancel()
 	b, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
-		return "", false, false
+		// A fresh `git init` has no commit for HEAD to resolve to, but HEAD
+		// still names the (unborn) branch.
+		if b, err = exec.CommandContext(ctx, "git", "-C", dir, "symbolic-ref", "--short", "HEAD").Output(); err != nil {
+			return "", false, false
+		}
 	}
 	st, _ := exec.CommandContext(ctx, "git", gitStatusArgs(dir)...).Output()
 	return strings.TrimSpace(string(b)), len(strings.TrimSpace(string(st))) > 0, true
