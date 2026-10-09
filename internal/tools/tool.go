@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/adeotek/moca/internal/llm"
@@ -45,8 +46,10 @@ const (
 	AllowAlways
 )
 
-// Question is an approval request. Kind is "shell" or "mcp"; Subject the
-// command name or server/tool; Detail the full command or args.
+// Question is an approval request. Kind is "shell", "mcp" or "write"
+// (a tool write outside the workdir: the global prompt templates — slash
+// commands the agent writes for the user); Subject the command name, the
+// server/tool or the path; Detail the full command, the args or the reason.
 type Question struct {
 	Kind, Subject, Detail string
 	CanAlways             bool
@@ -56,6 +59,43 @@ type Asker func(ctx context.Context, q Question) Answer
 
 // AutoAllow is the yolo-mode Asker: every approval is granted once.
 func AutoAllow(context.Context, Question) Answer { return AllowOnce }
+
+// ApprovablePaths is the optional PathChecker capability behind ask-write
+// roots: a jail may point out a refused write the user can approve (the
+// global prompt templates). permissions.Jail implements it.
+type ApprovablePaths interface {
+	Approvable(path string) (string, bool)
+}
+
+// askOutsideWrite resolves a write the jail refused. A target under an
+// ask-write root (the global prompt templates) is allowed only on the user's
+// yes; anything else keeps the refusal, and no asker (a -p run) means denial.
+func askOutsideWrite(ctx context.Context, env *Env, path string, refused error) (string, error) {
+	ap, ok := env.Paths.(ApprovablePaths)
+	if !ok {
+		return "", refused
+	}
+	abs, ok := ap.Approvable(path)
+	if !ok {
+		return "", refused
+	}
+	// The read guard comes first: an unread (or stale) existing file is
+	// refused anyway, and prompting for it would only spend the user's
+	// attention on a write that cannot land.
+	if _, err := os.Stat(abs); err == nil && env.Reads != nil {
+		if rerr := env.Reads.Check(abs); rerr != nil {
+			return "", rerr
+		}
+	}
+	// The resolved target, not the model's spelling of it: the user approves
+	// the file that will actually be written.
+	q := Question{Kind: "write", Subject: abs,
+		Detail: "outside the workdir — moca slash commands (global prompt templates)"}
+	if env.Ask == nil || env.Ask(ctx, q) == Deny {
+		return "", fmt.Errorf("%s is outside the workdir and the user did not approve writing it — keep project slash commands in .moca/prompts/ inside the workdir, or ask the user first", path)
+	}
+	return abs, nil
+}
 
 type Env struct {
 	Root     string

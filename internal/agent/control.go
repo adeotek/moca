@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 
 	"github.com/adeotek/moca/internal/compact"
@@ -36,6 +37,28 @@ type Status struct {
 
 // Models lists the catalog for /model (sorted by qualified id).
 func (a *Agent) Models() []provider.Model { return a.opts.Providers.Models() }
+
+// RefreshModels re-reads a configured Ollama server's models (models pulled
+// since startup appear; removed ones go). It returns the reason when the
+// server cannot be reached, and nil when no local provider is configured.
+func (a *Agent) RefreshModels(ctx context.Context) error {
+	_, err := a.opts.Providers.DiscoverOllama(ctx)
+	return err
+}
+
+// HasCredential reports whether a request to the qualified model could be
+// authenticated (the check SetModel makes: an env lookup or the stored
+// login, never the network).
+func (a *Agent) HasCredential(q string) bool { return a.opts.Providers.CheckCredential(q) == nil }
+
+// History is the conversation as the model sees it (after any compaction
+// summary): a copy of the stored messages, thinking blocks included, for a
+// front end to replay.
+func (a *Agent) History() []llm.Message {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return session.Messages(a.entries)
+}
 
 // recordModel persists a model_change entry and drops the usage anchor: after
 // a switch the estimate falls back to chars/4 of the whole request (§6).
@@ -124,6 +147,13 @@ func (a *Agent) Steer(text string) {
 	a.mu.Lock()
 	a.steer = append(a.steer, text)
 	a.mu.Unlock()
+}
+
+// PendingSteering is the number of queued steering messages not yet applied.
+func (a *Agent) PendingSteering() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.steer)
 }
 
 // TakeSteering drains the queue (an aborted run's texts return to the editor).

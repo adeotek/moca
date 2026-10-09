@@ -25,7 +25,7 @@ func (editTool) Spec() llm.ToolSpec {
 			`"required":["path","old_string","new_string"],"additionalProperties":false}`)}
 }
 
-func (editTool) Run(_ context.Context, env *Env, input json.RawMessage) Result {
+func (editTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result {
 	var a struct {
 		Path       string `json:"path"`
 		OldString  string `json:"old_string"`
@@ -36,6 +36,9 @@ func (editTool) Run(_ context.Context, env *Env, input json.RawMessage) Result {
 		return *r
 	}
 	abs, err := env.Paths.Resolve(a.Path, true)
+	if err != nil {
+		abs, err = askOutsideWrite(ctx, env, a.Path, err)
+	}
 	if err != nil {
 		return errorf("%v", err)
 	}

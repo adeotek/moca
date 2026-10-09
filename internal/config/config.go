@@ -26,6 +26,31 @@ var BuiltinProviders = map[string]string{
 	"openai":      "env:OPENAI_API_KEY",
 }
 
+// LocalProviders are built-in providers that need no API key and have no
+// static catalog (their models are discovered from the server). Unlike
+// BuiltinProviders they exist only when the user opts in — a providers entry,
+// or a model reference such as "ollama/llama3.1" — so nothing probes a local
+// port for people who never asked. They need no baseUrl or protocol.
+var LocalProviders = []string{"ollama"}
+
+// IsLocalProvider reports whether name is one of LocalProviders.
+func IsLocalProvider(name string) bool { return slices.Contains(LocalProviders, name) }
+
+// UseProvider makes sure a local provider has an entry (the implicit opt-in
+// of a model reference). The Providers map is replaced by a copy, so a caller
+// sharing the Config value is not mutated behind its back.
+func (c *Config) UseProvider(name string) {
+	if _, ok := c.Providers[name]; ok || !IsLocalProvider(name) {
+		return
+	}
+	next := make(map[string]ProviderConfig, len(c.Providers)+1)
+	for k, v := range c.Providers {
+		next[k] = v
+	}
+	next[name] = ProviderConfig{Auth: "api_key"}
+	c.Providers = next
+}
+
 var Protocols = []string{"anthropic-messages", "openai-completions", "openai-responses"}
 
 // OAuthUnsupported lists providers whose subscription OAuth was rejected by
@@ -51,6 +76,7 @@ type Config struct {
 	MCP       MCPConfig                 `json:"mcp"`
 	Snapshot  SnapshotConfig            `json:"snapshot"`
 	Context   ContextConfig             `json:"context"`
+	TUI       TUIConfig                 `json:"tui"`
 	Yolo      bool                      `json:"yolo"` // all permission checks off by default (§7.5)
 }
 
@@ -100,6 +126,17 @@ type SnapshotConfig struct {
 	RetentionDays *int `json:"retentionDays,omitempty"` // nil → 30; 0 → forever
 }
 
+// TUIConfig holds the interactive front end's few knobs.
+type TUIConfig struct {
+	// Notify is how the TUI signals a finished long run or a waiting approval
+	// while the terminal is unfocused: "osc9" (desktop notification escape),
+	// "bell", or "off".
+	Notify string `json:"notify"`
+}
+
+// NotifyModes are the valid tui.notify values.
+var NotifyModes = []string{"osc9", "bell", "off"}
+
 type ContextConfig struct {
 	ReserveTokens    int `json:"reserveTokens"`
 	KeepRecentTokens int `json:"keepRecentTokens"`
@@ -133,6 +170,17 @@ func (c *Config) applyDefaults() {
 		}
 		c.Providers[name] = p
 	}
+	for _, q := range []string{c.Model, c.ModelHard} {
+		if p, _, err := SplitModel(q); err == nil {
+			c.UseProvider(p)
+		}
+	}
+	for _, name := range LocalProviders {
+		if p, ok := c.Providers[name]; ok && p.Auth == "" {
+			p.Auth = "api_key"
+			c.Providers[name] = p
+		}
+	}
 	if c.Shell.Allow == nil {
 		c.Shell.Allow = slices.Clone(DefaultShellAllow)
 	}
@@ -147,6 +195,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Context.MaxSteps == 0 {
 		c.Context.MaxSteps = 40
+	}
+	if c.TUI.Notify == "" {
+		c.TUI.Notify = "osc9"
 	}
 }
 
@@ -252,6 +303,7 @@ func (c Config) Validate() error {
 			return fmt.Errorf("providers.%s.auth must be \"api_key\" or \"oauth\", got %q", name, p.Auth)
 		}
 		_, builtin := BuiltinProviders[name]
+		builtin = builtin || IsLocalProvider(name)
 		if !builtin && p.BaseURL == "" && len(p.BaseURLs) == 0 {
 			return fmt.Errorf("providers.%s: custom provider needs baseUrl and protocol", name)
 		}
@@ -275,6 +327,9 @@ func (c Config) Validate() error {
 	}
 	if c.Context.MaxSteps < 1 || c.Context.ReserveTokens < 1 || c.Context.KeepRecentTokens < 1 {
 		return fmt.Errorf("context: reserveTokens, keepRecentTokens and maxSteps must be positive")
+	}
+	if !slices.Contains(NotifyModes, c.TUI.Notify) {
+		return fmt.Errorf("tui.notify %q unknown (want %s)", c.TUI.Notify, strings.Join(NotifyModes, "|"))
 	}
 	if c.Snapshot.RetentionDays != nil && *c.Snapshot.RetentionDays < 0 {
 		return fmt.Errorf("snapshot.retentionDays must be >= 0")

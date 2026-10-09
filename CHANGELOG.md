@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.2.0-beta (2026-10-09)
+
+Ollama support, a TUI review pass with saved `/` commands, and self-update from GitHub releases — still one binary, still no framework.
+
+### Ollama (local or LAN)
+
+- **New provider `ollama`** — a local or LAN [Ollama](https://ollama.com) server, no API key. Enable it by naming a model (`"model": "ollama/qwen3:8b"`, `--model ollama/…`) or with `"providers": { "ollama": {} }`; `baseUrl` or `$OLLAMA_HOST` points it at another machine. Models are discovered from the server (embedding and tool-less models are skipped; `thinking` models get effort levels) and `/model` re-reads them; models declared under `providers.ollama.models` override or add. See the README for the context-length caveat — moca warns when it has to assume the window.
+- A server that is down fails at once with how to start it (no retry ladder); a model that was never pulled says `ollama pull <name>`. A key (`/login ollama`) is optional, for servers behind an authenticating proxy. Nothing is probed unless you opt in.
+
+### TUI features
+
+- **`/create-command`** — a starter command template, written on the first TUI run into `~/.config/moca/prompts/` (an existing file is never overwritten): run it and the agent creates or updates a saved slash command for you — personal ones in that directory (it asks you to approve the write, since it is outside the workdir — once per write, never persisted) or project ones in `.moca/prompts/`; new commands are usable as soon as the run finishes — no restart.
+- **Markdown-lite responses** — `**bold**`, `` `code` ``, headings, bullets, quotes and fenced code blocks (a darker band, never word-wrapped) instead of raw markdown; `/copy` still copies the raw text.
+- **Inline edit diffs** — a successful `edit` prints its changed lines (red/green, ≤ 8) under its item line.
+- **Resume picks up where you left off** — `--resume`/`--continue` replay the last 3 turns into the scrollback; new **`/resume`** picker (this directory's other sessions) or `/resume <id8>` (an id from another directory is refused).
+- **`/sessions`** — manage this directory's stored sessions in one place: every session listed (the open one marked `(current)`), `enter` switches to it, `ctrl+d` deletes it after a `y` confirm — the open session and sessions held open by another moca process refuse, and a file under a live writer is never unlinked; the list stays open for the next one. The newest 100 are listed; the title gives the real total when there are more.
+- **`/model` picker** (providers without a key are marked) and **argument completion** in the `/` dropdown for `/model`, `/effort`, `/login`, `/logout`, `/show`, `/resume`.
+- **`@path`** completes workdir files (gitignore-aware; the path is sent, the model reads the file itself).
+- **Persistent prompt history** (`history.jsonl`, per workdir) and **`ctrl+r`** history search.
+- **Context pressure** in the status bar: the percent turns yellow at 70%, red (with `/compact`) where auto-compaction fires.
+- Richer activity row (tool operand, streamed-token estimate, queued steering count); pager search (`/`, `n`/`N`) and an "approval pending" marker; `shift+tab` cycles effort.
+- Desktop notification / bell for a finished long run or a waiting approval while the terminal is unfocused (`tui.notify`, default `osc9`).
+- Calmer layout: a blank row between tool items and the response, `›` messages hang their text, item lines stay on one row, `!cmd` echoes like other input, and the shift+enter hint shows once per machine.
+- Scrollback colors follow the terminal's profile: `NO_COLOR` is honored, and 256-color terminals get approximated band colors instead of raw truecolor.
+
+### TUI fixes
+
+- **Approvals show the whole command** — up to 6 lines under the question (overflow counted), and `ctrl+o` pages all of it; the prompt used to show only the first line, so approving `python3` hid the heredoc it would run.
+- **`esc` kills a running `!cmd`**, which now gets the activity row (spinner, elapsed time) like runs and `/compact` (`compacting… · esc to cancel`).
+- **`ctrl+c` on an empty draft says `press ctrl+c again to quit`**; inside the pager it now also clears the textarea (the draft used to come back on the next key).
+- **Exit** keeps the final status bar on screen and prints `session <id8> · resume with: moca --resume <id8>`.
+- The status bar shows the branch of a fresh `git init` (no commit yet) instead of `-`.
+- `/cost` uses the bar's compact token format and breaks the input down (fresh · cache read · cache write); `subscription` for OAuth.
+- `/copy` keeps the last answer when the final turn had no text; failed tool items get a red `✗`; `thinking 1 line` (was `1 lines`); the pager title is clamped to one row and shows the scroll position.
+
+### Self-update & release packages
+
+- **Install scripts** — `install.sh` (Linux) and `install.ps1` (Windows) download the release package, verify it against the release's `checksums.txt`, and install `moca` to `~/.local/bin` (`%LOCALAPPDATA%\Programs\moca` on Windows, added to the user PATH) or next to an existing installation; re-running updates in place and never fails because moca is already installed (`--version`/`-Version` pins a release, `--dir`/`-Dir` picks the directory).
+- **`moca update`** — replace the installed binary with the latest GitHub release package. It checks the newest published release (drafts skipped), picks the package for your platform (linux/amd64 · linux/arm64 · windows/amd64), verifies it against the release's `checksums.txt`, and swaps the binary in place (atomic; a symlinked launcher has its target replaced; sessions, config and credentials are never touched — the new version takes over on the next launch). `moca update --check` only reports. A development or `-dirty` build, or one newer than the release, reports "not newer"; a platform without a package (e.g. darwin — use `make release`) and an unparseable version are clear errors. It runs before the config is loaded, so a broken config cannot block an update.
+- **Release workflow** — a manual run of the new **Release** action (Actions → Release → Run workflow; pushing a `v*` tag deliberately does not trigger it) builds and publishes the linux/amd64, linux/arm64 and windows/amd64 packages plus `checksums.txt` as a GitHub Release — exactly what `moca update` consumes; re-running replaces the release's assets in place, and a run from an **untagged** ref is a rehearsal: it creates a **draft** release that `moca update` and the installers ignore until you publish it by hand.
+
 ## v0.1.1 (2026-10-08)
 
 Polish, a credential store in the config dir, `/` autocomplete, and a bigger catalog — still one binary, still no framework.

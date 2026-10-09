@@ -36,10 +36,10 @@ func TestItems(t *testing.T) {
 		t.Fatal("summaries are never format strings:", pct.Line)
 	}
 	// A streamed thinking block carries its duration; a zero one omits it.
-	if d := s.AddThinking("x", 12*time.Second); d.Line != "⋯ #5 thinking 1 lines · 12s" {
+	if d := s.AddThinking("x", 12*time.Second); d.Line != "⋯ #5 thinking 1 line · 12s" {
 		t.Fatal(d.Line)
 	}
-	if d := s.AddThinking("x", 500*time.Millisecond); d.Line != "⋯ #6 thinking 1 lines · <1s" {
+	if d := s.AddThinking("x", 500*time.Millisecond); d.Line != "⋯ #6 thinking 1 line · <1s" {
 		t.Fatal(d.Line)
 	}
 }

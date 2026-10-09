@@ -67,3 +67,33 @@ func TestFmtPercent(t *testing.T) {
 		}
 	}
 }
+
+func TestContextPressure(t *testing.T) {
+	s := StatusInfo{Window: 100_000, Trigger: 90_000, Model: "m", Cost: 0}
+	for used, want := range map[int]int{0: pressureOK, 69_000: pressureOK, 70_000: pressureWarn, 89_999: pressureWarn, 90_000: pressureHot} {
+		s.Used = used
+		if got := s.pressure(); got != want {
+			t.Fatalf("used %d: pressure %d, want %d", used, got, want)
+		}
+	}
+	s.Used = 95_000
+	if _, l2 := RenderStatus(s, 120); !strings.Contains(l2, "95% · /compact") {
+		t.Fatalf("a hot context says what to do: %q", l2)
+	}
+	s.Used = 50_000
+	if _, l2 := RenderStatus(s, 120); strings.Contains(l2, "/compact") {
+		t.Fatalf("no hint below the trigger: %q", l2)
+	}
+}
+
+func TestStatusPercentColored(t *testing.T) {
+	m := newTestModel()
+	m.status.Window, m.status.Trigger, m.status.Used = 100_000, 90_000, 95_000
+	if got := m.statusLine(); !strings.Contains(got, errFg.Bold(true).Render("95%")) {
+		t.Fatalf("hot percent not red: %q", got)
+	}
+	m.status.Used = 75_000
+	if got := m.statusLine(); !strings.Contains(got, warnFg.Render("75%")) {
+		t.Fatalf("warm percent not yellow: %q", got)
+	}
+}

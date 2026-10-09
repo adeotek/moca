@@ -39,6 +39,8 @@ usage:
     --api-key                  prompt for an API key instead of the OAuth flow
     --no-browser               headless OAuth: print the URL, read the pasted code from stdin
   moca logout <provider>       clear a stored login or API key
+  moca update                  replace the binary with the latest GitHub release package
+    --check                    only report whether a newer release exists
   moca mcp import              import MCP servers from Claude Code / OpenCode / Pi configs
   moca mcp index               prebuild the persisted MCP discovery index
   moca --version
@@ -131,7 +133,7 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 		return o, usageError{errors.New("--resume and --continue are mutually exclusive")}
 	}
 	o.Sub = fs.Args()
-	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp") {
+	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp" || o.Sub[0] == "update") {
 		return o, usageError{fmt.Errorf("unknown command %q", o.Sub[0])}
 	}
 	return o, nil

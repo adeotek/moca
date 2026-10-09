@@ -16,9 +16,14 @@ import (
 type Jail struct {
 	root     string
 	readOnly []string
+	// askWrite are user-owned roots outside the workdir where a write needs
+	// the user's approval first (the global prompt templates: slash commands
+	// the agent writes for the user). Resolve still refuses them; Approvable
+	// hands them out so the caller can ask.
+	askWrite []string
 }
 
-func NewJail(root string, readOnly []string) (*Jail, error) {
+func NewJail(root string, readOnly, askWrite []string) (*Jail, error) {
 	r, err := canonical(root)
 	if err != nil {
 		return nil, fmt.Errorf("jail root: %w", err)
@@ -38,6 +43,17 @@ func NewJail(root string, readOnly []string) (*Jail, error) {
 			continue
 		}
 		j.readOnly = append(j.readOnly, c)
+	}
+	for _, aw := range askWrite {
+		abs, err := filepath.Abs(aw)
+		if err != nil {
+			continue
+		}
+		c, err := resolveDeep(abs) // same reason as the read roots: may not exist yet
+		if err != nil {
+			continue
+		}
+		j.askWrite = append(j.askWrite, c)
 	}
 	return j, nil
 }
@@ -108,17 +124,7 @@ func within(base, p string) bool {
 }
 
 func (j *Jail) Resolve(path string, write bool) (string, error) {
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("cannot expand ~: %w", err)
-		}
-		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(j.root, path)
-	}
-	res, err := resolveDeep(filepath.Clean(path))
+	res, err := j.resolve(path)
 	if err != nil {
 		return "", err
 	}
@@ -134,4 +140,37 @@ func (j *Jail) Resolve(path string, write bool) (string, error) {
 		return "", fmt.Errorf("%s is outside the workdir %s (symlinks resolved); reading is limited to the workdir and skill directories", path, j.root)
 	}
 	return "", fmt.Errorf("%s is outside the workdir %s (symlinks resolved); writes are confined to the workdir", path, j.root)
+}
+
+// resolve expands ~, joins relative paths to the root and resolves symlinks
+// on the deepest existing ancestor (see resolveDeep).
+func (j *Jail) resolve(path string) (string, error) {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("cannot expand ~: %w", err)
+		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(j.root, path)
+	}
+	return resolveDeep(filepath.Clean(path))
+}
+
+// Approvable resolves a write the jail refused when the target lies under an
+// ask-write root — the global prompt templates, where the user may approve a
+// slash command the agent writes for them. The caller must still ask; every
+// other path reports false so a refusal cannot be laundered through this.
+func (j *Jail) Approvable(path string) (string, bool) {
+	res, err := j.resolve(path)
+	if err != nil || within(j.root, res) {
+		return "", false
+	}
+	for _, aw := range j.askWrite {
+		if within(aw, res) {
+			return res, true
+		}
+	}
+	return "", false
 }

@@ -55,8 +55,8 @@ func TestCompactingBlocksRun(t *testing.T) {
 	m.input.SetBuffer("!ls")
 	m.syncTextarea()
 	_, cmd = m.Update(key("enter"))
-	if m.shellBusy || !strings.Contains(printed(cmd), "/compact") {
-		t.Fatalf("`!` must be refused while compacting: %q", printed(cmd))
+	if out, _ := simulate(m, cmd); m.shellBusy || !strings.Contains(out, "/compact") {
+		t.Fatalf("`!` must be refused while compacting: %q", out)
 	}
 	m.Update(compactDoneMsg{err: nil})
 	if m.compacting {

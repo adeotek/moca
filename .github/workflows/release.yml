@@ -1,0 +1,122 @@
+# Release — build the platform packages and publish them as a GitHub
+# Release. Triggered manually only (Actions -> Release -> Run workflow):
+# a `v*` tag push deliberately does NOT trigger it — publishing is an
+# explicit action, decided by the maintainer. Run it from a tagged ref
+# (e.g. main after tagging) to name the release by the tag.
+#
+# The published assets are the contract `moca update` consumes
+# (internal/update.go): moca-<version>-<os>-<arch>.tar.gz (a .zip on
+# Windows) + checksums.txt — keep the two in sync if either side changes.
+# `make release` stays the local path and still cross-compiles all five
+# targets (darwin included); this workflow publishes the three the update
+# command can install (linux/amd64, linux/arm64, windows/amd64).
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: package ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - name: Checkout (full history — git describe needs the tag)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go (version from go.mod)
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and package
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          version="$(git describe --tags --always --dirty)"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          ext=""; [ "$GOOS" = "windows" ] && ext=".exe"
+          mkdir -p dist/pkg
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-s -w -X github.com/adeotek/moca/internal/config.Version=$version" \
+            -o "dist/pkg/moca$ext" ./cmd/moca
+          if [ "$GOOS" = "linux" ]; then
+            out="$(./dist/pkg/moca --version)"
+            [ "$out" = "moca $version" ] || { echo "version stamp mismatch: $out (want moca $version)"; exit 1; }
+          fi
+          cp LICENSE dist/pkg/
+          ( cd dist/pkg
+            if [ "$GOOS" = "windows" ]; then
+              zip -q -r "../moca-$version-$GOOS-$GOARCH.zip" moca.exe LICENSE
+            else
+              tar -czf "../moca-$version-$GOOS-$GOARCH.tar.gz" moca LICENSE
+            fi )
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: moca-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (full history — git describe needs the tag)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum moca-* > checksums.txt
+          cat checksums.txt
+
+      - name: Create or update the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(git describe --tags --always --dirty)"
+          if gh release view "$version" >/dev/null 2>&1; then
+            gh release upload "$version" dist/* --clobber
+          elif git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            gh release create "$version" dist/* --title "$version" --generate-notes
+          else
+            # manual dispatch from a branch (a rehearsal): a draft, so
+            # `moca update` and the installers never pick up the dev build;
+            # publish it by hand if it is meant to ship
+            gh release create "$version" dist/* --title "$version" --generate-notes --target "$GITHUB_SHA" --draft
+          fi
