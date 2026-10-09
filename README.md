@@ -5,7 +5,7 @@
 **A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, seven tools, no framework.**
 Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface area. It competes on *cost per task* and *read-the-whole-codebase-in-an-hour transparency*, not features: prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap; the agent ships MCP support that never floods the prompt (one ~200-token lazy proxy), loads Agent-Skills `SKILL.md` files written for other tools unchanged, and prefers external token-savers (`rtk`, `graphify`) when they are installed.
 
-**Status: v0.1.0 (pending the §14 ship gate; the tag lands when the gate's live legs pass).**
+**Status: v0.2.0-beta** — self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
 
 ## Install
 
@@ -134,7 +134,7 @@ make release        # five cross-compiled binaries in dist/
 | 4 | context manager + compaction + resume | token-triggered compaction, `--continue` — done |
 | 5 | MCP lazy proxy (stdio + streamable HTTP, persisted index, `mcp import`) | real server via proxy, no schemas in prompt, 0 servers at start — done |
 | 6 | rtk + graphify + skills ecosystem compatibility | rtk preferred in real session, pi SKILL.md loads — done |
-| 7 | OAuth providers + upstream graphify PR + v0.1 | ship-gate demo passes (§14); live legs + `v0.1.0` tag pending |
+| 7 | OAuth providers + upstream graphify PR + v0.1 | ship-gate demo passes (§14), live legs green (2026-10-07) — shipped as `v0.1.1-alpha`; current line `v0.2.0-beta` |
 
 ## Docs
 

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.2.0-beta (2026-10-09)
+
+Ollama support, a TUI review pass with saved `/` commands, and self-update from GitHub releases — still one binary, still no framework.
 
 ### Ollama (local or LAN)
 
