@@ -129,3 +129,39 @@ func TestMentionEscDismissesAndEmailDoesNot(t *testing.T) {
 		t.Fatalf("mention inside a command line: %+v", d)
 	}
 }
+
+// A walk that was in flight when the index went stale (a finished turn, a
+// `!` command) must not resurrect old files: its result is discarded, and
+// only a walk started after the invalidation is accepted.
+func TestStaleFileWalkIsDiscarded(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "stale.go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModel()
+	m.opts.Start.Workdir = dir
+	typeText(m, "see @st")
+	if !m.filesLoading {
+		t.Fatal("typing @ starts the index walk")
+	}
+	m.filesLoading = false
+	load := m.maybeLoadFiles()
+	if load == nil {
+		t.Fatal("a load command")
+	}
+	// The index goes stale while the walk is in flight; its result arrives
+	// after the invalidation.
+	m.invalidateFiles()
+	m.Update(load())
+	if m.files != nil {
+		t.Fatalf("stale walk accepted: %v", m.files)
+	}
+	// A walk started after the invalidation is accepted.
+	if load = m.maybeLoadFiles(); load == nil {
+		t.Fatal("a fresh load command")
+	}
+	m.Update(load())
+	if len(m.files) != 1 || m.files[0] != "stale.go" {
+		t.Fatalf("fresh walk: %v", m.files)
+	}
+}
