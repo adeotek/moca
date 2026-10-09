@@ -1,5 +1,8 @@
 # Release — build the platform packages and publish them as a GitHub
-# Release. Triggered by a `v*` tag push (or manually, for a rehearsal run).
+# Release. Triggered manually only (Actions -> Release -> Run workflow):
+# a `v*` tag push deliberately does NOT trigger it — publishing is an
+# explicit action, decided by the maintainer. Run it from a tagged ref
+# (e.g. main after tagging) to name the release by the tag.
 #
 # The published assets are the contract `moca update` consumes
 # (internal/update.go): moca-<version>-<os>-<arch>.tar.gz (a .zip on
@@ -10,8 +13,6 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
