@@ -37,7 +37,7 @@ mise run <task>                             # the make targets, as mise tasks
 ## Conventions & gotchas
 
 - Config decode is **strict**: unknown keys are rejected. Adding a config key means defaults + validation + a SPECS update.
-- The system prompt is built once per run and stored in the session; never rebuilt.
+- The system prompt is built once per run and stored in the session; never rebuilt. Its fixed text is the embedded `internal/agent/system-prompt.md` (`{{token}}` slots rendered at start).
 - `config.Standardize` (JSONC) preserves byte offsets so decode errors keep original `line:col`; `internal/config/testdata/example.jsonc` is the byte-exact DESIGN §12 fixture.
 - Secrets: config `apiKey` must be an `env:VAR` reference (literals rejected). `.env` and `*.key` are gitignored — never commit them.
 - Thinking blocks/signatures are model-bound; cross-provider transforms happen in the agent before each request (see SPECS §14).

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -69,5 +70,46 @@ func TestFilterSkillsDropsMissingBuiltins(t *testing.T) {
 	toolOnPath = func(string) bool { return true }
 	if got := filterSkills(sk); len(got) != 3 {
 		t.Fatalf("installed tool: the builtin must stay: %+v", got)
+	}
+}
+
+// TestPromptTemplateSlots: the fixed prompt text is the embedded markdown
+// file — every {{slot}} it uses must be one renderPrompt resolves (a typo
+// would ship the raw token to the model), and every resolvable slot must be
+// used (a dead slot is silent debt).
+func TestPromptTemplateSlots(t *testing.T) {
+	known := []string{"{{workdir}}", "{{os}}", "{{arch}}", "{{date}}", "{{git}}", "{{verify}}", "{{rtk}}", "{{version}}"}
+	re := regexp.MustCompile(`\{\{[a-z-]+\}\}`)
+	used := map[string]bool{}
+	for _, tok := range re.FindAllString(promptTemplate, -1) {
+		used[tok] = true
+	}
+	if len(used) == 0 {
+		t.Fatal("no slots found — embed broke or tokens were renamed")
+	}
+	for tok := range used {
+		found := false
+		for _, k := range known {
+			if tok == k {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("unknown template slot %s", tok)
+		}
+	}
+	for _, k := range known {
+		if !used[k] {
+			t.Errorf("slot %s is resolvable but unused in the template", k)
+		}
+	}
+	// Rendering must consume every slot, with and without optional lines.
+	for name, in := range map[string]PromptInput{
+		"full": {Workdir: "/w", OS: "o", Arch: "a", Date: "d", Git: "g", Version: "v", Verify: "vk", RTK: true},
+		"bare": {},
+	} {
+		if out := BuildSystemPrompt(in); strings.Contains(out, "{{") {
+			t.Errorf("%s render leaves a raw slot:\n%s", name, out)
+		}
 	}
 }
