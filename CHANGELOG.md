@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.0-beta (2026-10-09)
+
+First-run setup mode: a config without a model opens the TUI with `/login` + `/model` guidance instead of stopping — still one binary, still no framework.
+
+### TUI
+
+- **A fresh install opens the TUI instead of exiting** — with no `"model"` configured, `moca` used to stop with `moca: no model configured — set "model" in …`. Now it opens in *setup mode*: a red notice (`no provider configured — run /login first (store an API key or sign in), then /model picks a model`) rides the welcome print, the status bar carries `no provider configured — /login`, and sending a message repeats the notice instead of doing nothing. `/login` stores a credential, then `/model` opens the first-run picker — choosing a model checks its credential (a missing key says so and names `/login`), starts the session immediately and saves the choice as the config's `"model"`, so the next launch starts straight into a session. `/help`, `/exit`, `/resume`, `/sessions` and `!`/`!!` keep working throughout. `-p` without a model keeps the old error, and `--resume`/`--continue` need no configured model.
+
 ## v0.2.0-beta (2026-10-09)
 
 Ollama support, a TUI review pass with saved `/` commands, and self-update from GitHub releases — still one binary, still no framework.

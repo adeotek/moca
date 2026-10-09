@@ -372,9 +372,9 @@ func (m *model) loginKeyInput(k tea.KeyPressMsg) tea.Cmd {
 			return m.printlnError("error: " + err.Error())
 		}
 		if m.start.Config.Providers[p].Auth == "oauth" {
-			return m.printlnContent(fmt.Sprintf("stored API key for %s in %s — note: providers.%s.auth is \"oauth\"; set it to \"api_key\" to use the key", p, store.Path(), p))
+			return tea.Sequence(m.printlnContent(fmt.Sprintf("stored API key for %s in %s — note: providers.%s.auth is \"oauth\"; set it to \"api_key\" to use the key", p, store.Path(), p)), m.setupModelHint())
 		}
-		return m.printlnContent(fmt.Sprintf("stored API key for %s in %s — the next request to it uses the key", p, store.Path()))
+		return tea.Sequence(m.printlnContent(fmt.Sprintf("stored API key for %s in %s — the next request to it uses the key", p, store.Path())), m.setupModelHint())
 	case "backspace":
 		if n := len(s.key); n > 0 {
 			s.key = s.key[:n-1]
@@ -406,6 +406,7 @@ func (m *model) loginFlipAuth() tea.Cmd {
 	note := "restart moca to use your subscription"
 	if cfg, err := config.Load(path); err == nil {
 		m.start.Config, m.opts.Start.Config = cfg, cfg
+		m.setupReg = nil // the cached setup registry holds the pre-reload copy
 		note = "a /clear (or a restart) starts the next session on your subscription"
 	}
 	return m.printlnContent(fmt.Sprintf("set providers.%s.auth to \"oauth\" in %s — %s", p, path, note))
@@ -434,6 +435,10 @@ func (m *model) handleLoginDone(msg loginDoneMsg) tea.Cmd {
 		line += " as " + msg.email
 	}
 	cmds = append(cmds, m.printlnContent(line))
+	if m.unconfigured() {
+		// The credential alone starts nothing yet — a model is missing.
+		cmds = append(cmds, m.setupModelHint())
+	}
 	if s == nil || m.start.Config.Providers[msg.provider].Auth == "oauth" {
 		m.login = nil
 		return tea.Sequence(cmds...)

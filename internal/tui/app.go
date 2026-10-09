@@ -64,9 +64,12 @@ const spinInterval = 100 * time.Millisecond
 var spinFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 type model struct {
-	opts     AppOptions         // Workdir/ConfigPath/Prompts/Home for rendering and commands
-	start    agent.StartOptions // opts.Start with Emit/Ask wired; /clear restarts from this copy
-	agent    *agent.Agent
+	opts  AppOptions         // Workdir/ConfigPath/Prompts/Home for rendering and commands
+	start agent.StartOptions // opts.Start with Emit/Ask wired; /clear restarts from this copy
+	agent *agent.Agent
+	// setupReg is the registry the unconfigured TUI lists /model choices from
+	// (there is no session yet to own one); see setup.go.
+	setupReg *provider.Registry
 	input    *Input
 	ta       textarea.Model
 	items    Items
@@ -339,11 +342,11 @@ func (m *model) printlnContent(s string) tea.Cmd {
 
 func (m *model) refreshStatus() {
 	m.status.Version = config.Version
+	m.status.Cwd = AbbrevHome(m.opts.Start.Workdir, m.opts.Home)
 	if m.agent == nil {
 		return
 	}
 	st := m.agent.Status()
-	m.status.Cwd = AbbrevHome(m.opts.Start.Workdir, m.opts.Home)
 	m.status.Model, m.status.Effort = st.Model.Qualified(), st.Effort
 	m.status.Window, m.status.Used = st.Window, st.ContextTokens
 	cc := m.start.Config.Context
@@ -362,7 +365,15 @@ func (m *model) Init() tea.Cmd {
 	// the reply arrives as tea.BackgroundColorMsg and picks the message
 	// background variants. No reply (unsupported terminal) keeps the dark
 	// default set in newModel.
-	return tea.Batch(m.println(welcomeText()), m.branchCmd(), tea.RequestBackgroundColor, tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return hintCheckMsg{} }))
+	// The setup notice rides the welcome's OWN print (§3.5): a second print
+	// landing while the first frame is still being drawn loses a line — the
+	// renderer's erase counts a frame that has not rendered yet and the
+	// notice takes the greeting's row.
+	welcome := welcomeText()
+	if m.unconfigured() {
+		welcome += "\n" + noProviderNotice()
+	}
+	return tea.Batch(m.println(welcome), m.branchCmd(), tea.RequestBackgroundColor, tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return hintCheckMsg{} }))
 }
 
 // welcomeText opens the scrollback of a session: title + version, then the
@@ -543,13 +554,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.hold(m.handleLogoutDone(msg))
 	case modelsRefreshedMsg:
 		m.status.Transient = ""
-		if m.agent == nil || m.busy() || m.pick != nil || m.login != nil {
+		if m.busy() || m.pick != nil || m.login != nil {
 			return m, nil
 		}
 		var warn tea.Cmd
 		if msg.err != nil {
 			// The listing still opens: cloud models and declared ones work.
 			warn = m.printlnWarn("warning: " + msg.err.Error())
+		}
+		if m.unconfigured() {
+			// Setup mode: the discovery refreshed m.setupReg.
+			return m, tea.Batch(m.hold(warn), m.openSetupModelPicker())
 		}
 		m.openModelPicker(m.agent.Status().Model.Qualified())
 		return m, m.hold(warn)
@@ -827,6 +842,10 @@ func (m *model) submit() tea.Cmd {
 	}
 	switch parsed.Kind {
 	case KindText, KindPrompt:
+		if m.unconfigured() {
+			// Nothing can run yet; the red notice says how to fix it.
+			return m.printlnNoProvider()
+		}
 		if m.running {
 			if m.agent != nil {
 				m.agent.Steer(parsed.Text)
@@ -910,9 +929,33 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		return m.runLogin(c.Args)
 	case "logout":
 		return m.runLogout(c.Args)
-	}
-	if m.agent == nil {
+	case "help":
+		return m.printlnContent(HelpText(m.opts.Prompts))
+	case "exit":
+		return m.quit()
+	case "copy":
+		if m.lastAssistant == "" {
+			return m.printlnMuted("nothing to copy yet")
+		}
+		return tea.Sequence(tea.SetClipboard(m.lastAssistant), m.printlnMuted(fmt.Sprintf("copied %d chars (OSC 52)", len(m.lastAssistant))))
+	case "show":
+		n, err := strconv.Atoi(c.Args)
+		if err != nil {
+			return m.println("usage: /show <n>")
+		}
+		it, ok := m.items.Get(n)
+		if !ok {
+			return m.println(fmt.Sprintf("no item #%d yet", n))
+		}
+		m.openPager(it)
 		return nil
+	}
+	if m.unconfigured() {
+		if c.Name == "model" {
+			return m.runModelSetup(c.Args)
+		}
+		// Everything below needs a session; the red notice says how.
+		return m.printlnNoProvider()
 	}
 	st := m.agent.Status()
 	switch c.Name {
@@ -1007,26 +1050,6 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 			return m.printlnError("error: " + err.Error())
 		}
 		return m.printlnContent(msg)
-	case "copy":
-		if m.lastAssistant == "" {
-			return m.printlnMuted("nothing to copy yet")
-		}
-		return tea.Sequence(tea.SetClipboard(m.lastAssistant), m.printlnMuted(fmt.Sprintf("copied %d chars (OSC 52)", len(m.lastAssistant))))
-	case "show":
-		n, err := strconv.Atoi(c.Args)
-		if err != nil {
-			return m.println("usage: /show <n>")
-		}
-		it, ok := m.items.Get(n)
-		if !ok {
-			return m.println(fmt.Sprintf("no item #%d yet", n))
-		}
-		m.openPager(it)
-		return nil
-	case "exit":
-		return m.quit()
-	case "help":
-		return m.printlnContent(HelpText(m.opts.Prompts))
 	}
 	return m.println("unknown command /" + c.Name)
 }
@@ -1078,26 +1101,44 @@ func (m *model) modelList(cur string) string {
 // a provider with no credential are marked (picking one reports the missing
 // key rather than switching).
 func (m *model) openModelPicker(cur string) {
+	items, cursor := modelPickItems(m.agent.Models(), cur, m.agent.HasCredential)
 	p := &pickState{title: "switch to which model?  (prompt cache is forfeited)", cancelNote: "model unchanged", onChoose: m.switchModel}
+	p.items, p.cursor = items, cursor
+	m.openPicker(p)
+}
+
+// modelPickItems labels a model list for a picker: models of a provider with
+// no credential are marked, cur (when set) is preselected — and with no
+// current model (the first-run picker) the cursor lands on the first
+// credentialed model, so the choices that can actually run sit under the hand.
+func modelPickItems(models []provider.Model, cur string, check func(string) bool) ([]pickItem, int) {
+	items := make([]pickItem, 0, len(models))
 	creds := map[string]bool{}
-	for i, mo := range m.agent.Models() {
+	cursor, firstReady := -1, -1
+	for i, mo := range models {
 		q := mo.Qualified()
 		ok, seen := creds[mo.Provider]
 		if !seen {
-			ok = m.agent.HasCredential(q)
+			ok = check(q)
 			creds[mo.Provider] = ok
 		}
 		label := q
 		switch {
 		case q == cur:
 			label += "  — current"
-			p.cursor = i
+			cursor = i
 		case !ok:
 			label += "  — no key (/login " + mo.Provider + ")"
 		}
-		p.items = append(p.items, pickItem{key: q, label: label})
+		if ok && firstReady < 0 {
+			firstReady = i
+		}
+		items = append(items, pickItem{key: q, label: label})
 	}
-	m.openPicker(p)
+	if cursor < 0 {
+		cursor = max(0, firstReady)
+	}
+	return items, cursor
 }
 
 // switchModel is /model <id>.
@@ -1225,11 +1266,15 @@ func (m *model) handleShellDone(msg shellDoneMsg) tea.Cmd {
 		exit = "[interrupted — process group killed]"
 	}
 	lines = append(lines, exit)
-	if !msg.local && !cancelled && m.agent != nil {
-		note := "$ " + msg.cmd + "\n" + body + "\n" + exit
-		m.sessionUsed = true
-		if err := m.agent.AddNote(note); err != nil {
-			lines = append(lines, "error: "+Sanitize(err.Error()))
+	if !msg.local && !cancelled {
+		if m.agent == nil {
+			lines = append(lines, "(not added to the transcript — no provider configured)")
+		} else {
+			note := "$ " + msg.cmd + "\n" + body + "\n" + exit
+			m.sessionUsed = true
+			if err := m.agent.AddNote(note); err != nil {
+				lines = append(lines, "error: "+Sanitize(err.Error()))
+			}
 		}
 	}
 	return m.println(strings.Join(lines, "\n"))
@@ -1661,9 +1706,14 @@ func Run(ctx context.Context, o AppOptions) error {
 	o.Start.Ask = newAsker(func(msg tea.Msg) { p.Send(msg) })
 	var a *agent.Agent
 	var err error
-	if o.ResumePath != "" {
+	switch {
+	case o.ResumePath != "":
 		a, err = agent.Resume(o.Start, o.ResumePath)
-	} else {
+	case o.Start.Config.Model == "":
+		// Setup mode (§3.5): no model configured, so no session can start —
+		// the TUI opens with the red no-provider notice instead, and /login
+		// + /model build the first session in place.
+	default:
 		a, err = agent.Start(o.Start)
 	}
 	if err != nil {
@@ -1697,7 +1747,9 @@ func Run(ctx context.Context, o AppOptions) error {
 	if line := m.exitLine(); line != "" {
 		fmt.Println(m.downsample(line)) // past the program: no renderer downsamples it
 	}
-	m.agent.Close()
+	if m.agent != nil { // setup mode may end without a session ever starting
+		m.agent.Close()
+	}
 	return runResult(ctx, err)
 }
 

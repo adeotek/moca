@@ -88,7 +88,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return exitUsage
 		}
 	}
-	if cfg.Model == "" {
+	if cfg.Model == "" && o.OneShot {
+		// A one-shot run needs a model up front; the TUI (no -p) instead
+		// opens in setup mode and offers /login + /model (§3.5).
 		fmt.Fprintf(stderr, "moca: no model configured — set \"model\" in %s or pass --model provider/model\n", path)
 		return exitUsage
 	}
