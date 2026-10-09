@@ -61,7 +61,7 @@ func guardedWrite(env *Env, abs string, data []byte) error {
 	return env.Reads.Record(abs)
 }
 
-func (writeTool) Run(_ context.Context, env *Env, input json.RawMessage) Result {
+func (writeTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result {
 	var a struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -70,6 +70,9 @@ func (writeTool) Run(_ context.Context, env *Env, input json.RawMessage) Result 
 		return *r
 	}
 	abs, err := env.Paths.Resolve(a.Path, true)
+	if err != nil {
+		abs, err = askOutsideWrite(ctx, env, a.Path, err)
+	}
 	if err != nil {
 		return errorf("%v", err)
 	}

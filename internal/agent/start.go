@@ -82,7 +82,12 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 		return nil, &StartError{err}
 	}
 	globalSkills := filepath.Join(config.ConfigDir(), "skills")
-	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir})
+	promptsDir := config.PromptsDir()
+	// readOnly: the prompt templates are readable (the agent may update a
+	// command it is shown). askWrite: a write there — outside the workdir —
+	// needs the user's approval (the write/edit tools ask; the shell's
+	// redirect check does not).
+	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir, promptsDir}, []string{promptsDir})
 	if err != nil {
 		return nil, &StartError{err}
 	}

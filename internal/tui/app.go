@@ -28,6 +28,10 @@ type AppOptions struct {
 	Start      agent.StartOptions
 	ConfigPath string
 	Prompts    []skills.Prompt
+	// PromptDirs re-reads Prompts when a run or `!` command finishes: a
+	// command written during the run (the create-command workflow) must be
+	// usable without a restart. Empty = Prompts stays as given.
+	PromptDirs []skills.Dir
 	Home       string
 	// HistoryPath is the persistent prompt history ("" = in-memory only).
 	HistoryPath string
@@ -1099,6 +1103,18 @@ func (m *model) switchModel(q string) tea.Cmd {
 	return m.printlnContent(fmt.Sprintf("switched to %s · effort %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
 }
 
+// reloadPrompts re-reads the prompt-template dirs when a run or `!` command
+// finishes: the agent can write a new command during a run (the
+// create-command workflow), and it must be usable without a restart. An
+// empty PromptDirs (unit tests, callers that pass literal prompts) is a
+// no-op.
+func (m *model) reloadPrompts() {
+	if len(m.opts.PromptDirs) == 0 {
+		return
+	}
+	m.opts.Prompts = skills.LoadPrompts(m.opts.PromptDirs)
+}
+
 // compactCmd runs a manual compaction off the event loop. The Compacted
 // event (through the pipe) prints the result; the done message only reports
 // refusals and errors. esc/quit cancel it through compactCancel.
@@ -1175,6 +1191,8 @@ func (m *model) shellCmd(local bool, cmd string) tea.Cmd {
 }
 
 func (m *model) handleShellDone(msg shellDoneMsg) tea.Cmd {
+	// A `!` command can edit prompt templates: pick the change up.
+	m.reloadPrompts()
 	if !msg.local {
 		m.shellBusy, m.shellText, m.shellCancel = false, "", nil
 	}
@@ -1316,6 +1334,9 @@ func (m *model) flushThinking() tea.Cmd {
 func (m *model) handleRunDone(msg runDoneMsg) tea.Cmd {
 	m.running, m.cancel = false, nil
 	m.toolBusy = ""
+	// The run may have written a slash command (the create-command
+	// workflow): it must be usable now, without a restart.
+	m.reloadPrompts()
 	var cmds []tea.Cmd
 	// The completion is queued behind the run's events (eventPipe.send), so
 	// every delta has been handled by now. Flush the trailing partial line

@@ -9,6 +9,7 @@
 
 ### TUI features
 
++- **`/create-command`** — a starter command template, written on the first TUI run into `~/.config/moca/prompts/` (an existing file is never overwritten): run it and the agent creates or updates a saved slash command for you — personal ones in that directory (it asks you to approve the write, since it is outside the workdir — once per write, never persisted) or project ones in `.moca/prompts/`; new commands are usable as soon as the run finishes — no restart.
 - **Markdown-lite responses** — `**bold**`, `` `code` ``, headings, bullets, quotes and fenced code blocks (a darker band, never word-wrapped) instead of raw markdown; `/copy` still copies the raw text.
 - **Inline edit diffs** — a successful `edit` prints its changed lines (red/green, ≤ 8) under its item line.
 - **Resume picks up where you left off** — `--resume`/`--continue` replay the last 3 turns into the scrollback; new **`/resume`** picker (this directory's other sessions) or `/resume <id8>`.

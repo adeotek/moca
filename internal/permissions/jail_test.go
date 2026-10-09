@@ -25,7 +25,7 @@ func setup(t *testing.T) (root, outside, ro string) {
 
 func TestJail(t *testing.T) {
 	root, outside, ro := setup(t)
-	j, err := NewJail(root, []string{ro})
+	j, err := NewJail(root, []string{ro}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,17 +60,60 @@ func TestJail(t *testing.T) {
 
 func TestJailResolvedPathIsCanonical(t *testing.T) {
 	root, _, _ := setup(t)
-	j, _ := NewJail(root, nil)
+	j, _ := NewJail(root, nil, nil)
 	got, _ := j.Resolve("inner/f.go", true)
 	if got != filepath.Join(j.Root(), "sub", "f.go") {
 		t.Fatalf("symlink must resolve: %s", got)
 	}
 }
 
+func TestJailApprovable(t *testing.T) {
+	root := t.TempDir()
+	prompts := filepath.Join(t.TempDir(), "prompts") // may not exist yet: an ask-write root is kept
+	j, err := NewJail(root, []string{prompts}, []string{prompts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reads under the prompts dir are allowed (the agent may update a command
+	// it was asked about)…
+	if _, err := j.Resolve(filepath.Join(prompts, "x.md"), false); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// …a write is not: Resolve keeps refusing, Approvable hands the path out
+	// for the approval ask.
+	if _, err := j.Resolve(filepath.Join(prompts, "x.md"), true); err == nil {
+		t.Fatal("a write outside the workdir must not resolve silently")
+	}
+	abs, ok := j.Approvable(filepath.Join(prompts, "x.md"))
+	if !ok || abs != filepath.Join(prompts, "x.md") {
+		t.Fatalf("approvable: %q %v", abs, ok)
+	}
+	// Inside the workdir needs no approval; anything else is not approvable.
+	if _, ok := j.Approvable(filepath.Join(root, "a.go")); ok {
+		t.Fatal("a workdir path must not be approvable")
+	}
+	for _, p := range []string{"/etc/passwd", filepath.Join(prompts, "..", "config.jsonc")} {
+		if _, ok := j.Approvable(p); ok {
+			t.Fatalf("%s must not be approvable", p)
+		}
+	}
+	// A symlink out of the ask root cannot launder a write through it.
+	out := t.TempDir()
+	if err := os.MkdirAll(prompts, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(out, filepath.Join(prompts, "sneaky")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := j.Approvable(filepath.Join(prompts, "sneaky", "x.md")); ok {
+		t.Fatal("a symlinked escape must not be approvable")
+	}
+}
+
 func TestJailTildeExpands(t *testing.T) {
 	root, _, _ := setup(t)
 	t.Setenv("HOME", root)
-	j, _ := NewJail(root, nil)
+	j, _ := NewJail(root, nil, nil)
 	if _, err := j.Resolve("~/x.txt", true); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +121,7 @@ func TestJailTildeExpands(t *testing.T) {
 
 func TestJailDanglingSymlinks(t *testing.T) {
 	root, outside, _ := setup(t)
-	j, _ := NewJail(root, nil)
+	j, _ := NewJail(root, nil, nil)
 	mk := func(target, link string) {
 		t.Helper()
 		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
@@ -120,7 +163,7 @@ func TestJailKeepsNotYetExistingReadOnlyRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	future := filepath.Join(base, "skills", "deploy")
-	j, err := NewJail(root, []string{future})
+	j, err := NewJail(root, []string{future}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
