@@ -51,6 +51,7 @@ type Release struct {
 	Name       string  `json:"name"`
 	HTMLURL    string  `json:"html_url"`
 	Prerelease bool    `json:"prerelease"`
+	Draft      bool    `json:"draft"`
 	Assets     []Asset `json:"assets"`
 }
 
@@ -215,10 +216,12 @@ func (c Client) get(ctx context.Context, u string) ([]byte, error) {
 	return b, nil
 }
 
-// Latest returns the newest release, prereleases included: moca ships
-// alphas, so a "stable only" query would find nothing for long stretches.
+// Latest returns the newest published release, prereleases included: moca
+// ships alphas, so a "stable only" query would find nothing for long
+// stretches. Drafts are skipped — the list includes them for a token with
+// push access, and a draft is not something to install.
 func (c Client) Latest(ctx context.Context) (Release, error) {
-	b, err := c.get(ctx, c.endpoint("/repos/"+c.repo()+"/releases?per_page=1"))
+	b, err := c.get(ctx, c.endpoint("/repos/"+c.repo()+"/releases?per_page=10"))
 	if err != nil {
 		return Release{}, err
 	}
@@ -226,10 +229,12 @@ func (c Client) Latest(ctx context.Context) (Release, error) {
 	if err := json.Unmarshal(b, &rels); err != nil {
 		return Release{}, fmt.Errorf("unexpected releases response: %w", err)
 	}
-	if len(rels) == 0 {
-		return Release{}, fmt.Errorf("%s has no releases published yet", c.repo())
+	for _, r := range rels {
+		if !r.Draft {
+			return r, nil
+		}
 	}
-	return rels[0], nil
+	return Release{}, fmt.Errorf("%s has no releases published yet", c.repo())
 }
 
 // FindAsset picks the platform package from a release: an asset named
@@ -304,7 +309,7 @@ func ExtractBinary(archive []byte, name string) ([]byte, error) {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}
 			defer rc.Close()
-			return io.ReadAll(io.LimitReader(rc, maxPackage))
+			return readBinary(rc, name)
 		}
 		return nil, fmt.Errorf("%s: no moca.exe inside", name)
 	case strings.HasSuffix(name, ".tar.gz"), strings.HasSuffix(name, ".tgz"):
@@ -325,11 +330,25 @@ func ExtractBinary(archive []byte, name string) ([]byte, error) {
 			if filepath.Base(hdr.Name) != "moca" {
 				continue
 			}
-			return io.ReadAll(io.LimitReader(tr, maxPackage))
+			return readBinary(tr, name)
 		}
 		return nil, fmt.Errorf("%s: no moca binary inside", name)
 	}
 	return nil, fmt.Errorf("%s: unsupported package format", name)
+}
+
+// readBinary reads an extracted binary, refusing one past maxPackage rather
+// than installing a truncated file (the checksum covers the archive, not the
+// extracted bytes).
+func readBinary(r io.Reader, name string) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, maxPackage+1))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	if len(b) > maxPackage {
+		return nil, fmt.Errorf("%s: binary exceeds %d MiB", name, maxPackage>>20)
+	}
+	return b, nil
 }
 
 // IsTemporary reports whether exe lives in the OS temp dir — a `go run`

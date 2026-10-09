@@ -209,7 +209,7 @@ func TestLatest(t *testing.T) {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
 		gotAuth, gotQuery = r.Header.Get("Authorization"), r.URL.RawQuery
-		fmt.Fprint(w, `[{"tag_name":"v9.9.9","prerelease":true,"assets":[{"name":"moca-v9.9.9-linux-amd64.tar.gz","browser_download_url":"http://x/pkg","size":12}]}]`)
+		fmt.Fprint(w, `[{"tag_name":"v10.0.0","draft":true},{"tag_name":"v9.9.9","prerelease":true,"assets":[{"name":"moca-v9.9.9-linux-amd64.tar.gz","browser_download_url":"http://x/pkg","size":12}]}]`)
 	}))
 	defer srv.Close()
 	cl := Client{APIBase: srv.URL, Token: "t0ken"}
@@ -223,7 +223,7 @@ func TestLatest(t *testing.T) {
 	if gotAuth != "Bearer t0ken" {
 		t.Errorf("Authorization = %q", gotAuth)
 	}
-	if gotQuery != "per_page=1" {
+	if gotQuery != "per_page=10" {
 		t.Errorf("query = %q", gotQuery)
 	}
 }

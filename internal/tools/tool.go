@@ -87,7 +87,9 @@ func askOutsideWrite(ctx context.Context, env *Env, path string, refused error) 
 			return "", rerr
 		}
 	}
-	q := Question{Kind: "write", Subject: path,
+	// The resolved target, not the model's spelling of it: the user approves
+	// the file that will actually be written.
+	q := Question{Kind: "write", Subject: abs,
 		Detail: "outside the workdir — moca slash commands (global prompt templates)"}
 	if env.Ask == nil || env.Ask(ctx, q) == Deny {
 		return "", fmt.Errorf("%s is outside the workdir and the user did not approve writing it — keep project slash commands in .moca/prompts/ inside the workdir, or ask the user first", path)

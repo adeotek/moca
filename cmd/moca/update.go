@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/adeotek/moca/internal/config"
@@ -77,6 +78,11 @@ func runUpdate(ctx context.Context, o Options, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "moca: cannot locate the running binary: %v\n", err)
 		return exitRuntime
+	}
+	// Replace the file a symlink points to, not the link (os.Executable may
+	// return the link's path, e.g. on macOS).
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
 	}
 	if update.IsTemporary(exe) {
 		fmt.Fprintf(stderr, "moca: %s is a temporary build — install a package from https://github.com/%s/releases\n", exe, cl.Repo)

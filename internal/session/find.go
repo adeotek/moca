@@ -101,6 +101,13 @@ func FindForWorkdir(dir, workdir string) (string, error) {
 	return "", fmt.Errorf("no session for %s; start one with moca", canon)
 }
 
+// InWorkdir reports whether the session at path started in workdir
+// (canonical paths, as FindForWorkdir compares them).
+func InWorkdir(path, workdir string) bool {
+	h, err := header(path)
+	return err == nil && h.Workdir == canonical(workdir)
+}
+
 // canonical is the symlink-resolved absolute form of a workdir, the same
 // comparison the jail uses.
 func canonical(workdir string) string {

@@ -115,6 +115,8 @@ jobs:
           elif git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
             gh release create "$version" dist/* --title "$version" --generate-notes
           else
-            # manual dispatch from a branch: tag the built commit
-            gh release create "$version" dist/* --title "$version" --generate-notes --target "$GITHUB_SHA"
+            # manual dispatch from a branch (a rehearsal): a draft, so
+            # `moca update` and the installers never pick up the dev build;
+            # publish it by hand if it is meant to ship
+            gh release create "$version" dist/* --title "$version" --generate-notes --target "$GITHUB_SHA" --draft
           fi

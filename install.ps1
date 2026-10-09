@@ -25,6 +25,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1: its progress bar slows downloads to a crawl, and
+# older .NET defaults may not offer TLS 1.2 (which GitHub requires).
+$ProgressPreference = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 # $IsWindows is $null on Windows PowerShell 5.1 (which only runs on Windows).
 if ($IsWindows -eq $false) {
@@ -60,11 +64,15 @@ New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
     $zip = Join-Path $tmp $assetName
     Write-Host "downloading $assetName..."
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
+    Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $zip
 
     if ($sumsAsset) {
         Write-Host 'verifying checksum...'
-        $sumsText = (Invoke-WebRequest -Uri $sumsAsset.browser_download_url).Content
+        # To a file: release assets are served as application/octet-stream,
+        # for which .Content is a byte[] (PowerShell 7), not text.
+        $sumsFile = Join-Path $tmp 'checksums.txt'
+        Invoke-WebRequest -UseBasicParsing -Uri $sumsAsset.browser_download_url -OutFile $sumsFile
+        $sumsText = Get-Content -Raw -Path $sumsFile
         $line = ($sumsText -split "`n") | Where-Object { $_ -match [regex]::Escape("  $assetName") } | Select-Object -First 1
         if (-not $line) { throw "checksums.txt has no entry for $assetName" }
         $want = ($line -split '\s+')[0].ToLower()
@@ -99,7 +107,11 @@ try {
         try { Rename-Item -Path $target -NewName (Split-Path -Leaf $old) -Force }
         catch { throw "cannot replace $target — close all moca instances and re-run ($_)" }
     }
-    Move-Item -Path $newExe -Destination $target -Force
+    try { Move-Item -Path $newExe -Destination $target -Force }
+    catch {
+        if (Test-Path $old) { Rename-Item -Path $old -NewName (Split-Path -Leaf $target) -Force } # put the old one back
+        throw
+    }
     Remove-Item -Path $old -Force -ErrorAction SilentlyContinue
 
     # Add the directory to the user PATH once (idempotent).

@@ -48,6 +48,26 @@ func TestFindForWorkdirViaSymlink(t *testing.T) {
 	}
 }
 
+func TestInWorkdir(t *testing.T) {
+	dir, base := t.TempDir(), t.TempDir()
+	real := filepath.Join(base, "real")
+	os.Mkdir(real, 0o755)
+	canon, _ := filepath.EvalSymlinks(real)
+	link := filepath.Join(base, "link")
+	os.Symlink(real, link)
+	w, _ := Create(dir, Header{Workdir: canon}, "x")
+	w.Close()
+	if !InWorkdir(w.Path(), link) {
+		t.Fatal("the session's own workdir (via a symlink) must match")
+	}
+	if InWorkdir(w.Path(), base) {
+		t.Fatal("another directory must not match")
+	}
+	if InWorkdir(filepath.Join(dir, "missing.jsonl"), canon) {
+		t.Fatal("an unreadable session must not match")
+	}
+}
+
 func TestFindNoSessions(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Find(dir, "last"); err == nil {

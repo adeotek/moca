@@ -143,6 +143,12 @@ func (m *model) runResume(args string) tea.Cmd {
 		if err != nil {
 			return m.printlnError("error: " + err.Error())
 		}
+		// Like the picker, only this directory's sessions: the agent would
+		// move to the other workdir while `!`, @mentions and the trust
+		// decision stay with this one.
+		if !session.InWorkdir(path, m.opts.Start.Workdir) {
+			return m.printlnError("error: session " + id + " belongs to another directory — run moca --resume " + id + " from there")
+		}
 		return m.resumeSession(path)
 	}
 	list := m.otherSessions()

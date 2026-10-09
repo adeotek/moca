@@ -30,6 +30,9 @@ func markHint(path, name string) {
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &m)
 	}
+	if m == nil { // a file holding `null` unmarshals to a nil map
+		m = map[string]bool{}
+	}
 	m[name] = true
 	b, err := json.Marshal(m)
 	if err != nil || os.MkdirAll(filepath.Dir(path), 0o700) != nil {

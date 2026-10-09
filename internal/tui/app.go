@@ -1686,7 +1686,7 @@ func Run(ctx context.Context, o AppOptions) error {
 	m.waitRun(2 * time.Second)
 	close(pipe.stop)
 	if line := m.exitLine(); line != "" {
-		fmt.Println(line)
+		fmt.Println(m.downsample(line)) // past the program: no renderer downsamples it
 	}
 	m.agent.Close()
 	return runResult(ctx, err)
