@@ -135,6 +135,17 @@ const previewScanLines = 60
 // most limit, skipping the session with id skipID8 (the one in use) and
 // sessions that never received a user message. Unreadable files are skipped.
 func List(dir, workdir, skipID8 string, limit int) []Info {
+	return list(dir, workdir, skipID8, limit, true)
+}
+
+// ListAll is List for the session manager: every stored session that started
+// in workdir — the one in use included (its Preview may be empty), nothing
+// filtered but unreadable files. Newest first, at most limit.
+func ListAll(dir, workdir string, limit int) []Info {
+	return list(dir, workdir, "", limit, false)
+}
+
+func list(dir, workdir, skipID8 string, limit int, requirePreview bool) []Info {
 	canon := ""
 	if workdir != "" {
 		canon = canonical(workdir)
@@ -148,7 +159,10 @@ func List(dir, workdir, skipID8 string, limit int) []Info {
 			continue
 		}
 		h, preview := headerAndPreview(f.path)
-		if h == nil || preview == "" || (canon != "" && h.Workdir != canon) {
+		if h == nil || (canon != "" && h.Workdir != canon) {
+			continue
+		}
+		if requirePreview && preview == "" {
 			continue
 		}
 		out = append(out, Info{Path: f.path, ID8: idOf(f.path), Modified: time.Unix(0, f.mod), Workdir: h.Workdir, Preview: preview})

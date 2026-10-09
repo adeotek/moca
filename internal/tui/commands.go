@@ -27,7 +27,7 @@ type Parsed struct {
 }
 
 // BuiltinCommands win over prompt templates on a name collision (§10).
-var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "clear", "resume", "compact", "cost", "undo", "copy", "show", "login", "logout", "help", "exit"}
+var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "clear", "resume", "sessions", "compact", "cost", "undo", "copy", "show", "login", "logout", "help", "exit"}
 
 // builtinAliases resolve to their built-in unless a prompt template already
 // owns the name (`/q`, `/quit` → `/exit`) — only the full built-in names are
@@ -35,21 +35,22 @@ var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "clear", "resu
 var builtinAliases = map[string]string{"q": "exit", "quit": "exit"}
 
 var builtinHelp = map[string]string{
-	"model":   "[provider/model]  pick a model or switch (forfeits prompt cache)",
-	"effort":  "[level]  show or set effort (off|minimal|low|medium|high|xhigh|max)",
-	"hard":    "toggle modelHard + high effort",
-	"yolo":    "toggle yolo mode: ALL permission checks off (between runs only)",
-	"clear":   "start a new session (the old one stays resumable)",
-	"resume":  "[id]  pick an earlier session of this directory to continue",
-	"compact": "summarize older context now",
-	"cost":    "session token and cost detail",
-	"undo":    "revert the last write/edit of this session",
-	"copy":    "copy the last assistant message (OSC 52)",
-	"show":    "<n>  open item #n in the pager",
-	"login":   "[provider]  store an API key or sign in to a subscription provider",
-	"logout":  "[provider]  remove a stored login or API key",
-	"help":    "this help",
-	"exit":    "quit (/q, /quit — same as ctrl+c twice)",
+	"model":    "[provider/model]  pick a model or switch (forfeits prompt cache)",
+	"effort":   "[level]  show or set effort (off|minimal|low|medium|high|xhigh|max)",
+	"hard":     "toggle modelHard + high effort",
+	"yolo":     "toggle yolo mode: ALL permission checks off (between runs only)",
+	"clear":    "start a new session (the old one stays resumable)",
+	"resume":   "[id]  pick an earlier session of this directory to continue",
+	"sessions": "list, switch or delete this directory's sessions",
+	"compact":  "summarize older context now",
+	"cost":     "session token and cost detail",
+	"undo":     "revert the last write/edit of this session",
+	"copy":     "copy the last assistant message (OSC 52)",
+	"show":     "<n>  open item #n in the pager",
+	"login":    "[provider]  store an API key or sign in to a subscription provider",
+	"logout":   "[provider]  remove a stored login or API key",
+	"help":     "this help",
+	"exit":     "quit (/q, /quit — same as ctrl+c twice)",
 }
 
 // ParseInput classifies one input line. Rules: `!!x` → local shell, `!x` →

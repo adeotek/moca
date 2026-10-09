@@ -899,6 +899,8 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 	switch c.Name {
 	case "resume":
 		return m.runResume(c.Args)
+	case "sessions":
+		return m.runSessions()
 	case "login":
 		return m.runLogin(c.Args)
 	case "logout":

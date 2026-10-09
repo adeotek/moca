@@ -15,6 +15,7 @@ Ollama support, a TUI review pass with saved `/` commands, and self-update from 
 - **Markdown-lite responses** — `**bold**`, `` `code` ``, headings, bullets, quotes and fenced code blocks (a darker band, never word-wrapped) instead of raw markdown; `/copy` still copies the raw text.
 - **Inline edit diffs** — a successful `edit` prints its changed lines (red/green, ≤ 8) under its item line.
 - **Resume picks up where you left off** — `--resume`/`--continue` replay the last 3 turns into the scrollback; new **`/resume`** picker (this directory's other sessions) or `/resume <id8>`.
+- **`/sessions`** — manage this directory's stored sessions in one place: every session listed (the open one marked `(current)`), `enter` switches to it, `ctrl+d` deletes it after a `y` confirm — the open session and sessions held open by another moca process refuse, and a file under a live writer is never unlinked; the list stays open for the next one.
 - **`/model` picker** (providers without a key are marked) and **argument completion** in the `/` dropdown for `/model`, `/effort`, `/login`, `/logout`, `/show`, `/resume`.
 - **`@path`** completes workdir files (gitignore-aware; the path is sent, the model reads the file itself).
 - **Persistent prompt history** (`history.jsonl`, per workdir) and **`ctrl+r`** history search.
