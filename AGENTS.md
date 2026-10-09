@@ -46,9 +46,9 @@ mise run <task>                             # the make targets, as mise tasks
 
 ## Docs
 
-- `docs/external-tools.md` — rtk/graphify allowlist rules and the cross-tool skills/prompts ecosystem.
+- `docs/specs/external-tools.md` — rtk/graphify allowlist rules and the cross-tool skills/prompts ecosystem.
 - `docs/specs/oauth-verification.md` — the binding OAuth policy gate (anthropic: API key only; openai: subscription login).
-- SPECS.md still cites `docs/plans/` and `docs/reviews/` — those were deleted; don't chase them.
+- SPECS.md still cites `docs/reviews/` review docs — those were deleted; don't chase them.
 
 ## graphify
 

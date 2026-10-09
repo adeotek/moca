@@ -120,10 +120,10 @@ moca --do docs/plans/add-json-flag.md # execute it step by step, ticking each - 
 
 ## Extend
 
-- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged. See [docs/external-tools.md](docs/external-tools.md).
+- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged. See [docs/specs/external-tools.md](docs/specs/external-tools.md).
 - **MCP** — `mcp.servers` in the config (stdio + streamable HTTP). Lazy by design: one fixed ~200-token `mcp` proxy tool, server tool lists never enter the prompt, servers start on first use and stop when idle. `moca mcp import` imports Claude Code / OpenCode / Pi server configs.
 - **Project instructions** — `AGENTS.md` / `CLAUDE.md`, loaded only in trusted projects (`--approve`).
-- **External tools** — `rtk` (token-compressed CLI output) and `graphify` (codebase knowledge graph) are allowlisted and ship built-in skills; see [docs/external-tools.md](docs/external-tools.md).
+- **External tools** — `rtk` (token-compressed CLI output) and `graphify` (codebase knowledge graph) are allowlisted and ship built-in skills; see [docs/specs/external-tools.md](docs/specs/external-tools.md).
 
 ## Non-goals (v1, probably forever)
 
@@ -154,4 +154,4 @@ make release        # five cross-compiled binaries in dist/
 
 ## Docs
 
-[`docs/specs/SPECS.md`](docs/specs/SPECS.md) — the current implemented state · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) — the v1 contract · [`docs/external-tools.md`](docs/external-tools.md) — rtk, graphify, skills, prompts.
+[`docs/specs/SPECS.md`](docs/specs/SPECS.md) — the current implemented state · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) — the v1 contract · [`docs/specs/external-tools.md`](docs/specs/external-tools.md) — rtk, graphify, skills, prompts.

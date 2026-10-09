@@ -334,7 +334,7 @@ subagents · hooks · LSP · image gen · voice · telemetry · **binary plugin/
 
 ## Phase plan (each = one PR, reviewed)
 
-Detailed task-level plans: `docs/plans/phase-<n>-*.md`.
+The per-phase plans (formerly `docs/plans/phase-<n>-*.md`) were removed from the repo once shipped; the phase list below is the surviving record.
 
 
 1. **Skeleton + protocol adapters + streaming + JSONC config** — all three codecs (anthropic-messages, openai-completions, openai-responses), api-key auth, retry/backoff + stall timeout (§3), model catalog incl. thinkingLevelMap, string-literal-aware JSONC pre-pass with trailing-comma removal (§12), `-p` output contract + exit codes (§12.5). Gate: `moca -p 'hi'` streams **via anthropic, opencode-go (both protocol families) and openai**; the §12 example decodes intact (URLs, trailing commas); a forced 429 retries with backoff.
