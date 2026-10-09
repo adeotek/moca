@@ -124,9 +124,14 @@ func discoverLocal(reg *provider.Registry, cfg config.Config, emit func(Event)) 
 func build(o StartOptions, st *setup, w *session.Writer, system, model string, effort llm.Effort, prior []session.Entry, snapshotDir string) (*Agent, error) {
 	cfg, jail := st.cfg, st.jail
 	snaps := session.NewSnapshots(w, snapshotDir, prior)
+	webKey, err := webSearchKey(cfg)
+	if err != nil {
+		return nil, err
+	}
 	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(cfg.Shell.Allow, jail, runtime.GOOS),
 		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
-		ShellEnv: tools.ShellEnv(os.Environ(), config.EnvRefs(cfg))}
+		ShellEnv:    tools.ShellEnv(os.Environ(), config.EnvRefs(cfg)),
+		WebProvider: cfg.Web.Search.Provider, WebKey: webKey}
 	reg := tools.NewRegistry(tools.Builtins()...)
 	// With servers configured, the frozen `mcp` stub is replaced by the lazy
 	// proxy (§10.5): nothing starts here, and no server tool schema ever
@@ -146,6 +151,21 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 		a.applyYolo(true)
 	}
 	return a, nil
+}
+
+// webSearchKey resolves web.search.apiKey at session start: a configured
+// but unset env: variable is a config error (exit 2), matching the
+// provider-key stance. The key never reaches the model's shell environment
+// either — config.EnvRefs strips it from the shell tool's env.
+func webSearchKey(cfg config.Config) (string, error) {
+	if cfg.Web.Search.APIKey == "" {
+		return "", nil
+	}
+	key, err := config.ResolveEnv(cfg.Web.Search.APIKey)
+	if err != nil {
+		return "", fmt.Errorf("web.search.apiKey: %w", err)
+	}
+	return key, nil
 }
 
 func Start(o StartOptions) (*Agent, error) {

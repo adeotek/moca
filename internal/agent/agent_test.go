@@ -310,8 +310,8 @@ func TestMCPNoSchemasInPromptAndZeroStarts(t *testing.T) {
 	}
 	body := s.bodies[0]
 	tools := body["tools"].([]any)
-	if len(tools) != 7 {
-		t.Fatalf("still exactly 7 tools, got %d", len(tools))
+	if len(tools) != 8 {
+		t.Fatalf("still exactly 8 tools (web added rev 19), got %d", len(tools))
 	}
 	sys := body["messages"].([]any)[0].(map[string]any)["content"].(string)
 	if !strings.Contains(sys, "- never: docs lookup") {

@@ -2,7 +2,11 @@
 
 ## v0.3.0-beta (2026-10-09)
 
-First-run setup mode: a config without a model opens the TUI with `/login` + `/model` guidance instead of stopping — still one binary, still no framework.
+First-run setup mode and a web tool: a config without a model opens the TUI with `/login` + `/model` guidance instead of stopping, and the agent can fetch pages and search the web — still one binary, still no framework.
+
+### Web
+
+- **A `web` tool — fetch and search, no API key needed.** `fetch` GETs a URL and returns it as readable markdown (the page title becomes the headline), plain text or raw html; `search` returns ranked results with snippets. Search works out of the box via [Tavily](https://tavily.com)'s keyless mode — set `web.search.apiKey` (an `env:` reference like `env:TAVILY_API_KEY`) to lift the rate limit, or `web.search.provider: "exa"` with a key. Fetching is bounded like every other tool (5 redirects, 2 MiB, 60 K chars, 30 s default), and — like `curl` — needs no approval: it only reads. Fetched pages are untrusted data, never instructions.
 
 ### TUI
 

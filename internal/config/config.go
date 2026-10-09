@@ -74,6 +74,7 @@ type Config struct {
 	Providers map[string]ProviderConfig `json:"providers"`
 	Shell     ShellConfig               `json:"shell"`
 	MCP       MCPConfig                 `json:"mcp"`
+	Web       WebConfig                 `json:"web"`
 	Snapshot  SnapshotConfig            `json:"snapshot"`
 	Context   ContextConfig             `json:"context"`
 	TUI       TUIConfig                 `json:"tui"`
@@ -105,6 +106,17 @@ type CostConfig struct {
 
 type ShellConfig struct {
 	Allow []string `json:"allow"`
+}
+
+// WebConfig configures the web tool's search op (§4, rev 19). fetch needs
+// no config.
+type WebConfig struct {
+	Search WebSearchConfig `json:"search"`
+}
+
+type WebSearchConfig struct {
+	Provider string `json:"provider,omitempty"` // "tavily" (default; keyless when apiKey is omitted) | "exa"
+	APIKey   string `json:"apiKey,omitempty"`   // must be "env:VAR"; optional for tavily, required for exa
 }
 
 type MCPConfig struct {
@@ -198,6 +210,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.TUI.Notify == "" {
 		c.TUI.Notify = "osc9"
+	}
+	if c.Web.Search.Provider == "" {
+		c.Web.Search.Provider = "tavily"
 	}
 }
 
@@ -341,6 +356,17 @@ func (c Config) Validate() error {
 		if (s.Command == "") == (s.URL == "") {
 			return fmt.Errorf("mcp.servers.%s: exactly one of command (stdio) or url (streamable HTTP)", name)
 		}
+	}
+	switch c.Web.Search.Provider {
+	case "tavily", "exa":
+	default:
+		return fmt.Errorf("web.search.provider %q unknown (want tavily|exa)", c.Web.Search.Provider)
+	}
+	if k := c.Web.Search.APIKey; k != "" && !strings.HasPrefix(k, envPrefix) {
+		return fmt.Errorf("web.search.apiKey must be an env: reference (e.g. \"env:TAVILY_API_KEY\"), never a literal")
+	}
+	if c.Web.Search.Provider == "exa" && c.Web.Search.APIKey == "" {
+		return fmt.Errorf("web.search: provider \"exa\" needs apiKey (an env: reference) — exa has no keyless mode; tavily works without a key")
 	}
 	return nil
 }

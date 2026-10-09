@@ -3,9 +3,9 @@
   "modelHard":  "opencode-go/glm-5.3",          // /hard escalation: planning, gnarly debug
 
   "providers": {
-    "anthropic":   { "auth": "api_key", "apiKey": "env:ANTHROPIC_API_KEY" },  // or "oauth" → moca login anthropic (if permitted, §3)
+    "anthropic":   { "auth": "api_key", "apiKey": "env:ANTHROPIC_API_KEY" },  // api_key only — subscription OAuth not permitted (§3, rev 12)
     "opencode-go": { "auth": "api_key", "apiKey": "env:OPENCODE_API_KEY" },   // OpenCode Zen subscription key
-    "openai":      { "auth": "api_key", "apiKey": "env:OPENAI_API_KEY" },     // or "oauth" → moca login openai (ChatGPT Plus/Pro)
+    "openai":      { "auth": "api_key", "apiKey": "env:OPENAI_API_KEY" },     // or "oauth" → moca login openai (ChatGPT Plus/Pro, §3)
     // optional baseUrl override per provider; custom providers too, e.g.:
     // "vllm": { "baseUrl": "http://localhost:8000/v1", "protocol": "openai-completions", "auth": "api_key",
     //           "apiKey": "env:VLLM_API_KEY", "models": { "qwen3-coder": { "contextWindow": 131072 } } }
@@ -24,6 +24,10 @@
       "context7": { "url": "https://mcp.context7.com/mcp",      // lazy: starts on first call, not at startup
                     "description": "library/API docs lookup" },
     },
+  },
+
+  "web": {
+    "search": { "provider": "tavily" },   // fetch needs no config; tavily works without a key — apiKey (env:TAVILY_API_KEY) lifts its rate limit; "exa" needs one
   },
 
   "snapshot": { "retentionDays": 30 },   // 0 = keep forever

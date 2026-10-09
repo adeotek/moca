@@ -105,6 +105,10 @@ type Env struct {
 	Reads    *ReadTracker
 	Snap     Snapshotter
 	ShellEnv []string
+	// WebProvider/WebKey are the resolved web.search config for the web
+	// tool (tavily|exa; the empty key is tavily's keyless mode).
+	WebProvider string
+	WebKey      string
 	// TestSeen/TestFailed/FailingTest/Searched drive the investigation hints:
 	// a failing test run sets TestFailed and FailingTest (the file name parsed
 	// from its output); reading any *_test.go sets TestSeen and clears
