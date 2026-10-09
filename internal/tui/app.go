@@ -404,6 +404,13 @@ func (m *model) commitLive() []string {
 }
 
 func (m *model) startRun(text string) tea.Cmd {
+	a := m.agent
+	return m.startRunWith(text, func(ctx context.Context) (agent.Outcome, error) { return a.Run(ctx, text) })
+}
+
+// startRunWith starts a run echoing label as the user line; run is the
+// agent call (Run, or RunPlan for /do).
+func (m *model) startRunWith(label string, run func(context.Context) (agent.Outcome, error)) tea.Cmd {
 	if m.agent == nil {
 		return nil
 	}
@@ -417,10 +424,10 @@ func (m *model) startRun(text string) tea.Cmd {
 	m.toolBusy, m.toolArg, m.runChars = "", "", 0
 	m.sessionUsed = true
 	spin := m.beginActivity()
-	a, pipe := m.agent, m.pipe
-	return tea.Batch(tea.Sequence(m.printlnUser("› "+text), func() tea.Msg {
+	pipe := m.pipe
+	return tea.Batch(tea.Sequence(m.printlnUser("› "+label), func() tea.Msg {
 		defer close(done)
-		out, err := a.Run(ctx, text)
+		out, err := run(ctx)
 		msg := runDoneMsg{out: out, err: err}
 		if pipe != nil {
 			pipe.send(msg) // behind every event the run emitted
@@ -1040,6 +1047,21 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		}
 		m.agent.SetPlan(!m.agent.Plan()) // PlanChanged prints + refreshes
 		return nil
+	case "do":
+		if cmd, refused := m.refuseRunning(); refused {
+			return cmd
+		}
+		path, extra, _ := strings.Cut(strings.TrimSpace(c.Args), " ")
+		if path == "" {
+			return m.println("usage: /do <plan.md> [instructions]")
+		}
+		if m.agent.Plan() {
+			return m.printlnError("error: plan mode is on (writes are confined to docs/plans/) — /plan to turn it off, then /do")
+		}
+		a := m.agent
+		return m.startRunWith("/do "+strings.TrimSpace(c.Args), func(ctx context.Context) (agent.Outcome, error) {
+			return a.RunPlan(ctx, path, extra)
+		})
 	case "clear":
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd

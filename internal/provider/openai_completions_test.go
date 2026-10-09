@@ -178,3 +178,22 @@ func TestCompletionsOverflow(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestCompletionsCacheKeyOnlyForOpenAI: prompt_cache_key routes repeat
+// prefixes to the same cache on api.openai.com; other OpenAI-compatible
+// servers may reject unknown fields, so they never get it.
+func TestCompletionsCacheKeyOnlyForOpenAI(t *testing.T) {
+	m := Model{ID: "m", ThinkingMode: "none"}
+	req := llm.Request{Model: "m", CacheKey: "moca-ab12cd34"}
+	official := newOpenAICompletions(m, "https://api.openai.com/v1", nil, nil).(*completionsAdapter)
+	if v := official.body(req)["prompt_cache_key"]; v != "moca-ab12cd34" {
+		t.Fatalf("openai: %v", v)
+	}
+	other := newOpenAICompletions(m, "https://opencode.ai/zen/go/v1", nil, nil).(*completionsAdapter)
+	if _, ok := other.body(req)["prompt_cache_key"]; ok {
+		t.Fatal("a compatible server must not get prompt_cache_key")
+	}
+	if _, ok := official.body(llm.Request{Model: "m"})["prompt_cache_key"]; ok {
+		t.Fatal("no key, no field")
+	}
+}

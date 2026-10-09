@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	searchCap         = 200
+	searchCap         = 100  // hits shown to the model
+	searchSpillCap    = 5000 // hits collected for the overflow file
 	searchMaxFileSize = 4 << 20
 )
 
@@ -27,7 +28,7 @@ func (searchTool) Spec() llm.ToolSpec {
 	return llm.ToolSpec{Name: "search", Description: "Search file contents recursively with a regular expression " +
 		"(Go RE2 syntax: no lookahead/lookbehind or backreferences; use (?i) for case-insensitive). " +
 		"Respects .gitignore/.ignore and skips hidden and binary files. Returns `path:line:text`, " +
-		"or only paths with files_only. At most 200 hits.",
+		"or only paths with files_only. At most 100 hits are shown; a longer list is saved to a file you can read.",
 		Schema: json.RawMessage(`{"type":"object","properties":{` +
 			`"pattern":{"type":"string","description":"RE2 regular expression"},` +
 			`"path":{"type":"string","description":"Directory or file to search (default: workdir)"},` +
@@ -147,7 +148,7 @@ func (searchTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resu
 			if !re.MatchString(line) {
 				continue
 			}
-			if len(hits) == searchCap {
+			if len(hits) == searchSpillCap {
 				capped = true
 				return fs.SkipAll
 			}
@@ -172,9 +173,16 @@ func (searchTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resu
 		}
 		return Result{Content: msg, Summary: a.Pattern + " (0)"}
 	}
-	out := strings.Join(hits, "\n")
-	if capped {
-		out += "\n[… results capped at 200; narrow the pattern or path]"
+	out := strings.Join(hits[:min(len(hits), searchCap)], "\n")
+	if len(hits) > searchCap {
+		more := fmt.Sprintf("%d", len(hits))
+		if capped {
+			more = fmt.Sprintf("%d+", searchSpillCap)
+		}
+		out += fmt.Sprintf("\n[… %d of %s hits shown; narrow the pattern or path]", searchCap, more)
+		if note := Spill(env, "search", strings.Join(hits, "\n")+"\n"); note != "" {
+			out += "\n" + note
+		}
 	}
 	if skippedLarge > 0 {
 		out += fmt.Sprintf("\n[… %d files larger than %d MB skipped]", skippedLarge, searchMaxFileSize>>20)

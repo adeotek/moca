@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -294,5 +295,42 @@ func TestWebHTMLConverters(t *testing.T) {
 	s := strings.Repeat("é", 10)
 	if cut := cutWeb(s, 5); cut != "éé" {
 		t.Errorf("cutWeb runes: %q", cut)
+	}
+}
+
+// TestWebFetchWireCapIsReported: a body past the 2 MiB read cap is cut, and
+// the result says so even when the rendered page fits the output limit —
+// otherwise the model takes a partial page for the whole one.
+func TestWebFetchWireCapIsReported(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		io.WriteString(w, "<p>start</p><script>"+strings.Repeat("x", webReadLimit)+"</script><p>end</p>")
+	}))
+	defer srv.Close()
+	env, _ := testEnv(t)
+	r := webTool{}.Run(context.Background(), env, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`"}`))
+	if r.IsError || !strings.Contains(r.Content, "start") || !strings.Contains(r.Content, "read cap") {
+		t.Fatalf("wire cap not reported: %.200q", r.Content)
+	}
+}
+
+// TestWebFetchOverflowSpills: rendered output past 20K chars is cut for the
+// model and saved in full.
+func TestWebFetchOverflowSpills(t *testing.T) {
+	body := strings.Repeat("word ", 10_000) + "THE-END"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		io.WriteString(w, body)
+	}))
+	defer srv.Close()
+	env, _ := testEnv(t)
+	env.SpillDir = t.TempDir()
+	r := webTool{}.Run(context.Background(), env, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`"}`))
+	if r.IsError || len(r.Content) > webOutputMax+600 || strings.Contains(r.Content, "THE-END") {
+		t.Fatalf("cut: %d chars", len(r.Content))
+	}
+	b, err := os.ReadFile(spilledPath(t, r.Content))
+	if err != nil || !strings.HasSuffix(string(b), "THE-END") {
+		t.Fatalf("spilled: %v", err)
 	}
 }

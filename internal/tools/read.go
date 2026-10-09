@@ -15,23 +15,25 @@ import (
 )
 
 const (
-	readMaxLines    = 2000
-	readMaxChars    = 50_000
-	readMaxLineLen  = 2000
-	readMaxFileSize = 256 << 20
+	readMaxLines     = 2000
+	readDefaultLines = 400 // the window when no limit is given
+	readMaxChars     = 50_000
+	readMaxLineLen   = 2000
+	readMaxFileSize  = 256 << 20
 )
 
 type readTool struct{}
 
 func (readTool) Spec() llm.ToolSpec {
 	return llm.ToolSpec{Name: "read", Description: "Read a text file. Returns lines as `N|content` plus a " +
-		"`[lines A-B of TOTAL]` footer. At most 2000 lines or 50K chars per call; use offset/limit to page " +
-		"through large files instead of re-reading them whole. Lines longer than 2000 chars are truncated. " +
+		"`[lines A-B of TOTAL]` footer. Without limit it returns at most 400 lines; limit allows up to 2000 lines " +
+		"(50K chars). Page with offset/limit, or search for the lines you need, instead of re-reading whole files. " +
+		"Lines longer than 2000 chars are truncated. " +
 		"Binary files are refused. A file must be read before write/edit may change it.",
 		Schema: json.RawMessage(`{"type":"object","properties":{` +
 			`"path":{"type":"string","description":"File path, relative to the workdir or absolute"},` +
 			`"offset":{"type":"integer","minimum":1,"description":"1-based first line (default 1)"},` +
-			`"limit":{"type":"integer","minimum":1,"description":"Max lines to return (default/max 2000)"}},` +
+			`"limit":{"type":"integer","minimum":1,"description":"Max lines to return (default 400, max 2000)"}},` +
 			`"required":["path"],"additionalProperties":false}`)}
 }
 
@@ -44,7 +46,7 @@ func (readTool) Run(_ context.Context, env *Env, input json.RawMessage) Result {
 	if r := decode(input, &a); r != nil {
 		return *r
 	}
-	offset, limit := 1, readMaxLines
+	offset, limit := 1, readDefaultLines
 	if a.Offset != nil {
 		offset = *a.Offset
 	}
@@ -128,7 +130,7 @@ func (readTool) Run(_ context.Context, env *Env, input json.RawMessage) Result {
 	}
 	footer := fmt.Sprintf("[lines %d-%d of %d]", offset, last, total)
 	if last < total {
-		footer = fmt.Sprintf("[lines %d-%d of %d — use offset=%d to continue]", offset, last, total, last+1)
+		footer = fmt.Sprintf("[lines %d-%d of %d — use offset=%d to continue, or search for what you need]", offset, last, total, last+1)
 	}
 	sb.WriteString(footer)
 	return Result{Content: sb.String(), Summary: fmt.Sprintf("%s %d-%d/%d", a.Path, offset, last, total)}

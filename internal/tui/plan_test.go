@@ -71,3 +71,19 @@ func TestPlanCommandRefusedMidRun(t *testing.T) {
 		t.Fatalf("mid-run toggle must refuse: %q plan=%v", out, m.agent.Plan())
 	}
 }
+
+func TestDoCommand(t *testing.T) {
+	m := newAgentModel(t)
+	if out := simulateAll(m, m.runCommand(Parsed{Kind: KindCommand, Name: "do"})); !strings.Contains(out, "usage: /do") {
+		t.Fatalf("no path: %q", out)
+	}
+	m.agent.SetPlan(true)
+	if out := simulateAll(m, m.runCommand(Parsed{Kind: KindCommand, Name: "do", Args: "docs/plans/x.md"})); !strings.Contains(out, "plan mode is on") {
+		t.Fatalf("plan mode: %q", out)
+	}
+	m.agent.SetPlan(false)
+	out := simulateAll(m, tuiCmd(t, m, "/do docs/plans/x.md keep it small"))
+	if !strings.Contains(out, "› /do docs/plans/x.md keep it small") {
+		t.Fatalf("/do must start a run: %q", out)
+	}
+}

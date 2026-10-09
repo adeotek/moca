@@ -56,6 +56,11 @@ func (a *responsesAdapter) body(req llm.Request, oauth bool) map[string]any {
 	}
 	b := map[string]any{"model": req.Model, "input": input, "stream": true, "store": false,
 		"include": []string{"reasoning.encrypted_content"}}
+	if req.CacheKey != "" {
+		// Both the API and the subscription route take it (the Codex CLI
+		// sends its conversation id): same key, same cache shard.
+		b["prompt_cache_key"] = req.CacheKey
+	}
 	if !oauth {
 		// The subscription route rejects max_output_tokens
 		// (docs/specs/oauth-verification.md §2.4).

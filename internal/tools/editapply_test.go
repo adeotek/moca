@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -144,5 +146,25 @@ func TestFormatDiff(t *testing.T) {
 	want := "--- f\n+++ f\n@@ -2,7 +2,7 @@\n 2\n 3\n 4\n-5\n+five\n 6\n 7\n 8\n"
 	if d != want {
 		t.Fatalf("got\n%s\nwant\n%s", d, want)
+	}
+}
+
+// TestEditTrailingBlankPastEOFNoPanic: an old_string with a trailing blank
+// line the file does not have (the file ends right after it) matched through
+// the whitespace fallback and crashed formatDiff with a slice past EOF —
+// a panic that killed the whole agent (eval feature#3).
+func TestEditTrailingBlankPastEOFNoPanic(t *testing.T) {
+	env, root := testEnv(t)
+	src := "package main\n\nimport (\n\t\"strings\"\n\t\"testing\"\n)\n\nfunc TestRenderTotal(t *testing.T) {\n\tout := Render(Items)\n\tif !strings.Contains(out, \"TOTAL\") {\n\t\tt.Fatalf(\"bad:\\n%s\", out)\n\t}\n}\n"
+	os.WriteFile(filepath.Join(root, "r_test.go"), []byte(src), 0o644)
+	run(t, readTool{}, env, map[string]any{"path": "r_test.go"})
+	old := "func TestRenderTotal(t *testing.T) {\n\tout := Render(Items)\n\tif !strings.Contains(out, \"TOTAL\") {\n\t\tt.Fatalf(\"bad:\\n%s\", out)\n\t}\n}\n\n"
+	r := run(t, editTool{}, env, map[string]any{"path": "r_test.go", "old_string": old, "new_string": old + "func TestX(t *testing.T) {}\n"})
+	if r.IsError {
+		t.Fatalf("edit: %s", r.Content)
+	}
+	b, _ := os.ReadFile(filepath.Join(root, "r_test.go"))
+	if !strings.Contains(string(b), "func TestX(t *testing.T) {}") || !strings.HasPrefix(string(b), "package main\n") {
+		t.Fatalf("result:\n%s", b)
 	}
 }

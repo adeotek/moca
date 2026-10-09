@@ -18,6 +18,7 @@ const (
 	TypeSnapshot       = "snapshot"
 	TypeError          = "error"
 	TypePermissionMode = "permission_mode"
+	TypeElision        = "elision"
 )
 
 const (
@@ -55,6 +56,13 @@ type Compaction struct {
 	ModifiedFiles    []string  `json:"modifiedFiles,omitempty"`
 }
 
+// Elision marks superseded tool results (§6): request rebuilds replace
+// their content with ElidedStub; the transcript keeps the originals.
+type Elision struct {
+	IDs    []string `json:"ids"`    // tool_result entry ids
+	Tokens int      `json:"tokens"` // estimated tokens saved
+}
+
 type ModelChange struct {
 	Model  string `json:"model"`
 	Effort string `json:"effort"`
@@ -89,4 +97,5 @@ type Entry struct {
 	Snapshot       *SnapshotRec    `json:"snapshot,omitempty"`
 	Error          *ErrorInfo      `json:"error,omitempty"`
 	PermissionMode *PermissionMode `json:"permissionMode,omitempty"`
+	Elision        *Elision        `json:"elision,omitempty"`
 }

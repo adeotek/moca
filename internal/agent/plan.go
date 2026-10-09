@@ -29,10 +29,12 @@ func (a *Agent) SetPlan(on bool) {
 	a.emit(PlanChanged{On: on})
 }
 
-// planEnvelope is appended to the last user text message of every request
+// planEnvelope is appended to every user text message of every request
 // built while plan mode is on — a request-only transform (like the
 // cross-provider thinking transform): the transcript keeps exactly what the
-// user wrote.
+// user wrote. Every message, not just the last: a moving envelope would
+// rewrite an earlier message on each new prompt and forfeit the prompt cache
+// from there (B4); toggling the mode costs one cache miss instead.
 const planEnvelope = "[plan mode] You are producing an implementation plan, not making changes. " +
 	"Investigate with read/search/ls/shell/web/mcp as needed — shell and mcp run under the normal permission rules, and you must use them only to inspect, never to change anything. " +
 	"Every write outside docs/plans is refused. " +
@@ -46,13 +48,26 @@ const planEnvelope = "[plan mode] You are producing an implementation plan, not 
 const planNudge = "You are in plan mode and this run has not written a plan file under docs/plans/ yet. " +
 	"Write the deliverable now (write for a new plan, edit to update one), then summarize in 3-5 lines."
 
-// withPlanEnvelope appends the envelope to the last user message that
-// carries text (never a tool-result-only message).
+// planReserveText is persisted two steps before a plan run's tool-less
+// wrap-up when its file is still missing (§14).
+const planReserveText = "You are running out of steps for this plan-mode run. Write the plan file under docs/plans/ now " +
+	"with what you know (mark open questions in its risks section), then summarize in 3-5 lines."
+
+// warnPlanMissing flags a plan run ending without its deliverable — after
+// the nudge, or at the tool-less maxSteps wrap-up.
+func (a *Agent) warnPlanMissing() {
+	if a.plan && !a.opts.Env.PlanWrote {
+		a.emit(Warning{"plan mode: the run finished without a plan file under docs/plans/ — the deliverable is missing"})
+	}
+}
+
+// withPlanEnvelope appends the envelope to every user message that carries
+// text (never a tool-result-only message).
 func withPlanEnvelope(msgs []llm.Message, on bool) []llm.Message {
 	if !on {
 		return msgs
 	}
-	for i := len(msgs) - 1; i >= 0; i-- {
+	for i := range msgs {
 		if msgs[i].Role != llm.RoleUser {
 			continue
 		}
@@ -70,7 +85,6 @@ func withPlanEnvelope(msgs []llm.Message, on bool) []llm.Message {
 		content = append(content, msgs[i].Content...)
 		content = append(content, llm.ContentBlock{Type: llm.BlockText, Text: planEnvelope})
 		msgs[i].Content = content
-		return msgs
 	}
 	return msgs
 }

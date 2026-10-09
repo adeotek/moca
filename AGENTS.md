@@ -25,13 +25,14 @@ mise run <task>                             # the make targets, as mise tasks
 - **CI gate** (`.github/workflows/ci.yml`): `gofmt -l .` empty, `go vet ./...`, `go build ./...`, `go test ./... -race`. `make vet` runs the first two locally.
 - **Release workflow** (`.github/workflows/release.yml`): a **manual dispatch only** (Actions → Release → Run workflow — no tag trigger) packages linux/amd64, linux/arm64, windows/amd64 + `checksums.txt` into a GitHub Release; the asset names (`moca-<version>-<os>-<arch>.tar.gz|zip`) are a contract with `internal/update` (`moca update`). `install.sh` / `install.ps1` (repo root) install and update from those packages (in-place, safe to re-run).
 - Single package/test: `go test ./internal/agent -run TestName -race -count=1`.
+- **Eval corpus** (DESIGN rev 21; not in CI, same `.env` key, a build first): `make build && bash test/evals/run.sh -n 3 -l <label>` — seven scenarios, metrics per run in the gitignored `test/evals/results/`; compare labels with `go run ./test/evals/evalstats -summary <file>`. `bash test/evals/run.sh --selftest` checks the checkers (no model). Harness or prompt changes should show their delta against `test/evals/BASELINE.md`.
 - **Ship gate** (not in CI, needs repo `.env` with `OPENCODE_GO_KEY`, and a build first): `make build && bash test/shipgate/run.sh`. The checker is `//go:build shipgate`, so plain `go test ./...` skips it. Several `internal/tools` tests are `//go:build !windows`.
 
 ## Layout & dependency rules
 
 - Entrypoint `cmd/moca/main.go`; `run()` is the testable core. Sibling files handle `-p`, the TUI, login, `mcp` and `update` subcommands.
 - Strict import direction: `llm`/`config`/`update` import nothing internal → `provider` (llm, config) → `mcp` (tools, config, llm) → `agent` (everything) → `tui` (agent + pure pkgs). Never reverse. `tools`/`permissions`/`session`/`skills`/`compact` are mutually independent and use structural interfaces, not shared types.
-- Exactly **eight frozen tools** (the `web` tool joined in DESIGN rev 19); schemas are golden (`internal/tools/testdata/schemas.golden.json`). Changing a schema is a v2 discussion.
+- Exactly **eight frozen tools** (the `web` tool joined in DESIGN rev 19); schemas are golden (`internal/tools/testdata/schemas.golden.json`). Changing a schema is a v2 discussion; description-only edits (rev 21) are batched into one golden update — each one costs every user a prompt-cache reset.
 
 ## Conventions & gotchas
 

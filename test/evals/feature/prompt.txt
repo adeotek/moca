@@ -1,0 +1,1 @@
+Add a --json flag to the inventory CLI that prints the items as a JSON array of objects with the fields "name", "qty" and "price" (price as a number). The default table output must stay exactly as it is. Add tests for the JSON output.

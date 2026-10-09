@@ -95,6 +95,8 @@ func (writeTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	}
 	if env.Plan {
 		env.PlanWrote = true
+	} else {
+		noteChange(env, abs)
 	}
 	n := countLines(a.Content)
 	if !hasPrev {

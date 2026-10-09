@@ -251,3 +251,51 @@ func TestRegistryInvestigationBanner(t *testing.T) {
 		t.Fatalf("green run must clear the state: %q failed=%v", r.Content, env.TestFailed)
 	}
 }
+
+// TestShellOverflowSpills: output past the 12K cap keeps head and tail for
+// the model and saves the whole output to a readable overflow file.
+func TestShellOverflowSpills(t *testing.T) {
+	env, _ := testEnv(t)
+	env.ShellEnv = os.Environ()
+	env.Commands = &fakeCmds{}
+	env.SpillDir, env.SpillPrefix = t.TempDir(), "s-"
+	r := run(t, shellTool{}, env, map[string]any{"command": "seq 1 20000"})
+	if len(r.Content) > shellMaxOutput+600 || !strings.Contains(r.Content, "lines omitted") || !strings.HasSuffix(r.Content, "[exit 0]") {
+		t.Fatalf("cut output: %d chars, tail %q", len(r.Content), r.Content[len(r.Content)-200:])
+	}
+	b, err := os.ReadFile(spilledPath(t, r.Content))
+	if err != nil || !strings.HasPrefix(string(b), "1\n2\n") || !strings.HasSuffix(string(b), "19999\n20000\n") {
+		t.Fatalf("spilled: %v %d bytes", err, len(b))
+	}
+	// Small output: no spill.
+	r = run(t, shellTool{}, env, map[string]any{"command": "echo hi"})
+	if strings.Contains(r.Content, "saved to") {
+		t.Fatalf("small output spilled: %q", r.Content)
+	}
+}
+
+// TestShellOwnBreakageDoesNotArmInvestigation: the failing-test protocol is
+// for failures the run found, not for the run's own work in progress — once
+// the run has changed files, a red test run must not arm the edit refusal
+// (baseline evals: a self-inflicted build break locked edit out for 4 calls).
+func TestShellOwnBreakageDoesNotArmInvestigation(t *testing.T) {
+	env, root := testEnv(t)
+	env.Commands = &fakeCmds{}
+	env.ShellEnv = os.Environ()
+	os.WriteFile(filepath.Join(root, "go.mod"), []byte("module x\n\ngo 1.21\n"), 0o644)
+	os.WriteFile(filepath.Join(root, "x_test.go"),
+		[]byte("package x\n\nimport \"testing\"\n\nfunc TestFail(t *testing.T) { t.Fatal(\"boom\") }\n"), 0o644)
+	env.Edited = true
+	run(t, shellTool{}, env, map[string]any{"command": "go test ./..."})
+	if env.TestFailed || env.FailingTest != "" || investigationRefusal(env) != "" {
+		t.Fatalf("own breakage armed the protocol: failed=%v file=%q", env.TestFailed, env.FailingTest)
+	}
+	env.BeginRun()
+	if env.Edited {
+		t.Fatal("BeginRun must reset Edited")
+	}
+	run(t, shellTool{}, env, map[string]any{"command": "go test ./..."})
+	if !env.TestFailed {
+		t.Fatal("a failure found before any change must arm the protocol")
+	}
+}

@@ -596,3 +596,19 @@ func TestExitForOAuthSentinels(t *testing.T) {
 		t.Fatalf("cancelled exit %d, want %d", got, exitInterrupted)
 	}
 }
+
+func TestParseArgsDo(t *testing.T) {
+	o, err := parseArgs([]string{"--do", "docs/plans/x.md"}, nil)
+	if err != nil || !o.OneShot || o.Do != "docs/plans/x.md" || o.Prompt != "" {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if o, err = parseArgs([]string{"--do", "x.md", "-p", "small commits"}, nil); err != nil || o.Prompt != "small commits" {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if _, err = parseArgs([]string{"--do", "x.md", "--plan"}, nil); err == nil {
+		t.Fatal("--do with --plan must be refused")
+	}
+	if oneShotSlug(Options{Do: "docs/plans/add-json.md"}) != session.Slug("do add-json") {
+		t.Fatal("slug")
+	}
+}

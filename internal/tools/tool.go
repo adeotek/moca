@@ -109,12 +109,24 @@ type Env struct {
 	// tool (tavily|exa; the empty key is tavily's keyless mode).
 	WebProvider string
 	WebKey      string
+	// SpillDir/SpillPrefix: where over-cap outputs are saved in full
+	// (overflow.go); empty SpillDir turns spilling off.
+	SpillDir    string
+	SpillPrefix string
 	// Plan/PlanWrote drive plan mode (rev 20): Plan confines write/edit to
 	// docs/plans/*.md and suppresses the failing-test investigation banner
 	// (plan runs inspect, they don't fix); PlanWrote is set by a successful
 	// write/edit there and read by the agent at run end.
 	Plan      bool
 	PlanWrote bool
+	// Edited/Unverified/MaxRepeat are per-run (runstate.go, reset by
+	// BeginRun): Edited is set by any successful write/edit; Unverified
+	// names the last code file changed since a verifying shell command;
+	// MaxRepeat is the highest identical-failure count of the run.
+	Edited     bool
+	Unverified string
+	MaxRepeat  int
+	failures   map[string]int
 	// TestSeen/TestFailed/FailingTest/Searched drive the investigation hints:
 	// a failing test run sets TestFailed and FailingTest (the file name parsed
 	// from its output); reading any *_test.go sets TestSeen and clears
@@ -164,11 +176,26 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 		return errorf("invalid JSON arguments for %s (the call was probably cut off at the output limit). "+
 			"Split the work into smaller calls, e.g. write a large file in parts with edit.", call.Name)
 	}
-	res := t.Run(ctx, env, call.Input)
+	res := runRecovered(ctx, t, env, call)
+	if res.IsError {
+		res.Content += trackFailure(env, call.Name, call.Input, res.Content)
+	}
 	if h := investigationHint(env); h != "" {
 		res.Content += h
 	}
 	return res
+}
+
+// runRecovered runs one tool call, turning a panic inside the tool into an
+// error result: a bug in one tool must not kill the session (and lose the
+// run) — the model is told the call may have partly applied.
+func runRecovered(ctx context.Context, t Tool, env *Env, call llm.ToolCall) (res Result) {
+	defer func() {
+		if p := recover(); p != nil {
+			res = errorf("internal error in %s: %v — this is a moca bug, not your input; the call may have partly applied, so check the state (e.g. re-read the file) before retrying", call.Name, p)
+		}
+	}()
+	return t.Run(ctx, env, call.Input)
 }
 
 // investigationHint is the protocol banner appended to every tool result

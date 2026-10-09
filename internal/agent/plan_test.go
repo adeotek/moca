@@ -104,6 +104,27 @@ func TestPlanModeShellRunsThroughAgent(t *testing.T) {
 	}
 }
 
+// TestPlanModeMaxStepsWarnsMissingPlan: a plan run cut short by maxSteps
+// cannot write its file in the tool-less wrap-up — it must still warn that
+// the deliverable is missing, like the normal end of a run.
+func TestPlanModeMaxStepsWarnsMissingPlan(t *testing.T) {
+	s := newScript(t,
+		toolTurn([2]string{"ls", `{}`}),
+		textTurn("ran out of steps"),
+	)
+	a, _, evs := startTest(t, s, 1, planMode)
+	out, err := a.Run(context.Background(), "plan it")
+	if err != nil || !out.MaxSteps {
+		t.Fatalf("%+v %v", out, err)
+	}
+	for _, e := range *evs {
+		if w, ok := e.(Warning); ok && strings.Contains(w.Text, "without a plan file") {
+			return
+		}
+	}
+	t.Fatal("a maxSteps-ended plan run without its file must warn")
+}
+
 // TestPlanModeOffByDefaultAndToggleRecords: no envelope without plan mode, and
 // SetPlan records a permission_mode entry (like /yolo).
 func TestPlanModeOffByDefaultAndToggleRecords(t *testing.T) {
@@ -138,5 +159,36 @@ func TestPlanModeOffByDefaultAndToggleRecords(t *testing.T) {
 	a.SetPlan(false)
 	if a.Plan() || a.opts.Env.Plan {
 		t.Fatal("SetPlan(false) must clear")
+	}
+}
+
+// TestPlanEnvelopeKeepsPrefixStable: a second plan-mode prompt must not
+// rewrite earlier messages (B4) — every message of the first run's last
+// request is byte-identical at the same position in the next request, so
+// the prompt cache survives the new prompt.
+func TestPlanEnvelopeKeepsPrefixStable(t *testing.T) {
+	s := newScript(t,
+		toolTurn([2]string{"write", `{"path":"docs/plans/a.md","content":"# a\n"}`}),
+		textTurn("plan a"),
+		toolTurn([2]string{"write", `{"path":"docs/plans/b.md","content":"# b\n"}`}),
+		textTurn("plan b"),
+	)
+	a, _, _ := startTest(t, s, 40, planMode)
+	for _, p := range []string{"plan a", "plan b"} {
+		if _, err := a.Run(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, _ := s.bodies[1]["messages"].([]any)
+	next, _ := s.bodies[2]["messages"].([]any)
+	if len(next) <= len(first) {
+		t.Fatalf("lengths %d %d", len(first), len(next))
+	}
+	for i := range first {
+		x, _ := json.Marshal(first[i])
+		y, _ := json.Marshal(next[i])
+		if string(x) != string(y) {
+			t.Fatalf("message %d changed:\n%s\n%s", i, x, y)
+		}
 	}
 }

@@ -88,7 +88,9 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	// command it is shown). askWrite: a write there — outside the workdir —
 	// needs the user's approval (the write/edit tools ask; the shell's
 	// redirect check does not).
-	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir, promptsDir}, []string{promptsDir})
+	// The overflow dir is readable too: over-cap tool outputs are saved there
+	// in full and the cut result names the file (tools.Spill).
+	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir, promptsDir, overflowDir()}, []string{promptsDir})
 	if err != nil {
 		return nil, &StartError{err}
 	}
@@ -132,7 +134,8 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(cfg.Shell.Allow, jail, runtime.GOOS),
 		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
 		ShellEnv:    tools.ShellEnv(os.Environ(), config.EnvRefs(cfg)),
-		WebProvider: cfg.Web.Search.Provider, WebKey: webKey}
+		WebProvider: cfg.Web.Search.Provider, WebKey: webKey,
+		SpillDir: overflowDir(), SpillPrefix: w.ID8() + "-"}
 	reg := tools.NewRegistry(tools.Builtins()...)
 	// With servers configured, the frozen `mcp` stub is replaced by the lazy
 	// proxy (§10.5): nothing starts here, and no server tool schema ever
@@ -156,6 +159,11 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	}
 	return a, nil
 }
+
+// overflowDir holds the full text of over-cap tool outputs (§10), one flat
+// directory pruned with the snapshot retention; file names carry the session
+// id8.
+func overflowDir() string { return filepath.Join(config.DataDir(), "overflow") }
 
 // webSearchKey resolves web.search.apiKey at session start: a configured
 // but unset env: variable is a config error (exit 2), matching the
@@ -202,11 +210,13 @@ func Start(o StartOptions) (*Agent, error) {
 	}
 	slices.SortFunc(servers, func(a, b ServerLine) int { return strings.Compare(a.Name, b.Name) })
 	osName, arch := Platform()
-	system := BuildSystemPrompt(PromptInput{Workdir: jail.Root(), OS: osName, Arch: arch,
+	verify, verifySrc := DetectVerify(jail.Root())
+	system := BuildSystemPrompt(PromptInput{Workdir: jail.Root(), OS: osName, Arch: arch, Verify: verify, VerifySource: verifySrc,
 		Date: time.Now().Format("2006-01-02"), Git: GitState(jail.Root()), Version: config.Version,
 		RTK: toolOnPath("rtk"), Skills: sk, Servers: servers, Instructions: instr})
 
 	session.Prune(filepath.Join(config.DataDir(), "snapshot"), cfg.RetentionDays())
+	session.Prune(overflowDir(), cfg.RetentionDays())
 	m, _, err := reg.Resolve(cfg.Model)
 	if err != nil {
 		return nil, err

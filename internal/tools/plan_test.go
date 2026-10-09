@@ -102,6 +102,35 @@ func TestPlanModeEditZone(t *testing.T) {
 	}
 }
 
+// TestPlanModeAskWriteRootsStayClosed: in plan mode neither write nor edit
+// may reach the approval ask for an ask-write root (§10: "nothing is asked")
+// — the user would approve a write that the plan zone then refuses.
+func TestPlanModeAskWriteRootsStayClosed(t *testing.T) {
+	root := t.TempDir()
+	prompts := filepath.Join(t.TempDir(), "prompts")
+	os.MkdirAll(prompts, 0o755)
+	dst := filepath.Join(prompts, "deploy.md")
+	os.WriteFile(dst, []byte("x\n"), 0o644)
+	asked := 0
+	env := &Env{Root: root, Paths: askRootChecker{root, prompts}, Reads: NewReadTracker(), Plan: true,
+		Ask: func(context.Context, Question) Answer { asked++; return AllowOnce }}
+	if r := run(t, readTool{}, env, map[string]any{"path": dst}); r.IsError {
+		t.Fatal(r.Content)
+	}
+	if r := run(t, writeTool{}, env, map[string]any{"path": dst, "content": "y"}); !r.IsError || !strings.Contains(r.Content, "docs/plans/*.md") {
+		t.Fatalf("write: %+v", r)
+	}
+	if r := run(t, editTool{}, env, map[string]any{"path": dst, "old_string": "x", "new_string": "y"}); !r.IsError || !strings.Contains(r.Content, "docs/plans/*.md") {
+		t.Fatalf("edit: %+v", r)
+	}
+	if asked != 0 {
+		t.Fatalf("plan mode asked the user %d time(s)", asked)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "x\n" {
+		t.Fatalf("refused write landed: %q", b)
+	}
+}
+
 func TestPlanModeReadsAndSearchStayAvailable(t *testing.T) {
 	env, root := testEnv(t)
 	os.WriteFile(filepath.Join(root, "a.go"), []byte("package main\n"), 0o644)

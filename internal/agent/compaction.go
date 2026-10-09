@@ -69,6 +69,7 @@ func (a *Agent) liveEntries() ([]compact.Entry, compact.Prev) {
 		}
 	}
 	var out []compact.Entry
+	elided := session.ElidedIDs(entries)
 	for _, e := range entries[start:] {
 		switch e.Type {
 		case session.TypeMessage:
@@ -81,7 +82,13 @@ func (a *Agent) liveEntries() ([]compact.Entry, compact.Prev) {
 			c := e.ToolUse.Call
 			out = append(out, compact.Entry{ID: e.ID, Kind: compact.KindToolUse, Call: &c})
 		case session.TypeToolResult:
-			out = append(out, compact.Entry{ID: e.ID, Kind: compact.KindToolResult, Result: e.ToolResult})
+			r := e.ToolResult
+			if elided[e.ID] {
+				stub := *r
+				stub.Content = session.ElidedStub
+				r = &stub
+			}
+			out = append(out, compact.Entry{ID: e.ID, Kind: compact.KindToolResult, Result: r})
 		}
 	}
 	return out, prev
@@ -153,6 +160,11 @@ func (a *Agent) Compact(ctx context.Context) error {
 	a.usage, a.cost = a.usage.Add(u), a.cost+cost
 	a.anchorValid = false
 	a.mu.Unlock()
+	// The cache is reset anyway: stub every stale result the kept window
+	// still carries.
+	if err := a.elide(true); err != nil {
+		return err
+	}
 	a.emit(Compacted{TokensBefore: before, TokensAfter: a.ContextTokens()})
 	return nil
 }
@@ -182,6 +194,9 @@ func (a *Agent) recordFailedCompaction(u llm.Usage, cheap provider.Model, cause 
 // model may handle the context fine, and a real provider overflow still
 // reports the problem through the compact-and-retry path.
 func (a *Agent) maybeCompact(ctx context.Context) error {
+	if err := a.elide(false); err != nil {
+		return err
+	}
 	b := a.Budget()
 	if !b.Over(a.ContextTokens()) {
 		return nil
