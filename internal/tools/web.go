@@ -433,7 +433,7 @@ func webHTMLRender(h string, md bool) string {
 			}
 		case "pre":
 			if closing {
-				pre--
+				pre = max(0, pre-1) // a stray </pre> must not disable later blocks
 				if md {
 					sb.WriteString("\n```\n")
 				} else {

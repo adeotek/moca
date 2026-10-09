@@ -334,3 +334,12 @@ func TestWebFetchOverflowSpills(t *testing.T) {
 		t.Fatalf("spilled: %v", err)
 	}
 }
+
+// TestWebHTMLStrayClosingPre: an unmatched </pre> must not leave the
+// renderer unable to enter preformatted mode for a later block.
+func TestWebHTMLStrayClosingPre(t *testing.T) {
+	got := webHTMLToText("<p>intro</pre></p><pre>a  b\n  c</pre>")
+	if !strings.Contains(got, "a  b\n  c") {
+		t.Fatalf("later <pre> lost its whitespace: %q", got)
+	}
+}

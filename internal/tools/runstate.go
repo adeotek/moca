@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -74,9 +75,14 @@ func verifies(command string) bool {
 	return false
 }
 
+// spillPathRe matches the overflow file named in a Spill note: its name is
+// random per call, so it must not make identical failures look different.
+var spillPathRe = regexp.MustCompile(`saved to \S+ — `)
+
 // trackFailure counts identical failing calls (tool, normalized input,
 // output) and returns the hint for a repeat.
 func trackFailure(env *Env, name string, input json.RawMessage, content string) string {
+	content = spillPathRe.ReplaceAllLiteralString(content, "saved to <overflow file> — ")
 	var buf bytes.Buffer
 	if json.Compact(&buf, input) != nil {
 		buf.Reset()

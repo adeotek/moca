@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/adeotek/moca/internal/session"
 )
 
 func planMode(o *StartOptions) { o.Plan = true }
@@ -190,5 +193,24 @@ func TestPlanEnvelopeKeepsPrefixStable(t *testing.T) {
 		if string(x) != string(y) {
 			t.Fatalf("message %d changed:\n%s\n%s", i, x, y)
 		}
+	}
+}
+
+// TestModeEntriesRecordBothFlags: each permission_mode entry records the
+// full mode state, so toggling one mode never logs the other as off.
+func TestModeEntriesRecordBothFlags(t *testing.T) {
+	a, _, _ := startTest(t, newScript(t), 40)
+	a.SetYolo(true)
+	a.SetPlan(true)
+	a.SetYolo(false)
+	var got []session.PermissionMode
+	for _, e := range a.entries {
+		if e.Type == session.TypePermissionMode {
+			got = append(got, *e.PermissionMode)
+		}
+	}
+	want := []session.PermissionMode{{Yolo: true}, {Yolo: true, Plan: true}, {Plan: true}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }

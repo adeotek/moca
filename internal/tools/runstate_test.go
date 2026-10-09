@@ -76,3 +76,26 @@ func TestRegistryRecoversToolPanic(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+// spillFailTool fails with output over a cap: every call spills to a fresh
+// overflow file, so the result names a different path each time.
+type spillFailTool struct{}
+
+func (spillFailTool) Spec() llm.ToolSpec { return llm.ToolSpec{Name: "spillfail"} }
+func (spillFailTool) Run(_ context.Context, env *Env, _ json.RawMessage) Result {
+	return errorf("build failed\n%s", Spill(env, "shell", strings.Repeat("error line\n", 50)))
+}
+
+// TestRepeatedFailureIgnoresSpillPath: the overflow file name is random per
+// call; the same failing call with a big output is still a repeat.
+func TestRepeatedFailureIgnoresSpillPath(t *testing.T) {
+	reg := NewRegistry(spillFailTool{})
+	env := &Env{SpillDir: t.TempDir(), SpillPrefix: "s-"}
+	var r Result
+	for range 3 {
+		r = reg.Run(context.Background(), env, llm.ToolCall{Name: "spillfail", Input: json.RawMessage(`{}`)})
+	}
+	if !strings.Contains(r.Content, "saved to ") || !strings.Contains(r.Content, "failed 3 times") || env.MaxRepeat != 3 {
+		t.Fatalf("3rd identical spilling failure must hint: %q max=%d", r.Content, env.MaxRepeat)
+	}
+}
