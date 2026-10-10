@@ -2,10 +2,10 @@
 
 [![CI](https://github.com/adeotek/moca/actions/workflows/ci.yml/badge.svg)](https://github.com/adeotek/moca/actions/workflows/ci.yml)
 
-**A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, seven tools, no framework.**
-Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface area. It competes on *cost per task* and *read-the-whole-codebase-in-an-hour transparency*, not features: prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap; the agent ships MCP support that never floods the prompt (one ~200-token lazy proxy), loads Agent-Skills `SKILL.md` files written for other tools unchanged, and prefers external token-savers (`rtk`, `graphify`) when they are installed.
+**A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, eight tools, no framework.**
+Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface area. It competes on *cost per task* and *read-the-whole-codebase-in-an-hour transparency*, not features: prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap; the agent ships MCP support that never floods the prompt (one ~200-token lazy proxy), loads Agent-Skills `SKILL.md` files written for other tools unchanged, searches the web and fetches pages without another tool (keyless by default), and prefers external token-savers (`rtk`, `graphify`) when they are installed.
 
-**Status: v0.2.0-beta** — self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
+**Status: v0.3.0-beta** — first-run setup mode (a bare config opens the TUI with `/login` + `/model`), a `web` tool (page fetch + search, keyless out of the box), plan mode (`--plan`/`/plan` writes `docs/plans/`, nothing else; `--do`/`/do` executes a plan step by step), a harness pass measured on a seven-scenario eval corpus (`test/evals/`), self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
 
 ## Install
 
@@ -13,7 +13,7 @@ Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface 
 go install github.com/adeotek/moca/cmd/moca@latest
 ```
 
-**Install script** — downloads the release package, verifies it against the release's `checksums.txt`, and installs the binary — to `~/.local/bin` (`%LOCALAPPDATA%\Programs\moca` on Windows, added to your user PATH), or next to an existing `moca` when one is already on PATH:
+**Install scripts** — `install.sh` (Linux) and `install.ps1` (Windows) download the release package for your platform, verify it against the release's `checksums.txt`, and install the binary — to `~/.local/bin` (`%LOCALAPPDATA%\Programs\moca` on Windows, added to your user PATH), or next to an existing `moca` when one is already on PATH:
 
 ```bash
 # Linux
@@ -25,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/adeotek/moca/main/install.sh | bash
 irm https://raw.githubusercontent.com/adeotek/moca/main/install.ps1 | iex
 ```
 
-Re-running the script is safe: an existing installation is updated in place, never an error. `--version vX.Y.Z` / `-Version vX.Y.Z` pins a release and `--dir <path>` / `-Dir <path>` picks the target directory (run the script directly for parameters). Or take a package from the [releases page](https://github.com/adeotek/moca/releases) — linux/amd64 · linux/arm64 · windows/amd64 are published by a manual **Release** workflow run (Actions → Release → Run workflow); other platforms (e.g. darwin) build from source with `make release`.
+Re-running a script is safe: an existing installation is updated in place, never an error. `--version vX.Y.Z` / `-Version vX.Y.Z` pins a release and `--dir <path>` / `-Dir <path>` picks the target directory; `--help` / `-?` prints the script's usage. Or take a package from the [releases page](https://github.com/adeotek/moca/releases) — linux/amd64 · linux/arm64 · windows/amd64 are published by a manual **Release** workflow run (Actions → Release → Run workflow); other platforms (e.g. darwin) build from source with `make release`.
 
 **Self-update** — an installed moca updates itself from the same releases:
 
@@ -52,6 +52,8 @@ moca update --check   # only report whether a newer release exists
   }
 }
 ```
+
+**First run** — with no `"model"` configured, `moca` opens the TUI with a red notice instead of stopping: `/login` stores an API key or signs in, then `/model` picks a model and starts the session (your choice is saved here as `"model"`). `-p` still needs a model up front.
 
 Optional TUI knob: `"tui": { "notify": "osc9" }` (`osc9` · `bell` · `off`) — a desktop notification (or bell) when a run longer than 30 s ends or an approval is waiting, only while the terminal is unfocused.
 
@@ -86,14 +88,24 @@ No API key and no model list: moca asks the server (`/api/tags`, `/api/show`) wh
 
 **Credentials live in `~/.config/moca/auth.json`** (0600, never committed): `/login` in the TUI — pick a provider, then paste the API key (masked, never echoed) or sign in to a subscription in the browser — or `moca login <provider>` on the CLI (`--api-key` for a key; `echo -n "$KEY" | moca login anthropic` stores silently on a pipe). A stored key is used ahead of any `apiKey` env reference, and `moca logout <provider>` (or the TUI `/logout`) clears it. `moca login openai` opens the browser for consent (SSH/headless: it prints the URL and accepts a pasted code — `--no-browser` forces that mode); tokens are auto-refreshed under a cross-process lock. Set `"auth": "oauth"` for `providers.openai` to use the subscription — after a successful TUI sign-in the wizard offers to flip it for you. The subscription route serves the Responses API only, and model slugs must be available to your ChatGPT account — declare them under `providers.openai.models` when they are not in the built-in catalog.
 
+## Debugging / logs
+
+moca keeps a small diagnostic log per run in `~/.local/state/moca/logs/` (or `$XDG_STATE_HOME/moca/logs/`). It records what moca did — retries, MCP servers starting and stopping, how a run ended — but never your prompts, code or keys. If something goes wrong, attach the newest file to your bug report.
+
+- More detail for one run: `MOCA_LOG=debug moca …`
+- Turn it off: `"log": { "level": "off" }` in the config, or `MOCA_LOG=off`.
+- Old logs are removed after `snapshot.retentionDays` (30 days by default).
+
 ## Use
 
 ```bash
 moca                            # TUI in the current directory
 moca -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
+moca --plan -p "add a --json flag"   # write docs/plans/<slug>.md, change nothing else
+moca --do docs/plans/add-json-flag.md # execute it step by step, ticking each - [ ] box
 ```
 
-`-p` contract: stdout is the final answer text only; tool activity, retries and the token/cost summary go to stderr. Exit codes: `0` completed · `1` provider/runtime error · `2` config or usage error · `3` stopped at the step limit · `130` interrupted.
+`-p` contract: stdout is the final answer text only; tool activity, retries and the token/cost summary go to stderr. Exit codes: `0` completed · `1` provider/runtime error · `2` config or usage error · `3` incomplete (step limit, or stopped after repeating the same failing call) · `130` interrupted.
 
 **TUI keys**
 
@@ -112,18 +124,18 @@ moca -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
 | `a` / `ctrl+a` / `d` | approval: allow once / allow always / deny |
 | `↑`/`↓` · `tab` · `esc` | in the `/` dropdown: pick · complete · dismiss |
 
-**Slash commands**: `/model` · `/effort` · `/hard` · `/yolo` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). Typing `/` opens a dropdown of every command and loaded template as you type — `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. The first run drops a starter **`/create-command`** template into that directory: run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands are usable the moment the run that wrote them finishes — no restart. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results.
+**Slash commands**: `/model` · `/effort` · `/hard` · `/yolo` · `/plan` · `/do` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). Typing `/` opens a dropdown of every command and loaded template as you type — `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. The first run drops a starter **`/create-command`** template into that directory: run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands are usable the moment the run that wrote them finishes — no restart. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results. **`/plan <request>`** (or `--plan`) turns a run into **plan mode**: the agent reads (shell, web and MCP stay available for investigation under their normal permission rules), writes an implementation plan to `docs/plans/`, and every write outside `docs/plans/*.md` is refused.
 
 ## Extend
 
-- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged. See [docs/external-tools.md](docs/external-tools.md).
+- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged. See [docs/specs/external-tools.md](docs/specs/external-tools.md).
 - **MCP** — `mcp.servers` in the config (stdio + streamable HTTP). Lazy by design: one fixed ~200-token `mcp` proxy tool, server tool lists never enter the prompt, servers start on first use and stop when idle. `moca mcp import` imports Claude Code / OpenCode / Pi server configs.
 - **Project instructions** — `AGENTS.md` / `CLAUDE.md`, loaded only in trusted projects (`--approve`).
-- **External tools** — `rtk` (token-compressed CLI output) and `graphify` (codebase knowledge graph) are allowlisted and ship built-in skills; see [docs/external-tools.md](docs/external-tools.md).
+- **External tools** — `rtk` (token-compressed CLI output) and `graphify` (codebase knowledge graph) are allowlisted and ship built-in skills; see [docs/specs/external-tools.md](docs/specs/external-tools.md).
 
 ## Non-goals (v1, probably forever)
 
-subagents · hooks · plan mode · LSP · web browsing · image gen · voice · telemetry · binary plugin system
+subagents · hooks · LSP · image gen · voice · telemetry · binary plugin system
 
 ## Development
 
@@ -146,8 +158,8 @@ make release        # five cross-compiled binaries in dist/
 | 4 | context manager + compaction + resume | token-triggered compaction, `--continue` — done |
 | 5 | MCP lazy proxy (stdio + streamable HTTP, persisted index, `mcp import`) | real server via proxy, no schemas in prompt, 0 servers at start — done |
 | 6 | rtk + graphify + skills ecosystem compatibility | rtk preferred in real session, pi SKILL.md loads — done |
-| 7 | OAuth providers + upstream graphify PR + v0.1 | ship-gate demo passes (§14), live legs green (2026-10-07) — shipped as `v0.1.1-alpha`; current line `v0.2.0-beta` |
+| 7 | OAuth providers + upstream graphify PR + v0.1 | ship-gate demo passes (§14), live legs green (2026-10-07) — shipped as `v0.1.1-alpha`; current line `v0.3.0-beta` |
 
 ## Docs
 
-[`docs/specs/SPECS.md`](docs/specs/SPECS.md) — the current implemented state · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) — the v1 contract · [`docs/external-tools.md`](docs/external-tools.md) — rtk, graphify, skills, prompts.
+[`docs/specs/SPECS.md`](docs/specs/SPECS.md) — the current implemented state · [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md) — the v1 contract · [`docs/specs/external-tools.md`](docs/specs/external-tools.md) — rtk, graphify, skills, prompts.

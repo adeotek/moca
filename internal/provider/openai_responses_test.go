@@ -286,3 +286,24 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 		t.Fatalf("credential headers must be applied: %v", hdr)
 	}
 }
+
+func TestResponsesCacheKey(t *testing.T) {
+	a := newOpenAIResponses(Model{ID: "m"}, "https://api.openai.com/v1", nil, nil).(*responsesAdapter)
+	for _, oauth := range []bool{false, true} {
+		if v := a.body(llm.Request{Model: "m", CacheKey: "moca-ab12cd34"}, oauth)["prompt_cache_key"]; v != "moca-ab12cd34" {
+			t.Fatalf("oauth=%v: %v", oauth, v)
+		}
+	}
+	if _, ok := a.body(llm.Request{Model: "m"}, false)["prompt_cache_key"]; ok {
+		t.Fatal("no key, no field")
+	}
+	// A Responses-compatible server that is not api.openai.com must not
+	// receive the key; the subscription route (oauth) still carries it.
+	other := newOpenAIResponses(Model{ID: "m"}, "https://opencode.ai/zen/go/v1", nil, nil).(*responsesAdapter)
+	if _, ok := other.body(llm.Request{Model: "m", CacheKey: "moca-ab12cd34"}, false)["prompt_cache_key"]; ok {
+		t.Fatal("a compatible server must not get prompt_cache_key")
+	}
+	if v := other.body(llm.Request{Model: "m", CacheKey: "moca-ab12cd34"}, true)["prompt_cache_key"]; v != "moca-ab12cd34" {
+		t.Fatalf("the subscription route keeps it: %v", v)
+	}
+}

@@ -74,6 +74,8 @@ type Config struct {
 	Providers map[string]ProviderConfig `json:"providers"`
 	Shell     ShellConfig               `json:"shell"`
 	MCP       MCPConfig                 `json:"mcp"`
+	Web       WebConfig                 `json:"web"`
+	Log       LogConfig                 `json:"log"`
 	Snapshot  SnapshotConfig            `json:"snapshot"`
 	Context   ContextConfig             `json:"context"`
 	TUI       TUIConfig                 `json:"tui"`
@@ -105,6 +107,23 @@ type CostConfig struct {
 
 type ShellConfig struct {
 	Allow []string `json:"allow"`
+}
+
+// WebConfig configures the web tool's search op (§4, rev 19). fetch needs
+// no config.
+type WebConfig struct {
+	Search WebSearchConfig `json:"search"`
+}
+
+type WebSearchConfig struct {
+	Provider string `json:"provider,omitempty"` // "tavily" (default; keyless when apiKey is omitted) | "exa"
+	APIKey   string `json:"apiKey,omitempty"`   // must be "env:VAR"; optional for tavily, required for exa
+}
+
+// LogConfig configures the diagnostic log (SPECS §13.5): a metadata-only
+// logfmt file per process under <state>/logs. MOCA_LOG overrides level.
+type LogConfig struct {
+	Level string `json:"level,omitempty"` // "info" (default) | "debug" | "off"
 }
 
 type MCPConfig struct {
@@ -198,6 +217,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.TUI.Notify == "" {
 		c.TUI.Notify = "osc9"
+	}
+	if c.Web.Search.Provider == "" {
+		c.Web.Search.Provider = "tavily"
+	}
+	if c.Log.Level == "" {
+		c.Log.Level = "info"
 	}
 }
 
@@ -341,6 +366,22 @@ func (c Config) Validate() error {
 		if (s.Command == "") == (s.URL == "") {
 			return fmt.Errorf("mcp.servers.%s: exactly one of command (stdio) or url (streamable HTTP)", name)
 		}
+	}
+	switch c.Web.Search.Provider {
+	case "tavily", "exa":
+	default:
+		return fmt.Errorf("web.search.provider %q unknown (want tavily|exa)", c.Web.Search.Provider)
+	}
+	if k := c.Web.Search.APIKey; k != "" && !strings.HasPrefix(k, envPrefix) {
+		return fmt.Errorf("web.search.apiKey must be an env: reference (e.g. \"env:TAVILY_API_KEY\"), never a literal")
+	}
+	if c.Web.Search.Provider == "exa" && c.Web.Search.APIKey == "" {
+		return fmt.Errorf("web.search: provider \"exa\" needs apiKey (an env: reference) — exa has no keyless mode; tavily works without a key")
+	}
+	switch c.Log.Level {
+	case "info", "debug", "off":
+	default:
+		return fmt.Errorf("log.level %q unknown (want info|debug|off)", c.Log.Level)
 	}
 	return nil
 }

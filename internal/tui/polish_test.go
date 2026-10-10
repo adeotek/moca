@@ -127,6 +127,7 @@ func TestExitLine(t *testing.T) {
 // line prints below the final numbers instead of over a stale draft.
 func TestQuittingFrame(t *testing.T) {
 	m := newTestModel()
+	m.status.Model = "fake/m" // a session exists: the bar shows its model
 	m.ta.SetValue("draft")
 	m.pullTextarea()
 	m.quit()

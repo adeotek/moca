@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/adeotek/moca/internal/applog"
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/provider"
 )
@@ -27,6 +30,7 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	applog.Discard() // before anything can log: slog's default writes to stderr (the TUI's screen)
 	o, err := parseArgs(args, stdin)
 	if err != nil {
 		if errors.Is(err, errHelp) {
@@ -88,12 +92,25 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return exitUsage
 		}
 	}
-	if cfg.Model == "" {
+	if cfg.Model == "" && o.OneShot {
+		// A one-shot run needs a model up front; the TUI (no -p) instead
+		// opens in setup mode and offers /login + /model (§3.5).
 		fmt.Fprintf(stderr, "moca: no model configured — set \"model\" in %s or pass --model provider/model\n", path)
 		return exitUsage
 	}
-	if !o.OneShot {
-		return runTUI(ctx, o, cfg, path, stderr)
+	closeLog, err := startLog(cfg, path, o, stderr)
+	if err != nil {
+		fmt.Fprintln(stderr, "moca:", err)
+		return exitUsage
 	}
-	return runOneShot(ctx, o, cfg, stdout, stderr)
+	defer closeLog()
+	t0 := time.Now()
+	var code int
+	if o.OneShot {
+		code = runOneShot(ctx, o, cfg, stdout, stderr)
+	} else {
+		code = runTUI(ctx, o, cfg, path, stderr)
+	}
+	slog.Info("exit", "code", code, "duration", time.Since(t0).Round(time.Millisecond))
+	return code
 }

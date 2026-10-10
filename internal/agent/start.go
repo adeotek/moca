@@ -2,7 +2,10 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,6 +38,7 @@ type StartOptions struct {
 	Effort  string
 	Trusted bool
 	Yolo    bool
+	Plan    bool
 	Ask     tools.Asker
 	Emit    func(Event)
 	HTTP    *http.Client
@@ -49,6 +53,7 @@ type setup struct {
 	reg        *provider.Registry
 	builtinDir string
 	jail       *permissions.Jail
+	spillDir   string // this process's overflow dir — the only one its jail can read
 }
 
 func prepare(o StartOptions, jailRoot string) (*setup, error) {
@@ -87,11 +92,19 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	// command it is shown). askWrite: a write there — outside the workdir —
 	// needs the user's approval (the write/edit tools ask; the shell's
 	// redirect check does not).
-	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir, promptsDir}, []string{promptsDir})
+	// This process's overflow dir is readable too: over-cap tool outputs are
+	// saved there in full and the cut result names the file (tools.Spill).
+	// Only its own dir — other sessions' outputs (other projects, possibly
+	// secrets) share the overflow area and must stay out of reach.
+	spillDir, err := newSpillDir()
 	if err != nil {
 		return nil, &StartError{err}
 	}
-	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail}, nil
+	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir, promptsDir, spillDir}, []string{promptsDir})
+	if err != nil {
+		return nil, &StartError{err}
+	}
+	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail, spillDir: spillDir}, nil
 }
 
 // discoverLocal reads a configured Ollama server's models into the registry
@@ -124,9 +137,15 @@ func discoverLocal(reg *provider.Registry, cfg config.Config, emit func(Event)) 
 func build(o StartOptions, st *setup, w *session.Writer, system, model string, effort llm.Effort, prior []session.Entry, snapshotDir string) (*Agent, error) {
 	cfg, jail := st.cfg, st.jail
 	snaps := session.NewSnapshots(w, snapshotDir, prior)
+	webKey, err := webSearchKey(cfg)
+	if err != nil {
+		return nil, err
+	}
 	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(cfg.Shell.Allow, jail, runtime.GOOS),
 		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
-		ShellEnv: tools.ShellEnv(os.Environ(), config.EnvRefs(cfg))}
+		ShellEnv:    tools.ShellEnv(os.Environ(), config.EnvRefs(cfg)),
+		WebProvider: cfg.Web.Search.Provider, WebKey: webKey,
+		SpillDir: st.spillDir, SpillPrefix: w.ID8() + "-"}
 	reg := tools.NewRegistry(tools.Builtins()...)
 	// With servers configured, the frozen `mcp` stub is replaced by the lazy
 	// proxy (§10.5): nothing starts here, and no server tool schema ever
@@ -145,7 +164,78 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	if o.Yolo {
 		a.applyYolo(true)
 	}
+	if o.Plan {
+		a.applyPlan(true)
+	}
+	a.logger().Info("session", "resumed", prior != nil, "workdir", jail.Root(), "model", model,
+		"effort", string(effort), "yolo", o.Yolo, "plan", o.Plan)
 	return a, nil
+}
+
+// overflowDir is the area holding the full text of over-cap tool outputs
+// (§10): one random subdirectory per process, pruned with the snapshot
+// retention.
+func overflowDir() string { return filepath.Join(config.DataDir(), "overflow") }
+
+// newSpillDir names this process's overflow subdirectory (created lazily by
+// tools.Spill). Random, so no other session can guess or share it.
+func newSpillDir() (string, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return filepath.Join(overflowDir(), hex.EncodeToString(b)), nil
+}
+
+// pruneOverflow removes overflow entries (per-process dirs, and flat files of
+// the first rev-21 layout) older than days; 0 keeps everything.
+func pruneOverflow(days int) {
+	if days <= 0 {
+		return
+	}
+	cutoff := time.Now().AddDate(0, 0, -days)
+	ents, err := os.ReadDir(overflowDir())
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		p := filepath.Join(overflowDir(), e.Name())
+		if newestModTime(p).Before(cutoff) {
+			os.RemoveAll(p)
+		}
+	}
+}
+
+// newestModTime is the latest modification time under p (p itself included):
+// a directory's own mtime only moves when an entry is added or removed, so a
+// per-process spill dir is judged by its freshest file.
+func newestModTime(p string) time.Time {
+	var newest time.Time
+	filepath.WalkDir(p, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if fi, err := d.Info(); err == nil && fi.ModTime().After(newest) {
+			newest = fi.ModTime()
+		}
+		return nil
+	})
+	return newest
+}
+
+// webSearchKey resolves web.search.apiKey at session start: a configured
+// but unset env: variable is a config error (exit 2), matching the
+// provider-key stance. The key never reaches the model's shell environment
+// either — config.EnvRefs strips it from the shell tool's env.
+func webSearchKey(cfg config.Config) (string, error) {
+	if cfg.Web.Search.APIKey == "" {
+		return "", nil
+	}
+	key, err := config.ResolveEnv(cfg.Web.Search.APIKey)
+	if err != nil {
+		return "", fmt.Errorf("web.search.apiKey: %w", err)
+	}
+	return key, nil
 }
 
 func Start(o StartOptions) (*Agent, error) {
@@ -178,11 +268,13 @@ func Start(o StartOptions) (*Agent, error) {
 	}
 	slices.SortFunc(servers, func(a, b ServerLine) int { return strings.Compare(a.Name, b.Name) })
 	osName, arch := Platform()
-	system := BuildSystemPrompt(PromptInput{Workdir: jail.Root(), OS: osName, Arch: arch,
+	verify, verifySrc := DetectVerify(jail.Root())
+	system := BuildSystemPrompt(PromptInput{Workdir: jail.Root(), OS: osName, Arch: arch, Verify: verify, VerifySource: verifySrc,
 		Date: time.Now().Format("2006-01-02"), Git: GitState(jail.Root()), Version: config.Version,
 		RTK: toolOnPath("rtk"), Skills: sk, Servers: servers, Instructions: instr})
 
 	session.Prune(filepath.Join(config.DataDir(), "snapshot"), cfg.RetentionDays())
+	pruneOverflow(cfg.RetentionDays())
 	m, _, err := reg.Resolve(cfg.Model)
 	if err != nil {
 		return nil, err

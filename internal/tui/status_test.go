@@ -88,6 +88,7 @@ func TestContextPressure(t *testing.T) {
 
 func TestStatusPercentColored(t *testing.T) {
 	m := newTestModel()
+	m.status.Model = "fake/m" // the percent fields only render with a model
 	m.status.Window, m.status.Trigger, m.status.Used = 100_000, 90_000, 95_000
 	if got := m.statusLine(); !strings.Contains(got, errFg.Bold(true).Render("95%")) {
 		t.Fatalf("hot percent not red: %q", got)

@@ -76,6 +76,11 @@ func RenderStatus(s StatusInfo, width int) (string, string) {
 		cost = s.Transient
 	}
 	l1 := renderLine([]field{{s.Version, 0}, {s.Cwd, 1}, {branch, 2}}, width, 0)
+	if s.Model == "" {
+		// No session yet (moca started without a model, §3.5): the bar
+		// carries the state instead of an empty model/effort pair.
+		return l1, renderLine([]field{{"no provider configured — /login", 0}}, width, 0)
+	}
 	hint := ""
 	if s.pressure() == pressureHot {
 		hint = "/compact" // the bar says what to do about a full context

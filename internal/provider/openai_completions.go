@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -18,10 +19,18 @@ type completionsAdapter struct {
 	url  string
 	cred CredentialFunc
 	hc   *http.Client
+	// cacheKey: the server is api.openai.com, which takes prompt_cache_key;
+	// other OpenAI-compatible servers may reject unknown fields.
+	cacheKey bool
 }
 
 func newOpenAICompletions(m Model, baseURL string, cred CredentialFunc, hc *http.Client) Adapter {
-	return &completionsAdapter{m: m, url: strings.TrimRight(baseURL, "/") + "/chat/completions", cred: cred, hc: hc}
+	u := strings.TrimRight(baseURL, "/") + "/chat/completions"
+	official := false
+	if pu, err := url.Parse(u); err == nil {
+		official = pu.Hostname() == "api.openai.com"
+	}
+	return &completionsAdapter{m: m, url: u, cred: cred, hc: hc, cacheKey: official}
 }
 
 func (a *completionsAdapter) body(req llm.Request) map[string]any {
@@ -54,6 +63,9 @@ func (a *completionsAdapter) body(req llm.Request) map[string]any {
 	}
 	b := map[string]any{"model": req.Model, "messages": msgs, "stream": true, "max_tokens": req.MaxTokens,
 		"stream_options": map[string]any{"include_usage": true}}
+	if a.cacheKey && req.CacheKey != "" {
+		b["prompt_cache_key"] = req.CacheKey
+	}
 	if len(req.Tools) > 0 {
 		tools := make([]map[string]any, len(req.Tools))
 		for i, t := range req.Tools {

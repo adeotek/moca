@@ -14,6 +14,22 @@ func LatestCompaction(entries []Entry) (*Compaction, int) {
 	return nil, -1
 }
 
+// ElidedStub replaces a superseded tool result's content in requests.
+const ElidedStub = "[superseded: this call ran again later (or the file was rewritten) — the newer result is below]"
+
+// ElidedIDs collects the tool_result ids named by every elision entry.
+func ElidedIDs(entries []Entry) map[string]bool {
+	ids := map[string]bool{}
+	for _, e := range entries {
+		if e.Type == TypeElision && e.Elision != nil {
+			for _, id := range e.Elision.IDs {
+				ids[id] = true
+			}
+		}
+	}
+	return ids
+}
+
 // Messages rebuilds request messages: the latest compaction summary (if any),
 // then entries from its firstKeptEntryId onward (§8). Without a compaction
 // the whole transcript is used, unchanged.
@@ -37,6 +53,7 @@ func Messages(entries []Entry) []llm.Message {
 		appendUser(&out, llm.ContentBlock{Type: llm.BlockText, Text: "[Summary of earlier conversation]\n" + c.Summary})
 	}
 	assistantIdx := map[string]int{}
+	elided := ElidedIDs(entries)
 	for _, e := range entries[start:] {
 		switch e.Type {
 		case TypeMessage:
@@ -53,6 +70,9 @@ func Messages(entries []Entry) []llm.Message {
 			}
 		case TypeToolResult:
 			r := *e.ToolResult
+			if elided[e.ID] {
+				r.Content = ElidedStub
+			}
 			appendUser(&out, llm.ContentBlock{Type: llm.BlockToolResult, ToolResult: &r})
 		}
 	}

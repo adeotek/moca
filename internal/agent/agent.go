@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/adeotek/moca/internal/compact"
 	"github.com/adeotek/moca/internal/config"
@@ -18,6 +21,20 @@ import (
 
 const wrapUpText = "You have reached the step limit for this run. Do not call tools. " +
 	"Summarize what you did, what remains, and how to continue."
+
+// emptyNudge answers a turn with neither text nor tool calls.
+const emptyNudge = "Your last reply was empty. Continue the task where you left off, or give your final answer."
+
+// stuckText is the wrap-up of a run stopped for repeating a failing call.
+const stuckText = "This run is stopped: the same tool call failed with the same result several times. Do not call tools. " +
+	"Explain to the user what you were trying to do, what is blocking you, and what they could do about it."
+
+// verifyNudge is persisted and answered when a run that changed code is
+// about to end without a build/test since (§14): one bounded nudge.
+func verifyNudge(file string) string {
+	return "You changed " + file + " but have not built or tested since the last change. " +
+		"Run the project's checks now (build, tests, or running the program), or state why verification is not possible, then give your final answer."
+}
 
 type Options struct {
 	Config    config.Config
@@ -39,6 +56,9 @@ type Options struct {
 type Outcome struct {
 	Text     string
 	MaxSteps bool
+	// Stuck: the run was stopped after the same call failed identically
+	// tools.RepeatStopAt times (§14) — like MaxSteps, an incomplete run.
+	Stuck bool
 }
 
 type Agent struct {
@@ -49,7 +69,11 @@ type Agent struct {
 	usage   llm.Usage
 	cost    float64
 	yolo    bool
-	hard    *savedModel
+	plan    bool
+	steps   int // steps taken by the current run (run-end log line)
+	// doPlan/doPlanRel: the plan file a RunPlan run executes (abs, display).
+	doPlan, doPlanRel string
+	hard              *savedModel
 	// mu guards the fields the TUI reads while a run is in progress from
 	// another goroutine: the steering queue, the transcript mirror, the
 	// usage/cost totals and the estimate anchor (Status/ContextTokens/
@@ -104,6 +128,16 @@ func (a *Agent) Effort() llm.Effort           { return a.effort }
 func (a *Agent) Totals() (llm.Usage, float64) { return a.usage, a.cost }
 func (a *Agent) Session() *session.Writer     { return a.opts.Session }
 
+// cacheKey is the session's prompt-cache routing key (openai
+// prompt_cache_key): stable for the session, so every request lands on the
+// shard that holds its prefix.
+func (a *Agent) cacheKey() string {
+	if a.opts.Session == nil {
+		return ""
+	}
+	return "moca-" + a.opts.Session.ID8()
+}
+
 // Close releases the agent's resources: the MCP servers it may have started
 // (stopping their processes) and the session writer. Both front ends call it
 // at shutdown.
@@ -118,6 +152,12 @@ func (a *Agent) Close() error {
 // in; a resumed session keeps its original one.
 func (a *Agent) Workdir() string { return a.opts.Env.Root }
 func (a *Agent) emit(e Event) {
+	switch e := e.(type) {
+	case Warning:
+		a.logger().Warn("warning", "text", e.Text)
+	case Compacted:
+		a.logger().Info("compacted", "before", e.TokensBefore, "after", e.TokensAfter)
+	}
 	if a.opts.Emit != nil {
 		a.opts.Emit(e)
 	}
@@ -146,9 +186,10 @@ func (a *Agent) request(choice llm.ToolChoice) llm.Request {
 	return llm.Request{
 		Model:      a.model.ID,
 		System:     a.opts.System,
-		Messages:   TransformHistory(msgs, a.model.Qualified()),
+		Messages:   withPlanEnvelope(TransformHistory(msgs, a.model.Qualified()), a.plan),
 		Tools:      a.opts.Tools.Specs(),
 		ToolChoice: choice,
+		CacheKey:   a.cacheKey(),
 		MaxTokens:  a.model.MaxTokens(a.opts.Config.Context.ReserveTokens),
 		Effort:     a.effort,
 	}
@@ -268,6 +309,7 @@ func (a *Agent) turnWithRecovery(ctx context.Context, choice llm.ToolChoice) (ll
 	if !errors.Is(err, errOverflow) {
 		return resp, calls, err
 	}
+	a.logger().Info("context overflow: compacting and retrying the turn")
 	orig := a.lastOverflow
 	if cerr := a.Compact(ctx); cerr != nil {
 		if ctx.Err() != nil || errors.Is(cerr, context.Canceled) {
@@ -282,7 +324,48 @@ func (a *Agent) turnWithRecovery(ctx context.Context, choice llm.ToolChoice) (ll
 	return resp, calls, err
 }
 
+// wrapUp ends a run with one tool-less turn answering text (the step limit,
+// a stuck run).
+func (a *Agent) wrapUp(ctx context.Context, text string) (Outcome, error) {
+	if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(text)}); err != nil {
+		return Outcome{}, err
+	}
+	resp, calls, err := a.turnWithRecovery(ctx, llm.ToolChoiceNone)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if len(calls) > 0 {
+		// The model ignored tool_choice: none; every call still gets
+		// exactly one result (§10).
+		a.abort("the wrap-up turn must not call tools; this call was not executed")
+	}
+	a.warnPlanMissing()
+	return Outcome{Text: llm.TextOf(resp.Message)}, nil
+}
+
+// Run runs one prompt to completion (§14) and logs its end.
 func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
+	t0 := time.Now()
+	u0, c0 := a.Totals()
+	a.steps = 0
+	out, err := a.run(ctx, prompt)
+	u, c := a.Totals()
+	attrs := []any{"outcome", outcomeKind(out, err), "steps", a.steps, "duration", time.Since(t0).Round(time.Millisecond),
+		slog.Group("usage", "in", u.Input-u0.Input, "out", u.Output-u0.Output,
+			"cache_read", u.CacheRead-u0.CacheRead, "cache_write", u.CacheWrite-u0.CacheWrite),
+		"cost", fmt.Sprintf("%.4f", c-c0)}
+	if err != nil {
+		attrs = append(attrs, "error", err)
+	}
+	a.logger().Info("run end", attrs...)
+	return out, err
+}
+
+func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
+	// Per-run tool state (plan deliverable, changes awaiting verification,
+	// identical-failure counts): tools/runstate.go.
+	a.opts.Env.BeginRun()
+	nudged, verifyNudged, reserved, doNudged, emptyNudged := false, false, false, false, false
 	if err := a.maybeCompact(ctx); err != nil {
 		return Outcome{}, err
 	}
@@ -290,22 +373,31 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 		return Outcome{}, err
 	}
 	for step := 0; ; step++ {
-		if step == a.opts.Config.Context.MaxSteps {
-			a.append(session.Entry{Type: session.TypeMessage, Message: userText(wrapUpText)})
-			resp, calls, err := a.turnWithRecovery(ctx, llm.ToolChoiceNone)
-			if err != nil {
+		maxSteps := a.opts.Config.Context.MaxSteps
+		if step == maxSteps {
+			out, err := a.wrapUp(ctx, wrapUpText)
+			out.MaxSteps = true
+			return out, err
+		}
+		if a.plan && !reserved && !a.opts.Env.PlanWrote && maxSteps >= 4 && step == maxSteps-2 {
+			// Two steps before the tool-less wrap-up: a long investigation
+			// must still land its deliverable (§14).
+			reserved = true
+			if err := a.nudge("plan_reserve", planReserveText); err != nil {
 				return Outcome{}, err
 			}
-			if len(calls) > 0 {
-				// The model ignored tool_choice: none; every call still gets
-				// exactly one result (§10).
-				a.abort("the wrap-up turn must not call tools; this call was not executed")
-			}
-			return Outcome{Text: llm.TextOf(resp.Message), MaxSteps: true}, nil
 		}
 		resp, calls, err := a.turnWithRecovery(ctx, llm.ToolChoiceAuto)
 		if err != nil {
 			return Outcome{}, err
+		}
+		a.steps = step + 1
+		if len(calls) > 0 {
+			names := make([]string, len(calls))
+			for i, c := range calls {
+				names[i] = c.Name
+			}
+			a.logger().Debug("step", "n", step+1, "tools", names)
 		}
 		if len(calls) == 0 {
 			queued, err := a.applySteering()
@@ -314,6 +406,46 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 			}
 			if queued {
 				continue
+			}
+			if strings.TrimSpace(llm.TextOf(resp.Message)) == "" {
+				// No text and no calls: a provider/model glitch, not an
+				// answer — one bounded nudge, then a warning (§14).
+				if !emptyNudged {
+					emptyNudged = true
+					if err := a.nudge("empty", emptyNudge); err != nil {
+						return Outcome{}, err
+					}
+					continue
+				}
+				a.emit(Warning{"the model ended the run with an empty reply"})
+			}
+			if a.plan && !a.opts.Env.PlanWrote {
+				if !nudged {
+					// One bounded retry: a plan run must end with its file.
+					nudged = true
+					if err := a.nudge("plan", planNudge); err != nil {
+						return Outcome{}, err
+					}
+					continue
+				}
+				a.warnPlanMissing()
+			}
+			if !a.plan && !verifyNudged && a.opts.Env.Unverified != "" {
+				// One bounded nudge: changed code ends verified or with a
+				// stated reason (§14).
+				verifyNudged = true
+				if err := a.nudge("verify", verifyNudge(a.opts.Env.Unverified)); err != nil {
+					return Outcome{}, err
+				}
+				continue
+			}
+			if !doNudged {
+				doNudged = true
+				if ok, err := a.nudgeDoPlan(); err != nil {
+					return Outcome{}, err
+				} else if ok {
+					continue
+				}
 			}
 			return Outcome{Text: llm.TextOf(resp.Message)}, nil
 		}
@@ -337,6 +469,12 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 		if ctx.Err() != nil {
 			a.abort(session.AbortedByUser)
 			return Outcome{}, ctx.Err()
+		}
+		if a.opts.Env.MaxRepeat >= tools.RepeatStopAt {
+			a.emit(Warning{fmt.Sprintf("run stopped: the same failing call repeated %d times", a.opts.Env.MaxRepeat)})
+			out, err := a.wrapUp(ctx, stuckText)
+			out.Stuck = true
+			return out, err
 		}
 		// Steering lands after the complete tool batch (never between a call
 		// and its result — no provider accepts that, §11).

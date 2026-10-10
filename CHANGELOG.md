@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+### Diagnostics
+
+- **A diagnostic log, safe to attach to bug reports.** Every TUI and `-p` run writes a small logfmt file to `~/.local/state/moca/logs/` — retries, MCP server lifecycle, how each run ended, tool panics with their stack — and never prompts, code, command text or keys (a redaction net blanks secret-named fields and URL credentials). `MOCA_LOG=debug` adds per-request and per-tool-call detail for one run; `log.level` (`info`/`debug`/`off`) sets the default. Files are capped at 10 MB and pruned with the snapshot retention.
+
+## v0.3.0-beta (2026-10-09)
+
+First-run setup mode, a `web` tool, plan mode and a measured harness pass: a config without a model opens the TUI with `/login` + `/model` guidance instead of stopping; the agent can fetch pages and search the web; `--plan`/`/plan` write an implementation plan instead of changing code, and `--do`/`/do` execute one step by step — still one binary, still no framework.
+
+### Harness (measured)
+
+- **An eval corpus judges harness changes.** `test/evals/` holds seven scenarios (bugfix, multi-file feature, refactor, a vague request, a 1,400-line file, plan mode, a web lookup) with fixture repos and checkers; `bash test/evals/run.sh -n 3 -l <label>` runs them and records steps, tokens, cost and repeated failures per run. Baseline and results: `test/evals/BASELINE.md`.
+- **Long outputs are saved, not dropped.** Shell, search, web-fetch and MCP output over its cap is cut for the model and saved in full to a file the result names — the model reads or searches it instead of re-running. That made smaller caps safe: shell 30K → 12K chars, web 60K → 20K, search shows 100 hits (5000 saved).
+- **Overflow files are per-session.** Each run spills into its own random directory under `<data>/overflow/`, and moca can read only its own — another session's saved output (another project, possibly holding secrets) stays out of reach. Old entries are pruned with the snapshot retention.
+- **`read` returns 400 lines by default** (up to 2000 with `limit`), and results the model already superseded — a re-read file, a re-run test, a file rewritten whole — are replaced by a one-line stub once that saves at least 8K tokens.
+- **Prompt-cache friendlier**: the plan-mode instruction no longer moves between messages, and OpenAI requests carry a per-session `prompt_cache_key`.
+- **Runs end verified or explained.** A run that changed code and never built or tested since gets one reminder; a run that repeats the same failing call five times stops and explains what blocks it (exit 3); an empty model reply gets one retry instead of ending the run as "done".
+- **Fixed: an `edit` could crash moca.** An `old_string` ending in a blank line the file does not have (the file ends right there) matched, was written, and then crashed the diff rendering — taking the session down. The diff is fixed, and any panic inside a tool now becomes an error result for that call instead of a crash.
+- **The failing-test protocol no longer fights the fix**: it now arms only for failures found before the run's first change — a build the agent broke mid-edit no longer locks `edit` out.
+- **`/do <plan>` / `--do <plan>` executes a plan** written by plan mode, step by step, ticking each `- [ ]` box as it is verified; long plan-mode runs are told to write their file before the step limit.
+- **The system prompt names the project's checks** (detected from the Makefile, package.json or the ecosystem) and its working style was rewritten: state the assumption on a vague request, think through edge cases, fix root causes, never weaken a test, review the diff, never edit files through the shell.
+
+### Web
+
+- **A `web` tool — fetch and search, no API key needed.** `fetch` GETs a URL and returns it as readable markdown (the page title becomes the headline), plain text or raw html; `search` returns ranked results with snippets. Search works out of the box via [Tavily](https://tavily.com)'s keyless mode — set `web.search.apiKey` (an `env:` reference like `env:TAVILY_API_KEY`) to lift the rate limit, or `web.search.provider: "exa"` with a key. Fetching is bounded like every other tool (5 redirects, 2 MiB, 20 K chars — the full rendering is saved to a file — 30 s default), and — like `curl` — needs no approval for public sites; fetching a private or local address (localhost, a LAN IP, cloud metadata) asks every time — per host, so a redirect to a different private address asks again. Fetched pages are untrusted data, never instructions.
+
+### Plan mode
+
+- **`--plan` / `/plan` — the agent writes the plan, not the code.** A plan-mode run analyzes the request and the codebase, then writes an implementation plan to `docs/plans/<slug>.md` (goal · current state · `- [ ]` steps · verification · out of scope · risks) and stops — writes are confined to `docs/plans/*.md`, so nothing else is modified (shell, web and MCP stay available for investigation under their normal permission rules). `moca --plan -p "<request>"` for one-shot; `/plan` toggles it in the TUI (blue `PLAN` status field) and `/plan <request>` plans immediately. A run that would finish without the file is nudged once, then warned. The write confinement is not a permission — `--yolo` does not lift it.
+
+### TUI
+
+- **A fresh install opens the TUI instead of exiting** — with no `"model"` configured, `moca` used to stop with `moca: no model configured — set "model" in …`. Now it opens in *setup mode*: a red notice (`no provider configured — run /login first (store an API key or sign in), then /model picks a model`) rides the welcome print, the status bar carries `no provider configured — /login`, and sending a message repeats the notice instead of doing nothing. `/login` stores a credential, then `/model` opens the first-run picker — choosing a model checks its credential (a missing key says so and names `/login`), starts the session immediately and saves the choice as the config's `"model"`, so the next launch starts straight into a session. `/help`, `/exit`, `/resume`, `/sessions` and `!`/`!!` keep working throughout. `-p` without a model keeps the old error, and `--resume`/`--continue` need no configured model.
+
 ## v0.2.0-beta (2026-10-09)
 
 Ollama support, a TUI review pass with saved `/` commands, and self-update from GitHub releases — still one binary, still no framework.

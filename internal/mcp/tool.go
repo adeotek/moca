@@ -66,6 +66,10 @@ func errResult(format string, a ...any) tools.Result {
 	return tools.Result{Content: fmt.Sprintf(format, a...), IsError: true}
 }
 
+// mcpMaxOutput is the model-facing cap of a call result; the rest spills
+// to an overflow file (tools.Spill).
+const mcpMaxOutput = 12_000
+
 func (p *ProxyTool) Run(ctx context.Context, env *tools.Env, input json.RawMessage) tools.Result {
 	var a struct {
 		Action string          `json:"action"`
@@ -155,7 +159,13 @@ func (p *ProxyTool) Run(ctx context.Context, env *tools.Env, input json.RawMessa
 				parts = append(parts, fmt.Sprintf("[%s omitted]", c.Type))
 			}
 		}
-		out := tools.Truncate(strings.Join(parts, "\n"), 30_000)
+		full := strings.Join(parts, "\n")
+		out := tools.Truncate(full, mcpMaxOutput)
+		if len(full) > mcpMaxOutput {
+			if note := tools.Spill(env, "mcp", full); note != "" {
+				out += "\n" + note
+			}
+		}
 		return tools.Result{Content: out, IsError: res.IsError, Summary: a.Server + "/" + a.Tool}
 	}
 	return errResult("action must be search, describe or call")

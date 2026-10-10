@@ -95,9 +95,12 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 	if yolo {
 		fmt.Fprintln(stderr, "yolo mode: all permission checks are off")
 	}
+	if o.Plan {
+		fmt.Fprintln(stderr, "plan mode: the run writes an implementation plan to docs/plans/ (no other writes)")
+	}
 	var a *agent.Agent
 	so := agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model,
-		Trusted: trusted, Yolo: yolo, Emit: emit, Slug: session.Slug(o.Prompt)}
+		Trusted: trusted, Yolo: yolo, Plan: o.Plan, Emit: emit, Slug: oneShotSlug(o)}
 	if resumePath != "" {
 		a, err = agent.Resume(so, resumePath)
 	} else {
@@ -112,7 +115,12 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		return exitUsage
 	}
 	defer a.Close()
-	out, err := a.Run(ctx, o.Prompt)
+	var out agent.Outcome
+	if o.Do != "" {
+		out, err = a.RunPlan(ctx, o.Do, o.Prompt)
+	} else {
+		out, err = a.Run(ctx, o.Prompt)
+	}
 	u, cost := a.Totals()
 	defer fmt.Fprintf(stderr, "tokens %d/%d · $%.4f\n", u.Input+u.CacheRead+u.CacheWrite, u.Output, cost)
 	if err != nil {
@@ -120,7 +128,7 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		return exitFor(ctx, err)
 	}
 	fmt.Fprintln(stdout, out.Text)
-	if out.MaxSteps {
+	if out.MaxSteps || out.Stuck {
 		return exitMaxSteps
 	}
 	// Phase-1 contract kept: a final turn cut off at the token limit or
@@ -134,4 +142,12 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		return exitRuntime
 	}
 	return exitOK
+}
+
+// oneShotSlug names the session file: the prompt, or for --do the plan.
+func oneShotSlug(o Options) string {
+	if o.Do != "" {
+		return session.Slug("do " + strings.TrimSuffix(filepath.Base(o.Do), filepath.Ext(o.Do)))
+	}
+	return session.Slug(o.Prompt)
 }

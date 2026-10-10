@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"runtime"
@@ -153,6 +154,7 @@ func startStdio(_ context.Context, name string, s config.MCPServer, baseEnv []st
 		return nil, fmt.Errorf("mcp server %s: %w", name, err)
 	}
 	pw.Close() // the child holds the write end now
+	slog.Info("mcp server started", "server", name, "transport", "stdio", "pid", cmd.Process.Pid)
 	t := &stdioTransport{name: name, cmd: cmd, stdin: stdin, pending: map[int64]chan callResult{}, logs: logs, done: make(chan struct{})}
 	readDone := make(chan struct{})
 	go func() {
@@ -161,7 +163,12 @@ func startStdio(_ context.Context, name string, s config.MCPServer, baseEnv []st
 	}()
 	go func() {
 		werr := cmd.Wait()
-		select { // let the reader drain what the server wrote before exiting
+		status := "exit status 0"
+		if werr != nil {
+			status = werr.Error()
+		}
+		slog.Info("mcp server exited", "server", name, "status", status) // never the server's stderr
+		select {                                                         // let the reader drain what the server wrote before exiting
 		case <-readDone:
 		case <-time.After(exitGrace):
 		}

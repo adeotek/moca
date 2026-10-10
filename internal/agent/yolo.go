@@ -25,6 +25,6 @@ func (a *Agent) applyYolo(on bool) {
 // SetYolo toggles yolo mode between runs (never during Run).
 func (a *Agent) SetYolo(on bool) {
 	a.applyYolo(on)
-	a.append(session.Entry{Type: session.TypePermissionMode, PermissionMode: &session.PermissionMode{Yolo: on}})
+	a.append(session.Entry{Type: session.TypePermissionMode, PermissionMode: &session.PermissionMode{Yolo: on, Plan: a.plan}})
 	a.emit(YoloChanged{On: on})
 }

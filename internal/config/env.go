@@ -43,6 +43,7 @@ func EnvRefs(c Config) []string {
 	for _, p := range c.Providers {
 		add(p.APIKey)
 	}
+	add(c.Web.Search.APIKey)
 	for _, s := range c.MCP.Servers {
 		for _, v := range s.Env {
 			add(v)

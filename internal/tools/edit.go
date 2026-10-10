@@ -36,6 +36,10 @@ func (editTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result
 		return *r
 	}
 	abs, err := env.Paths.Resolve(a.Path, true)
+	if env.Plan && (err != nil || !planAllows(env, abs)) {
+		// Before the ask, like write: the ask-write roots stay closed.
+		return errorf("%s", planWriteRefusal)
+	}
 	if err != nil {
 		abs, err = askOutsideWrite(ctx, env, a.Path, err)
 	}
@@ -58,6 +62,11 @@ func (editTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result
 	}
 	if err := guardedWrite(env, abs, out); err != nil {
 		return errorf("%v", err)
+	}
+	if env.Plan {
+		env.PlanWrote = true
+	} else {
+		noteChange(env, abs)
 	}
 	norm := func(b []byte) []string {
 		return splitLines(strings.ReplaceAll(strings.TrimPrefix(string(b), "\ufeff"), "\r\n", "\n"))

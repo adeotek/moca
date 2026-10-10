@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,6 +44,11 @@ func startHTTP(name string, s config.MCPServer, hc *http.Client) (transport, err
 		}
 		h[k] = r
 	}
+	host := ""
+	if u, err := url.Parse(s.URL); err == nil {
+		host = u.Host
+	}
+	slog.Info("mcp server started", "server", name, "transport", "http", "host", host)
 	return &httpTransport{name: name, url: s.URL, headers: h, hc: hc}, nil
 }
 

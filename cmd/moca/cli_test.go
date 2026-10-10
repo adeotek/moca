@@ -43,6 +43,13 @@ func TestParseArgs(t *testing.T) {
 	if o.Yolo == nil || *o.Yolo || o.YoloOn(config.Config{Yolo: true}) {
 		t.Fatal("--no-yolo overrides config")
 	}
+	o, _ = parseArgs([]string{"--plan", "-p", "x"}, nil)
+	if !o.Plan || !o.OneShot {
+		t.Fatalf("--plan: %+v", o)
+	}
+	if o, _ = parseArgs([]string{"-p", "x"}, nil); o.Plan {
+		t.Fatal("plan mode must default off")
+	}
 	o, _ = parseArgs([]string{"-p", "x"}, nil)
 	if o.YoloOn(config.Config{}) || !o.YoloOn(config.Config{Yolo: true}) {
 		t.Fatal("no flag → config decides")
@@ -64,7 +71,7 @@ func TestHelpListsSurface(t *testing.T) {
 			t.Fatalf("%s: exit %d stderr %q", arg, code, errb.String())
 		}
 		for _, want := range []string{"moca -p", "--model", "--effort", "--approve", "--yolo", "--resume", "--continue",
-			"moca login", "moca logout", "moca update", "moca mcp import", "moca mcp index", "moca --version"} {
+			"moca login", "moca logout", "moca update", "moca mcp import", "moca mcp index", "moca --version", "MOCA_LOG"} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("%s: usage missing %q", arg, want)
 			}
@@ -587,5 +594,21 @@ func TestExitForOAuthSentinels(t *testing.T) {
 	cancel()
 	if got := exitFor(cctx, context.Canceled); got != exitInterrupted {
 		t.Fatalf("cancelled exit %d, want %d", got, exitInterrupted)
+	}
+}
+
+func TestParseArgsDo(t *testing.T) {
+	o, err := parseArgs([]string{"--do", "docs/plans/x.md"}, nil)
+	if err != nil || !o.OneShot || o.Do != "docs/plans/x.md" || o.Prompt != "" {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if o, err = parseArgs([]string{"--do", "x.md", "-p", "small commits"}, nil); err != nil || o.Prompt != "small commits" {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if _, err = parseArgs([]string{"--do", "x.md", "--plan"}, nil); err == nil {
+		t.Fatal("--do with --plan must be refused")
+	}
+	if oneShotSlug(Options{Do: "docs/plans/add-json.md"}) != session.Slug("do add-json") {
+		t.Fatal("slug")
 	}
 }
