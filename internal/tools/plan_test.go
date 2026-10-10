@@ -39,6 +39,7 @@ func TestPlanModeWebStaysAvailable(t *testing.T) {
 	defer srv.Close()
 	env, _ := testEnv(t)
 	env.Plan = true
+	env.Ask = AutoAllow
 	r := webTool{}.Run(context.Background(), env, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`"}`))
 	if r.IsError || !strings.Contains(r.Content, "Plan research") {
 		t.Fatalf("web must stay available in plan mode: %+v", r)

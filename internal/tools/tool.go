@@ -49,7 +49,7 @@ const (
 	AllowAlways
 )
 
-// Question is an approval request. Kind is "shell", "mcp" or "write"
+// Question is an approval request. Kind is "shell", "mcp", "web" (a fetch of a private address) or "write"
 // (a tool write outside the workdir: the global prompt templates — slash
 // commands the agent writes for the user); Subject the command name, the
 // server/tool or the path; Detail the full command, the args or the reason.

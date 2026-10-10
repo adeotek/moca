@@ -43,7 +43,7 @@ func TestWebFetchHTMLToMarkdown(t *testing.T) {
 		io.WriteString(w, webFixture)
 	}))
 	defer srv.Close()
-	r := webTool{}.Run(context.Background(), &Env{}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/page"}`))
+	r := webTool{}.Run(context.Background(), &Env{Ask: AutoAllow}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/page"}`))
 	if r.IsError {
 		t.Fatalf("fetch failed: %s", r.Content)
 	}
@@ -89,19 +89,19 @@ func TestWebFetchFormats(t *testing.T) {
 	defer srv.Close()
 	ctx := context.Background()
 
-	r := webTool{}.Run(ctx, &Env{}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/page","format":"text"}`))
+	r := webTool{}.Run(ctx, &Env{Ask: AutoAllow}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/page","format":"text"}`))
 	if r.IsError || !strings.Contains(r.Content, "Intro bold and ital.") || strings.Contains(r.Content, "**") {
 		t.Errorf("text format: %+v", r)
 	}
-	r = webTool{}.Run(ctx, &Env{}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/page","format":"html"}`))
+	r = webTool{}.Run(ctx, &Env{Ask: AutoAllow}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/page","format":"html"}`))
 	if r.IsError || !strings.Contains(r.Content, "<h1>Hello") {
 		t.Errorf("html format: %+v", r)
 	}
-	r = webTool{}.Run(ctx, &Env{}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/json"}`))
+	r = webTool{}.Run(ctx, &Env{Ask: AutoAllow}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/json"}`))
 	if r.IsError || r.Content != `{"ok":true}` {
 		t.Errorf("json passthrough: %+v", r)
 	}
-	r = webTool{}.Run(ctx, &Env{}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/text"}`))
+	r = webTool{}.Run(ctx, &Env{Ask: AutoAllow}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/text"}`))
 	if r.IsError || r.Content != "plain body" {
 		t.Errorf("text passthrough: %+v", r)
 	}
@@ -139,12 +139,12 @@ func TestWebFetchErrors(t *testing.T) {
 		{`{"op":"nope"}`, `op must be "fetch" or "search"`},
 	}
 	for _, c := range cases {
-		r := webTool{}.Run(ctx, &Env{}, json.RawMessage(c.in))
+		r := webTool{}.Run(ctx, &Env{Ask: AutoAllow}, json.RawMessage(c.in))
 		if !r.IsError || !strings.Contains(r.Content, c.want) {
 			t.Errorf("%s: want error containing %q, got %+v", c.in, c.want, r)
 		}
 	}
-	r := webTool{}.Run(ctx, &Env{}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/big"}`))
+	r := webTool{}.Run(ctx, &Env{Ask: AutoAllow}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/big"}`))
 	if r.IsError || !strings.Contains(r.Content, "truncated:") {
 		t.Errorf("big page should be truncated, got err=%v len=%d", r.IsError, len(r.Content))
 	}
@@ -157,7 +157,7 @@ func TestWebFetchTimeout(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer close(block)
-	r := webTool{}.Run(context.Background(), &Env{}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`","timeout":1}`))
+	r := webTool{}.Run(context.Background(), &Env{Ask: AutoAllow}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`","timeout":1}`))
 	if !r.IsError || !strings.Contains(r.Content, "fetch failed") {
 		t.Fatalf("want timeout error, got %+v", r)
 	}
@@ -178,7 +178,7 @@ func TestWebSearchTavilyKeyless(t *testing.T) {
 	}))
 	defer srv.Close()
 	withURL(t, &webTavilyURL, srv.URL)
-	r := webTool{}.Run(context.Background(), &Env{}, json.RawMessage(`{"op":"search","query":"golang testing"}`))
+	r := webTool{}.Run(context.Background(), &Env{Ask: AutoAllow}, json.RawMessage(`{"op":"search","query":"golang testing"}`))
 	if r.IsError {
 		t.Fatalf("search failed: %s", r.Content)
 	}
@@ -255,7 +255,7 @@ func TestWebSearchErrors(t *testing.T) {
 		{`{"op":"search","query":"q","maxResults":0}`, "maxResults must be"},
 		{`{"op":"search","query":"q"}`, "http 401"},
 	} {
-		r := webTool{}.Run(ctx, &Env{}, json.RawMessage(c.in))
+		r := webTool{}.Run(ctx, &Env{Ask: AutoAllow}, json.RawMessage(c.in))
 		if !r.IsError || !strings.Contains(r.Content, c.want) {
 			t.Errorf("%s: want %q, got %+v", c.in, c.want, r)
 		}
@@ -272,7 +272,7 @@ func TestWebSearchEmptyResults(t *testing.T) {
 	}))
 	defer srv.Close()
 	withURL(t, &webTavilyURL, srv.URL)
-	r := webTool{}.Run(context.Background(), &Env{}, json.RawMessage(`{"op":"search","query":"zzz"}`))
+	r := webTool{}.Run(context.Background(), &Env{Ask: AutoAllow}, json.RawMessage(`{"op":"search","query":"zzz"}`))
 	if r.IsError || r.Content != "no results" || !strings.Contains(r.Summary, "0 results") {
 		t.Errorf("empty results: %+v", r)
 	}
@@ -309,6 +309,7 @@ func TestWebFetchWireCapIsReported(t *testing.T) {
 	}))
 	defer srv.Close()
 	env, _ := testEnv(t)
+	env.Ask = AutoAllow
 	r := webTool{}.Run(context.Background(), env, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`"}`))
 	if r.IsError || !strings.Contains(r.Content, "start") || !strings.Contains(r.Content, "read cap") {
 		t.Fatalf("wire cap not reported: %.200q", r.Content)
@@ -325,6 +326,7 @@ func TestWebFetchOverflowSpills(t *testing.T) {
 	}))
 	defer srv.Close()
 	env, _ := testEnv(t)
+	env.Ask = AutoAllow
 	env.SpillDir = t.TempDir()
 	r := webTool{}.Run(context.Background(), env, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`"}`))
 	if r.IsError || len(r.Content) > webOutputMax+600 || strings.Contains(r.Content, "THE-END") {
@@ -355,12 +357,73 @@ func TestWebSearchLogOmitsQuery(t *testing.T) {
 	webTavilyURL = srv.URL
 	t.Cleanup(func() { webTavilyURL = old })
 	log := captureLog(t, slog.LevelDebug)
-	r := webTool{}.Run(context.Background(), &Env{}, json.RawMessage(`{"op":"search","query":"private words"}`))
+	r := webTool{}.Run(context.Background(), &Env{Ask: AutoAllow}, json.RawMessage(`{"op":"search","query":"private words"}`))
 	if r.IsError {
 		t.Fatal(r.Content)
 	}
 	out := log.String()
 	if !strings.Contains(out, `msg="web search" provider=tavily keyed=false results=1`) || strings.Contains(out, "private") {
 		t.Fatalf("search line:\n%s", out)
+	}
+}
+
+func TestWebFetchPrivateAddressNeedsApproval(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("secret"))
+	}))
+	defer srv.Close()
+	input := json.RawMessage(`{"op":"fetch","url":"` + srv.URL + `/"}`)
+
+	var asked []Question
+	deny := func(_ context.Context, q Question) Answer { asked = append(asked, q); return Deny }
+	envs := map[string]*Env{"no asker": {}, "denied": {Ask: deny}}
+	for name, env := range envs {
+		r := webTool{}.Run(context.Background(), env, input)
+		if !r.IsError || !strings.Contains(r.Content, "private or local") || strings.Contains(r.Content, "secret") {
+			t.Errorf("%s: want a refusal, got %+v", name, r)
+		}
+	}
+	if len(asked) != 1 || asked[0].Kind != "web" || asked[0].CanAlways {
+		t.Errorf("want one ask-every-time web question, got %+v", asked)
+	}
+
+	asked = nil
+	allow := func(_ context.Context, q Question) Answer { asked = append(asked, q); return AllowOnce }
+	r := webTool{}.Run(context.Background(), &Env{Ask: allow}, input)
+	if r.IsError || r.Content != "secret" {
+		t.Errorf("approved fetch: %+v", r)
+	}
+	if len(asked) != 1 {
+		t.Errorf("one approval should cover the call, asked %d times", len(asked))
+	}
+}
+
+func TestWebFetchRedirectToPrivateAddressNeedsApproval(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("internal"))
+	}))
+	defer target.Close()
+	// Both hops are private: the first is approved, the redirect must not
+	// be asked again.
+	hop := httptest.NewServer(http.RedirectHandler(target.URL, http.StatusFound))
+	defer hop.Close()
+	n := 0
+	allow := func(context.Context, Question) Answer { n++; return AllowOnce }
+	r := webTool{}.Run(context.Background(), &Env{Ask: allow}, json.RawMessage(`{"op":"fetch","url":"`+hop.URL+`/"}`))
+	if r.IsError || r.Content != "internal" || n != 1 {
+		t.Errorf("redirect: asked %d times, got %+v", n, r)
+	}
+}
+
+func TestWebPrivateHost(t *testing.T) {
+	for host, want := range map[string]bool{
+		"localhost": true, "app.localhost": true, "127.0.0.1": true, "::1": true, "10.1.2.3": true,
+		"192.168.0.10": true, "172.16.0.1": true, "169.254.169.254": true, "0.0.0.0": true,
+		"8.8.8.8": false, "2606:4700:4700::1111": false,
+	} {
+		if got := webPrivateHost(host); got != want {
+			t.Errorf("webPrivateHost(%q) = %v, want %v", host, got, want)
+		}
 	}
 }

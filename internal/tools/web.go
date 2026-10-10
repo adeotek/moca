@@ -8,10 +8,12 @@ import (
 	"html"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -111,13 +113,46 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 	}
 	req.Header.Set("User-Agent", webUA)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,application/json;q=0.8,*/*;q=0.5")
+	// Private targets (loopback, LAN, link-local, cloud metadata) need the
+	// user's yes, asked every time: a fetched page can steer the model there.
+	// One yes covers this call's later hops; the dialer re-checks the address
+	// actually connected to, so a public name resolving to a private IP (DNS
+	// rebinding) cannot slip past the host check.
+	allowed := false
+	askPrivate := func(host string) error {
+		if allowed || !webPrivateHost(host) {
+			return nil
+		}
+		ans := Deny
+		if env.Ask != nil {
+			ans = env.Ask(ctx, Question{Kind: "web", Subject: "fetch " + host,
+				Detail: "a private or local network address — " + u.Redacted()})
+		}
+		if ans == Deny {
+			return fmt.Errorf("refused: %s is a private or local address and the user did not approve fetching it", host)
+		}
+		allowed = true
+		return nil
+	}
+	if err := askPrivate(u.Hostname()); err != nil {
+		return errorf("%v", err)
+	}
+	dialer := &net.Dialer{Timeout: 30 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
+		if host, _, err := net.SplitHostPort(address); err == nil && !allowed && webPrivateIP(net.ParseIP(host)) {
+			return fmt.Errorf("refused: %s resolves to a private or local address and the user did not approve fetching it", u.Hostname())
+		}
+		return nil
+	}}
+	// No proxy: an environment proxy would hide the real target
+	// from the dialer check, so the fetch connects directly.
 	client := &http.Client{
-		Timeout: time.Duration(secs) * time.Second,
-		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
+		Timeout:   time.Duration(secs) * time.Second,
+		Transport: &http.Transport{DialContext: dialer.DialContext, Proxy: nil},
+		CheckRedirect: func(r *http.Request, via []*http.Request) error {
 			if len(via) >= webRedirectMax {
 				return fmt.Errorf("stopped after %d redirects", webRedirectMax)
 			}
-			return nil
+			return askPrivate(r.URL.Hostname())
 		},
 	}
 	t0 := time.Now()
@@ -169,6 +204,34 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 		out += fmt.Sprintf("\n\n[… the page exceeds the %s read cap; only its start was read]", webSize(webReadLimit))
 	}
 	return Result{Content: out, Summary: fmt.Sprintf("%s (%s, %s)", webDisplayURL(u), format, webSize(len(body)))}
+}
+
+// webPrivateHost reports whether a fetch target is a private or local
+// address: localhost names, private/loopback/link-local IP literals, or a
+// name resolving to any such address.
+func webPrivateHost(host string) bool {
+	h := strings.ToLower(strings.TrimSuffix(host, "."))
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return webPrivateIP(ip)
+	}
+	ips, err := net.LookupIP(h)
+	if err != nil {
+		return false // unresolvable: the fetch fails by itself, and the dialer re-checks
+	}
+	for _, ip := range ips {
+		if webPrivateIP(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func webPrivateIP(ip net.IP) bool {
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsInterfaceLocalMulticast())
 }
 
 type webResult struct{ Title, URL, Snippet string }
