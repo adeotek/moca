@@ -124,6 +124,9 @@ type Request struct {
 	MaxTokens    int
 	Effort       Effort
 	NoCacheWrite bool // compaction summaries: never write the prompt cache (§6)
+	// CacheKey routes a session's requests to the same prompt cache where
+	// the protocol supports it (openai prompt_cache_key); "" sends nothing.
+	CacheKey string
 }
 
 // Usage is normalized: Input excludes cache reads and writes on every

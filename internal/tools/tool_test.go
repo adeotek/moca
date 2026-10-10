@@ -58,7 +58,8 @@ func TestSchemasFrozen(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(got) != string(want) {
-		t.Fatal("tool schemas changed. They are frozen after phase 2 (DESIGN.md §4): " +
-			"a change is a v2 discussion. Run with -update only during phase 2.")
+		t.Fatal("tool schemas changed. They are frozen per DESIGN.md §4: " +
+			"a change is a v2 discussion (the web tool was added as rev 19). " +
+			"Run with -update only for an approved change.")
 	}
 }

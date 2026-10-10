@@ -193,7 +193,18 @@ func replaceFuzzy(text, oldS, newS string) (string, []hunk, error) {
 	}
 	orig := fileLines[at : at+len(oldLines)]
 	out := append(append(append([]string{}, fileLines[:at]...), repl...), fileLines[at+len(oldLines):]...)
-	return strings.Join(out, "\n"), []hunk{{Line: at + 1, Old: orig, New: repl}}, nil
+	// A trailing blank old line may match the phantom element after the
+	// file's final newline (strings.Split yields it; the diff's line model,
+	// splitLines, does not): keep it out of the hunk, or the diff indexes
+	// past the end of the file.
+	hunkNew := repl
+	if at+len(oldLines) == len(fileLines) && strings.HasSuffix(text, "\n") && len(orig) > 0 {
+		orig = orig[:len(orig)-1]
+		if n := len(hunkNew); n > 0 && hunkNew[n-1] == "" {
+			hunkNew = hunkNew[:n-1]
+		}
+	}
+	return strings.Join(out, "\n"), []hunk{{Line: at + 1, Old: orig, New: hunkNew}}, nil
 }
 
 // formatDiff renders unified-diff hunks with 3 lines of context, computed

@@ -19,6 +19,7 @@ func toolArgSummary(call llm.ToolCall) string {
 		Tool    string `json:"tool"`
 		Action  string `json:"action"`
 		Query   string `json:"query"`
+		URL     string `json:"url"`
 	}
 	if json.Unmarshal(call.Input, &a) != nil {
 		return ""
@@ -38,6 +39,12 @@ func toolArgSummary(call llm.ToolCall) string {
 		s = a.Pattern
 		if a.Path != "" {
 			s += " in " + a.Path
+		}
+	case "web":
+		if a.URL != "" {
+			s = a.URL
+		} else {
+			s = a.Query
 		}
 	case "mcp":
 		switch {

@@ -7,8 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
+	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/adeotek/moca/internal/llm"
 )
@@ -46,7 +49,7 @@ const (
 	AllowAlways
 )
 
-// Question is an approval request. Kind is "shell", "mcp" or "write"
+// Question is an approval request. Kind is "shell", "mcp", "web" (a fetch of a private address) or "write"
 // (a tool write outside the workdir: the global prompt templates — slash
 // commands the agent writes for the user); Subject the command name, the
 // server/tool or the path; Detail the full command, the args or the reason.
@@ -105,6 +108,28 @@ type Env struct {
 	Reads    *ReadTracker
 	Snap     Snapshotter
 	ShellEnv []string
+	// WebProvider/WebKey are the resolved web.search config for the web
+	// tool (tavily|exa; the empty key is tavily's keyless mode).
+	WebProvider string
+	WebKey      string
+	// SpillDir/SpillPrefix: where over-cap outputs are saved in full
+	// (overflow.go); empty SpillDir turns spilling off.
+	SpillDir    string
+	SpillPrefix string
+	// Plan/PlanWrote drive plan mode (rev 20): Plan confines write/edit to
+	// docs/plans/*.md and suppresses the failing-test investigation banner
+	// (plan runs inspect, they don't fix); PlanWrote is set by a successful
+	// write/edit there and read by the agent at run end.
+	Plan      bool
+	PlanWrote bool
+	// Edited/Unverified/MaxRepeat are per-run (runstate.go, reset by
+	// BeginRun): Edited is set by any successful write/edit; Unverified
+	// names the last code file changed since a verifying shell command;
+	// MaxRepeat is the highest identical-failure count of the run.
+	Edited     bool
+	Unverified string
+	MaxRepeat  int
+	failures   map[string]int
 	// TestSeen/TestFailed/FailingTest/Searched drive the investigation hints:
 	// a failing test run sets TestFailed and FailingTest (the file name parsed
 	// from its output); reading any *_test.go sets TestSeen and clears
@@ -154,11 +179,30 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 		return errorf("invalid JSON arguments for %s (the call was probably cut off at the output limit). "+
 			"Split the work into smaller calls, e.g. write a large file in parts with edit.", call.Name)
 	}
-	res := t.Run(ctx, env, call.Input)
+	start := time.Now()
+	res := runRecovered(ctx, t, env, call)
+	slog.Debug("tool", "name", call.Name, "duration", time.Since(start).Round(time.Millisecond),
+		"is_error", res.IsError, "bytes", len(res.Content))
+	if res.IsError {
+		res.Content += trackFailure(env, call.Name, call.Input, res.Content)
+	}
 	if h := investigationHint(env); h != "" {
 		res.Content += h
 	}
 	return res
+}
+
+// runRecovered runs one tool call, turning a panic inside the tool into an
+// error result: a bug in one tool must not kill the session (and lose the
+// run) — the model is told the call may have partly applied.
+func runRecovered(ctx context.Context, t Tool, env *Env, call llm.ToolCall) (res Result) {
+	defer func() {
+		if p := recover(); p != nil {
+			slog.Error("tool panic", "tool", call.Name, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+			res = errorf("internal error in %s: %v — this is a moca bug, not your input; the call may have partly applied, so check the state (e.g. re-read the file) before retrying", call.Name, p)
+		}
+	}()
+	return t.Run(ctx, env, call.Input)
 }
 
 // investigationHint is the protocol banner appended to every tool result
@@ -168,6 +212,11 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 // fix. State: shell.go (TestFailed/FailingTest, cleared by a green run),
 // read.go (TestSeen/FailingTest), search.go (Searched).
 func investigationHint(env *Env) string {
+	if env.Plan {
+		// Plan mode inspects, it does not fix: a failing test run during
+		// planning must not nag the fix-loop protocol on every result.
+		return ""
+	}
 	if env.FailingTest != "" {
 		return fmt.Sprintf("\n[hint: tests failed: (1) read the failing test file (%s) with the read tool, (2) locate the cause with the search tool, (3) only then edit]", env.FailingTest)
 	}
@@ -182,6 +231,11 @@ func investigationHint(env *Env) string {
 // weak models treat "read the file"/"locate the cause" as satisfied by
 // shell equivalents (cat/sed), so hints alone lose; the guard is what binds.
 func investigationRefusal(env *Env) string {
+	if env.Plan {
+		// Edits in plan mode can only touch docs/plans/*.md — the fix-loop
+		// protocol governs code edits and must not block plan updates.
+		return ""
+	}
 	if !env.TestFailed || (env.TestSeen && env.Searched) {
 		return ""
 	}

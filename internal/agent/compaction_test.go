@@ -23,14 +23,21 @@ const smallModel = `"m":{"contextWindow":32768,"maxOutputTokens":4096}`
 // 12288 — small enough that one big read busts it.
 const minWindowModel = `"m":{"contextWindow":16384,"maxOutputTokens":4096}`
 
-// bigToolTurns scripts n shell turns each returning 20000 chars (~5000
+// bigToolTurns scripts n shell turns each returning 2×10000 chars (~5000
 // tokens); with smallModel the trigger (24576) fires exactly after the 5th
 // batch. (The script server answers every agent request in order, including
 // summary requests, so the follow-up turns must be planned with that.)
 func bigToolTurns(n int) []string {
 	var turns []string
-	for range n {
-		turns = append(turns, toolTurn([2]string{"shell", "{\"command\":\"head -c 20000 /dev/zero | tr '\\\\0' x\"}"}))
+	for i := range n {
+		// Two 10000-char calls: each stays under the shell's 12K cap (no
+		// overflow note), together they are the turn's ~5000 tokens.
+		// Distinct byte counts keep every call unique: identical calls
+		// would be elided as superseded (elision.go).
+		half := func(n int) [2]string {
+			return [2]string{"shell", fmt.Sprintf("{\"command\":\"head -c %d /dev/zero | tr '\\\\0' x\"}", n)}
+		}
+		turns = append(turns, toolTurn(half(10000+2*i), half(10001+2*i)))
 	}
 	return turns
 }
@@ -97,7 +104,7 @@ func TestAutoCompactionShrinksContext(t *testing.T) {
 }
 
 func TestLoopGuardNamesOversizedEntry(t *testing.T) {
-	s := newScript(t, toolTurn([2]string{"read", `{"path":"dist/app.min.js"}`}), textTurn("## Goal\ns"), textTurn("never"))
+	s := newScript(t, toolTurn([2]string{"read", `{"path":"dist/app.min.js","limit":2000}`}), textTurn("## Goal\ns"), textTurn("never"))
 	a, work, _ := startTestWith(t, s, "", minWindowModel)
 	// One read of a big file is capped at 50K chars ≈ 12k tokens: larger
 	// than keepRecent (4096) and, kept verbatim, still over the trigger

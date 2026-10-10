@@ -4,21 +4,26 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/adeotek/moca/internal/llm"
 )
 
-const shellMaxOutput = 30_000
+const (
+	shellMaxOutput = 12_000 // model-facing; the full output spills (overflow.go)
+	shellDetailMax = 30_000 // the TUI's expandable detail
+)
 
 type shellTool struct{}
 
 func (shellTool) Spec() llm.ToolSpec {
 	return llm.ToolSpec{Name: "shell", Description: "Run a shell command (bash -c on Unix, PowerShell on Windows). " +
 		"Stateless: every call starts in the workdir, so use `cd dir && cmd` within one call. stdin is empty; " +
-		"stdout and stderr are merged; output over 30K chars keeps head and tail. Commands are checked against " +
-		"an allowlist; some need user approval and some are never allowed.",
+		"stdout and stderr are merged; output over 12K chars keeps head and tail and saves the full output to a file " +
+		"you can read. Commands are checked against an allowlist; some need user approval and some are never allowed. " +
+		"Don't use it to read, list or search files (use read, ls, search).",
 		Schema: json.RawMessage(`{"type":"object","properties":{` +
 			`"command":{"type":"string","description":"The command line"},` +
 			`"timeout":{"type":"integer","minimum":1,"maximum":300,"description":"Seconds (default 30)"}},` +
@@ -31,6 +36,7 @@ func approve(ctx context.Context, env *Env, names []string, command string, canA
 		if env.Ask != nil {
 			ans = env.Ask(ctx, Question{Kind: "shell", Subject: n, Detail: command, CanAlways: canAlways})
 		}
+		slog.Debug("approval", "name", n, "answer", [...]string{"deny", "once", "always"}[ans])
 		switch ans {
 		case Deny:
 			if canAlways {
@@ -64,6 +70,7 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	}
 	need, every, err := env.Commands.Check(a.Command)
 	if err != nil {
+		slog.Debug("shell refused") // the analyser's reason carries the command text: not logged
 		return errorf("refused: %v", err)
 	}
 	if err := approve(ctx, env, need, a.Command, true); err != nil {
@@ -80,6 +87,11 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	if body != "" && !strings.HasSuffix(body, "\n") {
 		body += "\n"
 	}
+	if len(out.Output) > shellMaxOutput {
+		if note := Spill(env, "shell", out.Output); note != "" {
+			body += note + "\n"
+		}
+	}
 	status := fmt.Sprintf("[exit %d]", out.ExitCode)
 	if out.TimedOut {
 		status = fmt.Sprintf("[timed out after %ds — process group killed]", timeout)
@@ -88,9 +100,16 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	if len(short) > 60 {
 		short = short[:57] + "..."
 	}
+	if verifies(a.Command) {
+		env.Unverified = ""
+	}
 	if testRunCommand(a.Command) {
 		switch {
 		case out.TimedOut: // inconclusive — keep the state
+		case env.Edited && !env.TestFailed:
+			// The run's own work in progress (it changed files before this
+			// red run): the investigation protocol is for failures the run
+			// found, and arming it here locks edit out of the fix.
 		case testRunFailed(a.Command, out.Output, out.ExitCode, out.TimedOut):
 			env.TestFailed = true
 			if !env.TestSeen {
@@ -105,7 +124,7 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 		}
 	}
 	return Result{Content: body + status, IsError: out.ExitCode != 0 || out.TimedOut,
-		Summary: fmt.Sprintf("%s %s", short, status), Detail: Truncate(out.Output, shellMaxOutput)}
+		Summary: fmt.Sprintf("%s %s", short, status), Detail: Truncate(out.Output, shellDetailMax)}
 }
 
 // testRunners identify a test run from its command line (case-insensitive).

@@ -3,6 +3,7 @@
 package agent
 
 import (
+	_ "embed"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -16,44 +17,40 @@ type ServerLine struct{ Name, Description string }
 type PromptInput struct {
 	Workdir, OS, Arch, Date, Git, Version string
 	RTK                                   bool // rtk is on PATH: only then is it advertised
-	Skills                                []skills.Skill
-	Servers                               []ServerLine
-	Instructions                          []skills.Instruction
+	// Verify/VerifySource: the project's detected check command (DetectVerify)
+	// and the file it came from; "" omits the line.
+	Verify, VerifySource string
+	Skills               []skills.Skill
+	Servers              []ServerLine
+	Instructions         []skills.Instruction
 }
 
-const coreTemplate = `You are moca, a coding agent working in a user's repository through tools.
+// The fixed text of the system prompt lives in system-prompt.md so it reads
+// and reviews as prose (no Go string escaping). {{token}} slots are resolved
+// once, at session start, by renderPrompt — the slot set is pinned by
+// TestPromptTemplateSlots; a new slot needs an entry there and in renderPrompt.
+//
+//go:embed system-prompt.md
+var embeddedTemplate string
 
-# Environment
-- Workdir: %s (all relative paths resolve here; file tools cannot leave it)
-- Platform: %s %s
-- Date: %s
-- Git at session start: %s (may be stale; check with git when it matters)
+// promptTemplate trims the file's trailing newline: the markdown file ends
+// with one (editors, diffs), the prompt text must not.
+var promptTemplate = strings.TrimRight(embeddedTemplate, "\n")
 
-# Tools
-- read before you write or edit an existing file; edit refuses files you have not read or that changed since.
-- Prefer edit (small exact replacements) over write for existing files. Copy old_string without read's N| prefixes.
-- read pages large files: use offset/limit instead of re-reading whole files.
-- search finds code (RE2 regex, respects .gitignore); ls lists one directory.
-- Use read/search/ls for files, not shell cat/grep/find/ls — reads are windowed and tracked (edit requires a tracked read of the file).
-- ` + "`shell` is stateless" + `: every call starts in the workdir. Use ` + "`cd dir && cmd`" + ` in one call.
-- shell commands are checked against an allowlist. If one is refused, do not retry variants that
-  do the same thing (find -delete, python -c …); explain what you need and ask the user.
-- Tool calls in one turn run in order; a failed call does not stop the rest.
-- mcp gives access to the MCP servers listed below: search, then describe, then call.
-
-# Working style
-- Do the task end to end: understand, change, verify (build/tests), commit when the task asks, then report briefly.
-- When tests fail, read the failing test file with the read tool before changing code — the assertions say what the code must do.
-- Locate the cause with the search tool before editing; don't guess from the error text alone.
-- Keep changes minimal and in the style of the surrounding code. Don't add unrequested features.
-- When something fails, read the error and fix the cause; don't loop on the same failing call.
-- Final answer: what changed, how it was verified, anything left open. No filler.
-
-# Token discipline
-- Every tool result costs tokens on every later turn. Read windows, not whole files; search before reading.
-%s- Don't echo file contents or tool output back to the user; summarize.
-
-moca %s`
+// renderPrompt resolves every {{token}} in one NewReplacer pass — replacement
+// values containing token-looking text are never re-scanned.
+func renderPrompt(in PromptInput, verify, rtk string) string {
+	return strings.NewReplacer(
+		"{{workdir}}", in.Workdir,
+		"{{os}}", in.OS,
+		"{{arch}}", in.Arch,
+		"{{date}}", in.Date,
+		"{{git}}", in.Git,
+		"{{verify}}", verify,
+		"{{rtk}}", rtk,
+		"{{version}}", in.Version,
+	).Replace(promptTemplate)
+}
 
 func BuildSystemPrompt(in PromptInput) string {
 	var sb strings.Builder
@@ -61,7 +58,11 @@ func BuildSystemPrompt(in PromptInput) string {
 	if in.RTK {
 		rtk = "- Prefer rtk-prefixed variants for shell command output where they exist (e.g. `rtk git status`, `rtk test -- go test ./...`).\n"
 	}
-	fmt.Fprintf(&sb, coreTemplate, in.Workdir, in.OS, in.Arch, in.Date, in.Git, rtk, in.Version)
+	verify := ""
+	if in.Verify != "" {
+		verify = fmt.Sprintf("- Project checks: `%s` (from %s) — run them after changes\n", in.Verify, in.VerifySource)
+	}
+	sb.WriteString(renderPrompt(in, verify, rtk))
 	if len(in.Skills) > 0 {
 		sb.WriteString("\n\n# Skills\nLoad a skill's instructions with read on its path when the task matches.\n")
 		for _, s := range in.Skills {

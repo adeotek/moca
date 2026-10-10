@@ -30,6 +30,15 @@ func DataDir() string {
 	return filepath.Join(home(), ".local", "share", "moca")
 }
 
+// StateDir is ~/.local/state/moca (or $XDG_STATE_HOME/moca): the diagnostic
+// log (logs/).
+func StateDir() string {
+	if x := os.Getenv("XDG_STATE_HOME"); x != "" {
+		return filepath.Join(x, "moca")
+	}
+	return filepath.Join(home(), ".local", "state", "moca")
+}
+
 // ConfigFile is ~/.config/moca/config.jsonc.
 func ConfigFile() string { return filepath.Join(ConfigDir(), "config.jsonc") }
 

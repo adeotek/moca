@@ -54,8 +54,15 @@ func TestSearchCap(t *testing.T) {
 	}
 	write(t, root, "many.txt", sb.String())
 	r := run(t, searchTool{}, env, map[string]any{"pattern": `hit`})
-	if strings.Count(r.Content, "\n") != 200 || !strings.Contains(r.Content, "capped at 200") {
-		t.Fatalf("cap: %d lines", strings.Count(r.Content, "\n"))
+	if strings.Count(r.Content, "\n") != 100 || !strings.Contains(r.Content, "100 of 300 hits shown") {
+		t.Fatalf("cap: %d lines\n%s", strings.Count(r.Content, "\n"), r.Content)
+	}
+	// With a spill dir the full list is saved and named.
+	env.SpillDir, env.SpillPrefix = t.TempDir(), "s1-"
+	r = run(t, searchTool{}, env, map[string]any{"pattern": `hit`})
+	p := spilledPath(t, r.Content)
+	if b, err := os.ReadFile(p); err != nil || strings.Count(string(b), "\n") != 300 {
+		t.Fatalf("spilled list: %v %d", err, strings.Count(string(b), "\n"))
 	}
 }
 

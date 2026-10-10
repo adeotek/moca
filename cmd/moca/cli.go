@@ -32,6 +32,8 @@ usage:
     --effort <level>           override effort for this session (off|minimal|low|medium|high|xhigh|max)
     --approve | --no-approve   project trust for this run (-p default: --no-approve)
     --yolo | --no-yolo         all permission checks off/on for this run (overrides config yolo)
+    --plan                     plan mode: analyze the request and write an implementation plan to docs/plans/ (no other writes)
+  moca --do <plan.md> [-p "<notes>"]  execute an implementation plan step by step, ticking its - [ ] boxes
     --resume <id8|last>        resume a session
     --continue                 latest session in this workdir
     --config <path>            config file (dev/test)
@@ -44,6 +46,7 @@ usage:
   moca mcp import              import MCP servers from Claude Code / OpenCode / Pi configs
   moca mcp index               prebuild the persisted MCP discovery index
   moca --version
+  logs: ~/.local/state/moca/logs/<date>-<pid>.log — config log.level (info|debug|off); MOCA_LOG overrides for one run
 `)
 }
 
@@ -54,6 +57,8 @@ type Options struct {
 	Effort     string
 	Approve    *bool
 	Yolo       *bool
+	Plan       bool
+	Do         string // plan file to execute (implies a one-shot run)
 	Resume     string
 	Continue   bool
 	Version    bool
@@ -82,6 +87,8 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 	noApprove := fs.Bool("no-approve", false, "skip project resources for this run")
 	yolo := fs.Bool("yolo", false, "turn all permission checks off for this run")
 	noYolo := fs.Bool("no-yolo", false, "keep permission checks on (overrides config yolo)")
+	fs.BoolVar(&o.Plan, "plan", false, "plan mode: write an implementation plan to docs/plans/, change nothing else")
+	fs.StringVar(&o.Do, "do", "", "execute the implementation plan in this file (one-shot; -p adds instructions)")
 	fs.StringVar(&o.Resume, "resume", "", "resume session id8 | last")
 	fs.BoolVar(&o.Continue, "continue", false, "resume latest session in this workdir")
 	fs.BoolVar(&o.Version, "version", false, "print version")
@@ -126,7 +133,13 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 		}
 		o.Prompt = strings.TrimRight(string(b), "\n")
 	}
-	if o.OneShot && strings.TrimSpace(o.Prompt) == "" {
+	if o.Do != "" {
+		if o.Plan {
+			return o, usageError{errors.New("--do and --plan are mutually exclusive (plan mode only writes docs/plans/)")}
+		}
+		o.OneShot = true // -p, when given, adds instructions
+	}
+	if o.OneShot && o.Do == "" && strings.TrimSpace(o.Prompt) == "" {
 		return o, usageError{errors.New("-p needs a non-empty prompt")}
 	}
 	if o.Resume != "" && o.Continue {

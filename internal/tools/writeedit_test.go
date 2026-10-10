@@ -177,3 +177,24 @@ func TestEditTool(t *testing.T) {
 		t.Fatal("edit on missing file")
 	}
 }
+
+// TestWriteEditTrackRunChanges: a successful write/edit marks the run as
+// changed and, for code files, unverified (the verification nudge, C1); a
+// docs file changes the run but needs no build.
+func TestWriteEditTrackRunChanges(t *testing.T) {
+	env, root := testEnv(t)
+	if r := run(t, writeTool{}, env, map[string]any{"path": "NOTES.md", "content": "x\n"}); r.IsError {
+		t.Fatal(r.Content)
+	}
+	if !env.Edited || env.Unverified != "" {
+		t.Fatalf("docs write: edited=%v unverified=%q", env.Edited, env.Unverified)
+	}
+	os.WriteFile(filepath.Join(root, "a.go"), []byte("package a\n"), 0o644)
+	run(t, readTool{}, env, map[string]any{"path": "a.go"})
+	if r := run(t, editTool{}, env, map[string]any{"path": "a.go", "old_string": "package a", "new_string": "package b"}); r.IsError {
+		t.Fatal(r.Content)
+	}
+	if env.Unverified != "a.go" {
+		t.Fatalf("code edit: unverified=%q", env.Unverified)
+	}
+}

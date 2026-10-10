@@ -1,0 +1,1 @@
+Plan adding an on-disk response cache with a configurable TTL to the fetcher.

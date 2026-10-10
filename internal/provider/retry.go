@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"math/rand/v2"
 	"time"
 
@@ -50,7 +51,35 @@ const maxRetryAfter = 60 * time.Second
 
 func WithRetry(a Adapter, p RetryPolicy) Adapter { return &retrying{a, p} }
 
+// Stream logs one request through the retry loop (SPECS §13.5): debug lines
+// for the request and its response, an info line for a final failure. Every
+// adapter is wrapped here, so this is the one place the wire is logged.
 func (r *retrying) Stream(ctx context.Context, req llm.Request, emit func(llm.Event)) (llm.Response, error) {
+	t0 := time.Now()
+	var first time.Time
+	slog.Debug("request", "model", req.Model, "messages", len(req.Messages), "tools", len(req.Tools))
+	resp, err := r.stream(ctx, req, func(e llm.Event) {
+		if first.IsZero() {
+			first = time.Now()
+		}
+		emit(e)
+	})
+	switch {
+	case err == nil:
+		attrs := []any{"model", req.Model, "duration", time.Since(t0).Round(time.Millisecond), "stop", string(resp.Stop)}
+		if !first.IsZero() {
+			attrs = append(attrs, "ttfb", first.Sub(t0).Round(time.Millisecond))
+		}
+		attrs = append(attrs, slog.Group("usage", "in", resp.Usage.Input, "out", resp.Usage.Output,
+			"cache_read", resp.Usage.CacheRead, "cache_write", resp.Usage.CacheWrite))
+		slog.Debug("response", attrs...)
+	case ctx.Err() == nil:
+		slog.Info("request failed", "model", req.Model, "cause", causeClass(err), "error", err)
+	}
+	return resp, err
+}
+
+func (r *retrying) stream(ctx context.Context, req llm.Request, emit func(llm.Event)) (llm.Response, error) {
 	attempt, midRetried := 0, false
 	for {
 		streamed := false
@@ -100,6 +129,7 @@ func (r *retrying) pause(ctx context.Context, cause error, base time.Duration, n
 		wait = he.RetryAfter
 	}
 	wait = min(wait, maxRetryAfter)
+	slog.Info("retry", "attempt", n, "of", of, "wait", wait.Round(time.Millisecond), "cause", causeClass(cause))
 	if r.p.Notify != nil {
 		r.p.Notify(RetryNotice{Attempt: n, Max: of, Wait: wait, Err: cause})
 	}

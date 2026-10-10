@@ -33,6 +33,7 @@ type Status struct {
 	Sub           bool
 	Hard          bool
 	Yolo          bool
+	Plan          bool
 }
 
 // Models lists the catalog for /model (sorted by qualified id).
@@ -205,12 +206,12 @@ func (a *Agent) contextTokensLocked() int {
 		return a.anchorTokens + compact.Tokens(n)
 	}
 	return compact.Tokens(compact.RequestChars(a.opts.System, a.opts.Tools.Specs(),
-		TransformHistory(session.Messages(a.entries), a.model.Qualified())))
+		withPlanEnvelope(TransformHistory(session.Messages(a.entries), a.model.Qualified()), a.plan)))
 }
 
 func (a *Agent) Status() Status {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return Status{Model: a.model, Effort: a.effort, ContextTokens: a.contextTokensLocked(), Window: a.model.ContextWindow,
-		Usage: a.usage, Cost: a.cost, Sub: a.opts.Config.Providers[a.model.Provider].Auth == "oauth", Hard: a.hard != nil, Yolo: a.yolo}
+		Usage: a.usage, Cost: a.cost, Sub: a.opts.Config.Providers[a.model.Provider].Auth == "oauth", Hard: a.hard != nil, Yolo: a.yolo, Plan: a.plan}
 }

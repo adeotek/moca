@@ -1,6 +1,7 @@
 package tools
 
-// Builtins returns the seven frozen tools in schema order (§4).
+// Builtins returns the eight frozen tools in schema order (§4, web added
+// rev 19).
 func Builtins() []Tool {
-	return []Tool{readTool{}, writeTool{}, editTool{}, shellTool{}, searchTool{}, lsTool{}, mcpStub{}}
+	return []Tool{readTool{}, writeTool{}, editTool{}, shellTool{}, searchTool{}, lsTool{}, webTool{}, mcpStub{}}
 }

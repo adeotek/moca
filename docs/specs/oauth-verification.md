@@ -174,7 +174,7 @@ open-source flow above. `api_key` remains supported and is the fallback if the p
 
 ## 3. Implementation deltas vs. the phase plan (recorded for the plan's Implementation notes)
 
-The phase plan (`docs/plans/phase-7-oauth-release.md`) was drafted before this verification. Reality adjusts it:
+The phase-7 plan was drafted before this verification. Reality adjusts it:
 
 1. **Anthropic**: no OAuth code; config validation + docs only (plan's "api_key only" branch — applied).
 2. **OpenAI uses dynamic client registration** (plan assumed a fixed per-provider client id): the store keeps

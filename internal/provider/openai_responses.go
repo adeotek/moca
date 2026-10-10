@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/adeotek/moca/internal/llm"
@@ -16,10 +17,19 @@ type responsesAdapter struct {
 	url  string
 	cred CredentialFunc
 	hc   *http.Client
+	// cacheKey: the server is api.openai.com, which takes prompt_cache_key;
+	// other Responses-compatible servers may reject unknown fields. The
+	// subscription route is gated separately, by oauth.
+	cacheKey bool
 }
 
 func newOpenAIResponses(m Model, baseURL string, cred CredentialFunc, hc *http.Client) Adapter {
-	return &responsesAdapter{m: m, url: strings.TrimRight(baseURL, "/") + "/responses", cred: cred, hc: hc}
+	u := strings.TrimRight(baseURL, "/") + "/responses"
+	official := false
+	if pu, err := url.Parse(u); err == nil {
+		official = pu.Hostname() == "api.openai.com"
+	}
+	return &responsesAdapter{m: m, url: u, cred: cred, hc: hc, cacheKey: official}
 }
 
 func (a *responsesAdapter) body(req llm.Request, oauth bool) map[string]any {
@@ -56,6 +66,11 @@ func (a *responsesAdapter) body(req llm.Request, oauth bool) map[string]any {
 	}
 	b := map[string]any{"model": req.Model, "input": input, "stream": true, "store": false,
 		"include": []string{"reasoning.encrypted_content"}}
+	if req.CacheKey != "" && (a.cacheKey || oauth) {
+		// Both the API and the subscription route take it (the Codex CLI
+		// sends its conversation id): same key, same cache shard.
+		b["prompt_cache_key"] = req.CacheKey
+	}
 	if !oauth {
 		// The subscription route rejects max_output_tokens
 		// (docs/specs/oauth-verification.md §2.4).

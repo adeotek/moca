@@ -1,0 +1,1 @@
+user.go and order.go duplicate the email validation and normalization logic. Extract it into a single shared function in a new file validate.go and use it from both places. Behavior must not change and all tests must keep passing.

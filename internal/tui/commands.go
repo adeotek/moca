@@ -27,7 +27,7 @@ type Parsed struct {
 }
 
 // BuiltinCommands win over prompt templates on a name collision (§10).
-var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "clear", "resume", "sessions", "compact", "cost", "undo", "copy", "show", "login", "logout", "help", "exit"}
+var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "plan", "do", "clear", "resume", "sessions", "compact", "cost", "undo", "copy", "show", "login", "logout", "help", "exit"}
 
 // builtinAliases resolve to their built-in unless a prompt template already
 // owns the name (`/q`, `/quit` → `/exit`) — only the full built-in names are
@@ -39,6 +39,8 @@ var builtinHelp = map[string]string{
 	"effort":   "[level]  show or set effort (off|minimal|low|medium|high|xhigh|max)",
 	"hard":     "toggle modelHard + high effort",
 	"yolo":     "toggle yolo mode: ALL permission checks off (between runs only)",
+	"plan":     "[request]  toggle plan mode (runs write an implementation plan to docs/plans/, change nothing else); with a request, plan it now",
+	"do":       "<plan.md> [instructions]  execute an implementation plan step by step, ticking its - [ ] boxes",
 	"clear":    "start a new session (the old one stays resumable)",
 	"resume":   "[id]  pick an earlier session of this directory to continue",
 	"sessions": "list, switch or delete this directory's sessions",

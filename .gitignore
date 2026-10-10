@@ -24,3 +24,6 @@ dist/
 !**/graphify-out/graph.json
 !**/graphify-out/*-callflow.html
 !**/graphify-out/wiki/
+
+# evals — per-run results are machine-local; BASELINE.md is the record
+/test/evals/results/

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -120,7 +121,13 @@ func (m *Manager) ensure(ctx context.Context, name string, st *state) error {
 	}
 	hctx, cancel := context.WithTimeout(ctx, m.o.HandshakeTimeout)
 	defer cancel()
+	t0 := time.Now()
 	err := m.start(hctx, name, st)
+	if err == nil {
+		slog.Info("mcp server ready", "server", name, "tools", len(st.tools), "duration", time.Since(t0).Round(time.Millisecond))
+	} else if ctx.Err() == nil {
+		slog.Warn("mcp server start failed", "server", name, "cause", startFailClass(err))
+	}
 	if err != nil && ctx.Err() == nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			err = fmt.Errorf("mcp server %s: no answer within %s while starting", name, m.o.HandshakeTimeout)
@@ -131,6 +138,19 @@ func (m *Manager) ensure(ctx context.Context, name string, st *state) error {
 		st.failErr = nil
 	}
 	return err
+}
+
+// startFailClass names a start failure for the log without its text: a stdio
+// server's stderr tail and an HTTP request's URL (query, userinfo) both ride
+// in the error string.
+func startFailClass(err error) string {
+	switch {
+	case errors.Is(err, errTransportDead):
+		return "server_exited"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	}
+	return "error"
 }
 
 func (m *Manager) start(ctx context.Context, name string, st *state) error {
@@ -168,7 +188,7 @@ func (m *Manager) start(ctx context.Context, name string, st *state) error {
 }
 
 // armTimer (re)starts the idle timer. Caller holds st.mu.
-func (m *Manager) armTimer(_ string, st *state) {
+func (m *Manager) armTimer(name string, st *state) {
 	if st.timer != nil {
 		st.timer.Stop()
 	}
@@ -176,6 +196,7 @@ func (m *Manager) armTimer(_ string, st *state) {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		if st.busy == 0 && st.cl != nil {
+			slog.Info("mcp server idle stop", "server", name)
 			st.cl.t.Close()
 			st.cl = nil
 		}
@@ -303,8 +324,11 @@ func (m *Manager) Call(ctx context.Context, server, tool string, args json.RawMe
 		cl := st.cl
 		st.mu.Unlock()
 		cctx, cancel := context.WithTimeout(ctx, m.o.CallTimeout)
+		t0 := time.Now()
 		res, err := cl.callTool(cctx, tool, args)
 		cancel()
+		slog.Debug("mcp call", "server", server, "tool", tool, "duration", time.Since(t0).Round(time.Millisecond),
+			"is_error", err != nil || res.IsError)
 		st.mu.Lock()
 		st.busy--
 		// The classification keys on the transports' own sentinels, never on
@@ -323,6 +347,10 @@ func (m *Manager) Call(ctx context.Context, server, tool string, args json.RawMe
 		readOnly := isTrue(t.Annotations.ReadOnlyHint) && !isTrue(t.Annotations.DestructiveHint)
 		replaySafe := expired || errors.Is(err, errNotSent) || readOnly
 		retry := attempt == 0 && (expired || dead) && replaySafe && !m.closed.Load()
+		if expired || dead || timedOut {
+			slog.Info("mcp call failed", "server", server, "tool", tool, "timeout", timedOut, "dead", dead,
+				"expired", expired, "retry", retry)
+		}
 		if st.busy == 0 && st.cl != nil {
 			m.armTimer(server, st)
 		}

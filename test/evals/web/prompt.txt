@@ -1,0 +1,1 @@
+Find out the latest stable Go release from the official Go website and write just its version string (in the form go1.N.M) to GO_VERSION.txt.

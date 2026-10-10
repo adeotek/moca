@@ -43,7 +43,7 @@ func TestReadWindowAndFooter(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(root, "f.txt"), []byte(sb.String()), 0o644)
 	r := run(t, readTool{}, env, map[string]any{"path": "f.txt", "offset": 3, "limit": 2})
-	if r.IsError || r.Content != "3|line3\n4|line4\n[lines 3-4 of 10 — use offset=5 to continue]" {
+	if r.IsError || r.Content != "3|line3\n4|line4\n[lines 3-4 of 10 — use offset=5 to continue, or search for what you need]" {
 		t.Fatalf("%q", r.Content)
 	}
 	r = run(t, readTool{}, env, map[string]any{"path": "f.txt", "offset": 9})
@@ -56,6 +56,10 @@ func TestReadCaps(t *testing.T) {
 	env, root := testEnv(t)
 	os.WriteFile(filepath.Join(root, "long.txt"), []byte(strings.Repeat("x\n", 2500)), 0o644)
 	r := run(t, readTool{}, env, map[string]any{"path": "long.txt"})
+	if !strings.Contains(r.Content, "[lines 1-400 of 2500 — use offset=401") {
+		t.Fatalf("400-line default window: %q", r.Content[len(r.Content)-80:])
+	}
+	r = run(t, readTool{}, env, map[string]any{"path": "long.txt", "limit": 5000})
 	if !strings.Contains(r.Content, "[lines 1-2000 of 2500") {
 		t.Fatal("2000-line cap")
 	}
@@ -65,7 +69,7 @@ func TestReadCaps(t *testing.T) {
 		t.Fatal("per-line cap")
 	}
 	os.WriteFile(filepath.Join(root, "chars.txt"), []byte(strings.Repeat(strings.Repeat("z", 1000)+"\n", 100)), 0o644)
-	r = run(t, readTool{}, env, map[string]any{"path": "chars.txt"})
+	r = run(t, readTool{}, env, map[string]any{"path": "chars.txt", "limit": 2000})
 	if len(r.Content) > 50_000+200 || !strings.Contains(r.Content, "use offset=") {
 		t.Fatalf("50K char cap: %d", len(r.Content))
 	}
