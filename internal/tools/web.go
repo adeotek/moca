@@ -114,13 +114,15 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 	req.Header.Set("User-Agent", webUA)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,application/json;q=0.8,*/*;q=0.5")
 	// Private targets (loopback, LAN, link-local, cloud metadata) need the
-	// user's yes, asked every time: a fetched page can steer the model there.
-	// One yes covers this call's later hops; the dialer re-checks the address
-	// actually connected to, so a public name resolving to a private IP (DNS
-	// rebinding) cannot slip past the host check.
-	allowed := false
+	// user's yes, asked every time and per host: a fetched page can steer the
+	// model there, and approving one host must not open the rest of the
+	// network to a redirect. The dialer admits only the addresses of approved
+	// hosts, so a public name that resolves to a private IP (DNS rebinding)
+	// cannot slip past the host check.
+	approved := map[string]bool{} // host names asked about
+	okIPs := map[string]bool{}    // addresses of approved hosts
 	askPrivate := func(host string) error {
-		if allowed || !webPrivateHost(host) {
+		if approved[host] || !webPrivateHost(host) {
 			return nil
 		}
 		ans := Deny
@@ -131,20 +133,28 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 		if ans == Deny {
 			return fmt.Errorf("refused: %s is a private or local address and the user did not approve fetching it", host)
 		}
-		allowed = true
+		approved[host] = true
+		if ip := net.ParseIP(host); ip != nil {
+			okIPs[ip.String()] = true
+		} else if ips, err := net.LookupIP(host); err == nil {
+			for _, ip := range ips {
+				okIPs[ip.String()] = true
+			}
+		}
 		return nil
 	}
 	if err := askPrivate(u.Hostname()); err != nil {
 		return errorf("%v", err)
 	}
 	dialer := &net.Dialer{Timeout: 30 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
-		if host, _, err := net.SplitHostPort(address); err == nil && !allowed && webPrivateIP(net.ParseIP(host)) {
-			return fmt.Errorf("refused: %s resolves to a private or local address and the user did not approve fetching it", u.Hostname())
+		host, _, err := net.SplitHostPort(address)
+		if ip := net.ParseIP(host); err == nil && webPrivateIP(ip) && !okIPs[ip.String()] {
+			return fmt.Errorf("refused: %s resolves to a private or local address the user did not approve", host)
 		}
 		return nil
 	}}
-	// No proxy: an environment proxy would hide the real target
-	// from the dialer check, so the fetch connects directly.
+	// No proxy: an environment proxy would hide the real target from the
+	// dialer check, so the fetch connects directly.
 	client := &http.Client{
 		Timeout:   time.Duration(secs) * time.Second,
 		Transport: &http.Transport{DialContext: dialer.DialContext, Proxy: nil},

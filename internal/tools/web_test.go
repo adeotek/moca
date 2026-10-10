@@ -427,3 +427,20 @@ func TestWebPrivateHost(t *testing.T) {
 		}
 	}
 }
+
+func TestWebFetchRedirectToOtherPrivateHostAsksAgain(t *testing.T) {
+	hop := httptest.NewServer(http.RedirectHandler("http://169.254.169.254/latest", http.StatusFound))
+	defer hop.Close()
+	var subjects []string
+	ask := func(_ context.Context, q Question) Answer {
+		subjects = append(subjects, q.Subject)
+		if strings.Contains(q.Subject, "169.254") {
+			return Deny
+		}
+		return AllowOnce
+	}
+	r := webTool{}.Run(context.Background(), &Env{Ask: ask}, json.RawMessage(`{"op":"fetch","url":"`+hop.URL+`/"}`))
+	if !r.IsError || len(subjects) != 2 {
+		t.Errorf("want a second question for the metadata host, asked %v, got %+v", subjects, r)
+	}
+}
