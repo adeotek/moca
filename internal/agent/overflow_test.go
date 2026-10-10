@@ -62,6 +62,8 @@ func TestPruneOverflow(t *testing.T) {
 	os.Chtimes(filepath.Dir(oldDir), old, old) // dir mtime governs a dir entry
 	oldFlat := mk("bbbbbbbb-s-1.txt", old)     // legacy flat layout
 	fresh := mk("cccccccccccccccc/s-1.txt", time.Now())
+	keptInOldDir := mk("eeeeeeeeeeeeeeee/s-1.txt", time.Now())
+	os.Chtimes(filepath.Dir(keptInOldDir), old, old) // the dir's own mtime must not prune a fresh file inside
 
 	pruneOverflow(30)
 	if _, err := os.Stat(oldDir); !os.IsNotExist(err) {
@@ -72,6 +74,9 @@ func TestPruneOverflow(t *testing.T) {
 	}
 	if _, err := os.Stat(fresh); err != nil {
 		t.Fatalf("fresh entry must stay: %v", err)
+	}
+	if _, err := os.Stat(keptInOldDir); err != nil {
+		t.Fatalf("a dir with an old mtime but a fresh file inside must stay: %v", err)
 	}
 	keep := mk("dddddddddddddddd/s-1.txt", old)
 	os.Chtimes(filepath.Dir(keep), old, old)

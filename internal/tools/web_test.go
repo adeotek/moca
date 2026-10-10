@@ -3,8 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -420,11 +422,78 @@ func TestWebPrivateHost(t *testing.T) {
 	for host, want := range map[string]bool{
 		"localhost": true, "app.localhost": true, "127.0.0.1": true, "::1": true, "10.1.2.3": true,
 		"192.168.0.10": true, "172.16.0.1": true, "169.254.169.254": true, "0.0.0.0": true,
-		"8.8.8.8": false, "2606:4700:4700::1111": false,
+		// A zoned literal (RFC 6874 %25 in a URL) is still that address; the
+		// zone picks an interface and must not hide it from the check.
+		// net.ParseIP fails on the zone form, so this leans on LookupIP's
+		// netip fast path (lookup.go) — pinned so it can never silently skip.
+		"::1%lo": true, "fe80::1%eth0": true,
+		"8.8.8.8": false, "2606:4700:4700::1111": false, "2001:db8::1%eth0": false,
 	} {
 		if got := webPrivateHost(host); got != want {
 			t.Errorf("webPrivateHost(%q) = %v, want %v", host, got, want)
 		}
+	}
+}
+
+// TestWebFetchZonedLiteralNeedsApproval: "http://[::1%25lo]/" is a loopback
+// literal with a zone. net.ParseIP cannot parse the zoned form, so the ask
+// leans on the resolver's fast path and the dialer's own check skips it —
+// the gate must hold end to end anyway: denied (or no asker) refuses before
+// any connection, approved reaches the host.
+func TestWebFetchZonedLiteralNeedsApproval(t *testing.T) {
+	ln, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("no IPv6 loopback: %v", err)
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("secret"))
+	})}
+	go srv.Serve(ln)
+	defer srv.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	zone := ""
+	for _, z := range []string{"lo", "lo0"} { // Linux, then macOS naming
+		if c, err := net.Dial("tcp", fmt.Sprintf("[::1%%%s]:%d", z, port)); err == nil {
+			c.Close()
+			zone = z
+			break
+		}
+	}
+	if zone == "" {
+		t.Skip("no loopback interface zone to dial through")
+	}
+	raw := json.RawMessage(fmt.Sprintf(`{"op":"fetch","url":"http://[::1%%25%s]:%d/"}`, zone, port))
+
+	var asked []Question
+	deny := func(_ context.Context, q Question) Answer { asked = append(asked, q); return Deny }
+	for name, env := range map[string]*Env{"no asker": {}, "denied": {Ask: deny}} {
+		r := webTool{}.Run(context.Background(), env, raw)
+		if !r.IsError || !strings.Contains(r.Content, "private or local") || strings.Contains(r.Content, "secret") {
+			t.Errorf("%s: want a refusal, got %+v", name, r)
+		}
+	}
+	if len(asked) != 1 || asked[0].Kind != "web" || asked[0].CanAlways {
+		t.Errorf("want one ask-every-time web question, got %+v", asked)
+	}
+
+	r := webTool{}.Run(context.Background(), &Env{Ask: AutoAllow}, raw)
+	if r.IsError || r.Content != "secret" {
+		t.Errorf("approved zoned fetch: %+v", r)
+	}
+}
+
+// TestWebDataAttrsAreNotLinkAttrs: only a real href/src/alt counts — the
+// $attr sits after the real one so a data-* match would win the map.
+func TestWebDataAttrsAreNotLinkAttrs(t *testing.T) {
+	h := `<p><img src="/real.png" data-src="/lazy.png" alt="pic">` +
+		`<a href="https://good" data-href="https://evil">x</a></p>`
+	got := webHTMLToMarkdown(h)
+	if !strings.Contains(got, "![pic](/real.png)") || !strings.Contains(got, "[x](https://good)") {
+		t.Fatalf("data-* attributes leaked into the link markup: %q", got)
+	}
+	if strings.Contains(got, "lazy.png") || strings.Contains(got, "evil") {
+		t.Fatalf("a data-* attribute value was used: %q", got)
 	}
 }
 

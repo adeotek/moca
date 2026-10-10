@@ -26,10 +26,11 @@ import (
 // keyless by default, a configured key lifts the rate limit; exa with a
 // key).
 //
-// Like the allowlisted `curl`, it reads the network without an approval
-// prompt: the user's gate is the config, not a Question. Fetched content is
-// untrusted input — the system prompt says so and the shell env never sees
-// the search key (config.EnvRefs strips it).
+// Like the allowlisted `curl`, it reads the network; a public fetch needs no
+// approval, while a private or local target asks the user every time and per
+// host (the private-address gate, SPECS §11). Fetched content is untrusted
+// input — the system prompt says so and the shell env never sees the search
+// key (config.EnvRefs strips it).
 type webTool struct{}
 
 const (

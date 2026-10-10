@@ -32,6 +32,10 @@ func TestStaleResults(t *testing.T) {
 		use("6", "write", `{"path":"c.go","content":"x"}`), res("6", "refused", true),
 		use("7", "shell", `{"command":"go test ./..."}`), res("7", big, true),
 		use("8", "shell", `{"command":"go test ./..."}`), res("8", "ok", false),
+		use("9", "read", `{"path":"d.go"}`), res("9", big, false), // a later errored repeat is not a replacement
+		use("10", "read", `{"path":"d.go"}`), res("10", "boom", true),
+		res("97", big, false), // orphan results: their call left the window — they match nothing
+		res("98", big, false),
 	}
 	ids, saved := staleResults(live)
 	if strings.Join(ids, ",") != "r1,r2,r7" || saved < 2900 {
