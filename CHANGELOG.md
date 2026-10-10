@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Diagnostics
+
+- **A diagnostic log, safe to attach to bug reports.** Every TUI and `-p` run writes a small logfmt file to `~/.local/state/moca/logs/` — retries, MCP server lifecycle, how each run ended, tool panics with their stack — and never prompts, code, command text or keys (a redaction net blanks secret-named fields and URL credentials). `MOCA_LOG=debug` adds per-request and per-tool-call detail for one run; `log.level` (`info`/`debug`/`off`) sets the default. Files are capped at 10 MB and pruned with the snapshot retention.
+
 ## v0.3.0-beta (2026-10-09)
 
 First-run setup mode, a `web` tool, plan mode and a measured harness pass: a config without a model opens the TUI with `/login` + `/model` guidance instead of stopping; the agent can fetch pages and search the web; `--plan`/`/plan` write an implementation plan instead of changing code, and `--do`/`/do` execute one step by step — still one binary, still no framework.

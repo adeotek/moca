@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ func approve(ctx context.Context, env *Env, names []string, command string, canA
 		if env.Ask != nil {
 			ans = env.Ask(ctx, Question{Kind: "shell", Subject: n, Detail: command, CanAlways: canAlways})
 		}
+		slog.Debug("approval", "name", n, "answer", [...]string{"deny", "once", "always"}[ans])
 		switch ans {
 		case Deny:
 			if canAlways {
@@ -68,6 +70,7 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	}
 	need, every, err := env.Commands.Check(a.Command)
 	if err != nil {
+		slog.Debug("shell refused") // the analyser's reason carries the command text: not logged
 		return errorf("refused: %v", err)
 	}
 	if err := approve(ctx, env, need, a.Command, true); err != nil {

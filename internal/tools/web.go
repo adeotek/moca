@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -119,6 +120,7 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 			return nil
 		},
 	}
+	t0 := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
 		return errorf("fetch failed: %v", err)
@@ -132,6 +134,8 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 	if capped {
 		body = body[:webReadLimit]
 	}
+	slog.Debug("web fetch", "url", u, "status", resp.StatusCode, "type", resp.Header.Get("Content-Type"),
+		"bytes", len(body), "duration", time.Since(t0).Round(time.Millisecond))
 	if resp.StatusCode >= 400 {
 		return errorf("http %d %s for %s\n%s", resp.StatusCode, http.StatusText(resp.StatusCode),
 			u.Redacted(), webOneLine(cutWeb(string(body), webErrorBodyMax)))
@@ -189,6 +193,7 @@ func webSearch(ctx context.Context, env *Env, query string, max *int) Result {
 		results []webResult
 		err     error
 	)
+	t0 := time.Now()
 	switch provider {
 	case "tavily":
 		results, err = webTavily(ctx, env.WebKey, q, n)
@@ -201,8 +206,11 @@ func webSearch(ctx context.Context, env *Env, query string, max *int) Result {
 		return errorf("search failed: web.search.provider %q unknown (want tavily|exa)", provider)
 	}
 	if err != nil {
+		slog.Debug("web search failed", "provider", provider, "error", err)
 		return errorf("search failed: %v", err)
 	}
+	slog.Debug("web search", "provider", provider, "keyed", env.WebKey != "", "results", len(results),
+		"duration", time.Since(t0).Round(time.Millisecond))
 	if len(results) == 0 {
 		return Result{Content: "no results", Summary: fmt.Sprintf("%q (0 results)", q)}
 	}

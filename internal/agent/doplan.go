@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-
-	"github.com/adeotek/moca/internal/session"
 )
 
 // Plan execution (§14, DESIGN rev 21): `/do <plan>` / `--do <plan>` runs an
@@ -83,6 +81,6 @@ func (a *Agent) nudgeDoPlan() (bool, error) {
 	if n == 0 {
 		return false, nil
 	}
-	_, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(doNudge(a.doPlanRel, n))})
+	err := a.nudge("do", doNudge(a.doPlanRel, n))
 	return err == nil, err
 }

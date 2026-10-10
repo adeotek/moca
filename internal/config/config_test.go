@@ -33,6 +33,9 @@ func TestSpecExampleDecodesIntact(t *testing.T) {
 	if c.Web.Search.Provider != "tavily" {
 		t.Fatalf("web.search lost: %+v", c.Web)
 	}
+	if c.Log.Level != "info" {
+		t.Fatalf("log lost: %+v", c.Log)
+	}
 	if !slices.Contains(c.Shell.Allow, "graphify") || len(c.Shell.Allow) != 32 {
 		t.Fatalf("allow list: %v", c.Shell.Allow)
 	}

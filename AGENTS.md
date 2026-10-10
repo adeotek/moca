@@ -32,6 +32,7 @@ mise run <task>                             # the make targets, as mise tasks
 
 - Entrypoint `cmd/moca/main.go`; `run()` is the testable core. Sibling files handle `-p`, the TUI, login, `mcp` and `update` subcommands.
 - Strict import direction: `llm`/`config`/`update` import nothing internal → `provider` (llm, config) → `mcp` (tools, config, llm) → `agent` (everything) → `tui` (agent + pure pkgs). Never reverse. `tools`/`permissions`/`session`/`skills`/`compact` are mutually independent and use structural interfaces, not shared types.
+- Logging: packages call the standard `log/slog` directly; `internal/applog` (the file handler, redaction, caps) is imported **only** by `cmd/moca`. Log metadata only — never prompts, file contents, command text or secrets (SPECS §13.5).
 - Exactly **eight frozen tools** (the `web` tool joined in DESIGN rev 19); schemas are golden (`internal/tools/testdata/schemas.golden.json`). Changing a schema is a v2 discussion; description-only edits (rev 21) are batched into one golden update — each one costs every user a prompt-cache reset.
 
 ## Conventions & gotchas

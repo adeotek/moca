@@ -74,6 +74,27 @@ func retryable(err error) bool {
 		(errors.As(err, &ne) && ne.Timeout()) || http2Transient(err)
 }
 
+// causeClass names a failure for the log: enough to group failures without
+// their text.
+func causeClass(err error) string {
+	var he *HTTPError
+	var ne net.Error
+	switch {
+	case errors.Is(err, ErrContextOverflow):
+		return "overflow"
+	case errors.Is(err, ErrStall):
+		return "stall"
+	case errors.As(err, &he):
+		return fmt.Sprintf("http_%d", he.Status)
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
+		return "timeout"
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, syscall.ECONNRESET),
+		errors.Is(err, syscall.ECONNABORTED), errors.Is(err, syscall.EPIPE):
+		return "reset"
+	}
+	return "other"
+}
+
 // http2Transient: net/http's bundled HTTP/2 transport keeps GOAWAY and
 // stream-reset error types unexported, so they can only be matched by text.
 func http2Transient(err error) bool {

@@ -93,6 +93,7 @@ func (a *Agent) elide(force bool) error {
 	if _, err := a.append(session.Entry{Type: session.TypeElision, Elision: &session.Elision{IDs: ids, Tokens: saved}}); err != nil {
 		return err
 	}
+	a.logger().Info("elided", "results", len(ids), "saved", saved)
 	a.mu.Lock()
 	a.anchorValid = false // the next request differs from what the anchor measured
 	a.mu.Unlock()

@@ -7,8 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
+	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/adeotek/moca/internal/llm"
 )
@@ -176,7 +179,10 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 		return errorf("invalid JSON arguments for %s (the call was probably cut off at the output limit). "+
 			"Split the work into smaller calls, e.g. write a large file in parts with edit.", call.Name)
 	}
+	start := time.Now()
 	res := runRecovered(ctx, t, env, call)
+	slog.Debug("tool", "name", call.Name, "duration", time.Since(start).Round(time.Millisecond),
+		"is_error", res.IsError, "bytes", len(res.Content))
 	if res.IsError {
 		res.Content += trackFailure(env, call.Name, call.Input, res.Content)
 	}
@@ -192,6 +198,7 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 func runRecovered(ctx context.Context, t Tool, env *Env, call llm.ToolCall) (res Result) {
 	defer func() {
 		if p := recover(); p != nil {
+			slog.Error("tool panic", "tool", call.Name, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
 			res = errorf("internal error in %s: %v — this is a moca bug, not your input; the call may have partly applied, so check the state (e.g. re-read the file) before retrying", call.Name, p)
 		}
 	}()

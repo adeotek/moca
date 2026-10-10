@@ -11,6 +11,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -129,6 +130,7 @@ func (m *model) startSession(q string) tea.Cmd {
 	m.start = opts
 	m.opts.Start.Config.Model = q
 	m.refreshStatus()
+	slog.Info("setup: first session", "model", q)
 	note := fmt.Sprintf("session %s · %s", a.Session().ID8(), q)
 	path := m.opts.ConfigPath
 	if path == "" {

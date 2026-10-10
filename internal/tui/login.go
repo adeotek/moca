@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -368,7 +369,9 @@ func (m *model) loginKeyInput(k tea.KeyPressMsg) tea.Cmd {
 		p := s.provider
 		m.login = nil
 		store := provider.NewDefaultStore()
-		if err := store.PutAPIKey(p, key); err != nil {
+		err := store.PutAPIKey(p, key)
+		slog.Info("login", "provider", p, "method", "api_key", "ok", err == nil)
+		if err != nil {
 			return m.printlnError("error: " + err.Error())
 		}
 		if m.start.Config.Providers[p].Auth == "oauth" {
@@ -414,6 +417,7 @@ func (m *model) loginFlipAuth() tea.Cmd {
 
 func (m *model) handleLoginDone(msg loginDoneMsg) tea.Cmd {
 	s := m.login
+	slog.Info("login", "provider", msg.provider, "method", "oauth", "ok", msg.err == nil)
 	if s != nil && s.pw != nil {
 		s.pw.Close() // release a paste write still waiting for its reader
 	}

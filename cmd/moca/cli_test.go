@@ -71,7 +71,7 @@ func TestHelpListsSurface(t *testing.T) {
 			t.Fatalf("%s: exit %d stderr %q", arg, code, errb.String())
 		}
 		for _, want := range []string{"moca -p", "--model", "--effort", "--approve", "--yolo", "--resume", "--continue",
-			"moca login", "moca logout", "moca update", "moca mcp import", "moca mcp index", "moca --version"} {
+			"moca login", "moca logout", "moca update", "moca mcp import", "moca mcp index", "moca --version", "MOCA_LOG"} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("%s: usage missing %q", arg, want)
 			}

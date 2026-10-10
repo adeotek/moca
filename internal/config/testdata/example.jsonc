@@ -32,6 +32,8 @@
 
   "snapshot": { "retentionDays": 30 },   // 0 = keep forever
 
+  "log": { "level": "info" },            // diagnostic log in ~/.local/state/moca/logs (info|debug|off); MOCA_LOG overrides
+
   "yolo": false,                         // true = all permission checks off by default (§7.5); --no-yolo overrides
 
   "context": { "reserveTokens": 16384, "keepRecentTokens": 20000, "maxSteps": 40 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -341,5 +342,25 @@ func TestWebHTMLStrayClosingPre(t *testing.T) {
 	got := webHTMLToText("<p>intro</pre></p><pre>a  b\n  c</pre>")
 	if !strings.Contains(got, "a  b\n  c") {
 		t.Fatalf("later <pre> lost its whitespace: %q", got)
+	}
+}
+
+func TestWebSearchLogOmitsQuery(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"results":[{"title":"T","url":"https://e.x/a","content":"c"}]}`)
+	}))
+	defer srv.Close()
+	old := webTavilyURL
+	webTavilyURL = srv.URL
+	t.Cleanup(func() { webTavilyURL = old })
+	log := captureLog(t, slog.LevelDebug)
+	r := webTool{}.Run(context.Background(), &Env{}, json.RawMessage(`{"op":"search","query":"private words"}`))
+	if r.IsError {
+		t.Fatal(r.Content)
+	}
+	out := log.String()
+	if !strings.Contains(out, `msg="web search" provider=tavily keyed=false results=1`) || strings.Contains(out, "private") {
+		t.Fatalf("search line:\n%s", out)
 	}
 }

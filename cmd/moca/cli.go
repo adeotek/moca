@@ -46,6 +46,7 @@ usage:
   moca mcp import              import MCP servers from Claude Code / OpenCode / Pi configs
   moca mcp index               prebuild the persisted MCP discovery index
   moca --version
+  logs: ~/.local/state/moca/logs/<date>-<pid>.log — config log.level (info|debug|off); MOCA_LOG overrides for one run
 `)
 }
 

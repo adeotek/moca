@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/adeotek/moca/internal/compact"
 	"github.com/adeotek/moca/internal/config"
@@ -68,6 +70,7 @@ type Agent struct {
 	cost    float64
 	yolo    bool
 	plan    bool
+	steps   int // steps taken by the current run (run-end log line)
 	// doPlan/doPlanRel: the plan file a RunPlan run executes (abs, display).
 	doPlan, doPlanRel string
 	hard              *savedModel
@@ -149,6 +152,12 @@ func (a *Agent) Close() error {
 // in; a resumed session keeps its original one.
 func (a *Agent) Workdir() string { return a.opts.Env.Root }
 func (a *Agent) emit(e Event) {
+	switch e := e.(type) {
+	case Warning:
+		a.logger().Warn("warning", "text", e.Text)
+	case Compacted:
+		a.logger().Info("compacted", "before", e.TokensBefore, "after", e.TokensAfter)
+	}
 	if a.opts.Emit != nil {
 		a.opts.Emit(e)
 	}
@@ -300,6 +309,7 @@ func (a *Agent) turnWithRecovery(ctx context.Context, choice llm.ToolChoice) (ll
 	if !errors.Is(err, errOverflow) {
 		return resp, calls, err
 	}
+	a.logger().Info("context overflow: compacting and retrying the turn")
 	orig := a.lastOverflow
 	if cerr := a.Compact(ctx); cerr != nil {
 		if ctx.Err() != nil || errors.Is(cerr, context.Canceled) {
@@ -333,7 +343,25 @@ func (a *Agent) wrapUp(ctx context.Context, text string) (Outcome, error) {
 	return Outcome{Text: llm.TextOf(resp.Message)}, nil
 }
 
+// Run runs one prompt to completion (§14) and logs its end.
 func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
+	t0 := time.Now()
+	u0, c0 := a.Totals()
+	a.steps = 0
+	out, err := a.run(ctx, prompt)
+	u, c := a.Totals()
+	attrs := []any{"outcome", outcomeKind(out, err), "steps", a.steps, "duration", time.Since(t0).Round(time.Millisecond),
+		slog.Group("usage", "in", u.Input-u0.Input, "out", u.Output-u0.Output,
+			"cache_read", u.CacheRead-u0.CacheRead, "cache_write", u.CacheWrite-u0.CacheWrite),
+		"cost", fmt.Sprintf("%.4f", c-c0)}
+	if err != nil {
+		attrs = append(attrs, "error", err)
+	}
+	a.logger().Info("run end", attrs...)
+	return out, err
+}
+
+func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
 	// Per-run tool state (plan deliverable, changes awaiting verification,
 	// identical-failure counts): tools/runstate.go.
 	a.opts.Env.BeginRun()
@@ -355,13 +383,21 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 			// Two steps before the tool-less wrap-up: a long investigation
 			// must still land its deliverable (§14).
 			reserved = true
-			if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(planReserveText)}); err != nil {
+			if err := a.nudge("plan_reserve", planReserveText); err != nil {
 				return Outcome{}, err
 			}
 		}
 		resp, calls, err := a.turnWithRecovery(ctx, llm.ToolChoiceAuto)
 		if err != nil {
 			return Outcome{}, err
+		}
+		a.steps = step + 1
+		if len(calls) > 0 {
+			names := make([]string, len(calls))
+			for i, c := range calls {
+				names[i] = c.Name
+			}
+			a.logger().Debug("step", "n", step+1, "tools", names)
 		}
 		if len(calls) == 0 {
 			queued, err := a.applySteering()
@@ -376,7 +412,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 				// answer — one bounded nudge, then a warning (§14).
 				if !emptyNudged {
 					emptyNudged = true
-					if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(emptyNudge)}); err != nil {
+					if err := a.nudge("empty", emptyNudge); err != nil {
 						return Outcome{}, err
 					}
 					continue
@@ -387,7 +423,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 				if !nudged {
 					// One bounded retry: a plan run must end with its file.
 					nudged = true
-					if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(planNudge)}); err != nil {
+					if err := a.nudge("plan", planNudge); err != nil {
 						return Outcome{}, err
 					}
 					continue
@@ -398,7 +434,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 				// One bounded nudge: changed code ends verified or with a
 				// stated reason (§14).
 				verifyNudged = true
-				if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(verifyNudge(a.opts.Env.Unverified))}); err != nil {
+				if err := a.nudge("verify", verifyNudge(a.opts.Env.Unverified)); err != nil {
 					return Outcome{}, err
 				}
 				continue

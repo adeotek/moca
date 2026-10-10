@@ -166,6 +166,8 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	if o.Plan {
 		a.applyPlan(true)
 	}
+	a.logger().Info("session", "resumed", prior != nil, "workdir", jail.Root(), "model", model,
+		"effort", string(effort), "yolo", o.Yolo, "plan", o.Plan)
 	return a, nil
 }
 

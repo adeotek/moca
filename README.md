@@ -88,6 +88,14 @@ No API key and no model list: moca asks the server (`/api/tags`, `/api/show`) wh
 
 **Credentials live in `~/.config/moca/auth.json`** (0600, never committed): `/login` in the TUI — pick a provider, then paste the API key (masked, never echoed) or sign in to a subscription in the browser — or `moca login <provider>` on the CLI (`--api-key` for a key; `echo -n "$KEY" | moca login anthropic` stores silently on a pipe). A stored key is used ahead of any `apiKey` env reference, and `moca logout <provider>` (or the TUI `/logout`) clears it. `moca login openai` opens the browser for consent (SSH/headless: it prints the URL and accepts a pasted code — `--no-browser` forces that mode); tokens are auto-refreshed under a cross-process lock. Set `"auth": "oauth"` for `providers.openai` to use the subscription — after a successful TUI sign-in the wizard offers to flip it for you. The subscription route serves the Responses API only, and model slugs must be available to your ChatGPT account — declare them under `providers.openai.models` when they are not in the built-in catalog.
 
+## Debugging / logs
+
+moca keeps a small diagnostic log per run in `~/.local/state/moca/logs/` (or `$XDG_STATE_HOME/moca/logs/`). It records what moca did — retries, MCP servers starting and stopping, how a run ended — but never your prompts, code or keys. If something goes wrong, attach the newest file to your bug report.
+
+- More detail for one run: `MOCA_LOG=debug moca …`
+- Turn it off: `"log": { "level": "off" }` in the config, or `MOCA_LOG=off`.
+- Old logs are removed after `snapshot.retentionDays` (30 days by default).
+
 ## Use
 
 ```bash

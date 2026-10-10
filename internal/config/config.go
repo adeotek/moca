@@ -75,6 +75,7 @@ type Config struct {
 	Shell     ShellConfig               `json:"shell"`
 	MCP       MCPConfig                 `json:"mcp"`
 	Web       WebConfig                 `json:"web"`
+	Log       LogConfig                 `json:"log"`
 	Snapshot  SnapshotConfig            `json:"snapshot"`
 	Context   ContextConfig             `json:"context"`
 	TUI       TUIConfig                 `json:"tui"`
@@ -117,6 +118,12 @@ type WebConfig struct {
 type WebSearchConfig struct {
 	Provider string `json:"provider,omitempty"` // "tavily" (default; keyless when apiKey is omitted) | "exa"
 	APIKey   string `json:"apiKey,omitempty"`   // must be "env:VAR"; optional for tavily, required for exa
+}
+
+// LogConfig configures the diagnostic log (SPECS §13.5): a metadata-only
+// logfmt file per process under <state>/logs. MOCA_LOG overrides level.
+type LogConfig struct {
+	Level string `json:"level,omitempty"` // "info" (default) | "debug" | "off"
 }
 
 type MCPConfig struct {
@@ -213,6 +220,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Web.Search.Provider == "" {
 		c.Web.Search.Provider = "tavily"
+	}
+	if c.Log.Level == "" {
+		c.Log.Level = "info"
 	}
 }
 
@@ -367,6 +377,11 @@ func (c Config) Validate() error {
 	}
 	if c.Web.Search.Provider == "exa" && c.Web.Search.APIKey == "" {
 		return fmt.Errorf("web.search: provider \"exa\" needs apiKey (an env: reference) — exa has no keyless mode; tavily works without a key")
+	}
+	switch c.Log.Level {
+	case "info", "debug", "off":
+	default:
+		return fmt.Errorf("log.level %q unknown (want info|debug|off)", c.Log.Level)
 	}
 	return nil
 }

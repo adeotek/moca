@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 )
@@ -19,18 +21,23 @@ func Spill(env *Env, kind, full string) string {
 	if env.SpillDir == "" {
 		return ""
 	}
-	if err := os.MkdirAll(env.SpillDir, 0o700); err != nil {
+	fail := func(err error) string {
+		slog.Warn("spill failed", "kind", kind, "error", err)
 		return ""
+	}
+	if err := os.MkdirAll(env.SpillDir, 0o700); err != nil {
+		return fail(err)
 	}
 	f, err := os.CreateTemp(env.SpillDir, env.SpillPrefix+kind+"-*.txt")
 	if err != nil {
-		return ""
+		return fail(err)
 	}
 	_, werr := f.WriteString(full)
 	if cerr := f.Close(); werr != nil || cerr != nil {
 		os.Remove(f.Name())
-		return ""
+		return fail(errors.Join(werr, cerr))
 	}
+	slog.Debug("spill", "kind", kind, "bytes", len(full))
 	lines := strings.Count(full, "\n")
 	if full != "" && !strings.HasSuffix(full, "\n") {
 		lines++
