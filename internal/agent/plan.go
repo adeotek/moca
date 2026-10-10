@@ -37,7 +37,7 @@ func (a *Agent) SetPlan(on bool) {
 // from there (B4); toggling the mode costs one cache miss instead.
 const planEnvelope = "[plan mode] You are producing an implementation plan, not making changes. " +
 	"Investigate with read/search/ls/shell/web/mcp as needed — shell and mcp run under the normal permission rules, and you must use them only to inspect, never to change anything. " +
-	"Every write outside docs/plans is refused. " +
+	"The write and edit tools refuse any path outside docs/plans. " +
 	"Then write the plan to docs/plans/<kebab-case-slug>.md with the write tool (edit to update an existing one) and stop with a 3-5 line summary naming the file. " +
 	"Plan format: a one-paragraph goal; current state (file paths); numbered steps as `- [ ]` checkboxes (each: what changes, which files, how it is verified); then verification, out-of-scope and risks/decisions sections. " +
 	"Do not modify any other file."

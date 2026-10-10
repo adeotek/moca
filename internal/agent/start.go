@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -198,10 +199,28 @@ func pruneOverflow(days int) {
 		return
 	}
 	for _, e := range ents {
-		if fi, err := e.Info(); err == nil && fi.ModTime().Before(cutoff) {
-			os.RemoveAll(filepath.Join(overflowDir(), e.Name()))
+		p := filepath.Join(overflowDir(), e.Name())
+		if newestModTime(p).Before(cutoff) {
+			os.RemoveAll(p)
 		}
 	}
+}
+
+// newestModTime is the latest modification time under p (p itself included):
+// a directory's own mtime only moves when an entry is added or removed, so a
+// per-process spill dir is judged by its freshest file.
+func newestModTime(p string) time.Time {
+	var newest time.Time
+	filepath.WalkDir(p, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if fi, err := d.Info(); err == nil && fi.ModTime().After(newest) {
+			newest = fi.ModTime()
+		}
+		return nil
+	})
+	return newest
 }
 
 // webSearchKey resolves web.search.apiKey at session start: a configured

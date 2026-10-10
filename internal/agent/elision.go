@@ -62,7 +62,9 @@ func staleResults(live []compact.Entry) ([]string, int) {
 			continue
 		}
 		for _, later := range order[i+1:] {
-			sameCall := later.call.key == r.call.key
+			// A later error is not a replacement for a good result; a result
+			// whose call left the window (empty key) matches nothing.
+			sameCall := r.call.key != "" && later.call.key == r.call.key && !later.e.Result.IsError
 			rewritten := r.call.readPath != "" && later.call.writePath == r.call.readPath && !later.e.Result.IsError
 			if sameCall || rewritten {
 				ids = append(ids, r.e.ID)

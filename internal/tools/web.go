@@ -362,7 +362,7 @@ var (
 		}
 		return out
 	}()
-	webAttrRe = regexp.MustCompile(`(?i)\b(href|src|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
+	webAttrRe = regexp.MustCompile(`(?i)(?:^|[\s"'/])(href|src|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
 )
 
 func webHTMLToMarkdown(h string) string { return webHTMLRender(h, true) }
