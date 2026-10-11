@@ -5414,7 +5414,7 @@
       },
       "norm_label": "die()",
       "source_file": "install.sh",
-      "source_location": "L28"
+      "source_location": "L31"
     },
     {
       "id": "install_fetch",
@@ -5429,7 +5429,7 @@
       },
       "norm_label": "fetch()",
       "source_file": "install.sh",
-      "source_location": "L110"
+      "source_location": "L132"
     },
     {
       "id": "install_note",
@@ -5444,7 +5444,7 @@
       },
       "norm_label": "note()",
       "source_file": "install.sh",
-      "source_location": "L29"
+      "source_location": "L32"
     },
     {
       "id": "install_sh__entry",
@@ -5489,7 +5489,7 @@
       },
       "norm_label": "usage()",
       "source_file": "install.sh",
-      "source_location": "L31"
+      "source_location": "L34"
     },
     {
       "id": "config_scanner",
@@ -44987,43 +44987,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "install.sh",
-      "source_location": "L116",
-      "weight": 1.0
-    },
-    {
-      "source": "install_sh__entry",
-      "target": "install_fetch",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "call",
-      "source_file": "install.sh",
-      "source_location": "L130",
-      "weight": 1.0
-    },
-    {
-      "source": "install_sh__entry",
-      "target": "install_die",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "call",
-      "source_file": "install.sh",
-      "source_location": "L52",
-      "weight": 1.0
-    },
-    {
-      "source": "install_sh__entry",
-      "target": "install_usage",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "call",
-      "source_file": "install.sh",
-      "source_location": "L66",
+      "source_location": "L138",
       "weight": 1.0
     },
     {
@@ -45035,7 +44999,43 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "install.sh",
-      "source_location": "L91",
+      "source_location": "L105",
+      "weight": 1.0
+    },
+    {
+      "source": "install_sh__entry",
+      "target": "install_fetch",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "install.sh",
+      "source_location": "L152",
+      "weight": 1.0
+    },
+    {
+      "source": "install_sh__entry",
+      "target": "install_die",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "install.sh",
+      "source_location": "L58",
+      "weight": 1.0
+    },
+    {
+      "source": "install_sh__entry",
+      "target": "install_usage",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "install.sh",
+      "source_location": "L76",
       "weight": 1.0
     },
     {
@@ -154274,7 +154274,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "install.sh",
-      "source_location": "L110",
+      "source_location": "L132",
       "weight": 1.0
     },
     {
@@ -154285,7 +154285,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "install.sh",
-      "source_location": "L28",
+      "source_location": "L31",
       "weight": 1.0
     },
     {
@@ -154296,7 +154296,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "install.sh",
-      "source_location": "L29",
+      "source_location": "L32",
       "weight": 1.0
     },
     {
@@ -154307,7 +154307,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "install.sh",
-      "source_location": "L31",
+      "source_location": "L34",
       "weight": 1.0
     },
     {
@@ -192649,5 +192649,5 @@
       "source_file": "README.md"
     }
   ],
-  "built_at_commit": "2aeb3e603f99ebc5c653f92f862ac54955d18772"
+  "built_at_commit": "a14e5d99a727fae6664b2c11d4eb7eb674e954ab"
 }

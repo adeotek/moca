@@ -1,7 +1,7 @@
 # Graph Report - moca  (2026-10-11)
 
 ## Corpus Check
-- 335 files · ~250,876 words
+- 335 files · ~251,292 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 12 file(s) not represented in the graph (top: (none) 6, .jsonc 4, .v2 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `2aeb3e60`
+- Built from commit: `a14e5d99`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -266,16 +266,16 @@
 10. `Config` - 39 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Scenario: vague (6 runs - highest swing, stays hard)` --semantically_similar_to--> `Locate the cause with search before editing; fix root cause`  [INFERRED] [semantically similar]
-  test/evals/BASELINE.md → internal/agent/system-prompt.md
 - `Permissions threat model stated plainly: guard against model mistakes and casual prompt injection; NOT a sandbox because an allowlisted interpreter can do anything the user can; OS-level sandboxing is a v2 discussion` --semantically_similar_to--> `Debugging and logs: moca keeps a small diagnostic log per run under the state moca logs directory recording what moca did like retries, MCP servers starting and stopping, and how a run ended, but never prompts, code or keys; attach the newest file to a bug report; MOCA_LOG debug adds per-run detail; log level off turns it off; old logs removed after snapshot retention days at 30 by default`  [INFERRED] [semantically similar]
   docs/specs/DESIGN.md → README.md
-- `OAuth policy gate (oauth-verification.md)` --references--> `External tools - rtk, graphify, skills ecosystem`  [INFERRED]
-  AGENTS.md → docs/specs/external-tools.md
-- `System prompt built once per run, never rebuilt` --semantically_similar_to--> `Skills mechanism (SKILL.md directories)`  [INFERRED] [semantically similar]
-  AGENTS.md → docs/specs/external-tools.md
+- `Scenario: vague (6 runs - highest swing, stays hard)` --semantically_similar_to--> `Locate the cause with search before editing; fix root cause`  [INFERRED] [semantically similar]
+  test/evals/BASELINE.md → internal/agent/system-prompt.md
 - `Bet: a tight agent loop plus disciplined context handling beats a feature-rich agent on cost-per-task for everyday coding (read, edit, run tests, commit)` --semantically_similar_to--> `Competes on cost per task and transparency: prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap; MCP support that never floods the prompt via one 200-token lazy proxy; loads Agent-Skills SKILL.md files written for other tools unchanged; searches the web and fetches pages without another tool with keyless default; prefers external token-savers rtk and graphify when installed`  [INFERRED] [semantically similar]
   docs/specs/DESIGN.md → README.md
+- `Skill frontmatter: name, description, optional argument-hint; discovery is name plus description in the system prompt only and body loaded on explicit request, token-cheap by construction` --semantically_similar_to--> `Extend via skills: SKILL.md directories in the global config skills path or in a trusted repo's moca skills path; any skill written for pi, Claude Code or OpenCode loads unchanged; see docs/specs/external-tools.md`  [INFERRED] [semantically similar]
+  docs/specs/DESIGN.md → README.md
+- `Ecosystem compatibility is a hard requirement: any SKILL.md written for pi claude code or opencode including graphify's must load unchanged; tested in phase 6` --semantically_similar_to--> `External tools and the skills ecosystem landed in v0.1.0-alpha: rtk and graphify in the default allowlist with built-in guidance skills and the shell analyser unwrapping rtk so it cannot launder a non-allowlisted command; Agent-Skills compatibility with SKILL.md files written for pi, Claude Code and OpenCode including graphify's proven by a vendored corpus with provenance and SHA-256 enforcement; prompt templates from Claude Code command files and pi templates drop in; graphify install platform moca contributed upstream in Graphify Labs graphify pull request 4174`  [INFERRED] [semantically similar]
+  docs/specs/DESIGN.md → CHANGELOG.md
 
 ## Import Cycles
 - None detected.
@@ -879,17 +879,17 @@ Nodes (3): Timeline: 2026-01 server-side OAuth checks, bans later partially reve
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `External tools - rtk, graphify, skills ecosystem` connect `External tools - rtk, graphify, skills ecosystem` to `permissions/shell.go`, `README.md - moca`?**
-  _High betweenness centrality (0.178) - this node is a cross-community bridge._
+- **Why does `README.md - moca` connect `README.md - moca` to `External tools - rtk, graphify, skills ecosystem`, `Release - build packages, publish GitHub Release`, `system-prompt.md`?**
+  _High betweenness centrality (0.182) - this node is a cross-community bridge._
 - **What connects `github.com/adeotek/moca`, `Agent`, `Shell` to the rest of the system?**
   _231 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `go_pkg_strings` be split into smaller, more focused modules?**
   _Cohesion score 0.10154752442844453 - nodes in this community are weakly interconnected._
-- **Why does `README.md - moca` connect `README.md - moca` to `External tools - rtk, graphify, skills ecosystem`, `Release - build packages, publish GitHub Release`, `system-prompt.md`?**
-  _High betweenness centrality (0.170) - this node is a cross-community bridge._
+- **Why does `External tools - rtk, graphify, skills ecosystem` connect `External tools - rtk, graphify, skills ecosystem` to `permissions/shell.go`, `README.md - moca`?**
+  _High betweenness centrality (0.181) - this node is a cross-community bridge._
 - **Should `testing.T` be split into smaller, more focused modules?**
   _Cohesion score 0.03178694158075601 - nodes in this community are weakly interconnected._
 - **Why does `Self-update (moca update)` connect `Release - build packages, publish GitHub Release` to `DESIGN rev 16 (2026-10-09): self-update plus release automation: moca update fetching the newest GitHub release including prereleases, picking the platform package, verifying against checksums, and swapping the binary in place beside the running file atomically with a unix same-directory rename and a windows rename-aside; runs before config is loaded so a broken config cannot block an update; writes nothing but the binary and never touches sessions or credentials; refuses a go run temp build; semver comparison over the git describe stamp with dev dirty or newer reporting not newer; a release workflow manual-dispatch only building three platform packages plus checksums into a GitHub Release with asset names the update code consumes; make release keeps five local targets including darwin`, `README.md - moca`?**
-  _High betweenness centrality (0.151) - this node is a cross-community bridge._
+  _High betweenness centrality (0.148) - this node is a cross-community bridge._
 - **Should `newScript` be split into smaller, more focused modules?**
   _Cohesion score 0.07079414838035528 - nodes in this community are weakly interconnected._
