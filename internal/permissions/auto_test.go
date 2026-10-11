@@ -589,3 +589,69 @@ func TestAutoFixRound2(t *testing.T) {
 		assertVerdict(t, cmd, want, need, every, unsure, err)
 	}
 }
+
+// Task 5b: destinations and allow-enabling flags are parsed with each
+// command's real option spec (getopt_long semantics), not by scanning
+// letters.
+func TestAutoOptionSpecs(t *testing.T) {
+	s, root := newAutoShell(t)
+	cases := map[string]verdict{
+		// chmod -t is a symbolic mode, not a target directory
+		"chmod -t .":    {every: []string{"chmod"}},
+		"chmod -t .git": {every: []string{"chmod"}},
+		"chmod 755 .":   {every: []string{"chmod"}},
+		"chmod -t sub":  {},
+		"chmod -- -t .": {every: []string{"chmod"}},
+		// a letter that takes a value consumes the rest of the cluster
+		"mv -St . sub":         {every: []string{"mv"}}, // -S t: "." is a source, not -t .
+		"cp -rSx t sub/y":      {},
+		"cp -rSt a sub":        {},
+		"cp -rSt . sub":        {unsure: []string{"cp"}}, // copies the root tree
+		"cp -S /x a b":         {every: []string{"cp"}},  // a backup suffix with a slash writes elsewhere
+		"mv --suffix=../x a b": {every: []string{"mv"}},
+		// long options: abbreviations resolve; ambiguous or unknown fail closed
+		"cp -r --t=. evil/.":       {unsure: []string{"cp"}},
+		"cp -r --t=sub evil/.":     {},
+		"cp --n a b":               {unsure: []string{"cp"}},
+		"cp --frob a b":            {unsure: []string{"cp"}},
+		"cp --no-t a b":            {},
+		"cp --verbose=x a b":       {unsure: []string{"cp"}},
+		"cp --backup=numbered a b": {},
+		// repeated -t, -T conflicts, permutation, --
+		"cp -t sub -t docs a":  {unsure: []string{"cp"}},
+		"cp -T -t sub a":       {unsure: []string{"cp"}},
+		"cp -rT evil .":        {unsure: []string{"cp"}},
+		"cp -T a b":            {},
+		"cp a.txt -t sub":      {},
+		"mv sub/x -t .":        {unsure: []string{"mv"}},
+		"mv . -t sub":          {every: []string{"mv"}},
+		"cp -- -t sub":         {},
+		"mv -- -t .":           {unsure: []string{"mv"}},
+		"mv -t " + root + " a": {unsure: []string{"mv"}},
+		// value words of touch/mkdir are not paths; -r is a read
+		"touch -t 202001010000 f": {},
+		"touch -d 'next week' f":  {},
+		"touch -r /etc/passwd f":  {unsure: []string{"touch"}},
+		"touch -r ref.txt f":      {},
+		"mkdir -m 700 d":          {},
+		"mkdir -m700 sub/.git/x":  {every: []string{"mkdir"}},
+		"ln -st sub a.txt":        {},
+		"install -m 755 a /usr/x": {unsure: []string{"install"}},
+		// git restore: -s takes a value; --no-staged is not --staged
+		"git restore -sS a.go":                    {every: []string{"git"}},
+		"git restore --source --staged a.go":      {every: []string{"git"}},
+		"git restore --no-staged a.go":            {every: []string{"git"}},
+		"git restore -S -s HEAD a.go":             {},
+		"git restore --staged --source=HEAD a.go": {},
+		"git restore -SW a.go":                    {every: []string{"git"}},
+		// git branch/tag: a separate-word value is not a list flag
+		"git branch --sort -l newb":        {unsure: []string{"git"}},
+		"git tag --sort -l v9":             {unsure: []string{"git"}},
+		"git branch --sort=refname":        {},
+		"git tag -l --sort=v:refname 'v*'": {},
+	}
+	for cmd, want := range cases {
+		need, every, unsure, err := s.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
+	}
+}

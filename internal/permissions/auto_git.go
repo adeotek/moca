@@ -67,10 +67,14 @@ func gitVerdict(ws []Word, conf pathFunc) autoVerdict {
 		}
 		return autoUnsure
 	case sub == "restore":
-		if !hasOpt(ws, from, "S", "--staged") || hasOpt(ws, from, "W", "--worktree") {
+		p := getopt(ws, from, gitRestoreSpec)
+		if !p.has("-S", "--staged") || p.has("-W", "--worktree") {
 			return autoAsk // the working tree: uncommitted edits are lost
 		}
-		v = mutatorVerdict(ws, from, conf, guardNone, true)
+		if p.bad || p.has("--pathspec-from-file") {
+			return autoUnsure
+		}
+		v = mutatorArgs(p.operands, conf, guardNone, true)
 	case sub == "config":
 		if has(gitConfigReads...) {
 			return autoUnsure
@@ -126,6 +130,11 @@ var (
 	gitTagRead = []string{"--sort", "--format", "--column", "--no-column", "--color", "--no-color", "--ignore-case", "--omit-empty"}
 )
 
+// gitSepValue: git branch/tag read options whose value may be the next word
+// (`--sort -l` is a sort key, not list mode). Only the `=` form is placed;
+// a separate-word form is unsure.
+var gitSepValue = []string{"--sort", "--format", "--points-at", "--contains", "--no-contains", "--merged", "--no-merged"}
+
 // longIn reports whether a long option word selects one of names.
 func longIn(t string, names []string) bool {
 	name, _, _ := strings.Cut(t, "=")
@@ -143,6 +152,8 @@ func gitBranch(ws []Word, from int) autoVerdict {
 		switch {
 		case long && longIn(t, gitBranchAsk), !long && strings.ContainsAny(t[1:], "dDmMcCfut"):
 			return autoAsk
+		case long && !strings.Contains(t, "=") && longIn(t, gitSepValue):
+			return autoUnsure
 		case long && longIn(t, gitListImply), !long && strings.Contains(t, "l"):
 			list = true
 		case long && longIn(t, gitBranchRead):
@@ -166,6 +177,8 @@ func gitTag(ws []Word, from int) autoVerdict {
 		switch {
 		case long && longIn(t, []string{"--delete", "--force"}), !long && strings.ContainsAny(t[1:], "df"):
 			return autoAsk
+		case long && !strings.Contains(t, "=") && longIn(t, gitSepValue):
+			return autoUnsure
 		case long && longIn(t, gitListImply), !long && strings.Contains(t, "l"):
 			list = true
 		case long && longIn(t, gitTagRead):

@@ -185,8 +185,12 @@ func toolVerdict(ws []Word, lower string, conf pathFunc) autoVerdict {
 		}
 	}
 	if g, ok := confinedCmds[lower]; ok {
-		v := mutatorVerdict(ws, 1, conf, g, false)
-		if v == autoAllow && (lower == "mv" || (lower == "cp" && cpRecursive(ws))) && anyRootOperand(ws, conf) {
+		if _, ok := specMutators[lower]; !ok {
+			return mutatorVerdict(ws, 1, conf, g, false) // positional-only (rm, rmdir, chmod)
+		}
+		v, p, paths := specMutatorVerdict(ws, lower, conf, g)
+		recursive := p.has("-r", "-R", "-a", "--recursive", "--archive")
+		if v == autoAllow && (lower == "mv" || (lower == "cp" && recursive)) && anyRoot(paths, conf) {
 			// A tree merged into the workdir root may carry a .git (`cp -r
 			// evil/. .`): the classifier judges it.
 			return autoUnsure
@@ -274,17 +278,10 @@ func rtkVerdict(ws []Word, conf pathFunc) autoVerdict {
 	return autoAllow
 }
 
-// cpRecursive reports whether cp copies trees (-r, -R, -a, --recursive,
-// --archive, in any cluster).
-func cpRecursive(ws []Word) bool {
-	return hasOpt(ws, 1, "rRa", "--recursive", "--archive")
-}
-
-// anyRootOperand reports whether a literal operand is the workdir or a
-// writable root itself.
-func anyRootOperand(ws []Word, conf pathFunc) bool {
-	dests, args := targetDirs(ws, 1)
-	for _, a := range append(dests, args...) {
+// anyRoot reports whether a literal path is the workdir or a writable root
+// itself.
+func anyRoot(paths []Word, conf pathFunc) bool {
+	for _, a := range paths {
 		if a.Literal && conf(a.Text, true) == pathRoot {
 			return true
 		}
