@@ -36,6 +36,34 @@ moca update --check   # only report whether a newer release exists
 
 `moca update` verifies the package against the release's `checksums.txt` when published, then swaps the binary in place (atomic) — your config, credentials and sessions are never touched, and a running session keeps working (the new version starts on the next launch).
 
+## Uninstall
+
+Remove the binary (the config, data and state directories are kept):
+
+```bash
+# Linux
+curl -fsSL https://raw.githubusercontent.com/adeotek/moca/main/install.sh | bash -s -- --uninstall
+```
+
+```powershell
+# Windows (PowerShell)
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/adeotek/moca/main/install.ps1))) -Uninstall
+```
+
+Full uninstall — the binary plus `~/.config/moca`, `~/.local/share/moca` and `~/.local/state/moca` (config, credentials, sessions, logs; `$XDG_CONFIG_HOME`/`$XDG_DATA_HOME`/`$XDG_STATE_HOME` are honored):
+
+```bash
+# Linux
+curl -fsSL https://raw.githubusercontent.com/adeotek/moca/main/install.sh | bash -s -- --remove-data
+```
+
+```powershell
+# Windows (PowerShell)
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/adeotek/moca/main/install.ps1))) -RemoveData
+```
+
+Both scripts remove the `moca` found on `PATH` (or the one in `--dir <path>` / `-Dir <path>`), and refuse to delete anything whose `--version` output does not identify it as moca.
+
 ## Configure
 
 `~/.config/moca/config.jsonc` (JSONC — comments allowed; `$XDG_CONFIG_HOME` is honored). Minimal:
