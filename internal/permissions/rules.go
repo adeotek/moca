@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 // Word is one argv word of a simple command as the analyser sees it:
@@ -25,38 +26,60 @@ type Rule struct {
 }
 
 func ParseRule(s string) (Rule, error) {
-	ws := strings.Fields(s)
-	if len(ws) == 0 {
+	raw := strings.Fields(s)
+	if len(raw) == 0 {
 		return Rule{}, errors.New("empty permissions rule")
 	}
-	if len(ws) == 1 && !strings.Contains(ws[0], "*") {
+	// Consecutive standalone * words are equivalent to one; collapsing them
+	// bounds the backtracking in matchWords.
+	ws := make([]string, 0, len(raw))
+	for _, w := range raw {
+		if w == "*" && len(ws) > 0 && ws[len(ws)-1] == "*" {
+			continue
+		}
+		ws = append(ws, w)
+	}
+	if len(ws) == 1 && ws[0] != "*" {
 		ws = append(ws, "*")
 	}
 	return Rule{Src: s, words: ws}, nil
 }
 
-// match reports whether the rule covers cmd. conservative (deny/ask) treats
-// a non-literal word as possibly matching any pattern word and compares the
-// command name case-insensitively; allow does neither.
+// baseName is the command name of a head word: the last path element, with
+// both separators honoured so a Windows-style path is handled on any host.
+func baseName(s string) string {
+	return filepath.Base(strings.ReplaceAll(s, `\`, "/"))
+}
+
+// match reports whether the rule covers cmd. conservative (deny/ask) compares
+// the command name case-insensitively after stripping any directory from both
+// the head word and the rule's first word, and treats non-literal words as
+// possibly matching. Allow compares the head text exactly (so /tmp/x/git does
+// not satisfy `git *`) and matches non-literal words only with a standalone *.
 func (r Rule) match(cmd []Word, conservative bool) bool {
 	if len(cmd) == 0 {
 		return false
 	}
 	head := cmd[0]
-	head.Text = filepath.Base(head.Text)
-	if conservative {
-		head.Text = strings.ToLower(head.Text)
-	}
 	first := r.words[0]
 	if conservative {
-		first = strings.ToLower(first)
+		head.Text = strings.ToLower(baseName(head.Text))
+		first = strings.ToLower(baseName(first))
 	}
 	return matchWords(append([]string{first}, r.words[1:]...), append([]Word{head}, cmd[1:]...), conservative)
 }
 
+// matchWords matches pattern words against command words. A standalone *
+// matches zero or more command words. In conservative mode a non-literal
+// command word may expand to zero or more words, so it may be skipped or may
+// be matched against a pattern word while staying available for more.
 func matchWords(pat []string, ws []Word, conservative bool) bool {
 	if len(pat) == 0 {
-		return len(ws) == 0
+		if len(ws) == 0 {
+			return true
+		}
+		// Only a possibly-empty expansion can remain past an exhausted pattern.
+		return conservative && !ws[0].Literal && matchWords(pat, ws[1:], conservative)
 	}
 	if pat[0] == "*" {
 		for i := 0; i <= len(ws); i++ {
@@ -70,13 +93,14 @@ func matchWords(pat []string, ws []Word, conservative bool) bool {
 		return false
 	}
 	if ws[0].Literal {
-		if !globWord(pat[0], ws[0].Text) {
-			return false
-		}
-	} else if !conservative {
+		return globWord(pat[0], ws[0].Text) && matchWords(pat[1:], ws[1:], conservative)
+	}
+	if !conservative {
 		return false
 	}
-	return matchWords(pat[1:], ws[1:], conservative)
+	// Expands to nothing, or its first expanded word matches pat[0] and it may
+	// expand to further words.
+	return matchWords(pat, ws[1:], conservative) || matchWords(pat[1:], ws, conservative)
 }
 
 // globWord matches one word against a pattern where only * is special.
@@ -175,8 +199,13 @@ func (r *Rules) Decide(ws []Word) (Decision, string, string) {
 	return NoMatch, "", ""
 }
 
-// Learn records an allow-always answer for name in the user layer.
+// Learn records an allow-always answer for name in the user layer. name is
+// one literal command word; anything else (empty, whitespace, a wildcard) is
+// ignored rather than widened into a broader rule.
 func (r *Rules) Learn(name string) {
+	if name == "" || strings.Contains(name, "*") || strings.IndexFunc(name, unicode.IsSpace) >= 0 {
+		return
+	}
 	rule, err := ParseRule(name)
 	if err != nil {
 		return

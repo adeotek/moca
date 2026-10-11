@@ -1,6 +1,10 @@
 package permissions
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 func lit(ws ...string) []Word {
 	out := make([]Word, len(ws))
@@ -24,7 +28,13 @@ func TestRuleMatch(t *testing.T) {
 		{"git status", lit("git", "status"), true},
 		{"git status", lit("git", "status", "-s"), false},
 		{"git * --force*", lit("git", "push", "origin", "--force-with-lease"), true},
-		{"go test ./...", lit("/usr/local/go/bin/go", "test", "./..."), true},
+		{"go test ./...", lit("/usr/local/go/bin/go", "test", "./..."), false},
+		{"rm*", lit("rm", "-rf", "x"), true},
+		{"rm*", lit("rm"), true},
+		{"mkfs*", lit("mkfs.ext4", "/dev/sda"), true},
+		{"/usr/bin/git *", lit("/usr/bin/git", "status"), true},
+		{"git *", lit("./git", "status"), false},
+		{"git *", lit("/tmp/x/git", "status"), false},
 		{"npm run test:*", lit("npm", "run", "test:unit"), true},
 		{"*", lit("anything", "at", "all"), true},
 	}
@@ -36,6 +46,92 @@ func TestRuleMatch(t *testing.T) {
 		if got := r.match(c.cmd, false); got != c.want {
 			t.Errorf("%q vs %v = %v, want %v", c.rule, c.cmd, got, c.want)
 		}
+	}
+}
+
+func TestRuleConservativeHeads(t *testing.T) {
+	cases := []struct {
+		rule         string
+		cmd          []Word
+		conservative bool
+		want         bool
+	}{
+		{"go test ./...", lit("/usr/local/go/bin/go", "test", "./..."), true, true},
+		{"go test ./...", lit("/usr/local/go/bin/go", "test", "./..."), false, false},
+		{"git push *", lit("./git", "push", "origin"), true, true},
+		{"git push *", lit("/tmp/x/git", "push", "origin"), true, true},
+		{"git push *", lit("./git", "push", "origin"), false, false},
+		{"git *", lit("./git", "status"), true, true},
+		{"/usr/bin/rm *", lit("rm", "-rf", "x"), true, true},
+		{"/usr/bin/rm *", lit("rm", "-rf", "x"), false, false},
+		{"/usr/bin/git *", lit("/usr/bin/git", "status"), false, true},
+		{"/usr/bin/git *", lit("/usr/bin/git", "status"), true, true},
+	}
+	for _, c := range cases {
+		r, err := ParseRule(c.rule)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := r.match(c.cmd, c.conservative); got != c.want {
+			t.Errorf("%q vs %v (conservative=%v) = %v, want %v", c.rule, c.cmd, c.conservative, got, c.want)
+		}
+	}
+}
+
+func TestRuleNonLiteralMultiWord(t *testing.T) {
+	cases := []struct {
+		rule         string
+		cmd          []Word
+		conservative bool
+		want         bool
+	}{
+		{"git push --force", []Word{{"git", true}, {"$A", false}}, true, true},
+		{"git push --force", []Word{{"git", true}, {"$A", false}}, false, false},
+		{"git push *", []Word{{"git", true}, {"$X", false}, {"origin", true}}, true, true},
+		{"git push *", []Word{{"git", true}, {"$X", false}, {"origin", true}}, false, false},
+		{"rm -rf *", []Word{{"rm", true}, {"$F", false}}, true, true},
+		{"rm -rf *", []Word{{"rm", true}, {"$F", false}}, false, false},
+		{"git status", []Word{{"git", true}, {"$A", false}}, true, true},
+		{"git status", []Word{{"git", true}, {"$A", false}}, false, false},
+	}
+	for _, c := range cases {
+		r, err := ParseRule(c.rule)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := r.match(c.cmd, c.conservative); got != c.want {
+			t.Errorf("%q vs %v (conservative=%v) = %v, want %v", c.rule, c.cmd, c.conservative, got, c.want)
+		}
+	}
+}
+
+func TestLearnIsOneLiteralWord(t *testing.T) {
+	for _, name := range []string{"", "*", "a b", "a\tb", "a*"} {
+		r := NewRules(RuleSet{Name: "user"})
+		r.Learn(name)
+		for _, cmd := range [][]Word{lit("a"), lit("a", "b"), lit("a*")} {
+			if d, _, _ := r.Decide(cmd); d != NoMatch {
+				t.Errorf("Learn(%q) then Decide(%v) = %v, want NoMatch", name, cmd, d)
+			}
+		}
+	}
+}
+
+func TestParseRuleCollapsesStars(t *testing.T) {
+	r, err := ParseRule(strings.Repeat("* ", 10) + "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := make([]Word, 60)
+	for i := range cmd {
+		cmd[i] = Word{Text: "w", Literal: true}
+	}
+	start := time.Now()
+	if r.match(cmd, false) {
+		t.Error("pattern * * ... a must not match 60 words without a")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("match took %v, want under 1s", elapsed)
 	}
 }
 
