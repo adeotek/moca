@@ -9,12 +9,14 @@
 # default target is the directory of the moca already on PATH, else
 # ~/.local/bin.
 #
-# With --uninstall the installed moca binary is removed instead — the
-# configuration in ~/.config/moca (or $XDG_CONFIG_HOME/moca), along with the
-# data and state directories, is deliberately left untouched.
+# With --uninstall the installed moca binary is removed instead — the config,
+# data and state directories are deliberately left untouched. With
+# --remove-data (which implies --uninstall) the whole installation goes:
+# the binary plus ~/.config/moca, ~/.local/share/moca and ~/.local/state/moca
+# (or their $XDG_*_HOME equivalents).
 #
 # usage:
-#   ./install.sh [--version <vX.Y.Z>] [--dir <path>] [--uninstall]
+#   ./install.sh [--version <vX.Y.Z>] [--dir <path>] [--uninstall] [--remove-data]
 #
 # env: MOCA_REPO (default adeotek/moca), MOCA_API_BASE (default the GitHub API)
 set -euo pipefail
@@ -24,6 +26,7 @@ API_BASE="${MOCA_API_BASE:-https://api.github.com}"
 VERSION=""
 DIR=""
 UNINSTALL=0
+REMOVE_DATA=0
 
 die() { printf 'moca: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
@@ -32,13 +35,16 @@ usage() {
 	cat <<'EOF'
 moca installer — Linux
 
-usage: install.sh [--version <vX.Y.Z>] [--dir <path>] [--uninstall]
+usage: install.sh [--version <vX.Y.Z>] [--dir <path>] [--uninstall] [--remove-data]
 
   --version <v>   install this release instead of the latest one
   --dir <path>    install into this directory (default: the directory of
                   the moca already on PATH, else ~/.local/bin)
   --uninstall     remove the installed moca binary instead of installing;
-                  ~/.config/moca (config, credentials) is left untouched
+                  the config, data and state directories are left untouched
+  --remove-data   full uninstall: also remove ~/.config/moca,
+                  ~/.local/share/moca and ~/.local/state/moca (config,
+                  credentials, sessions, logs)
   -h, --help      this help
 
 Downloads the release package for this platform, verifies it against the
@@ -62,6 +68,10 @@ while [ $# -gt 0 ]; do
 		UNINSTALL=1
 		shift
 		;;
+	--remove-data)
+		REMOVE_DATA=1
+		shift
+		;;
 	-h | --help)
 		usage
 		exit 0
@@ -72,7 +82,8 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-if [ "$UNINSTALL" = "1" ]; then
+if [ "$UNINSTALL" = "1" ] || [ "$REMOVE_DATA" = "1" ]; then
+	[ -z "$VERSION" ] || die "--version has no effect together with --uninstall/--remove-data"
 	if [ -n "$DIR" ]; then
 		TARGET="$DIR/moca"
 	else
@@ -81,15 +92,26 @@ if [ "$UNINSTALL" = "1" ]; then
 		RESOLVED="$(readlink -f -- "$EXISTING" 2>/dev/null || printf '%s' "$EXISTING")"
 		TARGET="$RESOLVED"
 	fi
-	if [ ! -e "$TARGET" ]; then
+	if [ ! -f "$TARGET" ]; then
 		die "no moca binary at $TARGET"
 	fi
-	if [ ! -w "$TARGET" ]; then
-		die "no write permission for $TARGET — re-run with sudo, or pass --dir <path>"
-	fi
+	# Make sure the file we are about to delete really is moca.
+	VERSION_OUT="$("$TARGET" --version 2>/dev/null || true)"
+	case "$VERSION_OUT" in
+	moca*) ;;
+	*) die "$TARGET does not look like moca (its --version did not print 'moca …') — pass --dir <path> to name the installation directory explicitly, or remove it by hand if it really is moca" ;;
+	esac
 	rm -f -- "$TARGET" || die "could not remove $TARGET"
 	note "removed moca from $TARGET"
-	note "note: left ~/.config/moca untouched (configuration and credentials)"
+	if [ "$REMOVE_DATA" = "1" ]; then
+		CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/moca"
+		DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/moca"
+		STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/moca"
+		rm -rf -- "$CONFIG_DIR" "$DATA_DIR" "$STATE_DIR"
+		note "removed moca data: $CONFIG_DIR, $DATA_DIR, $STATE_DIR"
+	else
+		note "note: left the config, data and state directories untouched (configuration and credentials) — pass --remove-data for a full uninstall"
+	fi
 	exit 0
 fi
 

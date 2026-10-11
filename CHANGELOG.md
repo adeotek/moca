@@ -6,7 +6,7 @@ The install scripts learn `--uninstall` / `-Uninstall`, and every run writes a b
 
 ### Installer
 
-- **`--uninstall` / `-Uninstall` in the install scripts.** `install.sh`/`install.ps1` remove the installed `moca` binary (from `--dir`/`-Dir`, else the `moca` on PATH) instead of installing, leaving the config directory (`~/.config/moca`, credentials included) and the data/state directories untouched.
+- **`--uninstall` / `-Uninstall` in the install scripts.** `install.sh`/`install.ps1` remove the installed `moca` binary (from `--dir`/`-Dir`, else the `moca` on PATH — verified to really be moca via its `--version` output) instead of installing, leaving the config, data and state directories untouched. `--remove-data` / `-RemoveData` (implies `--uninstall`) is the full uninstall: the binary plus the config, data and state directories (`~/.config/moca`, `~/.local/share/moca`, `~/.local/state/moca`, or their `$XDG_*_HOME` equivalents — config, credentials, sessions, logs) are deleted.
 
 ### Diagnostics
 

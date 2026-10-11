@@ -11,12 +11,15 @@ place — the script never fails because moca is already installed. The
 default target is the directory of the moca already on PATH, else
 %LOCALAPPDATA%\Programs\moca (which is added to the user PATH).
 
-With -Uninstall the installed moca.exe is removed instead — the
-configuration in %APPDATA%\moca (or $env:XDG_CONFIG_HOME\moca), along with
-the data and state directories, is deliberately left untouched.
+With -Uninstall the installed moca.exe is removed instead — the config,
+data and state directories are deliberately left untouched. -RemoveData
+(which implies -Uninstall) removes the whole installation: the binary plus
+%USERPROFILE%\.config\moca, %USERPROFILE%\.local\share\moca and
+%USERPROFILE%\.local\state\moca (or their $env:XDG_*_HOME equivalents —
+moca applies the XDG rules on every platform).
 
 usage:
-    .\install.ps1 [-Version <vX.Y.Z>] [-Dir <path>] [-Uninstall]
+    .\install.ps1 [-Version <vX.Y.Z>] [-Dir <path>] [-Uninstall] [-RemoveData]
 
 env: MOCA_REPO (default adeotek/moca), MOCA_API_BASE (default the GitHub API)
 #>
@@ -25,6 +28,7 @@ param(
     [string]$Version = '',
     [string]$Dir = '',
     [switch]$Uninstall,
+    [switch]$RemoveData,
     [string]$Repo = $(if ($env:MOCA_REPO) { $env:MOCA_REPO } else { 'adeotek/moca' }),
     [string]$ApiBase = $(if ($env:MOCA_API_BASE) { $env:MOCA_API_BASE } else { 'https://api.github.com' })
 )
@@ -40,14 +44,21 @@ if ($IsWindows -eq $false) {
     throw 'this installer is for Windows — on Linux use install.sh'
 }
 
-if ($Uninstall) {
+if ($Uninstall -or $RemoveData) {
+    if ($Version) { throw '-Version has no effect together with -Uninstall/-RemoveData' }
     if (-not $Dir) {
-        $existing = Get-Command moca -ErrorAction SilentlyContinue
+        # -CommandType Application: an alias or function named moca has no
+        # .Source path, and we must not delete a random moca.exe in the cwd.
+        $existing = Get-Command moca -CommandType Application -ErrorAction SilentlyContinue
         if (-not $existing) { throw 'moca is not on PATH — pass -Dir <path> to name the installation directory' }
         $Dir = Split-Path -Parent $existing.Source
     }
     $target = Join-Path $Dir 'moca.exe'
     if (-not (Test-Path $target)) { throw "no moca.exe at $target" }
+    # Make sure the file we are about to delete really is moca.
+    $versionOut = ''
+    try { $versionOut = (& $target --version 2>$null | Out-String).Trim() } catch { $versionOut = '' }
+    if ($versionOut -notmatch '^moca') { throw "$target is not moca (its --version output does not start with 'moca') — pass -Dir <path> to name the installation directory explicitly" }
     try {
         Remove-Item -Path $target -Force
     } catch {
@@ -56,7 +67,15 @@ if ($Uninstall) {
     # A leftover from a previous update, if any.
     Remove-Item -Path "$target.old" -Force -ErrorAction SilentlyContinue
     Write-Host "removed moca from $target"
-    Write-Host 'note: left %APPDATA%\moca untouched (configuration and credentials)'
+    if ($RemoveData) {
+        $configDir = if ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME 'moca' } else { Join-Path $env:USERPROFILE '.config/moca' }
+        $dataDir = if ($env:XDG_DATA_HOME) { Join-Path $env:XDG_DATA_HOME 'moca' } else { Join-Path $env:USERPROFILE '.local/share/moca' }
+        $stateDir = if ($env:XDG_STATE_HOME) { Join-Path $env:XDG_STATE_HOME 'moca' } else { Join-Path $env:USERPROFILE '.local/state/moca' }
+        Remove-Item -Path $configDir, $dataDir, $stateDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "removed moca data: $configDir, $dataDir, $stateDir"
+    } else {
+        Write-Host 'note: left the config, data and state directories untouched (configuration and credentials) — pass -RemoveData for a full uninstall'
+    }
     # return, not exit: `irm ... | iex` runs this in the caller's session.
     return
 }
