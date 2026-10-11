@@ -195,3 +195,115 @@ func TestRulesPrecedence(t *testing.T) {
 		t.Errorf("learned allow → %v/%q", d, layer)
 	}
 }
+
+// matchWithin runs r.match and fails if it does not return within budget.
+func matchWithin(t *testing.T, r Rule, cmd []Word, conservative bool, budget time.Duration) bool {
+	t.Helper()
+	done := make(chan bool, 1)
+	go func() { done <- r.match(cmd, conservative) }()
+	select {
+	case got := <-done:
+		return got
+	case <-time.After(budget):
+		t.Fatalf("match of %q against %d words did not finish within %v", r.Src, len(cmd), budget)
+		return false
+	}
+}
+
+func TestRuleMatchIsPolynomial(t *testing.T) {
+	const budget = time.Second
+	nonLits := func(n int) []Word {
+		out := make([]Word, n)
+		for i := range out {
+			out[i] = Word{Text: "$N", Literal: false}
+		}
+		return out
+	}
+	literals := func(n int) []Word {
+		out := make([]Word, n)
+		for i := range out {
+			out[i] = Word{Text: "w", Literal: true}
+		}
+		return out
+	}
+	cases := []struct {
+		rule         string
+		cmd          []Word
+		conservative bool
+		want         bool
+	}{
+		// 40 non-literal words then a literal: conservative may read $N as b or x or y.
+		{"a * * b *", append(append([]Word{{"a", true}}, nonLits(40)...), Word{"z", true}), true, true},
+		{"a * * b *", append(append([]Word{{"a", true}}, nonLits(40)...), Word{"z", true}), false, false},
+		{"* x * y * z", append(nonLits(40), Word{"z", true}), true, true},
+		{"* x * y * z", append(nonLits(40), Word{"z", true}), false, false},
+		// Must explore every split of the 40 non-literal words, then fail on the
+		// trailing literal (no pattern word can follow it to absorb it).
+		{"* a * b * c * d * e", append(nonLits(40), Word{"q", true}), true, false},
+		{"* a * b * c * d * e", append(nonLits(40), Word{"q", true}), false, false},
+		// Literal-only worst cases that fail after exploring every split.
+		{"* x * y * z", literals(60), true, false},
+		{"* * * a", literals(200), true, false},
+		{"* * * a", literals(200), false, false},
+		{"a * b * c * d * e", append([]Word{{"a", true}}, literals(199)...), true, false},
+		{"a * b * c * d * e", append([]Word{{"a", true}}, literals(199)...), false, false},
+	}
+	for _, c := range cases {
+		r, err := ParseRule(c.rule)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := matchWithin(t, r, c.cmd, c.conservative, budget); got != c.want {
+			t.Errorf("%q vs %d words (conservative=%v) = %v, want %v", c.rule, len(c.cmd), c.conservative, got, c.want)
+		}
+	}
+}
+
+func TestRuleWideningReview(t *testing.T) {
+	cases := []struct {
+		rule         string
+		cmd          []Word
+		conservative bool
+		want         bool
+	}{
+		// A deny/ask first word that Base reduces to a bare * matches any command.
+		{"*/*", lit("git", "status"), true, true},
+		{"*/*", lit("git", "status"), false, false},
+		{"/*", lit("git", "status"), true, true},
+		{"/*", lit("git", "status"), false, false},
+		{"*/", lit("git"), true, true},
+		{"*/", lit("git"), false, false},
+		// Allow never takes Base: a bare-name rule does not cover a path head.
+		{"git", lit("/usr/bin/git"), false, false},
+		{"git", lit("/usr/bin/git"), true, true},
+		{"git *", lit("C:\\bin\\git", "status"), false, false},
+		{"git *", lit("C:\\bin\\git", "status"), true, true},
+		{"/usr/bin/git *", lit("git", "status"), false, false},
+		{"/usr/bin/git *", lit("/usr/bin/git", "status"), false, true},
+	}
+	for _, c := range cases {
+		r, err := ParseRule(c.rule)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := r.match(c.cmd, c.conservative); got != c.want {
+			t.Errorf("%q vs %v (conservative=%v) = %v, want %v", c.rule, c.cmd, c.conservative, got, c.want)
+		}
+	}
+}
+
+func TestLearnPathRecordsExactHead(t *testing.T) {
+	for _, name := range []string{"./git", "/usr/bin/git"} {
+		r := NewRules(RuleSet{Name: "user"})
+		r.Learn(name)
+		if d, _, _ := r.Decide(lit("git", "status")); d != NoMatch {
+			t.Errorf("Learn(%q) then Decide(git status) = %v, want NoMatch", name, d)
+		}
+		if d, _, _ := r.Decide(lit("/tmp/x/git", "status")); d != NoMatch {
+			t.Errorf("Learn(%q) then Decide(/tmp/x/git status) = %v, want NoMatch", name, d)
+		}
+		if d, layer, _ := r.Decide(lit(name, "status")); d != Allow || layer != "user" {
+			t.Errorf("Learn(%q) then Decide(%s status) = %v/%q, want Allow/user", name, name, d, layer)
+		}
+	}
+}

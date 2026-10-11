@@ -74,16 +74,48 @@ func (r Rule) match(cmd []Word, conservative bool) bool {
 // command word may expand to zero or more words, so it may be skipped or may
 // be matched against a pattern word while staying available for more.
 func matchWords(pat []string, ws []Word, conservative bool) bool {
+	m := &matcher{pat: pat, ws: ws, conservative: conservative}
+	m.memo = make([]uint8, (len(pat)+1)*(len(ws)+1))
+	return m.match(0, 0)
+}
+
+// matcher memoises matchWords on (pattern index, command-word index). Every
+// call leaves the same state space, so each state is evaluated at most once
+// and matching is polynomial in len(pat)*len(ws)^2 instead of exponential in
+// the number of stars and non-literal words.
+type matcher struct {
+	pat          []string
+	ws           []Word
+	conservative bool
+	memo         []uint8 // 0 unknown, 1 false, 2 true
+}
+
+func (m *matcher) match(pi, wi int) bool {
+	idx := pi*(len(m.ws)+1) + wi
+	if v := m.memo[idx]; v != 0 {
+		return v == 2
+	}
+	res := m.step(pi, wi)
+	if res {
+		m.memo[idx] = 2
+	} else {
+		m.memo[idx] = 1
+	}
+	return res
+}
+
+func (m *matcher) step(pi, wi int) bool {
+	pat, ws := m.pat[pi:], m.ws[wi:]
 	if len(pat) == 0 {
 		if len(ws) == 0 {
 			return true
 		}
 		// Only a possibly-empty expansion can remain past an exhausted pattern.
-		return conservative && !ws[0].Literal && matchWords(pat, ws[1:], conservative)
+		return m.conservative && !ws[0].Literal && m.match(pi, wi+1)
 	}
 	if pat[0] == "*" {
 		for i := 0; i <= len(ws); i++ {
-			if matchWords(pat[1:], ws[i:], conservative) {
+			if m.match(pi+1, wi+i) {
 				return true
 			}
 		}
@@ -93,14 +125,14 @@ func matchWords(pat []string, ws []Word, conservative bool) bool {
 		return false
 	}
 	if ws[0].Literal {
-		return globWord(pat[0], ws[0].Text) && matchWords(pat[1:], ws[1:], conservative)
+		return globWord(pat[0], ws[0].Text) && m.match(pi+1, wi+1)
 	}
-	if !conservative {
+	if !m.conservative {
 		return false
 	}
 	// Expands to nothing, or its first expanded word matches pat[0] and it may
 	// expand to further words.
-	return matchWords(pat, ws[1:], conservative) || matchWords(pat[1:], ws, conservative)
+	return m.match(pi, wi+1) || m.match(pi+1, wi)
 }
 
 // globWord matches one word against a pattern where only * is special.
