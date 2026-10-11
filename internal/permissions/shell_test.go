@@ -259,3 +259,61 @@ func TestAllowLearnsExactHead(t *testing.T) {
 		t.Errorf("other path: need=%v", need)
 	}
 }
+
+func TestLegacyAllowCannotLiftAsk(t *testing.T) {
+	root, _, _ := setup(t)
+	j, _ := NewJail(root, nil, nil)
+	s := NewShell(RulesFromAllow([]string{"rm", "*", "rm *", "sudo", "del", "rtk *"}), j, "linux")
+	cases := map[string]verdict{
+		"rm x":        {every: []string{"rm"}},
+		"python x":    {need: []string{"python"}},
+		"sudo ls":     {deny: "hard-deny"},
+		"rtk git log": {need: []string{"rtk", "git"}},
+		"del x":       {need: []string{"del"}},
+	}
+	for cmd, want := range cases {
+		need, every, unsure, err := s.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
+	}
+	w := NewShell(RulesFromAllow([]string{"del"}), j, "windows")
+	if _, every, _, _ := w.Check("del x"); !slices.Equal(every, []string{"del"}) {
+		t.Errorf("windows del: every=%v", every)
+	}
+	g := NewShell(RulesFromAllow([]string{"git"}), j, "linux")
+	if need, every, _, err := g.Check("git log"); err != nil || len(need)+len(every) != 0 {
+		t.Errorf("git log: %v %v %v", need, every, err)
+	}
+	if got := LegacyAllowNames([]string{"git", "rm", "a b", "x*", "", "del"}); !slices.Equal(got, []string{"git"}) {
+		t.Errorf("LegacyAllowNames = %v", got)
+	}
+}
+
+func TestAllowWinAskOnlyOnWindows(t *testing.T) {
+	root, _, _ := setup(t)
+	j, _ := NewJail(root, nil, nil)
+	l := NewShell(NewRules(), j, "linux")
+	l.Allow("rmdir")
+	if need, _, _, _ := l.Check("rmdir x"); len(need) != 0 {
+		t.Errorf("linux rmdir should be learnable: %v", need)
+	}
+	w := NewShell(NewRules(), j, "windows")
+	w.Allow("rmdir")
+	if _, every, _, _ := w.Check("rmdir x"); !slices.Equal(every, []string{"rmdir"}) {
+		t.Errorf("windows rmdir must keep asking: %v", every)
+	}
+}
+
+func TestShellWindowsRuleWords(t *testing.T) {
+	root, _, _ := setup(t)
+	j, _ := NewJail(root, nil, nil)
+	user, _ := ParseRuleSet("user", []string{"git"}, nil, []string{"git push *"})
+	s := NewShell(NewRules(user), j, "windows")
+	for _, cmd := range []string{`git "push" origin`, `git $p origin`, "git `push` origin", `git 'push' origin`, "git push origin"} {
+		if _, _, _, err := s.Check(cmd); err == nil || !strings.Contains(err.Error(), "denied by the permissions rule") {
+			t.Errorf("%q: err = %v, want a rule denial", cmd, err)
+		}
+	}
+	if need, every, _, err := s.Check("git status"); err != nil || len(need)+len(every) != 0 {
+		t.Errorf("git status: %v %v %v", need, every, err)
+	}
+}

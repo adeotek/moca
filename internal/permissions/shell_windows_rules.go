@@ -21,7 +21,7 @@ func (s *Shell) checkWindows(command string) ([]string, []string, []string, erro
 	classify := func(fields []string) error {
 		ws := make([]Word, len(fields))
 		for i, f := range fields {
-			ws[i] = Word{Text: f, Literal: true}
+			ws[i] = Word{Text: f, Literal: i == 0 || !strings.ContainsAny(f, "$`\"'(){}@%")}
 		}
 		ws[0].Text = winName(fields[0])
 		return s.classify(ws, &v)

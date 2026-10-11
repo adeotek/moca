@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -39,11 +40,40 @@ func NewShell(rules *Rules, jail *Jail, goos string) *Shell {
 	return &Shell{rules: rules, jail: jail, goos: goos}
 }
 
-// RulesFromAllow builds a single "user" layer whose allow rules are the given
-// command names (names ParseRule rejects are skipped).
+// learnable reports whether name may enter an allow list as a plain command
+// name: one literal word (what Rules.Learn accepts) that is not hard-deny,
+// mkfs*, or an ask-every-time class (an allow rule would lift that ask).
+// winToo adds the Windows ask names.
+func learnable(name string, winToo bool) bool {
+	if name == "" || strings.Contains(name, "*") || strings.IndexFunc(name, unicode.IsSpace) >= 0 {
+		return false
+	}
+	lower := strings.ToLower(filepath.Base(strings.ReplaceAll(name, `\`, "/")))
+	if hardDeny[lower] || strings.HasPrefix(lower, "mkfs") || askEvery[lower] || (winToo && winAsk[lower]) {
+		return false
+	}
+	return true
+}
+
+// LegacyAllowNames filters the legacy shell.allow list down to the names that
+// are accepted: single literal command names only, never a wildcard and never
+// a hard-deny or ask-every-time name (on every OS, so a shared config cannot
+// differ by platform).
+func LegacyAllowNames(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if learnable(n, true) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// RulesFromAllow builds a single "user" layer whose allow rules are the
+// accepted legacy command names (see LegacyAllowNames).
 func RulesFromAllow(names []string) *Rules {
 	rs := RuleSet{Name: "user"}
-	for _, n := range names {
+	for _, n := range LegacyAllowNames(names) {
 		if r, err := ParseRule(n); err == nil {
 			rs.Allow = append(rs.Allow, r)
 		}
@@ -51,11 +81,9 @@ func RulesFromAllow(names []string) *Rules {
 	return NewRules(rs)
 }
 
-// Allow records an allow-always answer. Hard-deny and ask-every-time names
-// are never learned: an allow rule would otherwise lift the ask-every class.
+// Allow records an allow-always answer, subject to the same predicate.
 func (s *Shell) Allow(name string) {
-	lower := strings.ToLower(filepath.Base(strings.ReplaceAll(name, `\`, "/")))
-	if hardDeny[lower] || strings.HasPrefix(lower, "mkfs") || askEvery[lower] || winAsk[lower] {
+	if !learnable(name, s.goos == "windows") {
 		return
 	}
 	s.rules.Learn(name)
