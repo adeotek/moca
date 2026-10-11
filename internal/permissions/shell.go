@@ -160,21 +160,22 @@ func (s *Shell) classify(ws []Word, v *verdictAcc, st cmdState) error {
 	case !win && refused[lower]:
 		return fmt.Errorf("%s is refused: it runs code the analyser cannot see", base)
 	}
-	switch d, layer, src := s.rules.Decide(ws); d {
-	case Deny:
-		return fmt.Errorf("`%s` is denied by the permissions rule %q (%s config)", shortCmd(ws), src, layer)
-	case Ask:
-		v.add(&v.every, base)
-		return nil
-	case Allow:
-		return nil
-	}
-	// A path-qualified head is its own allow-always identity: `./tool` is not
-	// `tool`, so the prompt shows (and learns) the full head text.
+	// A path-qualified head is its own identity (ruling 14): `./tool` is not
+	// `tool`, so prompts show (and learn) the full head text. The default
+	// ask-every-time class keeps the base name (existing contract).
 	name := base
 	pathHead := strings.ContainsAny(head, `/\`)
 	if pathHead {
 		name = head
+	}
+	switch d, layer, src := s.rules.Decide(ws); d {
+	case Deny:
+		return fmt.Errorf("`%s` is denied by the permissions rule %q (%s config)", shortCmd(ws), src, layer)
+	case Ask:
+		v.add(&v.every, name)
+		return nil
+	case Allow:
+		return nil
 	}
 	// A builtin is only a builtin by its bare name: `./echo` runs whatever
 	// file is there.
@@ -186,7 +187,7 @@ func (s *Shell) classify(ws []Word, v *verdictAcc, st cmdState) error {
 			// No path model on the best-effort Windows analyser: nothing
 			// beyond builtins is allowed by the table.
 			if winAsk[lower] || askEvery[lower] {
-				v.add(&v.every, base)
+				v.add(&v.every, name)
 			} else {
 				v.add(&v.unsure, name)
 			}
@@ -198,7 +199,7 @@ func (s *Shell) classify(ws []Word, v *verdictAcc, st cmdState) error {
 			switch verdict {
 			case autoAllow:
 			case autoAsk:
-				v.add(&v.every, base)
+				v.add(&v.every, name)
 			default:
 				v.add(&v.unsure, name)
 			}
@@ -540,7 +541,6 @@ func (s *Shell) pathCheck(cwdUnknown bool) pathFunc {
 	// `.GIT` is .git (stricter on Linux, where it is merely a sibling).
 	fold := strings.ToLower
 	root := s.jail.Root()
-	gitDir := fold(filepath.Join(root, ".git"))
 	return func(p string, write bool) pathClass {
 		home := p == "~" || strings.HasPrefix(p, "~/")
 		if strings.HasPrefix(p, "~") && !home {
@@ -554,21 +554,70 @@ func (s *Shell) pathCheck(cwdUnknown bool) pathFunc {
 		}
 		res, err := s.jail.Resolve(p, write)
 		if err != nil {
-			return pathOut
+			return pathOut // outside, and every ancestor of the workdir
 		}
-		if within(fold(res), fold(root)) {
-			return pathRoot
-		}
-		for _, w := range s.jail.writable {
-			if within(fold(res), fold(w)) {
-				return pathRoot
+		roots := append([]string{root}, s.jail.writable...)
+		for _, r := range roots {
+			if fold(res) == fold(r) {
+				return pathRoot // the workdir or a writable root itself
 			}
 		}
-		if within(gitDir, fold(res)) {
+		for _, r := range roots {
+			if within(fold(res), fold(r)) {
+				// An ancestor of the workdir (or of another writable root)
+				// that lies inside a writable root: treated as outside.
+				return pathOut
+			}
+		}
+		if gitComponent(p) || gitComponent(res) {
 			return pathGit
 		}
 		return pathOK
 	}
+}
+
+// gitComponent reports whether any path component of p is `.git`
+// (case-folded; trailing dots/spaces ignored, as Windows does). The match is
+// the whole component: `.gitignore` is not one.
+func gitComponent(p string) bool {
+	for _, c := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if strings.EqualFold(strings.TrimRight(c, ". "), ".git") {
+			return true
+		}
+	}
+	return false
+}
+
+// gitTarget reports whether a write target names .git or lands in it after
+// resolution (a symlink to .git).
+func (s *Shell) gitTarget(t string) bool {
+	if gitComponent(t) {
+		return true
+	}
+	res, err := s.jail.Resolve(t, true)
+	return err == nil && gitComponent(res)
+}
+
+// headName is the identity a command head is shown under (ruling 14): the
+// full text when path-qualified, else the base name.
+func headName(t string) string {
+	if strings.ContainsAny(t, `/\`) {
+		return t
+	}
+	return filepath.Base(t)
+}
+
+// stmtLabel names a statement for an every-time ask about one of its
+// redirects: the command it runs, or "redirect".
+func stmtLabel(x *syntax.Stmt) string {
+	if call, ok := x.Cmd.(*syntax.CallExpr); ok && len(call.Args) > 0 {
+		if idxs, err := unwrap(call.Args); err == nil && len(idxs) > 0 {
+			if t, ok := wordLit(call.Args[idxs[len(idxs)-1]]); ok {
+				return headName(t)
+			}
+		}
+	}
+	return "redirect"
 }
 
 // innerDotDot reports whether p has a `..` after a named component
@@ -606,10 +655,13 @@ func (s *Shell) cdConfined(ws []Word, cwdUnknown bool) bool {
 	return s.pathCheck(cwdUnknown)(args[0].Text, false) != pathOut
 }
 
-// checkWrapperOutputs checks the output file of a `time -o FILE` wrapper
-// (GNU time writes it) as a redirect target. ws[:last idx] holds the
-// wrapper words; wrapper options were already validated by unwrap.
-func (s *Shell) checkWrapperOutputs(ws []Word, idxs []int, cwdUnknown bool) error {
+// checkWrapperOutputs checks every output file of a `time` wrapper (GNU
+// time writes the last `-o FILE` / `--output[=]FILE`) as a redirect target.
+// The wrapper words are walked with timeSpec, so option values (`-f FMT`,
+// an earlier `-o`) never end the scan early. ws[:last idx] holds the
+// wrapper words; unwrap already validated their options. In auto mode a
+// target inside .git asks every time.
+func (s *Shell) checkWrapperOutputs(ws []Word, idxs []int, cwdUnknown bool, v *verdictAcc) error {
 	end := len(ws)
 	if len(idxs) > 0 {
 		end = idxs[len(idxs)-1]
@@ -618,21 +670,32 @@ func (s *Shell) checkWrapperOutputs(ws []Word, idxs []int, cwdUnknown bool) erro
 		if strings.ToLower(filepath.Base(ws[i].Text)) != "time" {
 			continue
 		}
-		for j := i + 1; j < end && strings.HasPrefix(ws[j].Text, "-"); j++ {
+	walk:
+		for j := i + 1; j < end; j++ {
 			t := ws[j].Text
-			var target string
+			target, has := "", false
 			switch {
 			case t == "-o" || t == "--output":
 				if j+1 < len(ws) {
-					target = ws[j+1].Text
+					target, has = ws[j+1].Text, true
 				}
+				j++
 			case strings.HasPrefix(t, "--output="):
-				target = strings.TrimPrefix(t, "--output=")
+				target, has = strings.TrimPrefix(t, "--output="), true
+			case timeSpec.arg[t]:
+				j++ // -f/--format FMT
+			case strings.HasPrefix(t, "-"):
+			default:
+				break walk // the wrapped command
 			}
-			if target != "" {
-				if err := s.checkTargetText(target, cwdUnknown); err != nil {
-					return err
-				}
+			if !has {
+				continue
+			}
+			if err := s.checkTargetText(target, cwdUnknown); err != nil {
+				return err
+			}
+			if s.auto && s.gitTarget(target) {
+				v.add(&v.every, headName(ws[i].Text))
 			}
 		}
 	}
@@ -662,17 +725,21 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 		switch x := n.(type) {
 		case *syntax.Stmt:
 			for _, r := range x.Redirs {
+				check := false
 				switch r.Op {
 				case syntax.RdrOut, syntax.AppOut, syntax.RdrAll, syntax.AppAll, syntax.ClbOut, syntax.RdrInOut:
-					if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
-						fail(err)
-					}
+					check = true
 				case syntax.DplOut:
-					if t, ok := wordLit(r.Word); !ok || (t != "-" && strings.Trim(t, "0123456789") != "") {
-						if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
-							fail(err)
-						}
-					}
+					t, ok := wordLit(r.Word)
+					check = !ok || (t != "-" && strings.Trim(t, "0123456789") != "")
+				}
+				if !check {
+					continue
+				}
+				if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
+					fail(err)
+				} else if t, _ := wordLit(r.Word); s.auto && s.gitTarget(t) {
+					v.add(&v.every, stmtLabel(x)) // .git/config, hooks: code that git runs later
 				}
 			}
 		case *syntax.DeclClause:
@@ -688,7 +755,7 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 				return false
 			}
 			ws := toWords(x.Args)
-			if err := s.checkWrapperOutputs(ws, idxs, cwdUnknown); err != nil {
+			if err := s.checkWrapperOutputs(ws, idxs, cwdUnknown, &v); err != nil {
 				fail(err)
 				return false
 			}
@@ -732,6 +799,8 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 						}
 						if err := s.checkTarget(a, cwdUnknown); err != nil {
 							fail(err)
+						} else if t, _ := wordLit(a); s.auto && s.gitTarget(t) {
+							v.add(&v.every, headName(ws[idx].Text))
 						}
 					}
 				}

@@ -72,7 +72,7 @@ func cargoVerdict(ws []Word, conf pathFunc) autoVerdict {
 	case "publish", "yank", "owner", "login", "logout":
 		return autoAsk
 	case "build", "test", "check":
-		if shortFlag(ws, 2, 'Z') {
+		if shortFlag(ws, 2, 'Z') || hasOpt(ws, 2, "", "--config") {
 			return autoUnsure
 		}
 		return buildWithWrites(ws, 2, conf, "", []string{"--target-dir", "--artifact-dir", "--out-dir"})
@@ -85,7 +85,7 @@ func cargoVerdict(ws []Word, conf pathFunc) autoVerdict {
 func npmVerdict(ws []Word, lower string, conf pathFunc) autoVerdict {
 	for i, w := range ws[1:] {
 		switch w.Text {
-		case "publish", "unpublish", "-g", "--global", "--location=global":
+		case "publish", "unpublish", "-g", "--global", "--location=global", "dlx":
 			return autoAsk
 		case "--location":
 			if i+2 < len(ws) && ws[i+2].Text == "global" {
@@ -100,11 +100,23 @@ func npmVerdict(ws []Word, lower string, conf pathFunc) autoVerdict {
 		return autoUnsure
 	}
 	switch ws[1].Text {
+	case "exec", "x":
+		return autoAsk // fetch-and-run
 	case "test", "t", "tst", "run", "run-script":
+		// npm options (before --) can swap the script shell, inject node
+		// options or load another npmrc: only a few are known harmless.
+		opts, _ := splitArgs(ws, 2)
+		for _, o := range opts {
+			if !slices.Contains(npmSafeOpts, o.Text) {
+				return autoUnsure
+			}
+		}
 		return readCheck(ws, 2, conf)
 	}
 	return autoUnsure
 }
+
+var npmSafeOpts = []string{"--silent", "-s", "--quiet", "-q", "--if-present", "--loglevel=silent", "--no-color"}
 
 // pipVerdict: `pip install` asks unless --target names a confined
 // directory (then it is unsure, like npm install).

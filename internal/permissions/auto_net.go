@@ -16,7 +16,7 @@ var (
 	curlValueLong = map[string]bool{"--header": true, "--user-agent": true, "--user": true, "--referer": true,
 		"--proxy": true, "--max-time": true, "--connect-timeout": true, "--retry": true, "--retry-delay": true,
 		"--retry-max-time": true, "--resolve": true, "--connect-to": true, "--interface": true, "--limit-rate": true,
-		"--max-filesize": true, "--write-out": true, "--range": true, "--oauth2-bearer": true, "--proxy-user": true,
+		"--max-filesize": true, "--range": true, "--oauth2-bearer": true, "--proxy-user": true,
 		"--continue-at": true, "--time-cond": true, "--max-redirs": true, "--speed-limit": true, "--speed-time": true,
 		"--dns-servers": true, "--doh-url": true, "--noproxy": true, "--preproxy": true, "--proxy-header": true}
 	curlAskPrefixes = []string{"--data", "--json", "--form", "--upload-file", "--config", "--unix-socket",
@@ -93,6 +93,16 @@ func atRead(w Word, conf pathFunc) autoVerdict {
 	return autoAllow
 }
 
+// writeOut judges a curl -w/--write-out format: %output{FILE} (or
+// %output{>>FILE}) writes a file, so it — or a value we cannot see — asks;
+// @file reads the format from a file.
+func writeOut(w Word, conf pathFunc) autoVerdict {
+	if !w.Literal || strings.Contains(strings.ToLower(w.Text), "%output{") {
+		return autoAsk
+	}
+	return atRead(w, conf)
+}
+
 type cursor struct {
 	ws []Word
 	i  int
@@ -124,6 +134,13 @@ func curlVerdict(ws []Word, conf pathFunc) autoVerdict {
 		case t == "--request":
 			if !getVerb(c.next()) {
 				return autoAsk
+			}
+		case strings.HasPrefix(t, "--write-out"):
+			_, val, eq := strings.Cut(t, "=")
+			if !eq {
+				v = v.and(writeOut(c.next(), conf))
+			} else {
+				v = v.and(writeOut(Word{Text: val, Literal: true}, conf))
 			}
 		case strings.HasPrefix(t, "--"):
 			if curlLongAsk(t) {
@@ -171,7 +188,9 @@ func curlVerdict(ws []Word, conf pathFunc) autoVerdict {
 					continue
 				case ch == 'b' || ch == 'E':
 					v = v.and(fileRead(val(), conf, ch == 'b'))
-				case strings.IndexByte("HwueAxrmCyYztUQP", ch) >= 0:
+				case ch == 'w':
+					v = v.and(writeOut(val(), conf))
+				case strings.IndexByte("HueAxrmCyYztUQP", ch) >= 0:
 					v = v.and(atRead(val(), conf))
 				default:
 					continue // a boolean flag
@@ -189,19 +208,20 @@ func curlVerdict(ws []Word, conf pathFunc) autoVerdict {
 }
 
 var (
-	wgetAskLong   = map[string]bool{"--post-data": true, "--post-file": true, "--body-data": true, "--body-file": true, "--execute": true, "--config": true, "--use-askpass": true}
-	wgetWriteLong = map[string]bool{"--output-document": true, "--output-file": true, "--append-output": true, "--save-cookies": true, "--warc-file": true, "--rejected-log": true}
-	wgetReadLong  = map[string]bool{"--input-file": true, "--load-cookies": true, "--ca-certificate": true, "--certificate": true, "--private-key": true, "--ca-directory": true, "--crl-file": true}
-	wgetValueLong = map[string]bool{"--user": true, "--password": true, "--header": true, "--user-agent": true, "--referer": true,
-		"--tries": true, "--timeout": true, "--wait": true, "--level": true, "--accept": true, "--reject": true, "--domains": true,
-		"--exclude-domains": true, "--include-directories": true, "--exclude-directories": true, "--limit-rate": true,
-		"--quota": true, "--restrict-file-names": true, "--bind-address": true}
+	wgetAskLong = map[string]bool{"--post-data": true, "--post-file": true, "--body-data": true, "--body-file": true,
+		"--execute": true, "--config": true, "--use-askpass": true}
+	// wgetSafeBool / wgetSafeValue: the only other long options a plain
+	// download may use. They cannot write a file (beyond the checked -O and
+	// -P), load code or read credentials. Anything else is unsure.
+	wgetSafeBool  = map[string]bool{"--quiet": true, "--no-verbose": true, "--server-response": true, "--spider": true, "--continue": true}
+	wgetSafeValue = map[string]bool{"--timeout": true, "--tries": true, "--user-agent": true, "--header": true}
 )
 
-// wgetLong expands an abbreviated long option (getopt_long) to the
-// dangerous name it may select, preferring ask, then write, then read.
+// wgetLong expands an abbreviated long option (getopt_long) to the known
+// name it may select, preferring the ask set.
 func wgetLong(name string) string {
-	for _, set := range []map[string]bool{wgetAskLong, {"--method": true}, wgetWriteLong, {"--directory-prefix": true}, wgetReadLong, wgetValueLong} {
+	for _, set := range []map[string]bool{wgetAskLong, {"--method": true}, {"--output-document": true},
+		{"--directory-prefix": true}, wgetSafeBool, wgetSafeValue} {
 		for full := range set {
 			if longIs(name, full) {
 				return full
@@ -211,6 +231,9 @@ func wgetLong(name string) string {
 	return name
 }
 
+// wgetVerdict: a plain download (http/https, the safe options, -O/-P inside
+// the confinement) is allowed; sending data, -e/--execute and --config ask;
+// every other option is unsure.
 func wgetVerdict(ws []Word, conf pathFunc) autoVerdict {
 	v := autoAllow
 	doc, prefix := false, false
@@ -242,19 +265,21 @@ func wgetVerdict(ws []Word, conf pathFunc) autoVerdict {
 				if !getVerb(value()) {
 					return autoAsk
 				}
-			case wgetWriteLong[name]:
-				doc = doc || name == "--output-document"
+			case name == "--output-document":
+				doc = true
 				v = v.and(writeTargets([]Word{value()}, conf, false))
 			case name == "--directory-prefix":
 				prefix = true
 				v = v.and(writeTargets([]Word{value()}, conf, true))
-			case wgetReadLong[name]:
-				v = v.and(fileRead(value(), conf, false))
-			case wgetValueLong[name] && !eq:
-				c.next()
+			case wgetSafeValue[name]:
+				value()
+			case wgetSafeBool[name] && !eq:
+			default:
+				// Unknown: unsure. Keep scanning so a later ask form still
+				// asks (a value word read as an option only over-matches).
+				v = v.and(autoUnsure)
 			}
-		case strings.HasPrefix(t, "-n") && len(t) == 3:
-			// -nd -nH -np -nv -nc: two-letter booleans
+		case t == "-nv" || t == "-nc":
 		case strings.HasPrefix(t, "-") && len(t) > 1:
 			for k := 1; k < len(t); k++ {
 				ch := t[k]
@@ -270,17 +295,15 @@ func wgetVerdict(ws []Word, conf pathFunc) autoVerdict {
 				case ch == 'O':
 					doc = true
 					v = v.and(writeTargets([]Word{val()}, conf, false))
-				case ch == 'o' || ch == 'a':
-					v = v.and(writeTargets([]Word{val()}, conf, false))
 				case ch == 'P':
 					prefix = true
 					v = v.and(writeTargets([]Word{val()}, conf, true))
-				case ch == 'i':
-					v = v.and(fileRead(val(), conf, false))
-				case strings.IndexByte("UtTwQARDIXlB", ch) >= 0:
+				case ch == 'T' || ch == 't' || ch == 'U':
 					val()
-				default:
+				case ch == 'q' || ch == 'S' || ch == 'c' || ch == 'v':
 					continue
+				default:
+					v = v.and(autoUnsure) // -o/-a logs, -i, -r, -x, … and unknown letters
 				}
 				break
 			}

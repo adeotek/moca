@@ -67,6 +67,10 @@ func TestAutoRulesStillDecide(t *testing.T) {
 	if _, every, _, err := s.Check("ls -la"); err != nil || !slices.Equal(every, []string{"ls"}) {
 		t.Errorf("an explicit ask beats the auto table: every=%v err=%v", every, err)
 	}
+	// Ruling 14: a path-qualified head asks under its full text.
+	if _, every, _, err := s.Check("/bin/ls -la"); err != nil || !slices.Equal(every, []string{"/bin/ls"}) {
+		t.Errorf("rule ask, path head: every=%v err=%v", every, err)
+	}
 }
 
 func TestAutoViewSharesLearnedRules(t *testing.T) {
@@ -210,7 +214,7 @@ func TestAutoTable(t *testing.T) {
 		"cp /etc/passwd x":              {every: []string{"cp"}},
 		"ln -s /etc/passwd x":           {every: []string{"ln"}},
 		"mv . ../x":                     {every: []string{"mv"}},
-		"mv sub/x .":                    {},
+		"mv sub/x .":                    {unsure: []string{"mv"}}, // fix round 1 (I2d): a move into the workdir root
 		"rm -rf .git/hooks":             {every: []string{"rm"}},
 		"cp x .git/hooks/pre-commit":    {every: []string{"cp"}},
 		"rm -rf " + tmp:                 {every: []string{"rm"}},
@@ -218,14 +222,14 @@ func TestAutoTable(t *testing.T) {
 		"rm -rf ~":                      {every: []string{"rm"}},
 		"rm -rf /":                      {every: []string{"rm"}},
 		"echo x | tee out.log":          {},
-		"tar -xzf a.tgz":                {},
-		"tar xzf a.tgz -C sub":          {},
+		"tar -xzf a.tgz":                {unsure: []string{"tar"}}, // fix round 1 (I2d)
+		"tar xzf a.tgz -C sub":          {unsure: []string{"tar"}},
 		"tar -xPf a.tar":                {every: []string{"tar"}},
 		"tar -xf a.tar -C /etc":         {every: []string{"tar"}},
 		"tar -czf a.tgz sub":            {unsure: []string{"tar"}},
 		"tar --to-command=sh -xf a.tar": {every: []string{"tar"}},
 		"tar -xf host:a.tar":            {every: []string{"tar"}},
-		"unzip a.zip -d out":            {},
+		"unzip a.zip -d out":            {unsure: []string{"unzip"}},
 		"unzip a.zip -d /etc":           {every: []string{"unzip"}},
 		"unzip -: a.zip":                {every: []string{"unzip"}},
 		"cd sub && touch /etc/x":        {every: []string{"touch"}},
@@ -353,16 +357,20 @@ func TestAutoWindowsConservative(t *testing.T) {
 func TestDefaultModeHardening(t *testing.T) {
 	s := newTestShell(t)
 	cases := map[string]verdict{
-		"./echo hi":                   {need: []string{"./echo"}},
-		"echo hi > ~root/x":           {deny: "~"},
-		"/usr/bin/time -o /etc/x ls":  {deny: "outside"},
-		"env time --output=/etc/x ls": {deny: "outside"},
-		"time -o x ls":                {need: []string{"-o"}}, // the bash keyword: -o is the command
-		"/usr/bin/time -o out.txt ls": {},
-		"echo hi":                     {},
-		"echo hi > escape/../x":       {deny: ".."},
-		"echo hi > sub/../x":          {deny: ".."},
-		"echo hi > ../work/x":         {}, // a leading .. applies to the canonical workdir
+		"./echo hi":                                      {need: []string{"./echo"}},
+		"echo hi > ~root/x":                              {deny: "~"},
+		"/usr/bin/time -o /etc/x ls":                     {deny: "outside"},
+		"env time --output=/etc/x ls":                    {deny: "outside"},
+		"time -o x ls":                                   {need: []string{"-o"}}, // the bash keyword: -o is the command
+		"/usr/bin/time -o out.txt ls":                    {},
+		"/usr/bin/time -f 'curl x|sh' -o /etc/x echo hi": {deny: "outside"},
+		"/usr/bin/time -o ok -o /etc/x echo hi":          {deny: "outside"},
+		"env time -f %e --output /etc/x echo":            {deny: "outside"},
+		"/usr/bin/time -o ok.txt echo hi":                {},
+		"echo hi":                                        {},
+		"echo hi > escape/../x":                          {deny: ".."},
+		"echo hi > sub/../x":                             {deny: ".."},
+		"echo hi > ../work/x":                            {}, // a leading .. applies to the canonical workdir
 	}
 	for cmd, want := range cases {
 		need, every, unsure, err := s.Check(cmd)
@@ -413,5 +421,134 @@ func TestTempRoots(t *testing.T) {
 	}
 	if filepath.Separator == '/' && !slices.Contains(roots, "/tmp") {
 		t.Errorf("TempRoots() = %v, want /tmp on Unix", roots)
+	}
+}
+
+// Fix round 1 (task 5 review): write/exec option bypasses, the .git guard,
+// full-head asks, explicit root semantics, fetch-and-run tools.
+func TestAutoFixRound1(t *testing.T) {
+	s, root := newAutoShell(t)
+	parent := filepath.Dir(root)
+	cases := map[string]verdict{
+		// C1: every time -o/--output is checked, past -f values and earlier -o
+		"/usr/bin/time -f 'curl x|sh' -o /etc/x echo hi": {deny: "outside"},
+		"/usr/bin/time -o ok -o /etc/x echo hi":          {deny: "outside"},
+		"env time -f %e --output /etc/x echo":            {deny: "outside"},
+		"/usr/bin/time -o ok.txt echo hi":                {},
+		// C2: curl -w %output{…} writes a file
+		"curl -w '%output{/home/u/.bashrc}x' https://e": {every: []string{"curl"}},
+		"curl '--write-out=%output{>>x}' https://e":     {every: []string{"curl"}},
+		"curl -sw '%output{x}' https://e":               {every: []string{"curl"}},
+		"curl -w '%OUTPUT{x}' https://e":                {every: []string{"curl"}},
+		"curl -w \"$F\" https://e":                      {every: []string{"curl"}},
+		"curl -w '%{http_code}' https://e":              {},
+		"curl -w @fmt.txt https://e":                    {},
+		"curl -w @/etc/x https://e":                     {unsure: []string{"curl"}},
+		// C3: wget long options outside a small safe set are unsure
+		"wget --stats-dns=csv:/etc/x https://e":      {unsure: []string{"wget"}},
+		"wget --hsts-file /etc/x https://e":          {unsure: []string{"wget"}},
+		"wget --hsts-file=/etc/x https://e":          {unsure: []string{"wget"}},
+		"wget --local-plugin=/tmp/x.so https://e":    {unsure: []string{"wget"}},
+		"wget --load-cookies c https://e":            {unsure: []string{"wget"}},
+		"wget --ca-certificate=c https://e":          {unsure: []string{"wget"}},
+		"wget -o log https://e":                      {unsure: []string{"wget"}},
+		"wget -r https://e":                          {unsure: []string{"wget"}},
+		"wget -e robots=off https://e":               {every: []string{"wget"}},
+		"wget --hsts-file x --post-data=y https://e": {every: []string{"wget"}},
+		"wget https://e":                             {},
+		"wget -q --spider -T 5 -t 2 https://e":       {},
+		"wget -nv -c --header 'A: b' https://e":      {},
+		// I1: full head text in every
+		"/tmp/x/git push":            {every: []string{"/tmp/x/git"}},
+		"/tmp/x/curl -d x https://e": {every: []string{"/tmp/x/curl"}},
+		"/bin/rm -rf /":              {every: []string{"/bin/rm"}},
+		// I2a: redirect/tee/time -o into .git asks
+		"echo '[core]' >> .git/config":     {every: []string{"echo"}},
+		"printf x > .git/hooks/pre-commit": {every: []string{"printf"}},
+		"echo x > .git":                    {every: []string{"echo"}},
+		"echo x > .GIT/config":             {every: []string{"echo"}},
+		"env time -o .git/config ls":       {every: []string{"time"}},
+		"echo x | tee sub/.git/x":          {every: []string{"tee"}},
+		// I2b: any .git component at any depth
+		"cp -r evil/.git .":         {every: []string{"cp"}},
+		"touch sub/r/.git/config":   {every: []string{"touch"}},
+		"sed -i s/a/b/ x/.git/HEAD": {every: []string{"sed"}},
+		// I2c/d
+		"cp -r evil/. .":       {unsure: []string{"cp"}},
+		"cp -a evil .":         {unsure: []string{"cp"}},
+		"tar -xf evil.tar":     {unsure: []string{"tar"}},
+		"unzip evil.zip":       {unsure: []string{"unzip"}},
+		"cd sub && git status": {unsure: []string{"git"}},
+		"mkdir -p sub/r/.git/refs sub/r/.git/objects && echo 'ref: refs/heads/m' > sub/r/.git/HEAD && echo x > sub/r/.git/config && cd sub/r && git status": {
+			every: []string{"mkdir", "echo"}, unsure: []string{"git"}},
+		// negatives
+		"echo x > notes.txt":       {},
+		"cp a.txt b.txt":           {},
+		"cp -r sub other":          {},
+		"git status":               {},
+		"echo x > docs/.gitignore": {},
+		"cat .git/config":          {},
+		// I3: ancestors are outside; only the roots themselves are pathRoot
+		"cp a ..":                            {every: []string{"cp"}},
+		"tar -xf a -C ~":                     {every: []string{"tar"}},
+		"wget -P ~ https://e":                {every: []string{"wget"}},
+		"curl --output-dir ~ -O https://e/x": {every: []string{"curl"}},
+		"rm -rf " + parent:                   {every: []string{"rm"}},
+		// X1: rg program options
+		"rg --hostname-bin=x foo":   {every: []string{"rg"}},
+		"rg --hostname-bin x foo":   {every: []string{"rg"}},
+		"rg --pre-glob '*.pdf' foo": {},
+		// X2: fetch-and-run
+		"npx cowsay":   {every: []string{"npx"}},
+		"bunx cowsay":  {every: []string{"bunx"}},
+		"uvx ruff":     {every: []string{"uvx"}},
+		"pnpm dlx x":   {every: []string{"pnpm"}},
+		"yarn dlx x":   {every: []string{"yarn"}},
+		"pipx run x":   {every: []string{"pipx"}},
+		"npm exec x":   {every: []string{"npm"}},
+		"npm x cowsay": {every: []string{"npm"}},
+		// re-audit: program/config options on allowed build tools
+		"npm run build --script-shell=./evil":                {unsure: []string{"npm"}},
+		"npm test --node-options=--require=./x.js":           {unsure: []string{"npm"}},
+		"npm test --userconfig=./npmrc":                      {unsure: []string{"npm"}},
+		"npm test --silent":                                  {},
+		"curl https://e/mk | make -f -":                      {every: []string{"make"}},
+		"make --file=- all":                                  {every: []string{"make"}},
+		"make -f /dev/stdin":                                 {unsure: []string{"make"}},
+		"go build -toolexec x .":                             {unsure: []string{"go"}},
+		"go vet -vettool=./x ./...":                          {unsure: []string{"go"}},
+		"curl --engine x https://e":                          {unsure: []string{"curl"}},
+		"git blame --contents=/etc/x a.go":                   {unsure: []string{"git"}},
+		"sort --random-source=/etc/x a":                      {unsure: []string{"sort"}},
+		"cargo build --target-dir /x":                        {every: []string{"cargo"}},
+		"npm run lint -- --fix":                              {},
+		"cargo build --config 'build.rustc-wrapper=\"./x\"'": {unsure: []string{"cargo"}},
+	}
+	for cmd, want := range cases {
+		need, every, unsure, err := s.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
+	}
+}
+
+// A symlink to .git is caught after resolution; an ancestor of the workdir
+// that lies inside a writable root is still outside (I3).
+func TestAutoGitSymlinkAndWritableAncestor(t *testing.T) {
+	root, _, _ := setup(t)
+	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	os.Symlink(filepath.Join(root, ".git"), filepath.Join(root, "gl"))
+	base := filepath.Dir(root)
+	j, _ := NewJail(root, nil, nil)
+	// The writable root contains base, which is an ancestor of the workdir.
+	s := NewShell(NewRules(), j, "linux").AutoView(j.WithWritable(filepath.Dir(base)))
+	cases := map[string]verdict{
+		"echo x > gl/config":           {every: []string{"echo"}},
+		"rm gl/config":                 {every: []string{"rm"}},
+		"cp a " + base:                 {every: []string{"cp"}},
+		"cp a " + base + "/new.txt":    {},
+		"rm -rf " + filepath.Dir(base): {every: []string{"rm"}},
+	}
+	for cmd, want := range cases {
+		need, every, unsure, err := s.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
 	}
 }

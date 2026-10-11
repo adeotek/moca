@@ -277,7 +277,17 @@ func tarVerdict(ws []Word, conf pathFunc) autoVerdict {
 	if conf(".", true) == pathOut {
 		return autoAsk // extracts into a cwd that a cd made unknown
 	}
-	return mutatorVerdict(ws, from, conf, guardNone, false)
+	return archiveVerdict(mutatorVerdict(ws, from, conf, guardNone, false))
+}
+
+// archiveVerdict: an unconfined target asks; otherwise extraction is
+// unsure, never allowed — archive members can plant .git, hooks or
+// symlinks the table cannot see.
+func archiveVerdict(v autoVerdict) autoVerdict {
+	if v == autoAsk {
+		return autoAsk
+	}
+	return autoUnsure
 }
 
 func unzipVerdict(ws []Word, conf pathFunc) autoVerdict {
@@ -290,5 +300,5 @@ func unzipVerdict(ws []Word, conf pathFunc) autoVerdict {
 	if conf(".", true) == pathOut {
 		return autoAsk
 	}
-	return mutatorVerdict(ws, 1, conf, guardNone, false)
+	return archiveVerdict(mutatorVerdict(ws, 1, conf, guardNone, false))
 }

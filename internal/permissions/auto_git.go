@@ -93,7 +93,9 @@ func gitVerdict(ws []Word, conf pathFunc) autoVerdict {
 	default:
 		return autoUnsure
 	}
-	if v == autoAllow && !safe {
+	if v == autoAllow && (!safe || conf(".", false) == pathOut) {
+		// Another repo or config (-C, -c, …), or a cwd a cd made unknown:
+		// that directory's .git config may run code.
 		v = autoUnsure
 	}
 	return v

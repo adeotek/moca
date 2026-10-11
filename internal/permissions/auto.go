@@ -38,10 +38,10 @@ func (a autoVerdict) and(b autoVerdict) autoVerdict {
 type pathClass int
 
 const (
-	pathOut  pathClass = iota // outside the confinement, unresolvable, or relative after a cd
-	pathOK                    // inside the workdir or a writable temp root
-	pathRoot                  // the workdir or a writable root itself, or an ancestor of one
-	pathGit                   // the workdir's .git or anything inside it
+	pathOut  pathClass = iota // outside the confinement, an ancestor of the workdir, unresolvable, or relative after a cd
+	pathOK                    // strictly inside the workdir or a writable temp root
+	pathRoot                  // exactly the workdir or a writable root (never an ancestor: that is pathOut)
+	pathGit                   // any path with a .git component, before or after resolution
 )
 
 // pathFunc classifies a literal path for a read (write=false) or a write.
@@ -60,6 +60,8 @@ var alwaysAskNames = map[string]bool{
 	"netcat": true, "telnet": true, "ftp": true,
 	"shutdown": true, "reboot": true, "halt": true, "poweroff": true, "service": true, "launchctl": true,
 	"pacman": true, "zypper": true, "snap": true, "flatpak": true,
+	// fetch-and-run: download a package and execute it
+	"npx": true, "bunx": true, "uvx": true,
 }
 
 // readOnlyCmds: tools that only read (their writing/executing options are
@@ -72,8 +74,8 @@ var readOnlyCmds = map[string]bool{
 }
 
 // confinedCmds: mutators allowed when every operand is literal and confined.
-// guardRoot means an operand that is the workdir (or a writable root, or an
-// ancestor of either) asks every time; .git is guarded for all of them.
+// A guarded operand that is the workdir or a writable root itself asks
+// every time; an operand with a .git component asks for all of them.
 var confinedCmds = map[string]rootGuard{
 	"rm": guardAll, "rmdir": guardAll, "chmod": guardAll, "mv": guardSources,
 	"cp": guardNone, "ln": guardNone, "mkdir": guardNone, "touch": guardNone,
@@ -118,6 +120,8 @@ func toolVerdict(ws []Word, lower string, conf pathFunc) autoVerdict {
 		return interpVerdict(ws, lower, conf)
 	case alwaysAskNames[lower] || strings.HasPrefix(lower, "apt"):
 		return autoAsk
+	case lower == "pipx" && askIfAnyWord(ws, "run") == autoAsk:
+		return autoAsk // fetch-and-run
 	case strings.HasPrefix(lower, "pip"):
 		return pipVerdict(ws, 1, conf)
 	}
@@ -137,6 +141,11 @@ func toolVerdict(ws []Word, lower string, conf pathFunc) autoVerdict {
 	case "go":
 		return goVerdict(ws, conf)
 	case "make":
+		for _, f := range optValues(ws, 1, "f", []string{"--file", "--makefile"}) {
+			if !f.Literal || f.Text == "-" {
+				return autoAsk // a makefile read from stdin is code from a pipe
+			}
+		}
 		if hasOpt(ws, 1, "E", "--eval") {
 			return autoUnsure
 		}
@@ -176,7 +185,13 @@ func toolVerdict(ws []Word, lower string, conf pathFunc) autoVerdict {
 		}
 	}
 	if g, ok := confinedCmds[lower]; ok {
-		return mutatorVerdict(ws, 1, conf, g, false)
+		v := mutatorVerdict(ws, 1, conf, g, false)
+		if v == autoAllow && (lower == "mv" || (lower == "cp" && cpRecursive(ws))) && anyRootOperand(ws, conf) {
+			// A tree merged into the workdir root may carry a .git (`cp -r
+			// evil/. .`): the classifier judges it.
+			return autoUnsure
+		}
+		return v
 	}
 	if readOnlyCmds[lower] {
 		return readOnlyVerdict(ws, lower, conf)
@@ -212,7 +227,8 @@ func readOnlyVerdict(ws []Word, lower string, conf pathFunc) autoVerdict {
 			}
 		}
 	case "rg":
-		if hasOpt(ws, 1, "", "--pre") {
+		// --pre and --hostname-bin run a program; --pre-glob only filters.
+		if hasOpt(ws, 1, "", "--pre", "--hostname-bin") {
 			return autoAsk
 		}
 	case "sort":
@@ -256,4 +272,22 @@ func rtkVerdict(ws []Word, conf pathFunc) autoVerdict {
 		return readCheck(ws, i+1, conf)
 	}
 	return autoAllow
+}
+
+// cpRecursive reports whether cp copies trees (-r, -R, -a, --recursive,
+// --archive, in any cluster).
+func cpRecursive(ws []Word) bool {
+	return hasOpt(ws, 1, "rRa", "--recursive", "--archive")
+}
+
+// anyRootOperand reports whether a literal operand is the workdir or a
+// writable root itself.
+func anyRootOperand(ws []Word, conf pathFunc) bool {
+	_, args := splitArgs(ws, 1)
+	for _, a := range args {
+		if a.Literal && conf(a.Text, true) == pathRoot {
+			return true
+		}
+	}
+	return false
 }
