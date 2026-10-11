@@ -49,7 +49,7 @@ func LoadPrompts(dirs []Dir) []Prompt {
 // arguments (bash parameter-expansion subset, a superset of pi's): $1..$9,
 // $@ / $ARGUMENTS (the raw argument string), $$ (a literal $), ${N},
 // ${X:-w} ${X-w} ${X:+w} ${X+w} (X = N, @ or ARGUMENTS; w may reference
-// arguments, one level), ${@:N} and ${@:N:L}. Arguments split like a shell
+// arguments, including ${N} forms), ${@:N} and ${@:N:L}. Arguments split like a shell
 // (quotes group, "" is an empty argument); values are never re-expanded.
 // Anything else — ${HOME}, an unterminated ${ — is kept verbatim.
 func ExpandPrompt(body, args string) string {
@@ -140,22 +140,22 @@ func braceExpr(in, raw string, argv []string) (string, bool) {
 		return slice(argv, op[1:])
 	case strings.HasPrefix(op, ":-"):
 		if val == "" {
-			return expand(op[2:], raw, argv, false), true
+			return expand(op[2:], raw, argv, true), true
 		}
 		return val, true
 	case strings.HasPrefix(op, ":+"):
 		if val != "" {
-			return expand(op[2:], raw, argv, false), true
+			return expand(op[2:], raw, argv, true), true
 		}
 		return "", true
 	case op[0] == '-':
 		if !set {
-			return expand(op[1:], raw, argv, false), true
+			return expand(op[1:], raw, argv, true), true
 		}
 		return val, true
 	case op[0] == '+':
 		if set {
-			return expand(op[1:], raw, argv, false), true
+			return expand(op[1:], raw, argv, true), true
 		}
 		return "", true
 	}

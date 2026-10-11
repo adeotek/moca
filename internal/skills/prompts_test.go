@@ -72,6 +72,9 @@ func TestExpandPromptBraceForms(t *testing.T) {
 		{"${1:+$1 $$}", "v", "v $"},
 		{"${1:-$2}", " x", "x"},      // nested reference in the default word
 		{"${1:+$@}", "$2 z", "$2 z"}, // values are not re-expanded
+		{"${3:-${2}}", "a b", "b"},   // braces inside a default word
+		{"${2:-$1}", "a", "a"},
+		{"${1:+${2:-z}}", "x", "z"},
 	}
 	for _, c := range cases {
 		if got := ExpandPrompt(c.body, c.args); got != c.want {
