@@ -11,8 +11,12 @@ place — the script never fails because moca is already installed. The
 default target is the directory of the moca already on PATH, else
 %LOCALAPPDATA%\Programs\moca (which is added to the user PATH).
 
+With -Uninstall the installed moca.exe is removed instead — the
+configuration in %APPDATA%\moca (or $env:XDG_CONFIG_HOME\moca), along with
+the data and state directories, is deliberately left untouched.
+
 usage:
-    .\install.ps1 [-Version <vX.Y.Z>] [-Dir <path>]
+    .\install.ps1 [-Version <vX.Y.Z>] [-Dir <path>] [-Uninstall]
 
 env: MOCA_REPO (default adeotek/moca), MOCA_API_BASE (default the GitHub API)
 #>
@@ -20,6 +24,7 @@ env: MOCA_REPO (default adeotek/moca), MOCA_API_BASE (default the GitHub API)
 param(
     [string]$Version = '',
     [string]$Dir = '',
+    [switch]$Uninstall,
     [string]$Repo = $(if ($env:MOCA_REPO) { $env:MOCA_REPO } else { 'adeotek/moca' }),
     [string]$ApiBase = $(if ($env:MOCA_API_BASE) { $env:MOCA_API_BASE } else { 'https://api.github.com' })
 )
@@ -33,6 +38,27 @@ $ProgressPreference = 'SilentlyContinue'
 # $IsWindows is $null on Windows PowerShell 5.1 (which only runs on Windows).
 if ($IsWindows -eq $false) {
     throw 'this installer is for Windows — on Linux use install.sh'
+}
+
+if ($Uninstall) {
+    if (-not $Dir) {
+        $existing = Get-Command moca -ErrorAction SilentlyContinue
+        if (-not $existing) { throw 'moca is not on PATH — pass -Dir <path> to name the installation directory' }
+        $Dir = Split-Path -Parent $existing.Source
+    }
+    $target = Join-Path $Dir 'moca.exe'
+    if (-not (Test-Path $target)) { throw "no moca.exe at $target" }
+    try {
+        Remove-Item -Path $target -Force
+    } catch {
+        throw "cannot remove $target — close all moca instances and re-run ($_)"
+    }
+    # A leftover from a previous update, if any.
+    Remove-Item -Path "$target.old" -Force -ErrorAction SilentlyContinue
+    Write-Host "removed moca from $target"
+    Write-Host 'note: left %APPDATA%\moca untouched (configuration and credentials)'
+    # return, not exit: `irm ... | iex` runs this in the caller's session.
+    return
 }
 
 switch ($env:PROCESSOR_ARCHITECTURE) {

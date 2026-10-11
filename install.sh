@@ -9,8 +9,12 @@
 # default target is the directory of the moca already on PATH, else
 # ~/.local/bin.
 #
+# With --uninstall the installed moca binary is removed instead — the
+# configuration in ~/.config/moca (or $XDG_CONFIG_HOME/moca), along with the
+# data and state directories, is deliberately left untouched.
+#
 # usage:
-#   ./install.sh [--version <vX.Y.Z>] [--dir <path>]
+#   ./install.sh [--version <vX.Y.Z>] [--dir <path>] [--uninstall]
 #
 # env: MOCA_REPO (default adeotek/moca), MOCA_API_BASE (default the GitHub API)
 set -euo pipefail
@@ -19,6 +23,7 @@ REPO="${MOCA_REPO:-adeotek/moca}"
 API_BASE="${MOCA_API_BASE:-https://api.github.com}"
 VERSION=""
 DIR=""
+UNINSTALL=0
 
 die() { printf 'moca: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
@@ -27,11 +32,13 @@ usage() {
 	cat <<'EOF'
 moca installer — Linux
 
-usage: install.sh [--version <vX.Y.Z>] [--dir <path>]
+usage: install.sh [--version <vX.Y.Z>] [--dir <path>] [--uninstall]
 
   --version <v>   install this release instead of the latest one
   --dir <path>    install into this directory (default: the directory of
                   the moca already on PATH, else ~/.local/bin)
+  --uninstall     remove the installed moca binary instead of installing;
+                  ~/.config/moca (config, credentials) is left untouched
   -h, --help      this help
 
 Downloads the release package for this platform, verifies it against the
@@ -51,6 +58,10 @@ while [ $# -gt 0 ]; do
 		DIR="$2"
 		shift 2
 		;;
+	--uninstall)
+		UNINSTALL=1
+		shift
+		;;
 	-h | --help)
 		usage
 		exit 0
@@ -60,6 +71,27 @@ while [ $# -gt 0 ]; do
 		;;
 	esac
 done
+
+if [ "$UNINSTALL" = "1" ]; then
+	if [ -n "$DIR" ]; then
+		TARGET="$DIR/moca"
+	else
+		EXISTING="$(command -v moca 2>/dev/null || true)"
+		[ -n "$EXISTING" ] || die "moca is not on PATH — pass --dir <path> to name the installation directory"
+		RESOLVED="$(readlink -f -- "$EXISTING" 2>/dev/null || printf '%s' "$EXISTING")"
+		TARGET="$RESOLVED"
+	fi
+	if [ ! -e "$TARGET" ]; then
+		die "no moca binary at $TARGET"
+	fi
+	if [ ! -w "$TARGET" ]; then
+		die "no write permission for $TARGET — re-run with sudo, or pass --dir <path>"
+	fi
+	rm -f -- "$TARGET" || die "could not remove $TARGET"
+	note "removed moca from $TARGET"
+	note "note: left ~/.config/moca untouched (configuration and credentials)"
+	exit 0
+fi
 
 [ "$(uname -s)" = "Linux" ] || die "this installer is for Linux — on Windows use install.ps1; on macOS use 'go install github.com/${REPO}/cmd/moca@latest'"
 
