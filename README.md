@@ -5,7 +5,7 @@
 **A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, eight tools, no framework.**
 Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface area. It competes on *cost per task* and *read-the-whole-codebase-in-an-hour transparency*, not features: prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap; the agent ships MCP support that never floods the prompt (one ~200-token lazy proxy), loads Agent-Skills `SKILL.md` files written for other tools unchanged, searches the web and fetches pages without another tool (keyless by default), and prefers external token-savers (`rtk`, `graphify`) when they are installed.
 
-**Status: v0.3.0-beta** — first-run setup mode (a bare config opens the TUI with `/login` + `/model`), a `web` tool (page fetch + search, keyless out of the box), plan mode (`--plan`/`/plan` writes `docs/plans/`, nothing else; `--do`/`/do` executes a plan step by step), a harness pass measured on a seven-scenario eval corpus (`test/evals/`), self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
+**Status: v0.4.0-beta** — the install scripts gain `--uninstall` / `-Uninstall`; every run writes a bounded diagnostic log. Previously: first-run setup mode (a bare config opens the TUI with `/login` + `/model`), a `web` tool (page fetch + search, keyless out of the box), plan mode (`--plan`/`/plan` writes `docs/plans/`, nothing else; `--do`/`/do` executes a plan step by step), a harness pass measured on a seven-scenario eval corpus (`test/evals/`), self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
 
 ## Install
 
@@ -25,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/adeotek/moca/main/install.sh | bash
 irm https://raw.githubusercontent.com/adeotek/moca/main/install.ps1 | iex
 ```
 
-Re-running a script is safe: an existing installation is updated in place, never an error. `--version vX.Y.Z` / `-Version vX.Y.Z` pins a release and `--dir <path>` / `-Dir <path>` picks the target directory; `--help` / `-?` prints the script's usage. Or take a package from the [releases page](https://github.com/adeotek/moca/releases) — linux/amd64 · linux/arm64 · windows/amd64 are published by a manual **Release** workflow run (Actions → Release → Run workflow); other platforms (e.g. darwin) build from source with `make release`.
+Re-running a script is safe: an existing installation is updated in place, never an error. `--version vX.Y.Z` / `-Version vX.Y.Z` pins a release and `--dir <path>` / `-Dir <path>` picks the target directory; `--help` / `-?` prints the script's usage. `--uninstall` / `-Uninstall` removes the installed binary instead of installing — the config directory (`~/.config/moca`, credentials included) is left untouched. Or take a package from the [releases page](https://github.com/adeotek/moca/releases) — linux/amd64 · linux/arm64 · windows/amd64 are published by a manual **Release** workflow run (Actions → Release → Run workflow); other platforms (e.g. darwin) build from source with `make release`.
 
 **Self-update** — an installed moca updates itself from the same releases:
 
@@ -158,7 +158,7 @@ make release        # five cross-compiled binaries in dist/
 | 4 | context manager + compaction + resume | token-triggered compaction, `--continue` — done |
 | 5 | MCP lazy proxy (stdio + streamable HTTP, persisted index, `mcp import`) | real server via proxy, no schemas in prompt, 0 servers at start — done |
 | 6 | rtk + graphify + skills ecosystem compatibility | rtk preferred in real session, pi SKILL.md loads — done |
-| 7 | OAuth providers + upstream graphify PR + v0.1 | ship-gate demo passes (§14), live legs green (2026-10-07) — shipped as `v0.1.1-alpha`; current line `v0.3.0-beta` |
+| 7 | OAuth providers + upstream graphify PR + v0.1 | ship-gate demo passes (§14), live legs green (2026-10-07) — shipped as `v0.1.1-alpha`; current line `v0.4.0-beta` |
 
 ## Docs
 

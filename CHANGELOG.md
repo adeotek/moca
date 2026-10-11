@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## v0.4.0-beta (2026-10-11)
+
+The install scripts learn `--uninstall` / `-Uninstall`, and every run writes a bounded diagnostic log — still one binary, still no framework.
+
+### Installer
+
+- **`--uninstall` / `-Uninstall` in the install scripts.** `install.sh`/`install.ps1` remove the installed `moca` binary (from `--dir`/`-Dir`, else the `moca` on PATH) instead of installing, leaving the config directory (`~/.config/moca`, credentials included) and the data/state directories untouched.
 
 ### Diagnostics
 
