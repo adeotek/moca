@@ -179,19 +179,69 @@ func buildWithWrites(ws []Word, from int, conf pathFunc, short string, long []st
 // literal and confined. An operand outside, inside .git (unless gitOK), or
 // a guarded root asks every time; a non-literal operand is unsure.
 func mutatorVerdict(ws []Word, from int, conf pathFunc, g rootGuard, gitOK bool) autoVerdict {
-	opts, args := splitArgs(ws, from)
+	dests, args := targetDirs(ws, from)
 	v := autoAllow
-	for _, o := range opts {
-		name, _, _ := strings.Cut(o.Text, "=")
-		if g == guardSources && (longIs(name, "--target-directory") ||
-			(!strings.HasPrefix(name, "--") && strings.Contains(name, "t"))) {
-			g = guardAll // with -t every operand is a source
+	for i := from; i < len(ws); i++ {
+		t := ws[i].Text
+		if t == "--" && ws[i].Literal {
+			break
 		}
-		if p, ok := optPath(o.Text); ok {
+		if p, ok := optPath(t); ok && ws[i].Literal {
 			v = v.and(mutatorPath(p, conf, false, gitOK))
 		}
 	}
+	for _, d := range dests {
+		if !d.Literal {
+			v = v.and(autoUnsure)
+			continue
+		}
+		v = v.and(mutatorPath(d.Text, conf, false, gitOK)) // the destination itself
+	}
+	if g == guardSources && len(dests) > 0 {
+		g = guardAll // with a target directory every operand is a source
+	}
 	return v.and(mutatorArgs(args, conf, g, gitOK))
+}
+
+// targetDirs finds every spelling of a -t/--target-directory destination
+// in ws[from:] (`--target-directory=D`, an abbreviation like `--target=D`,
+// `--target-directory D`, `-tD`, `-t D`, clustered `-rt D` / `-rtD`) and
+// returns those values plus the operands, without the separate-word values.
+func targetDirs(ws []Word, from int) (dests, args []Word) {
+	dd := false
+	for i := from; i < len(ws); i++ {
+		w := ws[i]
+		t := w.Text
+		switch {
+		case dd || !w.Literal || t == "-" || !strings.HasPrefix(t, "-"):
+			args = append(args, w)
+		case t == "--":
+			dd = true
+		case strings.HasPrefix(t, "--"):
+			name, val, eq := strings.Cut(t, "=")
+			if !longIs(name, "--target-directory") {
+				continue
+			}
+			if eq {
+				dests = append(dests, Word{Text: val, Literal: true})
+			} else if i+1 < len(ws) {
+				i++
+				dests = append(dests, ws[i])
+			}
+		default:
+			k := strings.IndexByte(t[1:], 't')
+			if k < 0 {
+				continue
+			}
+			if rest := t[k+2:]; rest != "" {
+				dests = append(dests, Word{Text: rest, Literal: true})
+			} else if i+1 < len(ws) {
+				i++
+				dests = append(dests, ws[i])
+			}
+		}
+	}
+	return dests, args
 }
 
 // mutatorArgs judges mutator operands (see mutatorVerdict).

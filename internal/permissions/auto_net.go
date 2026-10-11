@@ -94,13 +94,17 @@ func atRead(w Word, conf pathFunc) autoVerdict {
 }
 
 // writeOut judges a curl -w/--write-out format: %output{FILE} (or
-// %output{>>FILE}) writes a file, so it — or a value we cannot see — asks;
-// @file reads the format from a file.
-func writeOut(w Word, conf pathFunc) autoVerdict {
-	if !w.Literal || strings.Contains(strings.ToLower(w.Text), "%output{") {
+// %output{>>FILE}) writes a file, so it — or a value we cannot see — asks.
+// @file reads the format from a file whose content (possibly %output{…},
+// written earlier in the same chain) cannot be seen: unsure.
+func writeOut(w Word) autoVerdict {
+	switch {
+	case !w.Literal || strings.Contains(strings.ToLower(w.Text), "%output{"):
 		return autoAsk
+	case strings.HasPrefix(w.Text, "@"):
+		return autoUnsure
 	}
-	return atRead(w, conf)
+	return autoAllow
 }
 
 type cursor struct {
@@ -138,9 +142,9 @@ func curlVerdict(ws []Word, conf pathFunc) autoVerdict {
 		case strings.HasPrefix(t, "--write-out"):
 			_, val, eq := strings.Cut(t, "=")
 			if !eq {
-				v = v.and(writeOut(c.next(), conf))
+				v = v.and(writeOut(c.next()))
 			} else {
-				v = v.and(writeOut(Word{Text: val, Literal: true}, conf))
+				v = v.and(writeOut(Word{Text: val, Literal: true}))
 			}
 		case strings.HasPrefix(t, "--"):
 			if curlLongAsk(t) {
@@ -189,7 +193,7 @@ func curlVerdict(ws []Word, conf pathFunc) autoVerdict {
 				case ch == 'b' || ch == 'E':
 					v = v.and(fileRead(val(), conf, ch == 'b'))
 				case ch == 'w':
-					v = v.and(writeOut(val(), conf))
+					v = v.and(writeOut(val()))
 				case strings.IndexByte("HueAxrmCyYztUQP", ch) >= 0:
 					v = v.and(atRead(val(), conf))
 				default:

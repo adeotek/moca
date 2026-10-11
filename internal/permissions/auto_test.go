@@ -1,9 +1,11 @@
 package permissions
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -442,7 +444,7 @@ func TestAutoFixRound1(t *testing.T) {
 		"curl -w '%OUTPUT{x}' https://e":                {every: []string{"curl"}},
 		"curl -w \"$F\" https://e":                      {every: []string{"curl"}},
 		"curl -w '%{http_code}' https://e":              {},
-		"curl -w @fmt.txt https://e":                    {},
+		"curl -w @fmt.txt https://e":                    {unsure: []string{"curl"}}, // fix round 2 (N2)
 		"curl -w @/etc/x https://e":                     {unsure: []string{"curl"}},
 		// C3: wget long options outside a small safe set are unsure
 		"wget --stats-dns=csv:/etc/x https://e":      {unsure: []string{"wget"}},
@@ -546,6 +548,41 @@ func TestAutoGitSymlinkAndWritableAncestor(t *testing.T) {
 		"cp a " + base:                 {every: []string{"cp"}},
 		"cp a " + base + "/new.txt":    {},
 		"rm -rf " + filepath.Dir(base): {every: []string{"rm"}},
+	}
+	for cmd, want := range cases {
+		need, every, unsure, err := s.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
+	}
+}
+
+// Fix round 2: every spelling of the cp/mv target directory is a
+// destination (N1); a curl -w format read from a file is unseen (N2).
+func TestAutoFixRound2(t *testing.T) {
+	s, root := newAutoShell(t)
+	cases := map[string]verdict{
+		"cp -r a.txt b.txt": {},
+		"echo '%output{/home/x/.bashrc}' > f && curl -w @f https://e": {unsure: []string{"curl"}},
+		"curl -w@f https://e":              {unsure: []string{"curl"}},
+		"curl --write-out @f https://e":    {unsure: []string{"curl"}},
+		"curl '--write-out=@f' https://e":  {unsure: []string{"curl"}},
+		"curl -sw@f https://e":             {unsure: []string{"curl"}},
+		"curl -sw @f https://e":            {unsure: []string{"curl"}},
+		"curl -w '%{http_code}' https://e": {},
+		"curl -w '%output{x}@f' https://e": {every: []string{"curl"}},
+	}
+	forms := []string{
+		"cp -r --target-directory=%s evil/.", "cp -r --target=%s evil/.", "cp -r --target-directory %s evil/.",
+		"cp -r -t%s evil/.", "cp -r -t %s evil/.", "cp -rt %s evil/.", "cp -rt%s evil/.", "cp -r evil/. %s",
+		"mv --target-directory=%s sub/x", "mv --target=%s sub/x", "mv --target-directory %s sub/x",
+		"mv -t%s sub/x", "mv -t %s sub/x", "mv -ft %s sub/x", "mv -ft%s sub/x", "mv sub/x %s",
+	}
+	for _, f := range forms {
+		for _, dir := range []string{".", "./", root} {
+			cases[fmt.Sprintf(f, dir)] = verdict{unsure: []string{strings.Fields(f)[0]}}
+		}
+		for _, dir := range []string{"sub", "docs/out"} {
+			cases[fmt.Sprintf(f, dir)] = verdict{}
+		}
 	}
 	for cmd, want := range cases {
 		need, every, unsure, err := s.Check(cmd)

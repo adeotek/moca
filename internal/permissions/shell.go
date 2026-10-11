@@ -161,8 +161,10 @@ func (s *Shell) classify(ws []Word, v *verdictAcc, st cmdState) error {
 		return fmt.Errorf("%s is refused: it runs code the analyser cannot see", base)
 	}
 	// A path-qualified head is its own identity (ruling 14): `./tool` is not
-	// `tool`, so prompts show (and learn) the full head text. The default
-	// ask-every-time class keeps the base name (existing contract).
+	// `tool`, so prompts show (and learn) the full head text. That holds for
+	// rule-Ask entries in both modes and for every auto-mode entry; only the
+	// default-mode ask-every-time class (askEvery/winAsk) shows the base name
+	// (`/bin/rm x` → `rm`, as TestShellRules expects).
 	name := base
 	pathHead := strings.ContainsAny(head, `/\`)
 	if pathHead {

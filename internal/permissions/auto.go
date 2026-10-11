@@ -283,8 +283,8 @@ func cpRecursive(ws []Word) bool {
 // anyRootOperand reports whether a literal operand is the workdir or a
 // writable root itself.
 func anyRootOperand(ws []Word, conf pathFunc) bool {
-	_, args := splitArgs(ws, 1)
-	for _, a := range args {
+	dests, args := targetDirs(ws, 1)
+	for _, a := range append(dests, args...) {
 		if a.Literal && conf(a.Text, true) == pathRoot {
 			return true
 		}
