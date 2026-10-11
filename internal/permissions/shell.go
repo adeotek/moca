@@ -28,9 +28,17 @@ var errNonLiteral = errors.New("non-literal command name refused (e.g. $CMD); wr
 // sandbox: an allowlisted interpreter can do anything the user can.
 type Shell struct {
 	rules *Rules
-	auto  bool // wired in a later task; false = default mode
+	auto  bool // auto mode: the risk table (auto.go) replaces "needs approval"
 	jail  *Jail
 	goos  string
+}
+
+// AutoView returns the auto-mode view of s: the same Rules (an allow-always
+// learned in either view applies in both), the jail j (normally
+// s.jail.WithWritable(TempRoots()...)), and the risk table instead of the
+// default "needs approval" class.
+func (s *Shell) AutoView(j *Jail) *Shell {
+	return &Shell{rules: s.rules, auto: true, jail: j, goos: s.goos}
 }
 
 func NewShell(rules *Rules, jail *Jail, goos string) *Shell {
@@ -96,6 +104,17 @@ type verdictAcc struct {
 	need, every, unsure []string
 }
 
+// cmdState is what the walk knows when it reaches a command: whether a
+// cd/pushd/popd (or env -C) made the cwd unknown, and — auto mode only —
+// whether something before it may have changed how a command name or its
+// arguments resolve (an assignment, export/declare, printf -v, a cd to an
+// unconfined or unknown directory). A tainted command is never allowed by
+// the risk table; it goes to the classifier.
+type cmdState struct {
+	cwdUnknown bool
+	tainted    bool
+}
+
 func (v *verdictAcc) add(list *[]string, name string) {
 	if !slices.Contains(*list, name) {
 		*list = append(*list, name)
@@ -122,7 +141,7 @@ func shortCmd(ws []Word) string {
 // classify judges one command (ws = its words from the classified index to
 // the end of the call). Hard-deny and refused come first and no rule can
 // override them; then the layered rules; then the built-in classes.
-func (s *Shell) classify(ws []Word, v *verdictAcc) error {
+func (s *Shell) classify(ws []Word, v *verdictAcc, st cmdState) error {
 	win := s.goos == "windows"
 	head := ws[0].Text
 	var base string
@@ -153,11 +172,41 @@ func (s *Shell) classify(ws []Word, v *verdictAcc) error {
 	// A path-qualified head is its own allow-always identity: `./tool` is not
 	// `tool`, so the prompt shows (and learns) the full head text.
 	name := base
-	if strings.ContainsAny(head, `/\`) {
+	pathHead := strings.ContainsAny(head, `/\`)
+	if pathHead {
 		name = head
 	}
+	// A builtin is only a builtin by its bare name: `./echo` runs whatever
+	// file is there.
+	builtin := !pathHead && (builtinsOK[base] || (win && builtinsOK[lower]))
+	if s.auto {
+		switch {
+		case builtin:
+		case win:
+			// No path model on the best-effort Windows analyser: nothing
+			// beyond builtins is allowed by the table.
+			if winAsk[lower] || askEvery[lower] {
+				v.add(&v.every, base)
+			} else {
+				v.add(&v.unsure, name)
+			}
+		default:
+			verdict := autoClassify(ws, s.pathCheck(st.cwdUnknown))
+			if verdict == autoAllow && st.tainted {
+				verdict = autoUnsure
+			}
+			switch verdict {
+			case autoAllow:
+			case autoAsk:
+				v.add(&v.every, base)
+			default:
+				v.add(&v.unsure, name)
+			}
+		}
+		return nil
+	}
 	switch {
-	case builtinsOK[base] || (win && builtinsOK[lower]):
+	case builtin:
 	case askEvery[lower] || (win && winAsk[lower]):
 		v.add(&v.every, base)
 	default:
@@ -461,14 +510,131 @@ func (s *Shell) checkTarget(w *syntax.Word, cwdUnknown bool) error {
 	if !ok {
 		return fmt.Errorf("non-literal redirect/tee target refused")
 	}
+	return s.checkTargetText(t, cwdUnknown)
+}
+
+func (s *Shell) checkTargetText(t string, cwdUnknown bool) error {
 	if t == "/dev/null" || t == "/dev/stdout" || t == "/dev/stderr" {
 		return nil
+	}
+	if strings.HasPrefix(t, "~") && t != "~" && !strings.HasPrefix(t, "~/") {
+		return fmt.Errorf("redirect target %q: ~user, ~+ and ~- are not resolved; write the path out", t)
+	}
+	if innerDotDot(t) {
+		return fmt.Errorf("redirect target %q has .. after a directory (a symlink would be followed first); write the path without it", t)
 	}
 	if cwdUnknown && !filepath.IsAbs(t) && t != "~" && !strings.HasPrefix(t, "~/") {
 		return fmt.Errorf("relative redirect target %q after a cd/pushd/popd cannot be resolved; use an absolute path or run the cd separately", t)
 	}
 	if _, err := s.jail.Resolve(t, true); err != nil {
 		return err
+	}
+	return nil
+}
+
+// pathCheck classifies literal path operands for the auto table against
+// s.jail (the workdir plus its writable roots). After a cd a relative path
+// cannot be placed; `~user`, `~+` and `~-` are never resolved.
+func (s *Shell) pathCheck(cwdUnknown bool) pathFunc {
+	// The guards compare case-folded: on a case-insensitive filesystem
+	// `.GIT` is .git (stricter on Linux, where it is merely a sibling).
+	fold := strings.ToLower
+	root := s.jail.Root()
+	gitDir := fold(filepath.Join(root, ".git"))
+	return func(p string, write bool) pathClass {
+		home := p == "~" || strings.HasPrefix(p, "~/")
+		if strings.HasPrefix(p, "~") && !home {
+			return pathOut
+		}
+		if innerDotDot(p) {
+			return pathOut
+		}
+		if cwdUnknown && !filepath.IsAbs(p) && !home {
+			return pathOut
+		}
+		res, err := s.jail.Resolve(p, write)
+		if err != nil {
+			return pathOut
+		}
+		if within(fold(res), fold(root)) {
+			return pathRoot
+		}
+		for _, w := range s.jail.writable {
+			if within(fold(res), fold(w)) {
+				return pathRoot
+			}
+		}
+		if within(gitDir, fold(res)) {
+			return pathGit
+		}
+		return pathOK
+	}
+}
+
+// innerDotDot reports whether p has a `..` after a named component
+// (`link/..`). The jail cleans paths lexically, but the kernel applies `..`
+// after following a symlink — `escape/../x` lands beside the symlink's
+// target, not in the workdir — so such paths are not placed. A leading
+// `../` is fine: it applies to the canonical workdir.
+func innerDotDot(p string) bool {
+	named := false
+	for _, c := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		switch c {
+		case "..":
+			if named {
+				return true
+			}
+		case ".":
+		default:
+			named = true
+		}
+	}
+	return false
+}
+
+// cdConfined reports whether a cd goes to one literal directory inside the
+// confinement. pushd/popd (a directory stack), a bare cd (home), `cd -`
+// and a non-literal target do not.
+func (s *Shell) cdConfined(ws []Word, cwdUnknown bool) bool {
+	if strings.ToLower(filepath.Base(ws[0].Text)) != "cd" {
+		return false
+	}
+	_, args := splitArgs(ws, 1)
+	if len(args) != 1 || !args[0].Literal || args[0].Text == "-" {
+		return false
+	}
+	return s.pathCheck(cwdUnknown)(args[0].Text, false) != pathOut
+}
+
+// checkWrapperOutputs checks the output file of a `time -o FILE` wrapper
+// (GNU time writes it) as a redirect target. ws[:last idx] holds the
+// wrapper words; wrapper options were already validated by unwrap.
+func (s *Shell) checkWrapperOutputs(ws []Word, idxs []int, cwdUnknown bool) error {
+	end := len(ws)
+	if len(idxs) > 0 {
+		end = idxs[len(idxs)-1]
+	}
+	for i := 0; i < end; i++ {
+		if strings.ToLower(filepath.Base(ws[i].Text)) != "time" {
+			continue
+		}
+		for j := i + 1; j < end && strings.HasPrefix(ws[j].Text, "-"); j++ {
+			t := ws[j].Text
+			var target string
+			switch {
+			case t == "-o" || t == "--output":
+				if j+1 < len(ws) {
+					target = ws[j+1].Text
+				}
+			case strings.HasPrefix(t, "--output="):
+				target = strings.TrimPrefix(t, "--output=")
+			}
+			if target != "" {
+				if err := s.checkTargetText(target, cwdUnknown); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -482,7 +648,7 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 		return nil, nil, nil, fmt.Errorf("cannot parse command (refused, no best-effort guessing): %v", err)
 	}
 	var v verdictAcc
-	var cwdUnknown bool
+	var cwdUnknown, tainted bool
 	var firstErr error
 	fail := func(e error) {
 		if firstErr == nil {
@@ -509,9 +675,12 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 					}
 				}
 			}
+		case *syntax.DeclClause:
+			tainted = true // export/declare/local/readonly/typeset: PATH and friends
 		case *syntax.CallExpr:
 			if len(x.Args) == 0 {
-				return true // pure assignment
+				tainted = true // a pure assignment (PATH=…) changes later commands
+				return true
 			}
 			idxs, uerr := unwrap(x.Args)
 			if uerr != nil {
@@ -519,20 +688,42 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 				return false
 			}
 			ws := toWords(x.Args)
+			if err := s.checkWrapperOutputs(ws, idxs, cwdUnknown); err != nil {
+				fail(err)
+				return false
+			}
 			for _, idx := range idxs {
 				if !ws[idx].Literal {
 					fail(errNonLiteral)
 					return false
 				}
-				if err := s.classify(ws[idx:], &v); err != nil {
+				st := cmdState{cwdUnknown: cwdUnknown, tainted: tainted || len(x.Assigns) > 0}
+				for _, pw := range ws[:idx] { // wrapper words: env NAME=VALUE, env -C DIR
+					if !strings.HasPrefix(pw.Text, "-") && strings.Contains(pw.Text, "=") {
+						st.tainted = true
+					}
+					if pw.Text == "-C" || strings.HasPrefix(pw.Text, "--chdir") {
+						st.cwdUnknown, st.tainted = true, true
+					}
+				}
+				if err := s.classify(ws[idx:], &v, st); err != nil {
 					fail(err)
 					return false
 				}
 				switch filepath.Base(ws[idx].Text) {
+				case "printf":
+					if hasOpt(ws, idx+1, "v") {
+						tainted = true // printf -v PATH …
+					}
 				case "cd", "pushd", "popd":
 					// Relative redirect targets are resolved against the jail
 					// root, which is only correct while the cwd is unchanged;
-					// after a cd only absolute targets can be checked.
+					// after a cd only absolute targets can be checked. In auto
+					// mode a cd anywhere but a confined directory also taints
+					// what follows (a bare `ls` would read it).
+					if s.auto && !s.cdConfined(ws[idx:], cwdUnknown) {
+						tainted = true
+					}
 					cwdUnknown = true
 				case "tee":
 					for _, a := range x.Args[idx+1:] {

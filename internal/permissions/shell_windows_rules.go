@@ -24,7 +24,7 @@ func (s *Shell) checkWindows(command string) ([]string, []string, []string, erro
 			ws[i] = Word{Text: f, Literal: i == 0 || !strings.ContainsAny(f, "$`\"'(){}@%")}
 		}
 		ws[0].Text = winName(fields[0])
-		return s.classify(ws, &v)
+		return s.classify(ws, &v, cmdState{})
 	}
 	for _, seg := range winSplit.Split(command, -1) {
 		fields := strings.Fields(seg)
