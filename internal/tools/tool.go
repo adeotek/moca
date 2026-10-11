@@ -33,7 +33,7 @@ type PathChecker interface {
 }
 
 type CommandChecker interface {
-	Check(command string) (needApproval, askEveryTime []string, err error)
+	Check(command string) (needApproval, askEveryTime, unsure []string, err error)
 	Allow(name string)
 }
 

@@ -68,11 +68,12 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	if strings.TrimSpace(a.Command) == "" {
 		return errorf("empty command")
 	}
-	need, every, err := env.Commands.Check(a.Command)
+	need, every, unsure, err := env.Commands.Check(a.Command)
 	if err != nil {
 		slog.Debug("shell refused") // the analyser's reason carries the command text: not logged
 		return errorf("refused: %v", err)
 	}
+	need = append(need, unsure...) // replaced by the judge step later
 	if err := approve(ctx, env, need, a.Command, true); err != nil {
 		return errorf("%v", err)
 	}

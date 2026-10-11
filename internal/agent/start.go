@@ -141,7 +141,7 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	if err != nil {
 		return nil, err
 	}
-	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(cfg.Shell.Allow, jail, runtime.GOOS),
+	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(permissions.RulesFromAllow(cfg.Shell.Allow), jail, runtime.GOOS),
 		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
 		ShellEnv:    tools.ShellEnv(os.Environ(), config.EnvRefs(cfg)),
 		WebProvider: cfg.Web.Search.Provider, WebKey: webKey,

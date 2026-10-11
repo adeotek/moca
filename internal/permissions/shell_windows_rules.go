@@ -16,19 +16,15 @@ var winAsk = map[string]bool{"remove-item": true, "rm": true, "ri": true, "del":
 // no option tables, so a later `--shell <cmd-string>` shape is only
 // approximated, never analysed (review F1/M4). Documented as weaker than
 // Unix.
-func (s *Shell) checkWindows(command string) ([]string, []string, error) {
+func (s *Shell) checkWindows(command string) ([]string, []string, []string, error) {
 	var v verdictAcc
-	classify := func(name string) error {
-		switch {
-		case name == "format-volume" || hardDeny[name]:
-			return fmt.Errorf("%s is never allowed (hard-deny)", name)
-		case winAsk[name]:
-			v.add(&v.every, name)
-		case builtinsOK[name]:
-		case !s.allowed(name):
-			v.add(&v.need, name)
+	classify := func(fields []string) error {
+		ws := make([]Word, len(fields))
+		for i, f := range fields {
+			ws[i] = Word{Text: f, Literal: true}
 		}
-		return nil
+		ws[0].Text = winName(fields[0])
+		return s.classify(ws, &v)
 	}
 	for _, seg := range winSplit.Split(command, -1) {
 		fields := strings.Fields(seg)
@@ -36,8 +32,8 @@ func (s *Shell) checkWindows(command string) ([]string, []string, error) {
 			continue
 		}
 		name := strings.TrimSuffix(strings.ToLower(fields[0]), ".exe")
-		if err := classify(name); err != nil {
-			return nil, nil, err
+		if err := classify(fields); err != nil {
+			return nil, nil, nil, err
 		}
 		if name != "rtk" {
 			continue
@@ -64,21 +60,21 @@ func (s *Shell) checkWindows(command string) ([]string, []string, error) {
 			if j < len(fields) && fields[j] == "--" {
 				j++
 				if j < len(fields) && strings.HasPrefix(fields[j], "-") {
-					return nil, nil, fmt.Errorf("cannot analyse `rtk %s -- %s`: the word after `--` is option-shaped; run the command without the option", sub, fields[j])
+					return nil, nil, nil, fmt.Errorf("cannot analyse `rtk %s -- %s`: the word after `--` is option-shaped; run the command without the option", sub, fields[j])
 				}
 			}
 			if j < len(fields) {
-				if err := classify(winName(fields[j])); err != nil {
-					return nil, nil, err
+				if err := classify(fields[j:]); err != nil {
+					return nil, nil, nil, err
 				}
 			}
 		default:
-			if err := classify(sub); err != nil {
-				return nil, nil, err
+			if err := classify(fields[j:]); err != nil {
+				return nil, nil, nil, err
 			}
 		}
 	}
-	return v.need, v.every, nil
+	return v.need, v.every, v.unsure, nil
 }
 
 // winName normalizes a best-effort token: lowercase, surrounding quotes

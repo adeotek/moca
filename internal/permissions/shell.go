@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -27,35 +26,46 @@ var errNonLiteral = errors.New("non-literal command name refused (e.g. $CMD); wr
 // Shell analyses commands for the model-facing shell tool (§7). Not a
 // sandbox: an allowlisted interpreter can do anything the user can.
 type Shell struct {
-	mu    sync.Mutex
-	allow map[string]bool
+	rules *Rules
+	auto  bool // wired in a later task; false = default mode
 	jail  *Jail
 	goos  string
 }
 
-func NewShell(allow []string, jail *Jail, goos string) *Shell {
-	s := &Shell{allow: map[string]bool{}, jail: jail, goos: goos}
-	for _, a := range allow {
-		s.allow[a] = true
+func NewShell(rules *Rules, jail *Jail, goos string) *Shell {
+	if rules == nil {
+		rules = NewRules()
 	}
-	return s
+	return &Shell{rules: rules, jail: jail, goos: goos}
 }
 
+// RulesFromAllow builds a single "user" layer whose allow rules are the given
+// command names (names ParseRule rejects are skipped).
+func RulesFromAllow(names []string) *Rules {
+	rs := RuleSet{Name: "user"}
+	for _, n := range names {
+		if r, err := ParseRule(n); err == nil {
+			rs.Allow = append(rs.Allow, r)
+		}
+	}
+	return NewRules(rs)
+}
+
+// Allow records an allow-always answer. Hard-deny and ask-every-time names
+// are never learned: an allow rule would otherwise lift the ask-every class.
 func (s *Shell) Allow(name string) {
-	s.mu.Lock()
-	s.allow[strings.ToLower(name)] = true
-	s.allow[name] = true
-	s.mu.Unlock()
-}
-
-func (s *Shell) allowed(name string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.allow[name]
+	lower := strings.ToLower(filepath.Base(strings.ReplaceAll(name, `\`, "/")))
+	if hardDeny[lower] || strings.HasPrefix(lower, "mkfs") || askEvery[lower] || winAsk[lower] {
+		return
+	}
+	s.rules.Learn(name)
+	if lower2 := strings.ToLower(name); lower2 != name {
+		s.rules.Learn(lower2)
+	}
 }
 
 type verdictAcc struct {
-	need, every []string
+	need, every, unsure []string
 }
 
 func (v *verdictAcc) add(list *[]string, name string) {
@@ -64,24 +74,78 @@ func (v *verdictAcc) add(list *[]string, name string) {
 	}
 }
 
-func (s *Shell) classify(name string, v *verdictAcc) error {
-	base := filepath.Base(name)
+// shortCmd renders at most the first three words of a command for an error
+// message, so a heredoc is never dumped.
+func shortCmd(ws []Word) string {
+	var parts []string
+	for i, w := range ws {
+		if i == 3 {
+			break
+		}
+		if w.Literal {
+			parts = append(parts, w.Text)
+		} else {
+			parts = append(parts, "?")
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// classify judges one command (ws = its words from the classified index to
+// the end of the call). Hard-deny and refused come first and no rule can
+// override them; then the layered rules; then the built-in classes.
+func (s *Shell) classify(ws []Word, v *verdictAcc) error {
+	win := s.goos == "windows"
+	head := ws[0].Text
+	var base string
+	if win {
+		base = baseName(head)
+	} else {
+		base = filepath.Base(head)
+	}
 	// The safety classes match case-insensitively: on a case-insensitive
 	// filesystem (macOS, Windows) `SUDO` and `RM` resolve to the real
 	// binaries, and must not slip past hard-deny / ask-every-time.
 	lower := strings.ToLower(base)
 	switch {
-	case hardDeny[lower] || strings.HasPrefix(lower, "mkfs"):
+	case hardDeny[lower] || strings.HasPrefix(lower, "mkfs") || (win && lower == "format-volume"):
 		return fmt.Errorf("%s is never allowed (hard-deny)", base)
-	case refused[lower]:
+	case !win && refused[lower]:
 		return fmt.Errorf("%s is refused: it runs code the analyser cannot see", base)
-	case builtinsOK[base]:
-	case askEvery[lower]:
+	}
+	switch d, layer, src := s.rules.Decide(ws); d {
+	case Deny:
+		return fmt.Errorf("`%s` is denied by the permissions rule %q (%s config)", shortCmd(ws), src, layer)
+	case Ask:
 		v.add(&v.every, base)
-	case !s.allowed(base):
-		v.add(&v.need, base)
+		return nil
+	case Allow:
+		return nil
+	}
+	// A path-qualified head is its own allow-always identity: `./tool` is not
+	// `tool`, so the prompt shows (and learns) the full head text.
+	name := base
+	if strings.ContainsAny(head, `/\`) {
+		name = head
+	}
+	switch {
+	case builtinsOK[base] || (win && builtinsOK[lower]):
+	case askEvery[lower] || (win && winAsk[lower]):
+		v.add(&v.every, base)
+	default:
+		v.add(&v.need, name)
 	}
 	return nil
+}
+
+// toWords converts call arguments to analyser words.
+func toWords(args []*syntax.Word) []Word {
+	ws := make([]Word, len(args))
+	for i, a := range args {
+		t, ok := wordLit(a)
+		ws[i] = Word{Text: t, Literal: ok}
+	}
+	return ws
 }
 
 // literalSafe reports whether a word part's runtime value is exactly its
@@ -381,13 +445,13 @@ func (s *Shell) checkTarget(w *syntax.Word, cwdUnknown bool) error {
 	return nil
 }
 
-func (s *Shell) Check(command string) ([]string, []string, error) {
+func (s *Shell) Check(command string) (need, every, unsure []string, err error) {
 	if s.goos == "windows" {
 		return s.checkWindows(command)
 	}
 	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(command), "")
 	if err != nil {
-		return nil, nil, fmt.Errorf("cannot parse command (refused, no best-effort guessing): %v", err)
+		return nil, nil, nil, fmt.Errorf("cannot parse command (refused, no best-effort guessing): %v", err)
 	}
 	var v verdictAcc
 	var cwdUnknown bool
@@ -426,17 +490,17 @@ func (s *Shell) Check(command string) ([]string, []string, error) {
 				fail(uerr)
 				return false
 			}
+			ws := toWords(x.Args)
 			for _, idx := range idxs {
-				name, ok := wordLit(x.Args[idx])
-				if !ok {
+				if !ws[idx].Literal {
 					fail(errNonLiteral)
 					return false
 				}
-				if err := s.classify(name, &v); err != nil {
+				if err := s.classify(ws[idx:], &v); err != nil {
 					fail(err)
 					return false
 				}
-				switch filepath.Base(name) {
+				switch filepath.Base(ws[idx].Text) {
 				case "cd", "pushd", "popd":
 					// Relative redirect targets are resolved against the jail
 					// root, which is only correct while the cwd is unchanged;
@@ -457,7 +521,7 @@ func (s *Shell) Check(command string) ([]string, []string, error) {
 		return true
 	})
 	if firstErr != nil {
-		return nil, nil, firstErr
+		return nil, nil, nil, firstErr
 	}
-	return v.need, v.every, nil
+	return v.need, v.every, v.unsure, nil
 }
