@@ -87,7 +87,7 @@ type model struct {
 	toolArg  string
 	runChars int
 	cancel   context.CancelFunc
-	approval *approvalMsg
+	approval *approvalState
 	// login is the active /login//logout interaction (modal, like approval).
 	login *loginState
 	// pick is the active modal list picker (/model, /resume).
@@ -255,6 +255,7 @@ var (
 	// reports its background, and #d97706 keeps ≥3:1 contrast on white and
 	// 4.4+ on the common dark backgrounds.
 	orange = lipgloss.NewStyle().Foreground(lipgloss.Color("#d97706")).Bold(true)
+	bold   = lipgloss.NewStyle().Bold(true)
 )
 
 func newModel(o AppOptions, a *agent.Agent) *model {
@@ -550,7 +551,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	case approvalMsg:
-		m.approval = &msg
+		m.approval = &approvalState{approvalMsg: msg}
 		return m, m.notify("moca: approval needed — allow `" + Sanitize(msg.q.Subject) + "`?")
 	case loginProgressMsg:
 		if m.login == nil {
@@ -761,74 +762,6 @@ func (m *model) ctrlC() tea.Cmd {
 		return tea.Tick(time.Second+50*time.Millisecond, func(time.Time) tea.Msg { return quitHintMsg{} })
 	}
 	return nil
-}
-
-// approvalKey answers the shown prompt. `a`/`d` count only after a typing
-// pause (a user mid-sentence must not answer with letters meant for the
-// draft); allow-always is `ctrl+a` — it is persistent, so a plain letter (a
-// stray capital `A`, the first letter of "Add…") always goes to the draft and
-// can never write the config. esc always denies. handled=false lets the key
-// fall through to normal input handling.
-func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch k.String() {
-	case "esc":
-		m.approval.reply <- tools.Deny
-		m.approval = nil
-		return nil, true
-	case "a", "d":
-		if m.now().Sub(m.lastTyped) < approvalIdle {
-			return nil, false
-		}
-	}
-	switch k.String() {
-	case "a":
-		m.approval.reply <- tools.AllowOnce
-		m.approval = nil
-		return nil, true
-	case "d":
-		m.approval.reply <- tools.Deny
-		m.approval = nil
-		return nil, true
-	case "ctrl+a":
-		if !m.approval.q.CanAlways {
-			return nil, true // not offered for ask-every-time commands
-		}
-		q, reply := m.approval.q, m.approval.reply
-		m.approval = nil
-		reply <- tools.AllowAlways
-		path := m.opts.ConfigPath
-		if path == "" {
-			path = config.ConfigFile()
-		}
-		switch q.Kind {
-		case "shell":
-			// The running session (and a /clear restart) honours it now; the file
-			// makes it permanent.
-			m.start.Config.Shell.Allow = append(slices.Clone(m.start.Config.Shell.Allow), q.Subject)
-			if err := config.AppendString(path, []string{"shell", "allow"}, q.Subject, config.DefaultShellAllow); err != nil {
-				return m.printlnError("error: allow-always not saved: " + err.Error()), true
-			}
-			return m.printlnContent(fmt.Sprintf("always allowing %q (saved to %s)", q.Subject, path)), true
-		case "mcp":
-			// Subject is server/tool. The running session already learned it
-			// from the AllowAlways answer; the config makes it survive /clear
-			// and the next start.
-			server, tool, ok := strings.Cut(q.Subject, "/")
-			if !ok || server == "" || tool == "" {
-				return nil, true
-			}
-			if s, ok := m.start.Config.MCP.Servers[server]; ok {
-				s.Approve = append(slices.Clone(s.Approve), tool)
-				m.start.Config.MCP.Servers[server] = s
-			}
-			if err := config.AppendString(path, []string{"mcp", "servers", server, "approve"}, tool, nil); err != nil {
-				return m.printlnError("error: allow-always not saved: " + err.Error()), true
-			}
-			return m.printlnContent(fmt.Sprintf("always allowing %s (saved to %s)", q.Subject, path)), true
-		}
-		return nil, true
-	}
-	return nil, false
 }
 
 func (m *model) openPager(it Item) {
@@ -1498,7 +1431,7 @@ func (m *model) View() tea.View {
 		if m.height > 0 {
 			rows = min(rows, max(1, m.height-inputChrome-4))
 		}
-		sb.WriteString(approvalPanel(m.approval.q, max(20, m.width), rows) + "\n")
+		sb.WriteString(approvalPanel(m.approval, max(20, m.width), rows) + "\n")
 	} else if m.busy() {
 		sb.WriteString(m.activityLine() + "\n")
 	} else if d := m.dropdown(); d != nil {
@@ -1686,45 +1619,6 @@ func (m *model) styleL2(l2 string) string {
 // input area and the status bar.
 func (m *model) rule() string {
 	return dim.Render(strings.Repeat("─", max(20, m.width))) + "\n"
-}
-
-// approvalDetailRows caps the command lines shown under an approval question;
-// the whole command opens in the pager (ctrl+o).
-const approvalDetailRows = 6
-
-func approvalPrompt(q tools.Question) string {
-	subject := Sanitize(q.Subject)
-	if q.CanAlways {
-		return fmt.Sprintf("allow `%s`?  [a] once  [ctrl+a] always  [d] deny", subject)
-	}
-	return fmt.Sprintf("allow `%s` (asks every time)?  [a] once  [d] deny", subject)
-}
-
-// approvalPanel renders the question and the command it is about. The whole
-// command is shown up to rows lines — the subject alone can hide what runs
-// (an approved `python3` executes the heredoc under it) — each clamped to
-// the width; the rest is counted and opens in the pager.
-func approvalPanel(q tools.Question, width, rows int) string {
-	var b strings.Builder
-	b.WriteString(warnFg.Render("? ") + approvalPrompt(q))
-	lines := strings.Split(strings.TrimRight(strings.ReplaceAll(Sanitize(q.Detail), "\t", "    "), "\n"), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		return b.String()
-	}
-	shown := lines
-	if len(lines) > rows {
-		shown = lines[:max(1, rows-1)]
-	}
-	for _, l := range shown {
-		if lipgloss.Width(l) > width-4 {
-			l = truncCells(l, max(1, width-5)) + "…"
-		}
-		b.WriteString("\n" + dim.Render("  │ ") + l)
-	}
-	if rest := len(lines) - len(shown); rest > 0 {
-		b.WriteString("\n" + dim.Render(fmt.Sprintf("  │ … +%d %s · ctrl+o shows the whole command", rest, plural(rest, "line"))))
-	}
-	return b.String()
 }
 
 func firstLineOf(s string) string { l, _, _ := strings.Cut(s, "\n"); return l }

@@ -55,7 +55,7 @@ func TestPagerCtrlCClearsTextarea(t *testing.T) {
 func TestCtrlOOpensApprovalCommand(t *testing.T) {
 	m := newTestModel()
 	m.running = true
-	m.approval = &approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", Detail: "python3 - <<'EOF'\nimport os\nEOF"}, reply: make(chan tools.Answer, 1)}
+	m.approval = &approvalState{approvalMsg: approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", Detail: "python3 - <<'EOF'\nimport os\nEOF"}, reply: make(chan tools.Answer, 1)}}
 	m.Update(key("ctrl+o"))
 	if m.pager == nil || !strings.Contains(m.pager.vp.GetContent(), "import os") {
 		t.Fatal("ctrl+o must page the pending command")
