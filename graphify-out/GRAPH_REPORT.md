@@ -1,7 +1,7 @@
 # Graph Report - moca  (2026-10-12)
 
 ## Corpus Check
-- 363 files · ~325,450 words
+- 363 files · ~325,673 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 12 file(s) not represented in the graph (top: (none) 6, .jsonc 4, .v2 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a1690d86`
+- Built from commit: `0ca51a88`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -812,16 +812,16 @@ Nodes (4): File format, Rules, Steps, Where commands live
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `External tools - rtk, graphify, skills ecosystem` connect `External tools - rtk, graphify, skills ecosystem` to `permissions/shell.go`, `README.md - moca`?**
-  _High betweenness centrality (0.185) - this node is a cross-community bridge._
+  _High betweenness centrality (0.164) - this node is a cross-community bridge._
 - **What connects `github.com/adeotek/moca`, `Agent`, `Shell` to the rest of the system?**
   _231 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `go_pkg_strings` be split into smaller, more focused modules?**
   _Cohesion score 0.10955565142364107 - nodes in this community are weakly interconnected._
 - **Why does `README.md - moca` connect `README.md - moca` to `External tools - rtk, graphify, skills ecosystem`, `Release - build packages, publish GitHub Release`, `system-prompt.md`?**
-  _High betweenness centrality (0.176) - this node is a cross-community bridge._
+  _High betweenness centrality (0.156) - this node is a cross-community bridge._
 - **Should `testing.T` be split into smaller, more focused modules?**
   _Cohesion score 0.025910364145658265 - nodes in this community are weakly interconnected._
 - **Why does `Self-update (moca update)` connect `Release - build packages, publish GitHub Release` to `DESIGN rev 16 (2026-10-09): self-update plus release automation: moca update fetching the newest GitHub release including prereleases, picking the platform package, verifying against checksums, and swapping the binary in place beside the running file atomically with a unix same-directory rename and a windows rename-aside; runs before config is loaded so a broken config cannot block an update; writes nothing but the binary and never touches sessions or credentials; refuses a go run temp build; semver comparison over the git describe stamp with dev dirty or newer reporting not newer; a release workflow manual-dispatch only building three platform packages plus checksums into a GitHub Release with asset names the update code consumes; make release keeps five local targets including darwin`, `README.md - moca`?**
-  _High betweenness centrality (0.152) - this node is a cross-community bridge._
+  _High betweenness centrality (0.131) - this node is a cross-community bridge._
 - **Should `newScript` be split into smaller, more focused modules?**
   _Cohesion score 0.05470925470925471 - nodes in this community are weakly interconnected._
