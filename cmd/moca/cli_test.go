@@ -625,3 +625,59 @@ func TestParseArgsDo(t *testing.T) {
 		t.Fatal("slug")
 	}
 }
+
+// --resume <id8> from another directory is a usage error (exit 2) naming the
+// session's own workdir, and nothing is appended; --resume last means this
+// directory's newest session — never a newer one from elsewhere, and "no
+// session for <dir>" when this directory has none.
+func TestResumeFromAnotherDirRefused(t *testing.T) {
+	isolate(t)
+	home, other := t.TempDir(), t.TempDir()
+	t.Chdir(home)
+	t.Setenv("MOCA_T_KEY", "k")
+	srv := fakeCompletions(t, 200, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	cfg := writeCfg(t, `{"model":"loc/m","providers":{"loc":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768}}}}}`)
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"--config", cfg, "-p", "hello"}, nil, &out, &errb); code != 0 {
+		t.Fatalf("seed run: %d %q", code, errb.String())
+	}
+	dir := filepath.Join(os.Getenv("XDG_DATA_HOME"), "moca", "sessions")
+	ents, _ := os.ReadDir(dir)
+	if len(ents) != 1 {
+		t.Fatalf("want one session, got %d", len(ents))
+	}
+	sess := filepath.Join(dir, ents[0].Name())
+	before, _ := session.ReadFile(sess)
+	name := strings.TrimSuffix(ents[0].Name(), ".jsonl")
+	id8 := name[len(name)-8:]
+	resume := func(id string) int {
+		out.Reset()
+		errb.Reset()
+		return run(context.Background(), []string{"--config", cfg, "--resume", id, "-p", "again"}, nil, &out, &errb)
+	}
+
+	t.Chdir(t.TempDir())
+	if code := resume(id8); code != 2 || !strings.Contains(errb.String(), "another directory") || !strings.Contains(errb.String(), session.WorkdirOf(sess)) {
+		t.Fatalf("--resume %s elsewhere: code %d stderr %q", id8, code, errb.String())
+	}
+	if code := resume("last"); code != 2 || !strings.Contains(errb.String(), "no session for") {
+		t.Fatalf("--resume last in a directory without sessions: code %d stderr %q", code, errb.String())
+	}
+	if after, _ := session.ReadFile(sess); len(after) != len(before) {
+		t.Fatalf("a refused resume wrote entries: %d → %d", len(before), len(after))
+	}
+
+	// A newer session elsewhere must not win `last` back home.
+	time.Sleep(20 * time.Millisecond)
+	t.Chdir(other)
+	if code := run(context.Background(), []string{"--config", cfg, "-p", "elsewhere"}, nil, &out, &errb); code != 0 {
+		t.Fatalf("other seed run: %d %q", code, errb.String())
+	}
+	t.Chdir(home)
+	if code := resume("last"); code != 0 {
+		t.Fatalf("own workdir: code %d stderr %q", code, errb.String())
+	}
+	if after, _ := session.ReadFile(sess); len(after) <= len(before) {
+		t.Fatalf("--resume last must continue this directory's session %s", id8)
+	}
+}

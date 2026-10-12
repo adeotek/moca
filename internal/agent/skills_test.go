@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/adeotek/moca/internal/session"
 	"github.com/adeotek/moca/internal/skills"
 )
 
@@ -63,7 +64,7 @@ func TestResumedAgentExposesSkills(t *testing.T) {
 	a, _, _ := startTestWith(t, s, "", "")
 	path := a.Session().Path()
 	a.Session().Close()
-	b, err := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client()}, path)
+	b, err := Resume(StartOptions{Config: a.opts.Config, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
 	if err != nil {
 		t.Fatal(err)
 	}

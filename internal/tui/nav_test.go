@@ -452,3 +452,22 @@ func TestLoginRowForOllama(t *testing.T) {
 		t.Fatal(r)
 	}
 }
+
+// `/resume last` is this directory's newest other session — the open one
+// (usually the newest) is skipped — and says so when there is none.
+func TestResumeLastIsNewestOtherHere(t *testing.T) {
+	m := newAgentModel(t)
+	if _, err := m.agent.Run(context.Background(), "first question"); err != nil {
+		t.Fatal(err)
+	}
+	old := m.agent.Session().ID8()
+	simulate(m, m.restartSession())
+	simulate(m, m.runResume("last"))
+	if m.agent.Session().ID8() != old {
+		t.Fatalf("/resume last resumed %s, want %s", m.agent.Session().ID8(), old)
+	}
+	out, _ := simulate(m, m.runResume("last"))
+	if !strings.Contains(out, "no other sessions for this directory") || m.agent.Session().ID8() != old {
+		t.Fatalf("nothing else to resume: %q (session %s)", out, m.agent.Session().ID8())
+	}
+}

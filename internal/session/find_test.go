@@ -19,16 +19,23 @@ func TestFind(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	w2, _ := Create(dir, Header{Workdir: "/b"}, "two")
 	w2.Close()
-	if p, err := Find(dir, "last"); err != nil || p != w2.Path() {
+	// "last" is the newest session of the given workdir, not of the store.
+	if p, err := Find(dir, "last", "/a"); err != nil || p != w1.Path() {
 		t.Fatal(p, err)
 	}
-	if p, err := Find(dir, w1.ID8()); err != nil || p != w1.Path() {
+	if p, err := Find(dir, "last", "/b"); err != nil || p != w2.Path() {
 		t.Fatal(p, err)
 	}
-	if _, err := Find(dir, "deadbeef"); err == nil || !strings.Contains(err.Error(), w2.ID8()) {
+	if _, err := Find(dir, "last", "/c"); err == nil || !strings.Contains(err.Error(), "no session for") {
+		t.Fatal("no session for this workdir:", err)
+	}
+	if p, err := Find(dir, w1.ID8(), "/b"); err != nil || p != w1.Path() {
+		t.Fatal(p, err)
+	}
+	if _, err := Find(dir, "deadbeef", "/a"); err == nil || !strings.Contains(err.Error(), w2.ID8()) {
 		t.Fatal("not-found lists recent ids:", err)
 	}
-	if _, err := Find(dir, "../x"); err == nil {
+	if _, err := Find(dir, "../x", "/a"); err == nil {
 		t.Fatal("ref must be 8 hex chars")
 	}
 }
@@ -70,7 +77,7 @@ func TestInWorkdir(t *testing.T) {
 
 func TestFindNoSessions(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Find(dir, "last"); err == nil {
+	if _, err := Find(dir, "last", dir); err == nil {
 		t.Fatal("empty dir")
 	}
 	if _, err := FindForWorkdir(dir, dir); err == nil || !strings.Contains(err.Error(), "no session for") {
@@ -84,7 +91,7 @@ func TestFindMtimeTieDeterministic(t *testing.T) {
 	dir := t.TempDir()
 	w1, _ := Create(dir, Header{Workdir: "/a"}, "one")
 	w1.Close()
-	w2, _ := Create(dir, Header{Workdir: "/b"}, "two")
+	w2, _ := Create(dir, Header{Workdir: "/a"}, "two")
 	w2.Close()
 	ts := time.Now()
 	for _, p := range []string{w1.Path(), w2.Path()} {
@@ -93,7 +100,7 @@ func TestFindMtimeTieDeterministic(t *testing.T) {
 		}
 	}
 	// Stable sort keeps directory-name order among ties: "one" wins.
-	p, err := Find(dir, "last")
+	p, err := Find(dir, "last", "/a")
 	if err != nil || p != w1.Path() {
 		t.Fatalf("mtime ties must resolve by name order: %s (%v)", p, err)
 	}

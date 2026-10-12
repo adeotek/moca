@@ -213,7 +213,7 @@ func TestResumeFindsItsModelWithoutConfig(t *testing.T) {
 	}
 	id := a.Session().ID8()
 	a.Close()
-	path, err := session.Find(sessionsDir(), id)
+	path, err := session.Find(sessionsDir(), id, wd)
 	if err != nil {
 		t.Fatal(err)
 	}

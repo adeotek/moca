@@ -138,8 +138,16 @@ func (m *model) runResume(args string) tea.Cmd {
 	if cmd, refused := m.refuseRunning(); refused {
 		return cmd
 	}
-	if id := strings.TrimSpace(args); id != "" {
-		path, err := session.Find(sessionsDir(), id)
+	if id := strings.TrimSpace(args); id == "last" {
+		// The newest of this directory's sessions is usually the open one:
+		// `last` here is the newest other one.
+		list := m.otherSessions()
+		if len(list) == 0 {
+			return m.printlnMuted("no other sessions for this directory")
+		}
+		return m.resumeSession(list[0].Path)
+	} else if id != "" {
+		path, err := session.Find(sessionsDir(), id, m.opts.Start.Workdir)
 		if err != nil {
 			return m.printlnError("error: " + err.Error())
 		}

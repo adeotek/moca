@@ -35,7 +35,7 @@ usage:
     --mode <m>                 permission mode for this run: default | auto | yolo | plan
                                (plan = the plan scope: write an implementation plan to docs/plans/, no other writes)
   moca --do <plan.md> [-p "<notes>"]  execute an implementation plan step by step, ticking its - [ ] boxes
-    --resume <id8|last>        resume a session
+    --resume <id8|last>        resume a session of this directory (last = its newest)
     --continue                 latest session in this workdir
     --config <path>            config file (dev/test)
   moca login <provider>        sign in (subscription OAuth where permitted) or store an API key

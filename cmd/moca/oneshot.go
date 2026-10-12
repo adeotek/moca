@@ -47,7 +47,17 @@ func resolveResume(o Options, wd string) (string, error) {
 	if o.Continue {
 		return session.FindForWorkdir(dir, wd)
 	}
-	return session.Find(dir, o.Resume)
+	path, err := session.Find(dir, o.Resume, wd)
+	if err != nil {
+		return "", err
+	}
+	// A session resumes only in its own workdir: the trust decision, the
+	// project rules and `!` all belong to the cwd (checked again by
+	// agent.Resume for every caller).
+	if !session.InWorkdir(path, wd) {
+		return "", fmt.Errorf("session %s belongs to another directory (%s); cd there and run moca --resume %s", o.Resume, session.WorkdirOf(path), o.Resume)
+	}
+	return path, nil
 }
 
 func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stderr io.Writer) int {
