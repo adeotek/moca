@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,23 @@ import (
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/tools"
 )
+
+// newAgentModelCfg builds an agent model around a real started agent from a
+// caller-supplied StartOptions (the config JSON is still written to cfgPath
+// for the model's Files/dropdown paths). The helper is the general shape;
+// newAgentModel is the common case (one fake provider, two models).
+func newAgentModelCfg(t *testing.T, so agent.StartOptions, cfgPath string) *model {
+	t.Helper()
+	a, err := agent.Start(so)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { a.Session().Close() })
+	m := newModel(AppOptions{Start: so, ConfigPath: cfgPath, Home: "/home/u"}, a)
+	m.start = so
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	return m
+}
 
 // newAgentModel builds a model around a real agent (openai-completions mock
 // server answering "ok" to every request), so glue paths that need an agent —
@@ -42,17 +60,43 @@ func newAgentModel(t *testing.T) *model {
 	if err := os.WriteFile(cfgPath, []byte("{\"model\":\"fake/m\"}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	so := agent.StartOptions{Config: cfg, Workdir: t.TempDir(), HTTP: srv.Client(), Slug: "t",
-		Ask: func(_ context.Context, _ tools.Question) tools.Answer { return tools.Deny }}
-	a, err := agent.Start(so)
+	return newAgentModelCfg(t, agent.StartOptions{Config: cfg, Workdir: t.TempDir(), HTTP: srv.Client(),
+		Slug: "t", Ask: func(_ context.Context, _ tools.Question) tools.Answer { return tools.Deny }}, cfgPath)
+}
+
+// newThinkingAgentModel builds an agent whose model has effort levels to
+// cycle, without touching the catalog or needing an env key: a fake ollama
+// server reports a model with the "thinking" capability, and the registry's
+// discovery grants it a ThinkingLevelMap (modelFromShow).
+func newThinkingAgentModel(t *testing.T) *model {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/tags":
+			json.NewEncoder(w).Encode(map[string]any{"models": []any{map[string]any{"name": "glm:t"}}})
+		case r.URL.Path == "/api/show":
+			json.NewEncoder(w).Encode(map[string]any{
+				"capabilities": []string{"completion", "tools", "thinking"},
+				"parameters":   "num_ctx 65536",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`{"model":"ollama/glm:t","providers":{"ollama":{"baseUrl":%q}}}`, srv.URL)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { a.Session().Close() })
-	m := newModel(AppOptions{Start: so, ConfigPath: cfgPath, Home: "/home/u"}, a)
-	m.start = so
-	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	return m
+	cfgPath := filepath.Join(t.TempDir(), "config.jsonc")
+	if err := os.WriteFile(cfgPath, []byte(`{"model":"ollama/glm:t"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return newAgentModelCfg(t, agent.StartOptions{Config: cfg, Workdir: t.TempDir(),
+		Slug: "t", Ask: func(_ context.Context, _ tools.Question) tools.Answer { return tools.Deny }}, cfgPath)
 }
 
 // printed renders what a print cmd would put in the scrollback: the scrollback
