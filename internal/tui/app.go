@@ -250,6 +250,8 @@ var (
 	red = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
 	// planFg is the plan-mode badge/notice color (blue).
 	planFg = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true)
+	// autoFg is the auto-mode badge color (green).
+	autoFg = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
 	// orange marks the product name in the welcome line. One shade serves
 	// both light and dark terminals: the welcome prints before the terminal
 	// reports its background, and #d97706 keeps ≥3:1 contrast on white and
@@ -721,6 +723,8 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	case "shift+tab":
+		return m.cycleMode()
+	case "ctrl+t":
 		return m.cycleEffort()
 	case "ctrl+r":
 		if m.login != nil || m.pager != nil || m.busy() {
@@ -964,8 +968,15 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
+		// Yolo can never carry plan: entering it drops plan first (two
+		// notices — PlanChanged then ModeChanged).
+		if !m.agent.Yolo() && m.agent.Plan() {
+			m.agent.SetPlan(false)
+		}
 		m.agent.SetYolo(!m.agent.Yolo()) // ModeChanged prints + refreshes
 		return nil
+	case "mode":
+		return m.runMode(c.Args)
 	case "plan":
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
@@ -1025,7 +1036,7 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 	return m.println("unknown command /" + c.Name)
 }
 
-// cycleEffort is shift+tab: the next effort level the current model
+// cycleEffort is ctrl+t: the next effort level the current model
 // supports, wrapping around — the quick form of /effort for the one knob most
 // worth tuning per task. Refused where /effort is.
 func (m *model) cycleEffort() tea.Cmd {
@@ -1330,14 +1341,12 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		return m.printlnMuted("↳ sent: " + strings.Join(e.Texts, " · "))
 	case agent.ModeChanged:
 		m.refreshStatus()
-		switch e.Mode {
-		case agent.ModeYolo:
-			return m.println(red.Render("yolo mode on: all permission checks are off"))
-		case agent.ModeAuto:
-			return m.println("auto mode: safe actions run, risky ones ask")
-		default:
-			return m.println("default mode: permission checks restored")
+		plan := m.agent.Status().Plan
+		line, isRed := modeNotice(e.Mode, plan)
+		if isRed {
+			return m.println(red.Render(line))
 		}
+		return m.printlnMuted(line)
 	case agent.PlanChanged:
 		m.refreshStatus()
 		if e.On {
@@ -1575,17 +1584,33 @@ func fmtThinkDuration(d time.Duration) string {
 	return fmtElapsed(d)
 }
 
-// statusLine renders the two-line bar; yolo/plan badges lead line 1 and are
-// never dropped — the rest gets the remaining width.
+// statusLine renders the two-line bar; the permission-mode badge always
+// leads line 1 (a safety state that must never be dropped) and is never
+// dropped — the rest gets the remaining width.
 func (m *model) statusLine() string {
 	w := max(20, m.width)
 	var badges []string
 	extra := 0
-	if m.agent != nil && m.agent.Yolo() {
-		badges, extra = append(badges, red.Render("YOLO")), extra+7 // "YOLO · "
+	add := func(text string, style lipgloss.Style) {
+		badges = append(badges, style.Render(text))
+		// The badge, its leading "· " separator and the following space.
+		extra += len(" · ") + len([]rune(text))
 	}
-	if m.agent != nil && m.agent.Plan() {
-		badges, extra = append(badges, planFg.Render("PLAN")), extra+7 // "PLAN · "
+	if m.agent != nil {
+		// The permission badge is always visible; auto+plan splits into
+		// its two badges with their own colors. Plan comes from the guarded
+		// Status() read (yolo never carries plan), so the badge agrees with
+		// /mode and the notices — e.g. --plan --yolo renders plain YOLO.
+		mode, plan := m.agent.Mode(), m.agent.Status().Plan
+		switch {
+		case mode == agent.ModeAuto && plan:
+			add("AUTO", autoFg)
+			add("PLAN", planFg)
+		case plan:
+			add(modeBadgeText(mode, true), permStyle(mode))
+		default:
+			add(modeBadgeText(mode, false), permStyle(mode))
+		}
 	}
 	if len(badges) > 0 {
 		l1, l2 := RenderStatus(m.status, max(13, w-extra))
@@ -1593,6 +1618,19 @@ func (m *model) statusLine() string {
 	}
 	l1, l2 := RenderStatus(m.status, w)
 	return dim.Render(Sanitize(l1)) + "\n" + m.styleL2(l2)
+}
+
+// permStyle picks the badge color: yolo red, auto green, everything else
+// (default; and plan states, which the auto+plan split in statusLine styles
+// itself) the muted status styling.
+func permStyle(mode agent.PermMode) lipgloss.Style {
+	switch mode {
+	case agent.ModeYolo:
+		return red
+	case agent.ModeAuto:
+		return autoFg
+	}
+	return dim
 }
 
 // styleL2 dims status line 2 and colors the percent field by context

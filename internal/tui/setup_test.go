@@ -85,7 +85,7 @@ func TestSetupSubmitGuidesToLogin(t *testing.T) {
 // /help and /exit keep working.
 func TestSetupGuardsAgentCommandsButNotHelpExit(t *testing.T) {
 	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
-	for _, name := range []string{"compact", "cost", "effort", "hard", "yolo", "clear", "undo"} {
+	for _, name := range []string{"compact", "cost", "effort", "hard", "mode", "yolo", "clear", "undo"} {
 		out, _ := simulate(m, m.runCommand(Parsed{Kind: KindCommand, Name: name}))
 		if !strings.Contains(out, "no provider configured") {
 			t.Errorf("/%s printed %q", name, out)

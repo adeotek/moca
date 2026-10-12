@@ -27,7 +27,7 @@ type Parsed struct {
 }
 
 // BuiltinCommands win over prompt templates on a name collision (§10).
-var BuiltinCommands = []string{"model", "effort", "hard", "yolo", "plan", "do", "clear", "resume", "sessions", "compact", "cost", "undo", "copy", "show", "login", "logout", "help", "exit"}
+var BuiltinCommands = []string{"model", "effort", "hard", "mode", "yolo", "plan", "do", "clear", "resume", "sessions", "compact", "cost", "undo", "copy", "show", "login", "logout", "help", "exit"}
 
 // builtinAliases resolve to their built-in unless a prompt template already
 // owns the name (`/q`, `/quit` → `/exit`) — only the full built-in names are
@@ -38,6 +38,7 @@ var builtinHelp = map[string]string{
 	"model":    "[provider/model]  pick a model or switch (forfeits prompt cache)",
 	"effort":   "[level]  show or set effort (off|minimal|low|medium|high|xhigh|max)",
 	"hard":     "toggle modelHard + high effort",
+	"mode":     "[default|auto|yolo]  show the permission mode or set it (shift+tab cycles default→auto→plan→yolo; between runs only)",
 	"yolo":     "toggle yolo mode: ALL permission checks off (between runs only)",
 	"plan":     "[request]  toggle plan mode (runs write an implementation plan to docs/plans/, change nothing else); with a request, plan it now",
 	"do":       "<plan.md> [instructions]  execute an implementation plan step by step, ticking its - [ ] boxes",
@@ -99,6 +100,6 @@ func HelpText(prompts []skills.Prompt) string {
 	}
 	sb.WriteString("!cmd     run cmd, output goes to the model   !!cmd  run cmd locally only\n")
 	sb.WriteString("type / for the command dropdown — ↑/↓ pick · tab completes · enter on an exact name sends\n")
-	sb.WriteString("enter send · shift+enter newline · esc interrupt · ctrl+o pager (latest item) · alt+t read the latest thinking · alt+p paste chips · ctrl+r search history · ctrl+c×2 quit")
+	sb.WriteString("enter send · shift+enter newline · esc interrupt · shift+tab cycle mode (default/auto/plan/yolo) · ctrl+t cycle effort · ctrl+o pager (latest item) · alt+t read the latest thinking · alt+p paste chips · ctrl+r search history · ctrl+c×2 quit")
 	return sb.String()
 }
