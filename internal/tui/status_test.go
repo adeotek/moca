@@ -16,8 +16,8 @@ func TestRenderStatusFull(t *testing.T) {
 	l1, l2 := RenderStatus(full, 200)
 	want1 := "v0.1.0-alpha-1-gc392fac · ~/projects/moca · main*"
 	want2 := "opencode-go/glm-5.3-flash · med · ctx 1M · 23% · 24k/6k · $0.0412"
-	if l1 != want1 || l2 != want2 {
-		t.Fatalf("got  %q / %q\nwant %q / %q", l1, l2, want1, want2)
+	if plainLine(l1) != want1 || plainLine(l2) != want2 {
+		t.Fatalf("got  %q / %q\nwant %q / %q", plainLine(l1), plainLine(l2), want1, want2)
 	}
 }
 
@@ -25,29 +25,30 @@ func TestRenderStatusVariants(t *testing.T) {
 	s := full
 	s.Git, s.Branch, s.Sub = false, "", true
 	l1, l2 := RenderStatus(s, 200)
-	if !strings.Contains(l1, "· -") || !strings.HasSuffix(l2, "· sub") {
-		t.Fatalf("%q / %q", l1, l2)
+	if !strings.Contains(plainLine(l1), "· -") || !strings.HasSuffix(plainLine(l2), "· sub") {
+		t.Fatalf("%q / %q", plainLine(l1), plainLine(l2))
 	}
 	s = full
 	s.Transient = "retry 2/5 · 4s"
-	if _, l2 := RenderStatus(s, 200); !strings.HasSuffix(l2, "retry 2/5 · 4s") {
-		t.Fatalf("transient replaces cost: %q", l2)
+	if _, l2 := RenderStatus(s, 200); !strings.HasSuffix(plainLine(l2), "retry 2/5 · 4s") {
+		t.Fatalf("transient replaces cost: %q", plainLine(l2))
 	}
 }
 
 func TestRenderStatusNarrow(t *testing.T) {
 	for _, w := range []int{100, 80, 60, 45, 40, 30, 25, 20} {
 		l1, l2 := RenderStatus(full, w)
-		for _, l := range []string{l1, l2} {
-			if lipgloss.Width(l) > w || strings.Contains(l, "\n") {
-				t.Errorf("width %d: %q (%d cells)", w, l, lipgloss.Width(l))
+		for _, l := range [][]segment{l1, l2} {
+			plain := plainLine(l)
+			if lipgloss.Width(plain) > w || strings.Contains(plain, "\n") {
+				t.Errorf("width %d: %q (%d cells)", w, plain, lipgloss.Width(plain))
 			}
 		}
 	}
-	if l1, _ := RenderStatus(full, 45); strings.Contains(l1, "~/projects") {
+	if l1, _ := RenderStatus(full, 45); strings.Contains(plainLine(l1), "~/projects") {
 		t.Fatal("cwd dropped first")
 	}
-	if _, l2 := RenderStatus(full, 60); !strings.Contains(l2, "23%") {
+	if _, l2 := RenderStatus(full, 60); !strings.Contains(plainLine(l2), "23%") {
 		t.Fatal("ctx % survives at 60 cols")
 	}
 }
@@ -77,12 +78,12 @@ func TestContextPressure(t *testing.T) {
 		}
 	}
 	s.Used = 95_000
-	if _, l2 := RenderStatus(s, 120); !strings.Contains(l2, "95% · /compact") {
-		t.Fatalf("a hot context says what to do: %q", l2)
+	if _, l2 := RenderStatus(s, 120); !strings.Contains(plainLine(l2), "95% · /compact") {
+		t.Fatalf("a hot context says what to do: %q", plainLine(l2))
 	}
 	s.Used = 50_000
-	if _, l2 := RenderStatus(s, 120); strings.Contains(l2, "/compact") {
-		t.Fatalf("no hint below the trigger: %q", l2)
+	if _, l2 := RenderStatus(s, 120); strings.Contains(plainLine(l2), "/compact") {
+		t.Fatalf("no hint below the trigger: %q", plainLine(l2))
 	}
 }
 
@@ -90,11 +91,13 @@ func TestStatusPercentColored(t *testing.T) {
 	m := newTestModel()
 	m.status.Model = "fake/m" // the percent fields only render with a model
 	m.status.Window, m.status.Trigger, m.status.Used = 100_000, 90_000, 95_000
-	if got := m.statusLine(); !strings.Contains(got, errFg.Bold(true).Render("95%")) {
-		t.Fatalf("hot percent not red: %q", got)
+	// The hot/warn percent segment is styled with its palette color; the
+	// visible text stays exactly what the plain spec says.
+	if got := m.statusLine(); !strings.Contains(got, statusPalette(m.darkBG).hot.Bold(true).Render("95%")) {
+		t.Fatalf("hot percent not hot-styled: %q", got)
 	}
 	m.status.Used = 75_000
-	if got := m.statusLine(); !strings.Contains(got, warnFg.Render("75%")) {
-		t.Fatalf("warm percent not yellow: %q", got)
+	if got := m.statusLine(); !strings.Contains(got, statusPalette(m.darkBG).warn.Render("75%")) {
+		t.Fatalf("warm percent not warm-styled: %q", got)
 	}
 }

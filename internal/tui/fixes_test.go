@@ -373,8 +373,8 @@ func TestStatusWideRunesNeverExceedWidth(t *testing.T) {
 		Model: "fake/m", Effort: "high", Window: 128 * 1024, Used: 1000, In: 1000, Out: 100, Cost: 0.5}
 	for _, w := range []int{100, 60, 40, 25, 20} {
 		l1, l2 := RenderStatus(s, w)
-		for _, l := range []string{l1, l2} {
-			if got := lipgloss.Width(l); got > w {
+		for _, l := range [][]segment{l1, l2} {
+			if got := lipgloss.Width(plainLine(l)); got > w {
 				t.Errorf("width %d: rendered %d cells", w, got)
 			}
 		}

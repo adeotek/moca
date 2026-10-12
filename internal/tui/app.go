@@ -1586,75 +1586,44 @@ func fmtThinkDuration(d time.Duration) string {
 
 // statusLine renders the two-line bar; the permission-mode badge always
 // leads line 1 (a safety state that must never be dropped) and is never
-// dropped — the rest gets the remaining width.
+// dropped — the rest gets the remaining width. Both lines render as styled
+// segments (role → color per theme, task 10): the plain text is unchanged.
 func (m *model) statusLine() string {
 	w := max(20, m.width)
-	var badges []string
-	extra := 0
-	add := func(text string, style lipgloss.Style) {
-		badges = append(badges, style.Render(text))
-		// The badge, its leading "· " separator and the following space.
-		extra += len(" · ") + len([]rune(text))
-	}
+	// Badge segments lead line 1: the permission state, its ever-visible
+	// placement (Task 8) preserved. Auto+plan splits into two badges, each
+	// with its own color; plan comes from the guarded Status() read (yolo
+	// never carries plan), so the badge agrees with /mode and the notices —
+	// e.g. --plan --yolo renders plain YOLO.
+	var badges []segment
 	if m.agent != nil {
-		// The permission badge is always visible; auto+plan splits into
-		// its two badges with their own colors. Plan comes from the guarded
-		// Status() read (yolo never carries plan), so the badge agrees with
-		// /mode and the notices — e.g. --plan --yolo renders plain YOLO.
 		mode, plan := m.agent.Mode(), m.agent.Status().Plan
-		switch {
-		case mode == agent.ModeAuto && plan:
-			add("AUTO", autoFg)
-			add("PLAN", planFg)
-		case plan:
-			add(modeBadgeText(mode, true), permStyle(mode))
-		default:
-			add(modeBadgeText(mode, false), permStyle(mode))
+		badges = append(badges, segment{text: badgeText(mode, plan), role: roleMode, drop: 0, badgeMode: mode, badgePlan: plan && mode == agent.ModeAuto})
+		if mode == agent.ModeAuto && plan {
+			badges = append(badges, segment{text: "PLAN", role: roleMode, drop: 0, badgePlan: true})
 		}
 	}
+	extra := 0
+	for _, b := range badges {
+		// The badge plus its leading " · " separator.
+		extra += len(" · ") + lipgloss.Width(b.text)
+	}
+	l1, l2 := RenderStatus(m.status, max(13, w-extra))
 	if len(badges) > 0 {
-		l1, l2 := RenderStatus(m.status, max(13, w-extra))
-		return strings.Join(badges, dim.Render(" · ")) + dim.Render(" · "+Sanitize(l1)) + "\n" + m.styleL2(l2)
+		l1 = append(badges, l1...)
 	}
-	l1, l2 := RenderStatus(m.status, w)
-	return dim.Render(Sanitize(l1)) + "\n" + m.styleL2(l2)
+	return styleLine(l1, m.darkBG, pressureOK) + "\n" +
+		styleLine(l2, m.darkBG, m.status.pressure())
 }
 
-// permStyle picks the badge color: yolo red, auto green, everything else
-// (default; and plan states, which the auto+plan split in statusLine styles
-// itself) the muted status styling.
-func permStyle(mode agent.PermMode) lipgloss.Style {
-	switch mode {
-	case agent.ModeYolo:
-		return red
-	case agent.ModeAuto:
-		return autoFg
+// badgeText is the plain badge text for one status-bar badge: a plan tag
+// (default · PLAN) rides the mode badge; the auto+plan split adds PLAN as
+// its own second badge, so AUTO carries no plan tag there.
+func badgeText(mode agent.PermMode, plan bool) string {
+	if plan && mode != agent.ModeAuto {
+		return modeBadgeText(mode, true)
 	}
-	return dim
-}
-
-// styleL2 dims status line 2 and colors the percent field by context
-// pressure (yellow from 70%, red from the auto-compaction trigger, where the
-// line also says /compact).
-func (m *model) styleL2(l2 string) string {
-	l2 = Sanitize(l2)
-	pct := FmtPercent(m.status.Used, m.status.Window)
-	var st lipgloss.Style
-	switch m.status.pressure() {
-	case pressureWarn:
-		st = warnFg
-	case pressureHot:
-		st = errFg.Bold(true)
-	default:
-		return dim.Render(l2)
-	}
-	needle := " · " + pct
-	i := strings.Index(l2, needle)
-	if i < 0 {
-		return dim.Render(l2) // truncated away
-	}
-	i += len(" · ")
-	return dim.Render(l2[:i]) + st.Render(pct) + dim.Render(l2[i+len(pct):])
+	return modeBadgeText(mode, false)
 }
 
 // rule is the full-width dim separator between the scrollback output, the

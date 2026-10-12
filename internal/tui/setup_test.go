@@ -235,8 +235,8 @@ func TestResumeFindsItsModelWithoutConfig(t *testing.T) {
 func TestStatusLineCarriesTheSetupState(t *testing.T) {
 	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
 	_, l2 := RenderStatus(m.status, 120)
-	if l2 != "no provider configured — /login" {
-		t.Fatalf("status line 2 %q", l2)
+	if plainLine(l2) != "no provider configured — /login" {
+		t.Fatalf("status line 2 %q", plainLine(l2))
 	}
 	if got := m.statusLine(); !strings.Contains(got, "no provider configured — /login") {
 		t.Fatalf("status line %q", got)

@@ -7,12 +7,13 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/llm"
 )
 
-// StatusInfo is the plain-text status bar content (§11); styling is the
-// caller's job. Line 1: version · cwd · branch. Line 2: model · effort ·
-// ctx W · P% · in/out · cost.
+// StatusInfo is the plain-text status bar content (§11); each field carries a
+// role (styled per theme by styleLine in status_style.go). Line 1: version ·
+// cwd · branch. Line 2: model · effort · ctx W · P% · in/out · cost.
 type StatusInfo struct {
 	Version      string
 	Cwd, Branch  string
@@ -49,18 +50,57 @@ func (s StatusInfo) pressure() int {
 	return pressureOK
 }
 
-// field is one status-bar field; drop is its shrink rank — rank 1 drops
-// first, rank 0 never drops.
-type field struct {
+// role is what a status-bar segment is — the styling key (status_style.go
+// maps role → color per theme, importance-ranked: mode and the context
+// percent must never be missed; separators and tier-4 text recede).
+type role int
+
+const (
+	roleSep role = iota
+	roleMode
+	roleModel
+	roleEffort
+	rolePct
+	roleHint
+	roleCwd
+	roleBranch
+	roleCost
+	roleMuted
+)
+
+// segment is one status-bar field: its text, its role (what it is → how
+// styleLine styles it) and its shrink rank — drop 1 drops first, 0 never
+// drops. Badge segments (roleMode lead badges) carry their exact
+// mode/plan state so the tier-1 badge hue is per state, not per role.
+type segment struct {
 	text string
+	role role
 	drop int
+	// badge state (roleMode lead badges only): badgeMode colors the badge
+	// for its mode, and badgePlan switches to the plan blue (the PLAN badge
+	// of the auto+plan split; never set for yolo — yolo never carries plan).
+	badgeMode agent.PermMode
+	badgePlan bool
 }
 
-// RenderStatus renders the two-line bar; neither line is ever wider than
-// width terminal cells (wide runes count 2) and neither wraps.
+// plainLine joins the segments' text with " · " — the plain spec of the bar.
+// Styling must never change this text; the width math reads it.
+func plainLine(segs []segment) string {
+	var parts []string
+	for _, seg := range segs {
+		if seg.text != "" {
+			parts = append(parts, seg.text)
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// RenderStatus renders the two-line bar as segment lists (plain text =
+// plainLine of each). Neither line's plain text is ever wider than width
+// terminal cells (wide runes count 2) and neither wraps.
 // Line 1 shrink order: drop cwd, then branch, then truncate the version.
 // Line 2 shrink order: drop in/out, then truncate the model, then truncate.
-func RenderStatus(s StatusInfo, width int) (string, string) {
+func RenderStatus(s StatusInfo, width int) (l1, l2 []segment) {
 	branch := "-"
 	if s.Git {
 		branch = s.Branch
@@ -75,20 +115,20 @@ func RenderStatus(s StatusInfo, width int) (string, string) {
 	if s.Transient != "" {
 		cost = s.Transient
 	}
-	l1 := renderLine([]field{{s.Version, 0}, {s.Cwd, 1}, {branch, 2}}, width, 0)
+	l1 = renderLine([]segment{{text: s.Version, role: roleMuted}, {text: s.Cwd, role: roleCwd, drop: 1}, {text: branch, role: roleBranch, drop: 2}}, width, 0)
 	if s.Model == "" {
 		// No session yet (moca started without a model, §3.5): the bar
 		// carries the state instead of an empty model/effort pair.
-		return l1, renderLine([]field{{"no provider configured — /login", 0}}, width, 0)
+		return l1, renderLine([]segment{{text: "no provider configured — /login", role: roleMuted}}, width, 0)
 	}
 	hint := ""
 	if s.pressure() == pressureHot {
 		hint = "/compact" // the bar says what to do about a full context
 	}
-	l2 := renderLine([]field{
-		{s.Model, 0}, {AbbrevEffort(s.Effort), 0},
-		{"ctx " + FmtWindow(s.Window), 0}, {FmtPercent(s.Used, s.Window), 0}, {hint, 2},
-		{FmtTokens(s.In) + "/" + FmtTokens(s.Out), 3}, {cost, 0},
+	l2 = renderLine([]segment{
+		{text: s.Model, role: roleModel}, {text: string(AbbrevEffort(s.Effort)), role: roleEffort},
+		{text: "ctx " + FmtWindow(s.Window), role: roleMuted}, {text: FmtPercent(s.Used, s.Window), role: rolePct}, {text: hint, role: roleHint, drop: 2},
+		{text: FmtTokens(s.In) + "/" + FmtTokens(s.Out), role: roleMuted, drop: 3}, {text: cost, role: roleCost},
 	}, width, 0)
 	return l1, l2
 }
@@ -110,36 +150,65 @@ func FmtPercent(used, window int) string {
 	return fmt.Sprintf("%d%%", int(math.Round(p)))
 }
 
-// renderLine joins the non-empty fields with " · " and shrinks them to at
-// most width cells: fields drop in rank order 1→3, the field at truncAt
-// gives up what is still over as an ellipsis, and a last-resort truncation
-// keeps the line within width.
-func renderLine(fields []field, width, truncAt int) string {
-	render := func() string {
-		var parts []string
-		for _, f := range fields {
-			if f.text != "" {
-				parts = append(parts, f.text)
+// renderLine shrinks the segments so their " · " join fits width cells:
+// segments drop in rank order 1→3 (skipping what is no longer needed), the
+// segment at truncAt gives up what is still over as an ellipsis, and a
+// last-resort cut clips the widest shrinkable segment so the line fits.
+// Dropping and truncating edit the segment texts — a surviving (possibly
+// shortened) segment keeps its role, so styling stays exact.
+func renderLine(segs []segment, width, truncAt int) []segment {
+	// widthOf is the joined width of the line as it stands.
+	widthOf := func() int {
+		var w int
+		first := true
+		for _, seg := range segs {
+			if seg.text == "" {
+				continue
+			}
+			if !first {
+				w += lipgloss.Width(" · ")
+			}
+			first = false
+			w += lipgloss.Width(seg.text)
+		}
+		return w
+	}
+	// Drop ranks 1..3: drop the rank's segments whenever the line is still
+	// over width (the old renderer's exact loop — unconditional per rank,
+	// with the fit check in the loop condition).
+	for drop := 1; drop <= 3 && widthOf() > width; drop++ {
+		for i := range segs {
+			if segs[i].drop == drop {
+				segs[i].text = ""
 			}
 		}
-		return strings.Join(parts, " · ")
 	}
-	for drop := 1; drop <= 3 && lipgloss.Width(render()) > width; drop++ {
-		for i := range fields {
-			if fields[i].drop == drop {
-				fields[i].text = ""
+	// The truncAt segment (rank 0, never dropped) gives up `over` cells plus
+	// one for the ellipsis.
+	if over := widthOf() - width; over > 0 && truncAt >= 0 {
+		segs[truncAt].text = truncCells(segs[truncAt].text, max(1, lipgloss.Width(segs[truncAt].text)-over-1)) + "…"
+	}
+	// Last resort: still over after dropping and truncating (wide runes,
+	// many narrow segments). Drop trailing segments (rank order reversed:
+	// the tail is context) while the line is over width — deterministic,
+	// no per-rune shrink loop.
+	for widthOf() > width {
+		any := false
+		for i := len(segs) - 1; i >= 0; i-- {
+			if i == truncAt && truncAt >= 0 {
+				continue // the truncated lead: shrunk already above
+			}
+			if segs[i].text != "" {
+				segs[i].text = ""
+				any = true
+				break
 			}
 		}
+		if !any {
+			break
+		}
 	}
-	if over := lipgloss.Width(render()) - width; over > 0 && truncAt >= 0 {
-		// Shorten the field by `over` cells plus one for the ellipsis.
-		fields[truncAt].text = truncCells(fields[truncAt].text, max(1, lipgloss.Width(fields[truncAt].text)-over-1)) + "…"
-	}
-	out := render()
-	if lipgloss.Width(out) > width {
-		out = truncCells(out, max(0, width-1)) + "…"
-	}
-	return out
+	return segs
 }
 
 // truncCells cuts s to at most w terminal cells (wide runes count 2).
