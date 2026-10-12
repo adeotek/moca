@@ -33,26 +33,33 @@ func TestParseArgs(t *testing.T) {
 	if _, err := parseArgs([]string{"--approve", "--no-approve", "-p", "x"}, nil); err == nil {
 		t.Fatal("approve flags are exclusive")
 	}
-	if _, err := parseArgs([]string{"--yolo", "--no-yolo", "-p", "x"}, nil); err == nil {
-		t.Fatal("yolo flags are exclusive")
+	// The retired mode flags are not registered at all (breaking change).
+	for _, flag := range []string{"--plan", "--yolo", "--no-yolo"} {
+		if _, err := parseArgs([]string{flag, "-p", "x"}, nil); err == nil {
+			t.Fatalf("%s must be refused", flag)
+		}
 	}
 	if _, err := parseArgs([]string{"--resume", "last", "--continue", "-p", "x"}, nil); err == nil {
 		t.Fatal("resume/continue are exclusive")
 	}
-	o, _ = parseArgs([]string{"--no-yolo", "-p", "x"}, nil)
-	if o.Yolo == nil || *o.Yolo || o.YoloOn(config.Config{Yolo: true}) {
-		t.Fatal("--no-yolo overrides config")
+	// --mode default replaces --no-yolo: it suppresses a configured yolo.
+	o, _ = parseArgs([]string{"--mode", "default", "-p", "x"}, nil)
+	if m, plan := o.ResolveMode(config.Config{Yolo: true}); m != "default" || plan {
+		t.Fatal("--mode default overrides config yolo")
 	}
-	o, _ = parseArgs([]string{"--plan", "-p", "x"}, nil)
-	if !o.Plan || !o.OneShot {
-		t.Fatalf("--plan: %+v", o)
+	o, _ = parseArgs([]string{"--mode", "plan", "-p", "x"}, nil)
+	if o.Mode == nil || *o.Mode != "plan" || !o.OneShot {
+		t.Fatalf("--mode plan: %+v", o)
 	}
-	if o, _ = parseArgs([]string{"-p", "x"}, nil); o.Plan {
-		t.Fatal("plan mode must default off")
+	if mode, plan := o.ResolveMode(config.Config{}); mode != "default" || !plan {
+		t.Fatal("--mode plan resolves to default + the plan scope")
 	}
 	o, _ = parseArgs([]string{"-p", "x"}, nil)
-	if o.YoloOn(config.Config{}) || !o.YoloOn(config.Config{Yolo: true}) {
-		t.Fatal("no flag → config decides")
+	if mode, plan := o.ResolveMode(config.Config{}); mode != "default" || plan {
+		t.Fatal("no flag → default without plan")
+	}
+	if m, _ := o.ResolveMode(config.Config{Yolo: true}); m != "yolo" {
+		t.Fatal("no flag → config yolo decides")
 	}
 	if _, err := parseArgs([]string{"--effort", "med", "-p", "x"}, nil); err == nil {
 		t.Fatal("bad effort is a usage error")
@@ -70,10 +77,16 @@ func TestHelpListsSurface(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("%s: exit %d stderr %q", arg, code, errb.String())
 		}
-		for _, want := range []string{"moca -p", "--model", "--effort", "--approve", "--yolo", "--resume", "--continue",
+		for _, want := range []string{"moca -p", "--model", "--effort", "--approve", "--mode", "--resume", "--continue",
 			"moca login", "moca logout", "moca update", "moca mcp import", "moca mcp index", "moca --version", "MOCA_LOG"} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("%s: usage missing %q", arg, want)
+			}
+		}
+		// The consolidated flag surface: no retired mode flags.
+		for _, gone := range []string{"--plan", "--yolo", "--no-yolo"} {
+			if strings.Contains(out.String(), gone) {
+				t.Errorf("%s: usage still documents %q", arg, gone)
 			}
 		}
 	}
@@ -464,12 +477,12 @@ func TestNoApproveSkipsProjectInstructions(t *testing.T) {
 	}
 	sawRules = false
 	errb.Reset()
-	run(context.Background(), []string{"--config", cfg, "--yolo", "-p", "x"}, nil, &out, &errb)
+	run(context.Background(), []string{"--config", cfg, "--mode", "yolo", "-p", "x"}, nil, &out, &errb)
 	if !sawRules || !strings.HasPrefix(errb.String(), "yolo mode: all permission checks are off") {
 		t.Fatal("yolo trusts project resources and warns on stderr")
 	}
 	sawRules = true
-	run(context.Background(), []string{"--config", cfg, "--yolo", "--no-approve", "-p", "x"}, nil, &out, &errb)
+	run(context.Background(), []string{"--config", cfg, "--mode", "yolo", "--no-approve", "-p", "x"}, nil, &out, &errb)
 	if sawRules {
 		t.Fatal("explicit --no-approve wins over yolo")
 	}
@@ -605,10 +618,66 @@ func TestParseArgsDo(t *testing.T) {
 	if o, err = parseArgs([]string{"--do", "x.md", "-p", "small commits"}, nil); err != nil || o.Prompt != "small commits" {
 		t.Fatalf("%+v %v", o, err)
 	}
-	if _, err = parseArgs([]string{"--do", "x.md", "--plan"}, nil); err == nil {
-		t.Fatal("--do with --plan must be refused")
+	if _, err = parseArgs([]string{"--do", "x.md", "--mode", "plan"}, nil); err == nil {
+		t.Fatal("--do with --mode plan must be refused")
 	}
 	if oneShotSlug(Options{Do: "docs/plans/add-json.md"}) != session.Slug("do add-json") {
 		t.Fatal("slug")
+	}
+}
+
+// --resume <id8> from another directory is a usage error (exit 2) naming the
+// session's own workdir, and nothing is appended; --resume last means this
+// directory's newest session — never a newer one from elsewhere, and "no
+// session for <dir>" when this directory has none.
+func TestResumeFromAnotherDirRefused(t *testing.T) {
+	isolate(t)
+	home, other := t.TempDir(), t.TempDir()
+	t.Chdir(home)
+	t.Setenv("MOCA_T_KEY", "k")
+	srv := fakeCompletions(t, 200, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	cfg := writeCfg(t, `{"model":"loc/m","providers":{"loc":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768}}}}}`)
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"--config", cfg, "-p", "hello"}, nil, &out, &errb); code != 0 {
+		t.Fatalf("seed run: %d %q", code, errb.String())
+	}
+	dir := filepath.Join(os.Getenv("XDG_DATA_HOME"), "moca", "sessions")
+	ents, _ := os.ReadDir(dir)
+	if len(ents) != 1 {
+		t.Fatalf("want one session, got %d", len(ents))
+	}
+	sess := filepath.Join(dir, ents[0].Name())
+	before, _ := session.ReadFile(sess)
+	name := strings.TrimSuffix(ents[0].Name(), ".jsonl")
+	id8 := name[len(name)-8:]
+	resume := func(id string) int {
+		out.Reset()
+		errb.Reset()
+		return run(context.Background(), []string{"--config", cfg, "--resume", id, "-p", "again"}, nil, &out, &errb)
+	}
+
+	t.Chdir(t.TempDir())
+	if code := resume(id8); code != 2 || !strings.Contains(errb.String(), "another directory") || !strings.Contains(errb.String(), session.WorkdirOf(sess)) {
+		t.Fatalf("--resume %s elsewhere: code %d stderr %q", id8, code, errb.String())
+	}
+	if code := resume("last"); code != 2 || !strings.Contains(errb.String(), "no session for") {
+		t.Fatalf("--resume last in a directory without sessions: code %d stderr %q", code, errb.String())
+	}
+	if after, _ := session.ReadFile(sess); len(after) != len(before) {
+		t.Fatalf("a refused resume wrote entries: %d → %d", len(before), len(after))
+	}
+
+	// A newer session elsewhere must not win `last` back home.
+	time.Sleep(20 * time.Millisecond)
+	t.Chdir(other)
+	if code := run(context.Background(), []string{"--config", cfg, "-p", "elsewhere"}, nil, &out, &errb); code != 0 {
+		t.Fatalf("other seed run: %d %q", code, errb.String())
+	}
+	t.Chdir(home)
+	if code := resume("last"); code != 0 {
+		t.Fatalf("own workdir: code %d stderr %q", code, errb.String())
+	}
+	if after, _ := session.ReadFile(sess); len(after) <= len(before) {
+		t.Fatalf("--resume last must continue this directory's session %s", id8)
 	}
 }

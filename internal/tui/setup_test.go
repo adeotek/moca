@@ -85,7 +85,7 @@ func TestSetupSubmitGuidesToLogin(t *testing.T) {
 // /help and /exit keep working.
 func TestSetupGuardsAgentCommandsButNotHelpExit(t *testing.T) {
 	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
-	for _, name := range []string{"compact", "cost", "effort", "hard", "yolo", "clear", "undo"} {
+	for _, name := range []string{"compact", "cost", "effort", "hard", "mode", "yolo", "clear", "undo"} {
 		out, _ := simulate(m, m.runCommand(Parsed{Kind: KindCommand, Name: name}))
 		if !strings.Contains(out, "no provider configured") {
 			t.Errorf("/%s printed %q", name, out)
@@ -213,7 +213,7 @@ func TestResumeFindsItsModelWithoutConfig(t *testing.T) {
 	}
 	id := a.Session().ID8()
 	a.Close()
-	path, err := session.Find(sessionsDir(), id)
+	path, err := session.Find(sessionsDir(), id, wd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,8 +235,8 @@ func TestResumeFindsItsModelWithoutConfig(t *testing.T) {
 func TestStatusLineCarriesTheSetupState(t *testing.T) {
 	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
 	_, l2 := RenderStatus(m.status, 120)
-	if l2 != "no provider configured — /login" {
-		t.Fatalf("status line 2 %q", l2)
+	if plainLine(l2) != "no provider configured — /login" {
+		t.Fatalf("status line 2 %q", plainLine(l2))
 	}
 	if got := m.statusLine(); !strings.Contains(got, "no provider configured — /login") {
 		t.Fatalf("status line %q", got)

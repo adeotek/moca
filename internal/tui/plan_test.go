@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/adeotek/moca/internal/agent"
 )
@@ -30,7 +31,7 @@ func TestPlanCommandTogglesAndBadges(t *testing.T) {
 	if !m.agent.Plan() {
 		t.Fatal("toggle must turn plan mode on")
 	}
-	if !strings.Contains(m.statusLine(), "PLAN") {
+	if !strings.Contains(m.statusLine(), "Plan") {
 		t.Fatalf("status badge missing: %q", m.statusLine())
 	}
 	// The live program delivers the toggle through the event bridge; inject
@@ -47,8 +48,8 @@ func TestPlanCommandTogglesAndBadges(t *testing.T) {
 	if !strings.Contains(out, "plan mode off") {
 		t.Fatalf("toggle-off notice: %q", out)
 	}
-	if strings.Contains(m.statusLine(), "PLAN") {
-		t.Fatalf("status badge must clear: %q", m.statusLine())
+	if l2 := ansi.Strip(secondLineOf(m.statusLine())); strings.HasPrefix(l2, "Plan · ") {
+		t.Fatalf("status badge must clear: %q", l2)
 	}
 }
 

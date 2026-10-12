@@ -73,8 +73,8 @@ func newScript(t *testing.T, turns ...string) *scriptServer {
 // big outputs through the shell tool without the permission ladder).
 type allowAll struct{}
 
-func (allowAll) Check(string) ([]string, []string, error) { return nil, nil, nil }
-func (allowAll) Allow(string)                             {}
+func (allowAll) Check(string) ([]string, []string, []string, error) { return nil, nil, nil, nil }
+func (allowAll) Allow(string)                                       {}
 
 func (s *scriptServer) bodyCount() int {
 	s.mu.Lock()

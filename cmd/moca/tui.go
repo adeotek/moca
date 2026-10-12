@@ -52,6 +52,15 @@ func decideTrust(ctx context.Context, o Options, wd string, yolo bool) (bool, er
 	return ans, ts.Set(wd, ans)
 }
 
+// modeWithoutProject resolves the mode ignoring the project layer: the
+// trust decision (yolo trusts, §7.5) must not depend on a file the workdir
+// may or may not be allowed to contribute.
+func modeWithoutProject(o Options, cfg config.Config) string {
+	cfg.Project = nil
+	mode, _ := o.ResolveMode(cfg)
+	return mode
+}
+
 // runTUI opens the interactive TUI (§11); prompt templates come from the
 // project dir only when trusted, then the global config dir.
 func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, stderr io.Writer) int {
@@ -65,29 +74,35 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 		fmt.Fprintln(stderr, "moca:", err)
 		return exitUsage
 	}
-	yolo := o.YoloOn(cfg)
-	trusted, err := decideTrust(ctx, o, wd, yolo)
+	trustMode := modeWithoutProject(o, cfg)
+	trusted, err := decideTrust(ctx, o, wd, trustMode == "yolo")
 	if err != nil {
 		if !errors.Is(err, context.Canceled) { // ctrl+c at the trust prompt: quiet 130
 			fmt.Fprintln(stderr, "moca:", err)
 		}
 		return exitFor(ctx, err)
 	}
+	// Trusted: the project file's rules and defaultMode join in; a project
+	// file that does not parse is a config error (exit 2) — but only for a
+	// workdir the user chose to trust.
+	if trusted {
+		p, err := config.LoadProject(wd)
+		if err != nil {
+			fmt.Fprintln(stderr, "moca:", err)
+			return exitUsage
+		}
+		cfg.Project = p
+	}
+	mode, plan := o.ResolveMode(cfg)
 	var pdirs []skills.Dir
 	if trusted {
 		pdirs = append(pdirs, skills.Dir{Path: filepath.Join(wd, ".moca", "prompts"), Source: "project"})
 	}
 	promptsDir := config.PromptsDir()
-	// First-run convenience: the starter create-command template teaches the
-	// saved-command workflow. Best-effort — an unwritable config dir must not
-	// stop the TUI (and /help documents the format regardless).
-	if err := skills.SeedUserPrompts(promptsDir); err != nil {
-		fmt.Fprintln(stderr, "moca: warning: could not write the starter slash command:", err)
-	}
 	pdirs = append(pdirs, skills.Dir{Path: promptsDir, Source: "global"})
 	home, _ := os.UserHomeDir()
 	err = tui.Run(ctx, tui.AppOptions{
-		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Yolo: yolo, Plan: o.Plan, Slug: "tui"},
+		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Mode: agent.PermMode(mode), Plan: plan, Slug: "tui"},
 		ConfigPath: cfgPath, Prompts: skills.LoadPrompts(pdirs), PromptDirs: pdirs, Home: home,
 		ResumePath:  resumePath,
 		HintsPath:   filepath.Join(config.DataDir(), "hints.json"),

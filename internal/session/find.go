@@ -45,16 +45,14 @@ func idOf(path string) string {
 	return b[max(0, len(b)-8):]
 }
 
-// Find resolves --resume: "last" is the newest file by mtime, anything else
-// must be the 8-hex-char id suffix of a session file name.
-func Find(dir, ref string) (string, error) {
-	fs := listNewestFirst(dir)
+// Find resolves --resume: "last" is workdir's newest session by mtime (a
+// session resumes only from its own workdir), anything else must be the
+// 8-hex-char id suffix of a session file name.
+func Find(dir, ref, workdir string) (string, error) {
 	if ref == "last" {
-		if len(fs) == 0 {
-			return "", fmt.Errorf("no sessions in %s", dir)
-		}
-		return fs[0].path, nil
+		return FindForWorkdir(dir, workdir)
 	}
+	fs := listNewestFirst(dir)
 	if !id8re.MatchString(ref) {
 		return "", fmt.Errorf("session id must be 8 hex chars or \"last\", got %q", ref)
 	}
@@ -106,6 +104,16 @@ func FindForWorkdir(dir, workdir string) (string, error) {
 func InWorkdir(path, workdir string) bool {
 	h, err := header(path)
 	return err == nil && h.Workdir == canonical(workdir)
+}
+
+// WorkdirOf is the workdir recorded in the session's header ("" when the
+// header cannot be read).
+func WorkdirOf(path string) string {
+	h, err := header(path)
+	if err != nil {
+		return ""
+	}
+	return h.Workdir
 }
 
 // canonical is the symlink-resolved absolute form of a workdir, the same

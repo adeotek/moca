@@ -1,4 +1,4 @@
-# Eval baseline — DESIGN rev 21 harness pass
+# Eval baseline — rev 21 harness pass
 
 Recorded 2026-10-09 with `opencode-go/glm-5.3-flash` (`test/evals/config.jsonc`), 3 runs per scenario
 (`vague`: 6 — its pass rate swings the most), `bash test/evals/run.sh -n 3 -j 4`.

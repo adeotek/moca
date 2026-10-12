@@ -77,9 +77,12 @@ func parseSlash(buf string) (cmd, arg string, inArg, ok bool) {
 }
 
 // commandHints lists the completable names with their one-line descriptions:
-// built-ins first (they win name collisions), then prompt templates.
+// built-ins first (untagged), then prompt templates (`prompt:`), then skills
+// (`skill:`) — a name shadowed by an earlier source is listed once, matching
+// how ParseInput resolves it (built-in > prompt > skill).
 func (m *model) commandHints() []dropItem {
-	items := make([]dropItem, 0, len(BuiltinCommands)+len(m.opts.Prompts))
+	sk := m.agentSkills()
+	items := make([]dropItem, 0, len(BuiltinCommands)+len(m.opts.Prompts)+len(sk))
 	for _, c := range BuiltinCommands {
 		items = append(items, dropItem{name: c, hint: builtinHelp[c]})
 	}
@@ -87,7 +90,13 @@ func (m *model) commandHints() []dropItem {
 		if slices.Contains(BuiltinCommands, p.Name) {
 			continue
 		}
-		items = append(items, dropItem{name: p.Name, hint: strings.TrimSpace(p.ArgumentHint + "  " + p.Description)})
+		items = append(items, dropItem{name: p.Name, hint: "prompt: " + strings.TrimSpace(p.ArgumentHint+"  "+p.Description)})
+	}
+	for _, s := range sk {
+		if slices.Contains(BuiltinCommands, s.Name) || promptNamed(m.opts.Prompts, s.Name) {
+			continue
+		}
+		items = append(items, dropItem{name: s.Name, hint: "skill: " + s.Description})
 	}
 	return items
 }

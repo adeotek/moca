@@ -33,7 +33,7 @@ type PathChecker interface {
 }
 
 type CommandChecker interface {
-	Check(command string) (needApproval, askEveryTime []string, err error)
+	Check(command string) (needApproval, askEveryTime, unsure []string, err error)
 	Allow(name string)
 }
 
@@ -68,6 +68,14 @@ func AutoAllow(context.Context, Question) Answer { return AllowOnce }
 // global prompt templates). permissions.Jail implements it.
 type ApprovablePaths interface {
 	Approvable(path string) (string, bool)
+}
+
+// LearnableCommands is the optional CommandChecker capability behind the
+// allow-always offer: Learnable reports whether Allow(name) would record
+// the name (permissions.Shell never learns hard-deny or ask-every-time
+// names such as rm). Checkers without it offer allow-always as before.
+type LearnableCommands interface {
+	Learnable(name string) bool
 }
 
 // askOutsideWrite resolves a write the jail refused. A target under an
@@ -108,6 +116,10 @@ type Env struct {
 	Reads    *ReadTracker
 	Snap     Snapshotter
 	ShellEnv []string
+	// AutoJail carries the auto-mode path checker (the default jail with the
+	// temp roots writable) from start.go to the agent's checker setup; nil
+	// for Envs built by hand.
+	AutoJail PathChecker
 	// WebProvider/WebKey are the resolved web.search config for the web
 	// tool (tavily|exa; the empty key is tavily's keyless mode).
 	WebProvider string
@@ -122,6 +134,10 @@ type Env struct {
 	// write/edit there and read by the agent at run end.
 	Plan      bool
 	PlanWrote bool
+	// Judge clears the auto table's unsure tier with one classifier call
+	// (built by the agent in auto mode when permissions.auto.classifier is
+	// on; nil otherwise — the tier then lands in the ask ladder).
+	Judge func(ctx context.Context, command string) (allow bool, reason string)
 	// Edited/Unverified/MaxRepeat are per-run (runstate.go, reset by
 	// BeginRun): Edited is set by any successful write/edit; Unverified
 	// names the last code file changed since a verifying shell command;

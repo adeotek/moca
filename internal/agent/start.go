@@ -37,7 +37,7 @@ type StartOptions struct {
 	Model   string
 	Effort  string
 	Trusted bool
-	Yolo    bool
+	Mode    PermMode // default | auto | yolo (the plan's Defaults first, then this)
 	Plan    bool
 	Ask     tools.Asker
 	Emit    func(Event)
@@ -54,6 +54,11 @@ type setup struct {
 	builtinDir string
 	jail       *permissions.Jail
 	spillDir   string // this process's overflow dir — the only one its jail can read
+	// skills/skillDirs: the discovered, filtered skill list and the dirs it
+	// came from — shared by Start (system prompt + the agent's picker list)
+	// and Resume, and re-read by Agent.ReloadSkills after a run.
+	skills    []skills.Skill
+	skillDirs []skills.Dir
 }
 
 func prepare(o StartOptions, jailRoot string) (*setup, error) {
@@ -89,9 +94,15 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	globalSkills := filepath.Join(config.ConfigDir(), "skills")
 	promptsDir := config.PromptsDir()
 	// readOnly: the prompt templates are readable (the agent may update a
-	// command it is shown). askWrite: a write there — outside the workdir —
-	// needs the user's approval (the write/edit tools ask; the shell's
-	// redirect check does not).
+	// command it is shown), the global skills dir (self-configure may add a
+	// skill), and the config file itself (self-knowledge answers "what is
+	// configured now" from it). askWrite: a write to any of them — outside
+	// the workdir — needs the user's approval (the write/edit tools ask;
+	// the shell's redirect check does not, so config edits go through
+	// write/edit and its snapshots either way). The config entry is the
+	// FILE, not its directory: auth.json sits beside it and stays
+	// unreachable (pinned by test).
+	configFile := config.ConfigFile()
 	// This process's overflow dir is readable too: over-cap tool outputs are
 	// saved there in full and the cut result names the file (tools.Spill).
 	// Only its own dir — other sessions' outputs (other projects, possibly
@@ -100,11 +111,30 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	if err != nil {
 		return nil, &StartError{err}
 	}
-	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir, promptsDir, spillDir}, []string{promptsDir})
+	jail, err := permissions.NewJail(jailRoot,
+		[]string{globalSkills, builtinDir, promptsDir, spillDir, configFile},
+		[]string{promptsDir, globalSkills, configFile})
 	if err != nil {
 		return nil, &StartError{err}
 	}
-	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail, spillDir: spillDir}, nil
+	// Skill discovery happens once here, so Start's system prompt and a
+	// resumed agent share one list — and the TUI's picker reads it off the
+	// agent (Agent.Skills). The project dir belongs to the session's
+	// workdir (jailRoot: for a resume that is the stored one, not the
+	// process's cwd) and needs the trust decision.
+	var skillDirs []skills.Dir
+	if o.Trusted {
+		skillDirs = append(skillDirs, skills.Dir{Path: filepath.Join(jailRoot, ".moca", "skills"), Source: "project"})
+	}
+	skillDirs = append(skillDirs, skills.Dir{Path: globalSkills, Source: "global"}, skills.Dir{Path: builtinDir, Source: "builtin"})
+	sk, skErrs := skills.Discover(skillDirs)
+	for _, se := range skErrs {
+		if emit != nil {
+			emit(Warning{Text: se.Error()})
+		}
+	}
+	sk = filterSkills(sk)
+	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail, spillDir: spillDir, skills: sk, skillDirs: skillDirs}, nil
 }
 
 // discoverLocal reads a configured Ollama server's models into the registry
@@ -141,11 +171,19 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	if err != nil {
 		return nil, err
 	}
-	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(cfg.Shell.Allow, jail, runtime.GOOS),
+	m := o.mode()
+	env := &tools.Env{
+		Root: jail.Root(), Paths: jail, AutoJail: jail.WithWritable(permissions.TempRoots()...),
 		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
 		ShellEnv:    tools.ShellEnv(os.Environ(), config.EnvRefs(cfg)),
 		WebProvider: cfg.Web.Search.Provider, WebKey: webKey,
 		SpillDir: st.spillDir, SpillPrefix: w.ID8() + "-"}
+	shellRules, err := rules(cfg, o.Trusted)
+	if err != nil {
+		return nil, err
+	}
+	shell := permissions.NewShell(shellRules, jail, runtime.GOOS)
+	env.Commands = shell
 	reg := tools.NewRegistry(tools.Builtins()...)
 	// With servers configured, the frozen `mcp` stub is replaced by the lazy
 	// proxy (§10.5): nothing starts here, and no server tool schema ever
@@ -161,15 +199,63 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	if err != nil {
 		return nil, err
 	}
-	if o.Yolo {
-		a.applyYolo(true)
-	}
+	// The mode and plan never cross: plan rides only on default (a plan
+	// run at default even when the resolved mode is wider — the TUI's
+	// SetPlan-to-plan lands there the same way).
+	a.skills, a.skillDirs = st.skills, st.skillDirs
+	a.applyMode(o.mode())
 	if o.Plan {
 		a.applyPlan(true)
 	}
 	a.logger().Info("session", "resumed", prior != nil, "workdir", jail.Root(), "model", model,
-		"effort", string(effort), "yolo", o.Yolo, "plan", o.Plan)
+		"effort", string(effort), "mode", m, "plan", o.Plan)
 	return a, nil
+}
+
+// mode is the starting permission mode: default when unset, and always
+// default under plan (plan rides only on default, so the TUI's plan
+// toggle lands there too — this guards every caller).
+func (o StartOptions) mode() PermMode {
+	switch {
+	case o.Mode == "", o.Plan:
+		return ModeDefault
+	}
+	return o.Mode
+}
+
+// rules builds the permission rules once for both shell views: the trusted
+// project layer first (.moca/config.jsonc), then the user layer — the legacy
+// shell.allow names (never a hard-deny or ask-every-time one) plus the
+// permissions block's own rules. Config validation rejects invalid rule
+// syntax upstream, so the parse steps below cannot fail in practice; any
+// rule that does not parse fails the build loudly (never a silently
+// dropped check). Untrusted: the project layer is absent.
+func rules(cfg config.Config, trusted bool) (*permissions.Rules, error) {
+	var layers []permissions.RuleSet
+	if trusted && cfg.Project != nil {
+		p := cfg.Project
+		proj, err := permissions.ParseRuleSet("project", p.Allow, p.Ask, p.Deny)
+		if err != nil {
+			return nil, err
+		}
+		layers = append(layers, proj)
+	}
+	var user permissions.RuleSet
+	for _, n := range permissions.LegacyAllowNames(append(slices.Clone(cfg.Shell.Allow), cfg.Permissions.Allow...)) {
+		r, err := permissions.ParseRule(n)
+		if err != nil {
+			return nil, err
+		}
+		user.Allow = append(user.Allow, r)
+	}
+	user.Name = "user"
+	rs, err := permissions.ParseRuleSet("user", nil, cfg.Permissions.Ask, cfg.Permissions.Deny)
+	if err != nil {
+		return nil, err
+	}
+	user.Ask, user.Deny = rs.Ask, rs.Deny
+	layers = append(layers, user)
+	return permissions.NewRules(layers...), nil
 }
 
 // overflowDir is the area holding the full text of over-cap tool outputs
@@ -243,21 +329,7 @@ func Start(o StartOptions) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, reg, jail, builtinDir, emit := st.cfg, st.reg, st.jail, st.builtinDir, o.Emit
-	globalSkills := filepath.Join(config.ConfigDir(), "skills")
-	projectSkills := filepath.Join(o.Workdir, ".moca", "skills")
-	var dirs []skills.Dir
-	if o.Trusted {
-		dirs = append(dirs, skills.Dir{Path: projectSkills, Source: "project"})
-	}
-	dirs = append(dirs, skills.Dir{Path: globalSkills, Source: "global"}, skills.Dir{Path: builtinDir, Source: "builtin"})
-	sk, skErrs := skills.Discover(dirs)
-	for _, se := range skErrs {
-		if emit != nil {
-			emit(Warning{Text: se.Error()})
-		}
-	}
-	sk = filterSkills(sk)
+	cfg, reg, jail := st.cfg, st.reg, st.jail
 	instr, err := skills.LoadInstructions(config.ConfigDir(), o.Workdir, o.Trusted)
 	if err != nil {
 		return nil, &StartError{err}
@@ -271,7 +343,8 @@ func Start(o StartOptions) (*Agent, error) {
 	verify, verifySrc := DetectVerify(jail.Root())
 	system := BuildSystemPrompt(PromptInput{Workdir: jail.Root(), OS: osName, Arch: arch, Verify: verify, VerifySource: verifySrc,
 		Date: time.Now().Format("2006-01-02"), Git: GitState(jail.Root()), Version: config.Version,
-		RTK: toolOnPath("rtk"), Skills: sk, Servers: servers, Instructions: instr})
+		ConfigDir: config.ConfigDir(), PromptsDir: config.PromptsDir(), SkillsDir: filepath.Join(config.ConfigDir(), "skills"),
+		RTK: toolOnPath("rtk"), Skills: st.skills, Servers: servers, Instructions: instr})
 
 	session.Prune(filepath.Join(config.DataDir(), "snapshot"), cfg.RetentionDays())
 	pruneOverflow(cfg.RetentionDays())
@@ -290,7 +363,7 @@ func Start(o StartOptions) (*Agent, error) {
 	}
 	w, err := session.Create(filepath.Join(config.DataDir(), "sessions"), session.Header{
 		Workdir: jail.Root(), Provider: m.Provider, Model: cfg.Model, Effort: string(effort),
-		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.Yolo}, slug)
+		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.mode() == ModeYolo, Mode: string(o.mode())}, slug)
 	if err != nil {
 		return nil, &StartError{err}
 	}

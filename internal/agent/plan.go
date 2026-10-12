@@ -22,10 +22,16 @@ func (a *Agent) applyPlan(on bool) {
 // SetPlan toggles plan mode between runs (never during Run). The tools layer
 // enforces the write confinement (write/edit only reach docs/plans/*.md);
 // shell, mcp, web and the read tools stay available under their normal
-// permission rules; the envelope rides every request while it is on.
+// permission rules; the envelope rides every request while it is on. Plan
+// rides only on default: turning plan on leaves a wider mode (auto, yolo)
+// for default first (its own ModeChanged) — previously only yolo did.
 func (a *Agent) SetPlan(on bool) {
+	if on && a.mode != ModeDefault {
+		a.SetMode(ModeDefault)
+	}
 	a.applyPlan(on)
-	a.append(session.Entry{Type: session.TypePermissionMode, PermissionMode: &session.PermissionMode{Yolo: a.yolo, Plan: on}})
+	a.append(session.Entry{Type: session.TypePermissionMode,
+		PermissionMode: &session.PermissionMode{Yolo: a.mode == ModeYolo, Plan: on, Mode: string(a.mode)}})
 	a.emit(PlanChanged{On: on})
 }
 

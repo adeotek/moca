@@ -26,7 +26,7 @@ func splitLines(s string) []string {
 
 var lineNumPrefix = regexp.MustCompile(`(?m)^\s*\d+\|`)
 
-// applyEdit implements DESIGN.md §5 on an LF-normalized, BOM-stripped view
+// applyEdit implements the SPECS §10 edit contract on an LF-normalized, BOM-stripped view
 // and restores the file's dominant line ending and BOM on output.
 func applyEdit(content []byte, oldS, newS string, replaceAll bool) ([]byte, []hunk, error) {
 	if oldS == "" {

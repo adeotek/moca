@@ -245,3 +245,33 @@ func TestOllamaProviderIsOptIn(t *testing.T) {
 		t.Fatal("only local providers are implicit")
 	}
 }
+
+func TestPermissionsBlock(t *testing.T) {
+	c, err := Parse([]byte(`{"permissions":{"defaultMode":"auto","allow":["rtk *"],"ask":["git push *"],"deny":["rtk rm *"]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Mode() != "auto" || c.Permissions.Allow[0] != "rtk *" || !c.Permissions.Auto.ClassifierOn() {
+		t.Fatalf("got %+v", c.Permissions)
+	}
+}
+
+func TestPermissionsValidation(t *testing.T) {
+	bad := map[string]string{
+		`{"permissions":{"defaultMode":"plan"}}`:             "defaultMode",
+		`{"permissions":{"allow":[""]}}`:                     "empty",
+		`{"yolo":true,"permissions":{"defaultMode":"auto"}}`: "yolo",
+		`{"permissions":{"bogus":1}}`:                        "unknown field",
+	}
+	for src, want := range bad {
+		if _, err := Parse([]byte(src)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", src, err, want)
+		}
+	}
+	if c, _ := Parse([]byte(`{"yolo":true}`)); c.Mode() != "yolo" {
+		t.Error("legacy yolo:true must resolve to mode yolo")
+	}
+	if c, _ := Parse([]byte(`{}`)); c.Mode() != "default" {
+		t.Error("default mode")
+	}
+}

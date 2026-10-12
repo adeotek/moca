@@ -87,7 +87,7 @@ type model struct {
 	toolArg  string
 	runChars int
 	cancel   context.CancelFunc
-	approval *approvalMsg
+	approval *approvalState
 	// login is the active /login//logout interaction (modal, like approval).
 	login *loginState
 	// pick is the active modal list picker (/model, /resume).
@@ -255,6 +255,7 @@ var (
 	// reports its background, and #d97706 keeps ≥3:1 contrast on white and
 	// 4.4+ on the common dark backgrounds.
 	orange = lipgloss.NewStyle().Foreground(lipgloss.Color("#d97706")).Bold(true)
+	bold   = lipgloss.NewStyle().Bold(true)
 )
 
 func newModel(o AppOptions, a *agent.Agent) *model {
@@ -550,7 +551,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	case approvalMsg:
-		m.approval = &msg
+		m.approval = &approvalState{approvalMsg: msg}
 		return m, m.notify("moca: approval needed — allow `" + Sanitize(msg.q.Subject) + "`?")
 	case loginProgressMsg:
 		if m.login == nil {
@@ -720,6 +721,8 @@ func (m *model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	case "shift+tab":
+		return m.cycleMode()
+	case "ctrl+t":
 		return m.cycleEffort()
 	case "ctrl+r":
 		if m.login != nil || m.pager != nil || m.busy() {
@@ -763,74 +766,6 @@ func (m *model) ctrlC() tea.Cmd {
 	return nil
 }
 
-// approvalKey answers the shown prompt. `a`/`d` count only after a typing
-// pause (a user mid-sentence must not answer with letters meant for the
-// draft); allow-always is `ctrl+a` — it is persistent, so a plain letter (a
-// stray capital `A`, the first letter of "Add…") always goes to the draft and
-// can never write the config. esc always denies. handled=false lets the key
-// fall through to normal input handling.
-func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch k.String() {
-	case "esc":
-		m.approval.reply <- tools.Deny
-		m.approval = nil
-		return nil, true
-	case "a", "d":
-		if m.now().Sub(m.lastTyped) < approvalIdle {
-			return nil, false
-		}
-	}
-	switch k.String() {
-	case "a":
-		m.approval.reply <- tools.AllowOnce
-		m.approval = nil
-		return nil, true
-	case "d":
-		m.approval.reply <- tools.Deny
-		m.approval = nil
-		return nil, true
-	case "ctrl+a":
-		if !m.approval.q.CanAlways {
-			return nil, true // not offered for ask-every-time commands
-		}
-		q, reply := m.approval.q, m.approval.reply
-		m.approval = nil
-		reply <- tools.AllowAlways
-		path := m.opts.ConfigPath
-		if path == "" {
-			path = config.ConfigFile()
-		}
-		switch q.Kind {
-		case "shell":
-			// The running session (and a /clear restart) honours it now; the file
-			// makes it permanent.
-			m.start.Config.Shell.Allow = append(slices.Clone(m.start.Config.Shell.Allow), q.Subject)
-			if err := config.AppendString(path, []string{"shell", "allow"}, q.Subject, config.DefaultShellAllow); err != nil {
-				return m.printlnError("error: allow-always not saved: " + err.Error()), true
-			}
-			return m.printlnContent(fmt.Sprintf("always allowing %q (saved to %s)", q.Subject, path)), true
-		case "mcp":
-			// Subject is server/tool. The running session already learned it
-			// from the AllowAlways answer; the config makes it survive /clear
-			// and the next start.
-			server, tool, ok := strings.Cut(q.Subject, "/")
-			if !ok || server == "" || tool == "" {
-				return nil, true
-			}
-			if s, ok := m.start.Config.MCP.Servers[server]; ok {
-				s.Approve = append(slices.Clone(s.Approve), tool)
-				m.start.Config.MCP.Servers[server] = s
-			}
-			if err := config.AppendString(path, []string{"mcp", "servers", server, "approve"}, tool, nil); err != nil {
-				return m.printlnError("error: allow-always not saved: " + err.Error()), true
-			}
-			return m.printlnContent(fmt.Sprintf("always allowing %s (saved to %s)", q.Subject, path)), true
-		}
-		return nil, true
-	}
-	return nil, false
-}
-
 func (m *model) openPager(it Item) {
 	m.pager = newPager(it, max(20, m.width), max(6, m.height))
 }
@@ -841,7 +776,7 @@ func (m *model) submit() tea.Cmd {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	parsed, err := ParseInput(text, m.opts.Prompts)
+	parsed, err := ParseInput(text, m.opts.Prompts, m.agentSkills())
 	m.input.Submit()
 	m.histSearch = false
 	appendHistory(m.opts.HistoryPath, m.opts.Start.Workdir, text)
@@ -850,7 +785,7 @@ func (m *model) submit() tea.Cmd {
 		return m.printlnError("error: " + err.Error())
 	}
 	switch parsed.Kind {
-	case KindText, KindPrompt:
+	case KindText, KindPrompt, KindSkill:
 		if m.unconfigured() {
 			// Nothing can run yet; the red notice says how to fix it.
 			return m.printlnNoProvider()
@@ -939,7 +874,7 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 	case "logout":
 		return m.runLogout(c.Args)
 	case "help":
-		return m.printlnContent(HelpText(m.opts.Prompts))
+		return m.printlnContent(HelpText(m.opts.Prompts, m.agentSkills()))
 	case "exit":
 		return m.quit()
 	case "copy":
@@ -1031,8 +966,12 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
-		m.agent.SetYolo(!m.agent.Yolo()) // YoloChanged prints + refreshes
+		// Entering yolo drops plan first (SetMode: two notices —
+		// PlanChanged then ModeChanged).
+		m.agent.SetYolo(!m.agent.Yolo()) // ModeChanged prints + refreshes
 		return nil
+	case "mode":
+		return m.runMode(c.Args)
 	case "plan":
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
@@ -1092,7 +1031,7 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 	return m.println("unknown command /" + c.Name)
 }
 
-// cycleEffort is shift+tab: the next effort level the current model
+// cycleEffort is ctrl+t: the next effort level the current model
 // supports, wrapping around — the quick form of /effort for the one knob most
 // worth tuning per task. Refused where /effort is.
 func (m *model) cycleEffort() tea.Cmd {
@@ -1189,16 +1128,19 @@ func (m *model) switchModel(q string) tea.Cmd {
 	return m.printlnContent(fmt.Sprintf("switched to %s · effort %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
 }
 
-// reloadPrompts re-reads the prompt-template dirs when a run or `!` command
-// finishes: the agent can write a new command during a run (the
-// create-command workflow), and it must be usable without a restart. An
-// empty PromptDirs (unit tests, callers that pass literal prompts) is a
-// no-op.
+// reloadPrompts re-reads the prompt-template dirs and the agent's skills
+// when a run or `!` command finishes: the agent can write a new command or
+// skill during a run (the create-command / self-configure workflows), and
+// both must be usable without a restart. An empty PromptDirs (unit tests,
+// callers that pass literal prompts) leaves Prompts alone; the skill reload
+// runs whenever an agent exists.
 func (m *model) reloadPrompts() {
-	if len(m.opts.PromptDirs) == 0 {
-		return
+	if len(m.opts.PromptDirs) > 0 {
+		m.opts.Prompts = skills.LoadPrompts(m.opts.PromptDirs)
 	}
-	m.opts.Prompts = skills.LoadPrompts(m.opts.PromptDirs)
+	if m.agent != nil {
+		m.agent.ReloadSkills()
+	}
 }
 
 // compactCmd runs a manual compaction off the event loop. The Compacted
@@ -1395,12 +1337,13 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		return tea.Sequence(head, m.replay(m.agent.History(), replayTurns))
 	case agent.SteeringApplied:
 		return m.printlnMuted("↳ sent: " + strings.Join(e.Texts, " · "))
-	case agent.YoloChanged:
+	case agent.ModeChanged:
 		m.refreshStatus()
-		if e.On {
-			return m.println(red.Render("yolo mode on: all permission checks are off"))
+		line, isRed := modeNotice(e.Mode, e.Plan)
+		if isRed {
+			return m.println(red.Render(line))
 		}
-		return m.println("yolo mode off: permission checks restored")
+		return m.printlnMuted(line)
 	case agent.PlanChanged:
 		m.refreshStatus()
 		if e.On {
@@ -1496,9 +1439,10 @@ func (m *model) View() tea.View {
 	} else if m.approval != nil {
 		rows := approvalDetailRows
 		if m.height > 0 {
-			rows = min(rows, max(1, m.height-inputChrome-4))
+			// The picker rows sit above the command lines.
+			rows = min(rows, max(1, m.height-inputChrome-4-len(m.approval.options())))
 		}
-		sb.WriteString(approvalPanel(m.approval.q, max(20, m.width), rows) + "\n")
+		sb.WriteString(approvalPanel(m.approval, max(20, m.width), rows) + "\n")
 	} else if m.busy() {
 		sb.WriteString(m.activityLine() + "\n")
 	} else if d := m.dropdown(); d != nil {
@@ -1638,93 +1582,47 @@ func fmtThinkDuration(d time.Duration) string {
 	return fmtElapsed(d)
 }
 
-// statusLine renders the two-line bar; yolo/plan badges lead line 1 and are
-// never dropped — the rest gets the remaining width.
+// statusLine renders the two-line bar; the permission-mode badge opens
+// line 2, just before the model (a safety state that must never be
+// missed) and is never dropped — the rest gets the remaining width. Both
+// lines render as styled segments (role → color per theme, task 10): the
+// plain text is unchanged.
 func (m *model) statusLine() string {
 	w := max(20, m.width)
-	var badges []string
+	// Badge segments lead line 2, before the model: the permission state,
+	// its ever-visible placement (Task 8, moved to line 2) preserved. One
+	// badge per state — plan rides only on default, so no split.
+	var badges []segment
+	if m.agent != nil {
+		mode, plan := m.agent.Mode(), m.agent.Status().Plan
+		badges = append(badges, segment{text: badgeText(mode, plan), role: roleMode, drop: 0, badgeMode: mode, badgePlan: plan})
+	}
 	extra := 0
-	if m.agent != nil && m.agent.Yolo() {
-		badges, extra = append(badges, red.Render("YOLO")), extra+7 // "YOLO · "
+	for _, b := range badges {
+		// The badge plus its leading " · " separator.
+		extra += lipgloss.Width(" · ") + lipgloss.Width(b.text)
 	}
-	if m.agent != nil && m.agent.Plan() {
-		badges, extra = append(badges, planFg.Render("PLAN")), extra+7 // "PLAN · "
-	}
+	// Only line 2 carries the badge: line 1 keeps the full width.
+	l1, _ := RenderStatus(m.status, w)
+	_, l2 := RenderStatus(m.status, max(13, w-extra))
 	if len(badges) > 0 {
-		l1, l2 := RenderStatus(m.status, max(13, w-extra))
-		return strings.Join(badges, dim.Render(" · ")) + dim.Render(" · "+Sanitize(l1)) + "\n" + m.styleL2(l2)
+		l2 = append(badges, l2...)
 	}
-	l1, l2 := RenderStatus(m.status, w)
-	return dim.Render(Sanitize(l1)) + "\n" + m.styleL2(l2)
+	return styleLine(l1, m.darkBG, pressureOK) + "\n" +
+		styleLine(l2, m.darkBG, m.status.pressure())
 }
 
-// styleL2 dims status line 2 and colors the percent field by context
-// pressure (yellow from 70%, red from the auto-compaction trigger, where the
-// line also says /compact).
-func (m *model) styleL2(l2 string) string {
-	l2 = Sanitize(l2)
-	pct := FmtPercent(m.status.Used, m.status.Window)
-	var st lipgloss.Style
-	switch m.status.pressure() {
-	case pressureWarn:
-		st = warnFg
-	case pressureHot:
-		st = errFg.Bold(true)
-	default:
-		return dim.Render(l2)
-	}
-	needle := " · " + pct
-	i := strings.Index(l2, needle)
-	if i < 0 {
-		return dim.Render(l2) // truncated away
-	}
-	i += len(" · ")
-	return dim.Render(l2[:i]) + st.Render(pct) + dim.Render(l2[i+len(pct):])
+// badgeText is the plain badge text for one status-bar badge: a single
+// Title-Case word per state (Default · Auto · Yolo · Plan). Plan is its own
+// badge — it rides only on the default mode, so there is no combined form.
+func badgeText(mode agent.PermMode, plan bool) string {
+	return modeBadgeText(mode, plan)
 }
 
 // rule is the full-width dim separator between the scrollback output, the
 // input area and the status bar.
 func (m *model) rule() string {
 	return dim.Render(strings.Repeat("─", max(20, m.width))) + "\n"
-}
-
-// approvalDetailRows caps the command lines shown under an approval question;
-// the whole command opens in the pager (ctrl+o).
-const approvalDetailRows = 6
-
-func approvalPrompt(q tools.Question) string {
-	subject := Sanitize(q.Subject)
-	if q.CanAlways {
-		return fmt.Sprintf("allow `%s`?  [a] once  [ctrl+a] always  [d] deny", subject)
-	}
-	return fmt.Sprintf("allow `%s` (asks every time)?  [a] once  [d] deny", subject)
-}
-
-// approvalPanel renders the question and the command it is about. The whole
-// command is shown up to rows lines — the subject alone can hide what runs
-// (an approved `python3` executes the heredoc under it) — each clamped to
-// the width; the rest is counted and opens in the pager.
-func approvalPanel(q tools.Question, width, rows int) string {
-	var b strings.Builder
-	b.WriteString(warnFg.Render("? ") + approvalPrompt(q))
-	lines := strings.Split(strings.TrimRight(strings.ReplaceAll(Sanitize(q.Detail), "\t", "    "), "\n"), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		return b.String()
-	}
-	shown := lines
-	if len(lines) > rows {
-		shown = lines[:max(1, rows-1)]
-	}
-	for _, l := range shown {
-		if lipgloss.Width(l) > width-4 {
-			l = truncCells(l, max(1, width-5)) + "…"
-		}
-		b.WriteString("\n" + dim.Render("  │ ") + l)
-	}
-	if rest := len(lines) - len(shown); rest > 0 {
-		b.WriteString("\n" + dim.Render(fmt.Sprintf("  │ … +%d %s · ctrl+o shows the whole command", rest, plural(rest, "line"))))
-	}
-	return b.String()
 }
 
 func firstLineOf(s string) string { l, _, _ := strings.Cut(s, "\n"); return l }

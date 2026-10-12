@@ -7,7 +7,7 @@
 #
 # Each scenario dir holds fixture/ (the repo, committed as the base), prompt.txt,
 # check.sh (run in the repo; exit 0 = pass; SESSION is the transcript path),
-# an optional flags file (extra moca flags, e.g. --plan) and
+# an optional flags file (extra moca flags, e.g. --mode plan) and
 # testdata/reference/ (a known-good solution overlay for --selftest).
 # The model key comes from the repo .env via env: indirection (never echoed).
 set -u

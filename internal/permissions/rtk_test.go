@@ -2,7 +2,6 @@ package permissions
 
 import (
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -13,7 +12,7 @@ import (
 func TestRtkUnwrap(t *testing.T) {
 	root, _, _ := setup(t)
 	j, _ := NewJail(root, nil, nil)
-	s := NewShell([]string{"rtk", "git", "go", "make", "docker", "tee"}, j, "linux")
+	s := NewShell(RulesFromAllow([]string{"rtk", "git", "go", "make", "docker", "tee"}), j, "linux")
 	cases := map[string]verdict{
 		"rtk":                            {},
 		"rtk --version":                  {},
@@ -68,27 +67,15 @@ func TestRtkUnwrap(t *testing.T) {
 		"rtk test echo hi --shell sh 'echo x'": {},
 	}
 	for cmd, want := range cases {
-		need, every, err := s.Check(cmd)
-		if want.deny != "" {
-			if err == nil || !strings.Contains(err.Error(), want.deny) {
-				t.Errorf("%q: want deny %q, got err=%v need=%v every=%v", cmd, want.deny, err, need, every)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("%q: unexpected deny %v", cmd, err)
-			continue
-		}
-		if !slices.Equal(need, want.need) || !slices.Equal(every, want.every) {
-			t.Errorf("%q: need=%v every=%v, want need=%v every=%v", cmd, need, every, want.need, want.every)
-		}
+		need, every, unsure, err := s.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
 	}
 	// Native-binary proxies forward their flags to the real tool, so they must
 	// pass the allowlist exactly as when run directly (review pass 3): with a
 	// narrow allowlist `rtk find -exec` must not run programs for free. rtk's
 	// own read-only machinery stays plain `rtk`; the config-mutating
 	// subcommands ask once.
-	narrow := NewShell([]string{"rtk", "git"}, j, "linux")
+	narrow := NewShell(RulesFromAllow([]string{"rtk", "git"}), j, "linux")
 	narrowCases := map[string][]string{
 		"rtk find . -exec python3 x ;":        {"find"},
 		"rtk find . -delete":                  {"find"},
@@ -114,13 +101,13 @@ func TestRtkUnwrap(t *testing.T) {
 		"rtk git status | rtk find . -type f": {"find"},
 	}
 	for cmd, want := range narrowCases {
-		need, every, err := narrow.Check(cmd)
+		need, every, _, err := narrow.Check(cmd)
 		if err != nil || len(every) != 0 || !slices.Equal(need, want) {
 			t.Errorf("narrow %q: need=%v every=%v err=%v; want need=%v", cmd, need, every, err, want)
 		}
 	}
-	noRtk := NewShell([]string{"git"}, j, "linux")
-	if need, _, _ := noRtk.Check("rtk git status"); !slices.Equal(need, []string{"rtk"}) {
+	noRtk := NewShell(RulesFromAllow([]string{"git"}), j, "linux")
+	if need, _, _, _ := noRtk.Check("rtk git status"); !slices.Equal(need, []string{"rtk"}) {
 		t.Fatal("rtk itself must be allowlisted", need)
 	}
 }

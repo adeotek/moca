@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -21,6 +22,9 @@ type Jail struct {
 	// the agent writes for the user). Resolve still refuses them; Approvable
 	// hands them out so the caller can ask.
 	askWrite []string
+	// writable are extra read+write roots beside the workdir (auto mode adds
+	// the temp roots); canonical, see WithWritable.
+	writable []string
 }
 
 func NewJail(root string, readOnly, askWrite []string) (*Jail, error) {
@@ -59,6 +63,75 @@ func NewJail(root string, readOnly, askWrite []string) (*Jail, error) {
 }
 
 func (j *Jail) Root() string { return j.root }
+
+// WithWritable returns a copy of the jail whose read and write area also
+// covers roots. Each root is made absolute and canonicalized with
+// resolveDeep; empty or missing roots are skipped, and so are the
+// filesystem root and the home directory or any ancestor of it (a stray
+// TMPDIR=/ or TMPDIR=$HOME must not open the whole tree). The original jail
+// is not modified.
+func (j *Jail) WithWritable(roots ...string) *Jail {
+	c := *j
+	c.readOnly = slices.Clone(j.readOnly)
+	c.askWrite = slices.Clone(j.askWrite)
+	c.writable = slices.Clone(j.writable)
+	home := ""
+	if h, err := os.UserHomeDir(); err == nil {
+		if hc, err := resolveDeep(filepath.Clean(h)); err == nil {
+			home = hc
+		}
+	}
+	for _, r := range roots {
+		if r == "" {
+			continue
+		}
+		abs, err := filepath.Abs(r)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(abs); err != nil {
+			continue
+		}
+		res, err := resolveDeep(abs)
+		if err != nil || filepath.Dir(res) == res || (home != "" && within(res, home)) {
+			continue
+		}
+		if !slices.Contains(c.writable, res) {
+			c.writable = append(c.writable, res)
+		}
+	}
+	return &c
+}
+
+// TempRoots lists the temporary directories auto mode may write to:
+// os.TempDir(), plus /tmp on Unix when different, plus $TMPDIR when set.
+func TempRoots() []string {
+	var out []string
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		p = filepath.Clean(p)
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	add(os.TempDir())
+	if runtime.GOOS != "windows" {
+		add("/tmp")
+	}
+	add(os.Getenv("TMPDIR"))
+	return out
+}
+
+func withinAny(bases []string, p string) bool {
+	for _, b := range bases {
+		if within(b, p) {
+			return true
+		}
+	}
+	return false
+}
 
 func canonical(p string) (string, error) {
 	abs, err := filepath.Abs(p)
@@ -128,7 +201,7 @@ func (j *Jail) Resolve(path string, write bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if within(j.root, res) {
+	if within(j.root, res) || withinAny(j.writable, res) {
 		return res, nil
 	}
 	if !write {

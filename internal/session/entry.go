@@ -35,11 +35,13 @@ type Header struct {
 	MocaVersion  string    `json:"mocaVersion"`
 	SystemPrompt string    `json:"systemPrompt"`
 	Yolo         bool      `json:"yolo,omitempty"`
+	Mode         string    `json:"mode,omitempty"` // recorded permission mode ("default" kept implicit for old sessions)
 }
 
 type PermissionMode struct {
-	Yolo bool `json:"yolo"`
-	Plan bool `json:"plan,omitempty"`
+	Yolo bool   `json:"yolo"`
+	Plan bool   `json:"plan,omitempty"`
+	Mode string `json:"mode,omitempty"` // empty = the legacy yolo flag only
 }
 
 type ToolUse struct {

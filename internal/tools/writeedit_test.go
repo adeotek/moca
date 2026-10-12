@@ -153,6 +153,91 @@ func TestWriteOutsideJailAsksTheUser(t *testing.T) {
 	}
 }
 
+// fileAskChecker mirrors permissions.Jail's file-root semantics for one
+// exact file: writes there refuse and Approvable hands that file — and only
+// that file — out for the approval ask (a sibling like auth.json never is).
+type fileAskChecker struct{ root, file string }
+
+func (c fileAskChecker) Resolve(path string, write bool) (string, error) {
+	p := path
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(c.root, p)
+	}
+	p = filepath.Clean(p)
+	inRoot := p == c.root || strings.HasPrefix(p, c.root+string(filepath.Separator))
+	if !inRoot && p != filepath.Clean(c.file) {
+		return "", fmt.Errorf("%s is outside the workdir", path)
+	}
+	if write && !inRoot {
+		return "", fmt.Errorf("%s is outside the workdir; writes are confined to the workdir", path)
+	}
+	return p, nil
+}
+
+func (c fileAskChecker) Approvable(path string) (string, bool) {
+	p := filepath.Clean(path)
+	if p == filepath.Clean(c.file) {
+		return p, true
+	}
+	return "", false
+}
+
+// The user config file joins the ask-write roots (self-configure): a write
+// asks with Kind "write" and never allow-always; allowing writes once, and
+// the next edit asks again. auth.json beside it can never be approved.
+func TestConfigFileWriteAsksEveryTime(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := t.TempDir()
+	cfg := filepath.Join(cfgDir, "config.jsonc")
+	if err := os.WriteFile(cfg, []byte("{\n  \"model\": \"a/b\"\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := &Env{Root: root, Paths: fileAskChecker{root, cfg}, Reads: NewReadTracker()}
+
+	// The real flow reads first (reads are allowed), then the edit asks.
+	if r := run(t, readTool{}, env, map[string]any{"path": cfg}); r.IsError {
+		t.Fatalf("read: %q", r.Content)
+	}
+	// No asker (a -p run): refused like any jail escape.
+	r := run(t, writeTool{}, env, map[string]any{"path": cfg, "content": "x"})
+	if !r.IsError || !strings.Contains(r.Content, "outside the workdir") {
+		t.Fatalf("no asker: %q", r.Content)
+	}
+	var got Question
+	env.Ask = func(_ context.Context, q Question) Answer { got = q; return Deny }
+	r = run(t, editTool{}, env, map[string]any{"path": cfg, "old_string": "\"a/b\"", "new_string": "\"a/c\""})
+	if !r.IsError || got.Kind != "write" || got.Subject != cfg || got.CanAlways {
+		t.Fatalf("denied edit: %q (%+v)", r.Content, got)
+	}
+	if b, _ := os.ReadFile(cfg); !strings.Contains(string(b), "\"a/b\"") {
+		t.Fatalf("denied must not change the file: %q", b)
+	}
+	// Allowed once: written; the next edit asks again (nothing persists).
+	env.Ask = func(_ context.Context, q Question) Answer { got = q; return AllowOnce }
+	if r = run(t, editTool{}, env, map[string]any{"path": cfg, "old_string": "\"a/b\"", "new_string": "\"a/c\""}); r.IsError {
+		t.Fatalf("allowed edit: %q", r.Content)
+	}
+	if b, _ := os.ReadFile(cfg); !strings.Contains(string(b), "\"a/c\"") {
+		t.Fatalf("content: %q", b)
+	}
+	if r = run(t, editTool{}, env, map[string]any{"path": cfg, "old_string": "\"a/c\"", "new_string": "\"a/d\""}); r.IsError || got.Subject != cfg || got.CanAlways {
+		t.Fatalf("second edit must re-ask: %q (%+v)", r.Content, got)
+	}
+	// auth.json beside it: refused without a question, for reads and writes.
+	auth := filepath.Join(cfgDir, "auth.json")
+	if err := os.WriteFile(auth, []byte("{\"apiKeys\":{}}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	asked := false
+	env.Ask = func(context.Context, Question) Answer { asked = true; return AllowOnce }
+	if r := run(t, readTool{}, env, map[string]any{"path": auth}); !r.IsError {
+		t.Fatalf("auth.json must not be readable: %q", r.Content)
+	}
+	if r := run(t, writeTool{}, env, map[string]any{"path": auth, "content": "x"}); !r.IsError || asked {
+		t.Fatalf("auth.json must be refused without a question: %q asked=%v", r.Content, asked)
+	}
+}
+
 func TestEditTool(t *testing.T) {
 	env, root := testEnv(t)
 	p := filepath.Join(root, "m.go")

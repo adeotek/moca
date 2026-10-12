@@ -20,7 +20,7 @@ import (
 	"github.com/adeotek/moca/internal/llm"
 )
 
-// webTool is the web capability (DESIGN §4, rev 19): op=fetch GETs one
+// webTool is the web capability (SPECS §10, rev 19): op=fetch GETs one
 // http(s) URL and returns it as markdown (default), text or html; op=search
 // runs a web search and returns ranked title/url/snippet results (tavily —
 // keyless by default, a configured key lifts the rate limit; exa with a

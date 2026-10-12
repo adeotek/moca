@@ -21,11 +21,11 @@ func TestPromptDirsReloadAtRunEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.opts.PromptDirs = []skills.Dir{{Path: dir, Source: "global"}}
-	if _, err := ParseInput("/deploy prod", m.opts.Prompts); err == nil {
+	if _, err := ParseInput("/deploy prod", m.opts.Prompts, m.agentSkills()); err == nil {
 		t.Fatal("not loaded before the run ends")
 	}
 	m.handleRunDone(runDoneMsg{})
-	p, err := ParseInput("/deploy prod", m.opts.Prompts)
+	p, err := ParseInput("/deploy prod", m.opts.Prompts, m.agentSkills())
 	if err != nil || p.Kind != KindPrompt || p.Text != "Deploy prod now" {
 		t.Fatalf("after the run: %+v %v", p, err)
 	}
@@ -60,26 +60,75 @@ func TestParseInput(t *testing.T) {
 		{"/quit now", Parsed{Kind: KindCommand, Name: "exit", Args: "now"}},
 	}
 	for _, c := range cases {
-		got, err := ParseInput(c.in, prompts)
+		got, err := ParseInput(c.in, prompts, nil)
 		if err != nil || got != c.want {
 			t.Errorf("ParseInput(%q) = %+v, %v; want %+v", c.in, got, err, c.want)
 		}
 	}
 	// An alias never hides a prompt template that owns the name.
 	owned := []skills.Prompt{{Name: "q", Body: "Question $1"}}
-	if got, _ := ParseInput("/q why", owned); got.Kind != KindPrompt || got.Text != "Question why" {
+	if got, _ := ParseInput("/q why", owned, nil); got.Kind != KindPrompt || got.Text != "Question why" {
 		t.Fatalf("a prompt named like an alias must win: %+v", got)
 	}
-	if _, err := ParseInput("/nope", prompts); err == nil || !strings.Contains(err.Error(), "/help") {
+	if _, err := ParseInput("/nope", prompts, nil); err == nil || !strings.Contains(err.Error(), "/help") {
 		t.Fatal(err)
 	}
-	if p, _ := ParseInput("/model", prompts); p.Kind != KindCommand {
+	if p, _ := ParseInput("/model", prompts, nil); p.Kind != KindCommand {
 		t.Fatal("built-ins win on collision")
 	}
-	if !strings.Contains(HelpText(prompts), "/review") {
+	if !strings.Contains(HelpText(prompts, nil), "/review") {
 		t.Fatal("help lists prompts")
 	}
-	if !strings.Contains(HelpText(prompts), "/exit") {
+	if !strings.Contains(HelpText(prompts, nil), "/exit") {
 		t.Fatal("help lists /exit")
+	}
+}
+
+// Skills are invokable from the picker: /name sends a message naming the
+// skill's path (the agent loads the body with `read` and follows it).
+// Built-ins and prompt templates win a name collision.
+func TestParseInputSkills(t *testing.T) {
+	sk := []skills.Skill{{Name: "rtk", Path: "/cfg/builtin/rtk/SKILL.md", Description: "compressed CLI"}}
+	p, err := ParseInput("/rtk grep stuff", nil, sk)
+	if err != nil || p.Kind != KindSkill || p.Name != "rtk" || p.Args != "grep stuff" {
+		t.Fatalf("parse: %+v %v", p, err)
+	}
+	if want := "Load and follow the rtk skill (/cfg/builtin/rtk/SKILL.md) for this request: grep stuff"; p.Text != want {
+		t.Fatalf("message %q, want %q", p.Text, want)
+	}
+	if p, _ := ParseInput("/rtk", nil, sk); p.Text != "Load and follow the rtk skill (/cfg/builtin/rtk/SKILL.md)." {
+		t.Fatalf("bare invocation: %q", p.Text)
+	}
+	// Built-ins win over a same-named skill.
+	if p, _ := ParseInput("/model x", nil, []skills.Skill{{Name: "model", Path: "/x"}}); p.Kind != KindCommand {
+		t.Fatalf("a built-in must win: %+v", p)
+	}
+	// A prompt template wins over a same-named skill.
+	prompts := []skills.Prompt{{Name: "review", Body: "Review $1"}}
+	if p, _ := ParseInput("/review a.go", prompts, []skills.Skill{{Name: "review", Path: "/x"}}); p.Kind != KindPrompt {
+		t.Fatalf("a prompt must win: %+v", p)
+	}
+	// /help lists the skills block; a name shadowed by a built-in or a
+	// prompt is listed once (its winner).
+	h := HelpText(nil, sk)
+	if !strings.Contains(h, "skills (invoke with /name — the agent loads and follows them):") || !strings.Contains(h, "/rtk      compressed CLI") {
+		t.Fatalf("help must list the skill:\n%s", h)
+	}
+	shadowed := []skills.Skill{{Name: "model", Path: "/x"}, {Name: "review", Path: "/y"}, {Name: "rtk", Path: "/z"}}
+	h = HelpText(prompts, shadowed)
+	countLines := func(prefix string) int {
+		n := 0
+		for _, ln := range strings.Split(h, "\n") {
+			if strings.HasPrefix(ln, prefix) {
+				n++
+			}
+		}
+		return n
+	}
+	if n := countLines("/model "); n != 1 {
+		t.Fatalf("/model listed %d times:\n%s", n, h)
+	}
+	if n := countLines("/review "); n != 1 {
+		t.Fatalf("/review listed %d times:\n%s", n, h)
 	}
 }
