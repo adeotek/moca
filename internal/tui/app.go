@@ -778,7 +778,7 @@ func (m *model) submit() tea.Cmd {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	parsed, err := ParseInput(text, m.opts.Prompts)
+	parsed, err := ParseInput(text, m.opts.Prompts, m.agentSkills())
 	m.input.Submit()
 	m.histSearch = false
 	appendHistory(m.opts.HistoryPath, m.opts.Start.Workdir, text)
@@ -787,7 +787,7 @@ func (m *model) submit() tea.Cmd {
 		return m.printlnError("error: " + err.Error())
 	}
 	switch parsed.Kind {
-	case KindText, KindPrompt:
+	case KindText, KindPrompt, KindSkill:
 		if m.unconfigured() {
 			// Nothing can run yet; the red notice says how to fix it.
 			return m.printlnNoProvider()
@@ -876,7 +876,7 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 	case "logout":
 		return m.runLogout(c.Args)
 	case "help":
-		return m.printlnContent(HelpText(m.opts.Prompts))
+		return m.printlnContent(HelpText(m.opts.Prompts, m.agentSkills()))
 	case "exit":
 		return m.quit()
 	case "copy":
@@ -1130,16 +1130,19 @@ func (m *model) switchModel(q string) tea.Cmd {
 	return m.printlnContent(fmt.Sprintf("switched to %s · effort %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
 }
 
-// reloadPrompts re-reads the prompt-template dirs when a run or `!` command
-// finishes: the agent can write a new command during a run (the
-// create-command workflow), and it must be usable without a restart. An
-// empty PromptDirs (unit tests, callers that pass literal prompts) is a
-// no-op.
+// reloadPrompts re-reads the prompt-template dirs and the agent's skills
+// when a run or `!` command finishes: the agent can write a new command or
+// skill during a run (the create-command / self-configure workflows), and
+// both must be usable without a restart. An empty PromptDirs (unit tests,
+// callers that pass literal prompts) leaves Prompts alone; the skill reload
+// runs whenever an agent exists.
 func (m *model) reloadPrompts() {
-	if len(m.opts.PromptDirs) == 0 {
-		return
+	if len(m.opts.PromptDirs) > 0 {
+		m.opts.Prompts = skills.LoadPrompts(m.opts.PromptDirs)
 	}
-	m.opts.Prompts = skills.LoadPrompts(m.opts.PromptDirs)
+	if m.agent != nil {
+		m.agent.ReloadSkills()
+	}
 }
 
 // compactCmd runs a manual compaction off the event loop. The Compacted

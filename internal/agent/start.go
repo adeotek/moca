@@ -54,6 +54,11 @@ type setup struct {
 	builtinDir string
 	jail       *permissions.Jail
 	spillDir   string // this process's overflow dir — the only one its jail can read
+	// skills/skillDirs: the discovered, filtered skill list and the dirs it
+	// came from — shared by Start (system prompt + the agent's picker list)
+	// and Resume, and re-read by Agent.ReloadSkills after a run.
+	skills    []skills.Skill
+	skillDirs []skills.Dir
 }
 
 func prepare(o StartOptions, jailRoot string) (*setup, error) {
@@ -104,7 +109,24 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	if err != nil {
 		return nil, &StartError{err}
 	}
-	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail, spillDir: spillDir}, nil
+	// Skill discovery happens once here, so Start's system prompt and a
+	// resumed agent share one list — and the TUI's picker reads it off the
+	// agent (Agent.Skills). The project dir belongs to the session's
+	// workdir (jailRoot: for a resume that is the stored one, not the
+	// process's cwd) and needs the trust decision.
+	var skillDirs []skills.Dir
+	if o.Trusted {
+		skillDirs = append(skillDirs, skills.Dir{Path: filepath.Join(jailRoot, ".moca", "skills"), Source: "project"})
+	}
+	skillDirs = append(skillDirs, skills.Dir{Path: globalSkills, Source: "global"}, skills.Dir{Path: builtinDir, Source: "builtin"})
+	sk, skErrs := skills.Discover(skillDirs)
+	for _, se := range skErrs {
+		if emit != nil {
+			emit(Warning{Text: se.Error()})
+		}
+	}
+	sk = filterSkills(sk)
+	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail, spillDir: spillDir, skills: sk, skillDirs: skillDirs}, nil
 }
 
 // discoverLocal reads a configured Ollama server's models into the registry
@@ -172,6 +194,7 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	// The mode and plan never cross: plan rides only on default (a plan
 	// run at default even when the resolved mode is wider — the TUI's
 	// SetPlan-to-plan lands there the same way).
+	a.skills, a.skillDirs = st.skills, st.skillDirs
 	a.applyMode(o.mode())
 	if o.Plan {
 		a.applyPlan(true)
@@ -298,21 +321,7 @@ func Start(o StartOptions) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, reg, jail, builtinDir, emit := st.cfg, st.reg, st.jail, st.builtinDir, o.Emit
-	globalSkills := filepath.Join(config.ConfigDir(), "skills")
-	projectSkills := filepath.Join(o.Workdir, ".moca", "skills")
-	var dirs []skills.Dir
-	if o.Trusted {
-		dirs = append(dirs, skills.Dir{Path: projectSkills, Source: "project"})
-	}
-	dirs = append(dirs, skills.Dir{Path: globalSkills, Source: "global"}, skills.Dir{Path: builtinDir, Source: "builtin"})
-	sk, skErrs := skills.Discover(dirs)
-	for _, se := range skErrs {
-		if emit != nil {
-			emit(Warning{Text: se.Error()})
-		}
-	}
-	sk = filterSkills(sk)
+	cfg, reg, jail := st.cfg, st.reg, st.jail
 	instr, err := skills.LoadInstructions(config.ConfigDir(), o.Workdir, o.Trusted)
 	if err != nil {
 		return nil, &StartError{err}
@@ -326,7 +335,7 @@ func Start(o StartOptions) (*Agent, error) {
 	verify, verifySrc := DetectVerify(jail.Root())
 	system := BuildSystemPrompt(PromptInput{Workdir: jail.Root(), OS: osName, Arch: arch, Verify: verify, VerifySource: verifySrc,
 		Date: time.Now().Format("2006-01-02"), Git: GitState(jail.Root()), Version: config.Version,
-		RTK: toolOnPath("rtk"), Skills: sk, Servers: servers, Instructions: instr})
+		RTK: toolOnPath("rtk"), Skills: st.skills, Servers: servers, Instructions: instr})
 
 	session.Prune(filepath.Join(config.DataDir(), "snapshot"), cfg.RetentionDays())
 	pruneOverflow(cfg.RetentionDays())

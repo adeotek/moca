@@ -149,6 +149,20 @@ func settle(m *model) {
 // that.
 var printLineType = reflect.TypeOf(tea.Println("")())
 
+// writeSkill writes a minimal valid SKILL.md under dir/<name>/ (picker and
+// reload tests exercise skill discovery without loading real skills).
+func writeSkill(t *testing.T, dir, name, desc string) {
+	t.Helper()
+	d := filepath.Join(dir, name)
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n%s body\n", name, desc, name)
+	if err := os.WriteFile(filepath.Join(d, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // simulate drives a submitted command like the running event loop: it runs
 // the command, expands sequences/batches, feeds every other message back
 // through Update (following the commands Update returns) and collects the
