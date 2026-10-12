@@ -99,12 +99,6 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 		pdirs = append(pdirs, skills.Dir{Path: filepath.Join(wd, ".moca", "prompts"), Source: "project"})
 	}
 	promptsDir := config.PromptsDir()
-	// First-run convenience: the starter create-command template teaches the
-	// saved-command workflow. Best-effort — an unwritable config dir must not
-	// stop the TUI (and /help documents the format regardless).
-	if err := skills.SeedUserPrompts(promptsDir); err != nil {
-		fmt.Fprintln(stderr, "moca: warning: could not write the starter slash command:", err)
-	}
 	pdirs = append(pdirs, skills.Dir{Path: promptsDir, Source: "global"})
 	home, _ := os.UserHomeDir()
 	err = tui.Run(ctx, tui.AppOptions{
