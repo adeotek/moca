@@ -170,11 +170,15 @@ func toolVerdict(ws []Word, lower string, conf pathFunc) autoVerdict {
 	case "rtk":
 		return rtkVerdict(ws, conf)
 	case "tee":
-		// Addition beyond the brief's table: Check already refuses a tee
-		// target outside the confinement (as a redirect); .git asks here.
+		// Addition beyond the brief's table: the Unix walk already refuses
+		// a tee target outside the confinement (as a redirect), Windows has
+		// no such walk — so the table places targets itself; .git asks.
 		_, args := splitArgs(ws, 1)
 		for _, a := range args {
-			if a.Literal && conf(a.Text, true) == pathGit {
+			if !a.Literal {
+				continue
+			}
+			if c := conf(a.Text, true); c == pathGit || c == pathOut {
 				return autoAsk
 			}
 		}

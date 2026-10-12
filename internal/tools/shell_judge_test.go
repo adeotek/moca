@@ -48,3 +48,31 @@ func TestShellJudgeStep(t *testing.T) {
 		})
 	}
 }
+
+// learnableCmds is a checker that refuses to learn some names, like
+// permissions.Shell does for rm.
+type learnableCmds struct {
+	fakeCmds
+	never map[string]bool
+}
+
+func (l *learnableCmds) Learnable(n string) bool { return !l.never[n] }
+
+// An unsure name the checker can never learn (auto mode's `rm *.o`) is asked
+// without the allow-always offer: the answer could not take effect.
+func TestShellUnsureNotLearnableNoAlways(t *testing.T) {
+	env, _ := testEnv(t)
+	env.Commands = &learnableCmds{fakeCmds: fakeCmds{unsure: []string{"rm", "npm"}}, never: map[string]bool{"rm": true}}
+	got := map[string]bool{}
+	env.Ask = func(_ context.Context, q Question) Answer {
+		got[q.Subject] = q.CanAlways
+		return AllowOnce
+	}
+	run(t, shellTool{}, env, map[string]any{"command": "true"})
+	if always, ok := got["rm"]; !ok || always {
+		t.Fatalf("rm asked=%v CanAlways=%v, want asked without allow-always", ok, always)
+	}
+	if always, ok := got["npm"]; !ok || !always {
+		t.Fatalf("npm asked=%v CanAlways=%v, want allow-always offered", ok, always)
+	}
+}

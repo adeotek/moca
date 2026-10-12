@@ -10,6 +10,56 @@ var winSplit = regexp.MustCompile(`&&|\|\||[;|]`)
 
 var winAsk = map[string]bool{"remove-item": true, "rm": true, "ri": true, "del": true, "erase": true, "rd": true, "rmdir": true}
 
+// Auto mode on Windows (the Unix risk table on best-effort words).
+var (
+	// winAutoNonLit: characters that make a PowerShell argument's value
+	// unknowable for the table — wildcards, arrays, redirects, drive /
+	// provider / stream / -Param:value colons, ~ (home and 8.3 short
+	// names), and the typographic quotes and dashes PowerShell accepts.
+	winAutoNonLit = "*?[],:<>&~!‘’‚‛“”„–—―"
+	// winAlwaysAsk: code runners and system control with no Unix spelling
+	// in the table — every invocation asks.
+	winAlwaysAsk = map[string]bool{
+		"iex": true, "invoke-expression": true, "invoke-command": true, "icm": true,
+		"start-process": true, "saps": true, "start": true, "invoke-item": true, "ii": true,
+		"cmd": true, "powershell": true, "pwsh": true, "wscript": true, "cscript": true, "mshta": true,
+		"rundll32": true, "regsvr32": true, "reg": true, "sc": true, "net": true, "schtasks": true,
+		"taskkill": true, "stop-process": true, "spps": true, "stop-computer": true, "restart-computer": true,
+		"set-executionpolicy": true, "winget": true, "choco": true, "scoop": true,
+	}
+	// winCd: commands after which the cwd is no longer the workdir.
+	winCd = map[string]bool{"cd": true, "chdir": true, "sl": true, "set-location": true,
+		"pushd": true, "push-location": true, "popd": true, "pop-location": true}
+	// winDefines: commands that change how later names or values resolve,
+	// tainting the rest of the command even when a rule allowed them.
+	winDefines = map[string]bool{".": true, "&": true, "function": true, "filter": true,
+		"set-alias": true, "sal": true, "new-alias": true, "nal": true, "set-variable": true, "sv": true,
+		"new-variable": true, "nv": true, "set-item": true, "si": true, "new-item": true, "ni": true,
+		"import-module": true, "ipmo": true, "set": true}
+)
+
+// winPathCheck narrows the Unix path check to what the best-effort Windows
+// words can place: plain relative paths only. A rooted path (`\x`, `/x`),
+// a drive or provider path (no ':' reaches here — it is non-literal), and a
+// component with a trailing dot or space (Windows drops them: `.git.` is
+// .git; a read of Go's `...` pattern excepted) are outside; separators are normalized for the shared guards.
+func winPathCheck(inner pathFunc) pathFunc {
+	return func(p string, write bool) pathClass {
+		if p == "" || strings.HasPrefix(p, `\`) || strings.HasPrefix(p, "/") || strings.ContainsAny(p, ":~") {
+			return pathOut
+		}
+		for _, c := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+			if c == "." || c == ".." || (c == "..." && !write) { // `./...`: Go's package pattern, read only
+				continue
+			}
+			if strings.TrimRight(c, ". ") != c {
+				return pathOut
+			}
+		}
+		return inner(strings.ReplaceAll(p, `\`, "/"), write)
+	}
+}
+
 // checkWindows is best-effort (no PowerShell parser in v1, §7): the first
 // token of every ;/|/&&/|| segment is checked, plus — for `rtk` — the
 // wrapped command word on the same best-effort basis: no quoting model and
@@ -18,13 +68,32 @@ var winAsk = map[string]bool{"remove-item": true, "rm": true, "ri": true, "del":
 // Unix.
 func (s *Shell) checkWindows(command string) ([]string, []string, []string, error) {
 	var v verdictAcc
+	var st cmdState
+	nonLit := "$`\"'(){}@%"
+	if s.auto {
+		nonLit += winAutoNonLit
+	}
 	classify := func(fields []string) error {
 		ws := make([]Word, len(fields))
 		for i, f := range fields {
-			ws[i] = Word{Text: f, Literal: i == 0 || !strings.ContainsAny(f, "$`\"'(){}@%")}
+			ws[i] = Word{Text: f, Literal: i == 0 || !strings.ContainsAny(f, nonLit)}
 		}
 		ws[0].Text = winName(fields[0])
-		return s.classify(ws, &v, cmdState{})
+		asked := len(v.need) + len(v.every) + len(v.unsure)
+		if err := s.classify(ws, &v, st); err != nil {
+			return err
+		}
+		// Auto mode carries state across segments like the Unix walk: a cd
+		// makes every later relative path unplaceable, and anything the
+		// table did not clear (it may define a function or an alias, set a
+		// variable, dot-source a script) taints what follows.
+		if winCd[ws[0].Text] {
+			st.cwdUnknown, st.tainted = true, true
+		}
+		if len(v.need)+len(v.every)+len(v.unsure) > asked || winDefines[ws[0].Text] {
+			st.tainted = true
+		}
+		return nil
 	}
 	for _, seg := range winSplit.Split(command, -1) {
 		fields := strings.Fields(seg)
@@ -32,6 +101,13 @@ func (s *Shell) checkWindows(command string) ([]string, []string, []string, erro
 			continue
 		}
 		name := strings.TrimSuffix(strings.ToLower(fields[0]), ".exe")
+		if s.auto && strings.ContainsAny(seg, "<>") {
+			// No redirect model on Windows: a segment that redirects is
+			// never cleared by the table (builtins included), and it
+			// taints what follows.
+			v.add(&v.unsure, winName(fields[0]))
+			st.tainted = true
+		}
 		if err := classify(fields); err != nil {
 			return nil, nil, nil, err
 		}

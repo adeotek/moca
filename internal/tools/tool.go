@@ -70,6 +70,14 @@ type ApprovablePaths interface {
 	Approvable(path string) (string, bool)
 }
 
+// LearnableCommands is the optional CommandChecker capability behind the
+// allow-always offer: Learnable reports whether Allow(name) would record
+// the name (permissions.Shell never learns hard-deny or ask-every-time
+// names such as rm). Checkers without it offer allow-always as before.
+type LearnableCommands interface {
+	Learnable(name string) bool
+}
+
 // askOutsideWrite resolves a write the jail refused. A target under an
 // ask-write root (the global prompt templates) is allowed only on the user's
 // yes; anything else keeps the refusal, and no asker (a -p run) means denial.

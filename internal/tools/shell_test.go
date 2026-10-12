@@ -13,18 +13,6 @@ import (
 	"github.com/adeotek/moca/internal/llm"
 )
 
-type fakeCmds struct {
-	need, every []string
-	unsure      []string
-	err         error
-	allowed     []string
-}
-
-func (f *fakeCmds) Check(string) ([]string, []string, []string, error) {
-	return f.need, f.every, f.unsure, f.err
-}
-func (f *fakeCmds) Allow(n string) { f.allowed = append(f.allowed, n) }
-
 func TestShellToolApprovals(t *testing.T) {
 	env, _ := testEnv(t)
 	env.ShellEnv = os.Environ()

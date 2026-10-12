@@ -31,15 +31,19 @@ func (shellTool) Spec() llm.ToolSpec {
 }
 
 func approve(ctx context.Context, env *Env, names []string, command string, canAlways bool) error {
+	lc, _ := env.Commands.(LearnableCommands)
 	for _, n := range names {
+		// A name the checker would ignore (auto mode's unsure `rm`) is not
+		// offered allow-always: the answer could never take effect.
+		always := canAlways && (lc == nil || lc.Learnable(n))
 		ans := Deny
 		if env.Ask != nil {
-			ans = env.Ask(ctx, Question{Kind: "shell", Subject: n, Detail: command, CanAlways: canAlways})
+			ans = env.Ask(ctx, Question{Kind: "shell", Subject: n, Detail: command, CanAlways: always})
 		}
 		slog.Debug("approval", "name", n, "answer", [...]string{"deny", "once", "always"}[ans])
 		switch ans {
 		case Deny:
-			if canAlways {
+			if always {
 				return fmt.Errorf("refused: `%s` is not allowlisted and the user did not approve it; ask the user to allow it or use another approach", n)
 			}
 			return fmt.Errorf("refused: `%s` needs explicit user approval for every call and it was not given", n)

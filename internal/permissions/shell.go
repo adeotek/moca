@@ -89,9 +89,13 @@ func RulesFromAllow(names []string) *Rules {
 	return NewRules(rs)
 }
 
+// Learnable reports whether Allow would record name (tools.LearnableCommands:
+// the asker offers allow-always only then).
+func (s *Shell) Learnable(name string) bool { return learnable(name, s.goos == "windows") }
+
 // Allow records an allow-always answer, subject to the same predicate.
 func (s *Shell) Allow(name string) {
-	if !learnable(name, s.goos == "windows") {
+	if !s.Learnable(name) {
 		return
 	}
 	s.rules.Learn(name)
@@ -185,18 +189,30 @@ func (s *Shell) classify(ws []Word, v *verdictAcc, st cmdState) error {
 	if s.auto {
 		switch {
 		case builtin:
-		case win:
-			// No path model on the best-effort Windows analyser: nothing
-			// beyond builtins is allowed by the table.
-			if winAsk[lower] || askEvery[lower] {
-				v.add(&v.every, name)
-			} else {
-				v.add(&v.unsure, name)
-			}
 		default:
-			verdict := autoClassify(ws, s.pathCheck(st.cwdUnknown))
+			// Windows runs the same table on its best-effort words, behind
+			// winPathCheck (plain relative paths only) and with the
+			// PowerShell removal aliases judged as rm.
+			conf, tws := s.pathCheck(st.cwdUnknown), ws
+			if win {
+				conf = winPathCheck(conf)
+				if !pathHead && winAsk[lower] {
+					tws = append([]Word{{Text: "rm", Literal: true}}, ws[1:]...)
+				}
+			}
+			verdict := autoClassify(tws, conf)
 			if verdict == autoAllow && st.tainted {
 				verdict = autoUnsure
+			}
+			// rm runs without a prompt only on literal paths the table
+			// placed inside the workdir or a temp root; anything it cannot
+			// place (a glob, a variable, a cd before it) asks every time
+			// and never reaches the classifier.
+			if verdict == autoUnsure && (askEvery[lower] || (win && winAsk[lower])) {
+				verdict = autoAsk
+			}
+			if win && winAlwaysAsk[lower] {
+				verdict = autoAsk
 			}
 			switch verdict {
 			case autoAllow:
