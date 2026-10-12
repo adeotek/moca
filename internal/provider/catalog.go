@@ -98,7 +98,7 @@ var (
 //   - openai: platform.openai.com models + developers.openai.com pricing (standard,
 //     short-context rates; long-context tiers exist and are not modelled in v1).
 var builtinCatalog = []Model{
-	// opencode-go — mixed protocol: the DESIGN.md §3 models, plus the 2026-10-07
+	// opencode-go — mixed protocol: the SPECS §6 original models, plus the 2026-10-07
 	// expansion (deepseek family, kimi-k2.7-code, mimo-v2.6-pro/flash,
 	// qwen3.8-max/flash, qwen3.7-plus). Routes and effort values live-verified
 	// 2026-10-07 — incl. qwen3.8-max on openai-completions (the /docs/go endpoint

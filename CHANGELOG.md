@@ -4,7 +4,11 @@
 
 A permissions overhaul — three permission modes instead of the boolean yolo flag, layered wildcard rules, a trusted per-project permissions file, and an `auto` mode that runs safe actions itself — plus TUI polish around it: a mode cycle on Shift+Tab, an arrow-key approval picker, `${…}` prompt templates, and a contrast-tested status bar. Still one binary, still no framework.
 
-Also in this release: the install scripts learn `--uninstall` / `-Uninstall`, and every run writes a bounded diagnostic log — still one binary, still no framework.
+Also in this release: the install scripts learn `--uninstall` / `-Uninstall`, every run writes a bounded diagnostic log, and the docs collapse to a single source of truth — still one binary, still no framework.
+
+### Docs
+
+- **`docs/specs/SPECS.md` is the single source of truth** for all design, specs, features and constraints. The retired `docs/specs/DESIGN.md` v1 contract was deleted; its still-current content (threat model, purpose, non-goals) was absorbed into SPECS §11/§1/§16, and everything else lives in git history. Design-level changes are now SPECS edits shipped in the same PR as the code — no separate design doc, no separate revision log.
 
 ### Installer
 

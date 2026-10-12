@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Plan mode (DESIGN rev 20): the agent analyzes a request and writes an
+// Plan mode (rev 20): the agent analyzes a request and writes an
 // implementation plan to <workdir>/docs/plans/*.md — nothing else changes.
 // Env.Plan drives the write confinement; shell, mcp, web and the read tools
 // stay available (the normal permission ladder applies to shell/mcp).
