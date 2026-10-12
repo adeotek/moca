@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -77,7 +78,7 @@ func TestResumeNeverRestoresYolo(t *testing.T) {
 		t.Fatal("resume starts with checks on unless the resuming process asks for yolo", err)
 	}
 	b.Session().Close()
-	c, _ := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client(), Yolo: true}, path)
+	c, _ := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client(), Mode: ModeYolo}, path)
 	if !c.Yolo() {
 		t.Fatal("--yolo on resume applies")
 	}
@@ -99,6 +100,41 @@ func TestResumeHonoursCompaction(t *testing.T) {
 	body := mustJSONString(s.bodies[0])
 	if !strings.Contains(body, "SUMMARY") || strings.Contains(body, "old answer") {
 		t.Fatal(body)
+	}
+}
+
+// A pre-Task-7 session header has no "mode" key (default was kept implicit)
+// and recorded yolo only as a bare flag: it must resume as default mode with
+// checks on, never yolo, and nothing must be rewritten on disk.
+func TestResumeOldSessionDefaultsMode(t *testing.T) {
+	s := newScript(t)
+	a, work, _ := startTestWith(t, s, "", "")
+	a.Session().Close()
+	path := filepath.Join(t.TempDir(), "old.jsonl")
+	// One JSON line per file line — no "mode" key (default kept implicit
+	// pre-Task-7) and yolo only as the bare flag.
+	line := `{"id":"s1","ts":"2026-01-02T03:04:05Z","type":"session","session":{"workdir":"` + work + `","provider":"fake","model":"fake/m",` +
+		`"startedAt":"2026-01-02T03:04:05Z","mocaVersion":"v0","systemPrompt":"SYS","yolo":true}}`
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Session().Close()
+	if b.Mode() != ModeDefault || b.Yolo() {
+		t.Fatalf("an old session must resume as default mode with checks on, got %s (yolo=%v)", b.Mode(), b.Yolo())
+	}
+	// No mode rewrite: default stays implicit, and the only extra entry is
+	// the model_change that records the model's default effort ("" in the
+	// header vs "off") — never a permission_mode entry.
+	if entries, _ := session.ReadFile(path); len(entries) != 2 ||
+		entries[1].Type != session.TypeModelChange ||
+		entries[1].PermissionMode != nil {
+		for i, e := range entries {
+			t.Errorf("entry %d: type=%q line=%+v", i, e.Type, e)
+		}
 	}
 }
 

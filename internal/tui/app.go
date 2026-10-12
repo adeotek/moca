@@ -964,7 +964,7 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
-		m.agent.SetYolo(!m.agent.Yolo()) // YoloChanged prints + refreshes
+		m.agent.SetYolo(!m.agent.Yolo()) // ModeChanged prints + refreshes
 		return nil
 	case "plan":
 		if cmd, refused := m.refuseRunning(); refused {
@@ -1328,12 +1328,16 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		return tea.Sequence(head, m.replay(m.agent.History(), replayTurns))
 	case agent.SteeringApplied:
 		return m.printlnMuted("↳ sent: " + strings.Join(e.Texts, " · "))
-	case agent.YoloChanged:
+	case agent.ModeChanged:
 		m.refreshStatus()
-		if e.On {
+		switch e.Mode {
+		case agent.ModeYolo:
 			return m.println(red.Render("yolo mode on: all permission checks are off"))
+		case agent.ModeAuto:
+			return m.println("auto mode: safe actions run, risky ones ask")
+		default:
+			return m.println("default mode: permission checks restored")
 		}
-		return m.println("yolo mode off: permission checks restored")
 	case agent.PlanChanged:
 		m.refreshStatus()
 		if e.On {

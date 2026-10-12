@@ -25,7 +25,8 @@ func (a *Agent) applyPlan(on bool) {
 // permission rules; the envelope rides every request while it is on.
 func (a *Agent) SetPlan(on bool) {
 	a.applyPlan(on)
-	a.append(session.Entry{Type: session.TypePermissionMode, PermissionMode: &session.PermissionMode{Yolo: a.yolo, Plan: on}})
+	a.append(session.Entry{Type: session.TypePermissionMode,
+		PermissionMode: &session.PermissionMode{Yolo: a.mode == ModeYolo, Plan: on, Mode: string(a.mode)}})
 	a.emit(PlanChanged{On: on})
 }
 

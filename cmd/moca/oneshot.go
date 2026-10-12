@@ -87,20 +87,42 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 			fmt.Fprintf(stderr, "warning: %s\n", e.Text)
 		}
 	}
-	yolo := o.YoloOn(cfg)
-	trusted := yolo
+	trustMode, err := modeWithoutProject(o, cfg)
+	if err != nil {
+		fmt.Fprintln(stderr, "moca:", err)
+		return exitUsage
+	}
+	trusted := trustMode == "yolo"
 	if o.Approve != nil {
 		trusted = *o.Approve
 	}
-	if yolo {
+	if trusted {
+		// Project rules and defaultMode join in; a project file that does
+		// not parse is a config error (exit 2) for a trusted workdir only.
+		p, err := config.LoadProject(wd)
+		if err != nil {
+			fmt.Fprintln(stderr, "moca:", err)
+			return exitUsage
+		}
+		cfg.Project = p
+	}
+	mode, err := o.ModeOf(cfg)
+	if err != nil {
+		fmt.Fprintln(stderr, "moca:", err)
+		return exitUsage
+	}
+	switch mode {
+	case "yolo":
 		fmt.Fprintln(stderr, "yolo mode: all permission checks are off")
+	case "auto":
+		fmt.Fprintln(stderr, "auto mode: safe actions run, risky ones are refused (no one to ask)")
 	}
 	if o.Plan {
 		fmt.Fprintln(stderr, "plan mode: the run writes an implementation plan to docs/plans/ (no other writes)")
 	}
 	var a *agent.Agent
 	so := agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model,
-		Trusted: trusted, Yolo: yolo, Plan: o.Plan, Emit: emit, Slug: oneShotSlug(o)}
+		Trusted: trusted, Mode: agent.PermMode(mode), Plan: o.Plan, Emit: emit, Slug: oneShotSlug(o)}
 	if resumePath != "" {
 		a, err = agent.Resume(so, resumePath)
 	} else {

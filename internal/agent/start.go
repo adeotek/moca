@@ -37,7 +37,7 @@ type StartOptions struct {
 	Model   string
 	Effort  string
 	Trusted bool
-	Yolo    bool
+	Mode    PermMode // default | auto | yolo (the plan's Defaults first, then this)
 	Plan    bool
 	Ask     tools.Asker
 	Emit    func(Event)
@@ -141,11 +141,22 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	if err != nil {
 		return nil, err
 	}
-	env := &tools.Env{Root: jail.Root(), Paths: jail, Commands: permissions.NewShell(permissions.RulesFromAllow(cfg.Shell.Allow), jail, runtime.GOOS),
+	m := o.Mode
+	if m == "" {
+		m = ModeDefault
+	}
+	env := &tools.Env{
+		Root: jail.Root(), Paths: jail, AutoJail: jail.WithWritable(permissions.TempRoots()...),
 		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
 		ShellEnv:    tools.ShellEnv(os.Environ(), config.EnvRefs(cfg)),
 		WebProvider: cfg.Web.Search.Provider, WebKey: webKey,
 		SpillDir: st.spillDir, SpillPrefix: w.ID8() + "-"}
+	shellRules, err := rules(cfg, o.Trusted)
+	if err != nil {
+		return nil, err
+	}
+	shell := permissions.NewShell(shellRules, jail, runtime.GOOS)
+	env.Commands = shell
 	reg := tools.NewRegistry(tools.Builtins()...)
 	// With servers configured, the frozen `mcp` stub is replaced by the lazy
 	// proxy (§10.5): nothing starts here, and no server tool schema ever
@@ -161,15 +172,48 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	if err != nil {
 		return nil, err
 	}
-	if o.Yolo {
-		a.applyYolo(true)
-	}
+	a.applyMode(m)
 	if o.Plan {
 		a.applyPlan(true)
 	}
 	a.logger().Info("session", "resumed", prior != nil, "workdir", jail.Root(), "model", model,
-		"effort", string(effort), "yolo", o.Yolo, "plan", o.Plan)
+		"effort", string(effort), "mode", m, "plan", o.Plan)
 	return a, nil
+}
+
+// rules builds the permission rules once for both shell views: the trusted
+// project layer first (.moca/config.jsonc), then the user layer — the legacy
+// shell.allow names (never a hard-deny or ask-every-time one) plus the
+// permissions block's own rules. Config validation rejects invalid rule
+// syntax upstream, so the parse steps below cannot fail in practice; any
+// rule that does not parse fails the build loudly (never a silently
+// dropped check). Untrusted: the project layer is absent.
+func rules(cfg config.Config, trusted bool) (*permissions.Rules, error) {
+	var layers []permissions.RuleSet
+	if trusted && cfg.Project != nil {
+		p := cfg.Project
+		proj, err := permissions.ParseRuleSet("project", p.Allow, p.Ask, p.Deny)
+		if err != nil {
+			return nil, err
+		}
+		layers = append(layers, proj)
+	}
+	var user permissions.RuleSet
+	for _, n := range permissions.LegacyAllowNames(append(slices.Clone(cfg.Shell.Allow), cfg.Permissions.Allow...)) {
+		r, err := permissions.ParseRule(n)
+		if err != nil {
+			return nil, err
+		}
+		user.Allow = append(user.Allow, r)
+	}
+	user.Name = "user"
+	rs, err := permissions.ParseRuleSet("user", nil, cfg.Permissions.Ask, cfg.Permissions.Deny)
+	if err != nil {
+		return nil, err
+	}
+	user.Ask, user.Deny = rs.Ask, rs.Deny
+	layers = append(layers, user)
+	return permissions.NewRules(layers...), nil
 }
 
 // overflowDir is the area holding the full text of over-cap tool outputs
@@ -290,7 +334,7 @@ func Start(o StartOptions) (*Agent, error) {
 	}
 	w, err := session.Create(filepath.Join(config.DataDir(), "sessions"), session.Header{
 		Workdir: jail.Root(), Provider: m.Provider, Model: cfg.Model, Effort: string(effort),
-		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.Yolo}, slug)
+		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.Mode == ModeYolo, Mode: string(o.Mode)}, slug)
 	if err != nil {
 		return nil, &StartError{err}
 	}

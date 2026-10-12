@@ -52,6 +52,14 @@ func decideTrust(ctx context.Context, o Options, wd string, yolo bool) (bool, er
 	return ans, ts.Set(wd, ans)
 }
 
+// modeWithoutProject resolves the mode ignoring the project layer: the
+// trust decision (yolo trusts, §7.5) must not depend on a file the workdir
+// may or may not be allowed to contribute.
+func modeWithoutProject(o Options, cfg config.Config) (string, error) {
+	cfg.Project = nil
+	return o.ModeOf(cfg)
+}
+
 // runTUI opens the interactive TUI (§11); prompt templates come from the
 // project dir only when trusted, then the global config dir.
 func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, stderr io.Writer) int {
@@ -65,13 +73,33 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 		fmt.Fprintln(stderr, "moca:", err)
 		return exitUsage
 	}
-	yolo := o.YoloOn(cfg)
-	trusted, err := decideTrust(ctx, o, wd, yolo)
+	trustMode, err := modeWithoutProject(o, cfg)
+	if err != nil {
+		fmt.Fprintln(stderr, "moca:", err)
+		return exitUsage
+	}
+	trusted, err := decideTrust(ctx, o, wd, trustMode == "yolo")
 	if err != nil {
 		if !errors.Is(err, context.Canceled) { // ctrl+c at the trust prompt: quiet 130
 			fmt.Fprintln(stderr, "moca:", err)
 		}
 		return exitFor(ctx, err)
+	}
+	// Trusted: the project file's rules and defaultMode join in; a project
+	// file that does not parse is a config error (exit 2) — but only for a
+	// workdir the user chose to trust.
+	if trusted {
+		p, err := config.LoadProject(wd)
+		if err != nil {
+			fmt.Fprintln(stderr, "moca:", err)
+			return exitUsage
+		}
+		cfg.Project = p
+	}
+	mode, err := o.ModeOf(cfg)
+	if err != nil {
+		fmt.Fprintln(stderr, "moca:", err)
+		return exitUsage
 	}
 	var pdirs []skills.Dir
 	if trusted {
@@ -87,7 +115,7 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 	pdirs = append(pdirs, skills.Dir{Path: promptsDir, Source: "global"})
 	home, _ := os.UserHomeDir()
 	err = tui.Run(ctx, tui.AppOptions{
-		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Yolo: yolo, Plan: o.Plan, Slug: "tui"},
+		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Mode: agent.PermMode(mode), Plan: o.Plan, Slug: "tui"},
 		ConfigPath: cfgPath, Prompts: skills.LoadPrompts(pdirs), PromptDirs: pdirs, Home: home,
 		ResumePath:  resumePath,
 		HintsPath:   filepath.Join(config.DataDir(), "hints.json"),

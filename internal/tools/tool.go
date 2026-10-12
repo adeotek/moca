@@ -108,6 +108,10 @@ type Env struct {
 	Reads    *ReadTracker
 	Snap     Snapshotter
 	ShellEnv []string
+	// AutoJail carries the auto-mode path checker (the default jail with the
+	// temp roots writable) from start.go to the agent's checker setup; nil
+	// for Envs built by hand.
+	AutoJail PathChecker
 	// WebProvider/WebKey are the resolved web.search config for the web
 	// tool (tavily|exa; the empty key is tavily's keyless mode).
 	WebProvider string

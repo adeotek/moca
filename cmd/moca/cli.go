@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/adeotek/moca/internal/config"
@@ -31,7 +32,8 @@ usage:
     --model <provider/model>   override config `+"`"+`model`+"`"+` for this session
     --effort <level>           override effort for this session (off|minimal|low|medium|high|xhigh|max)
     --approve | --no-approve   project trust for this run (-p default: --no-approve)
-    --yolo | --no-yolo         all permission checks off/on for this run (overrides config yolo)
+    --mode <m>                 permission mode for this run: default | auto | yolo
+    --yolo | --no-yolo         shorthand for --mode yolo / leave yolo (overrides config)
     --plan                     plan mode: analyze the request and write an implementation plan to docs/plans/ (no other writes)
   moca --do <plan.md> [-p "<notes>"]  execute an implementation plan step by step, ticking its - [ ] boxes
     --resume <id8|last>        resume a session
@@ -56,6 +58,7 @@ type Options struct {
 	Model      string
 	Effort     string
 	Approve    *bool
+	Mode       *string
 	Yolo       *bool
 	Plan       bool
 	Do         string // plan file to execute (implies a one-shot run)
@@ -68,12 +71,33 @@ type Options struct {
 
 type usageError struct{ error }
 
-// YoloOn: the flag wins; otherwise config `yolo` decides (§7.5).
-func (o Options) YoloOn(cfg config.Config) bool {
-	if o.Yolo != nil {
-		return *o.Yolo
+// ModeOf resolves the run's permission mode: an explicit flag wins
+// (--mode/--yolo/--no-yolo, mutually exclusive), else a trusted project
+// file's defaultMode, else the user config Mode() (§11). --no-yolo maps a
+// resolved yolo to default and leaves auto alone.
+func (o Options) ModeOf(cfg config.Config) (string, error) {
+	var flag string
+	switch {
+	case o.Mode != nil:
+		flag = *o.Mode
+	case o.Yolo != nil:
+		flag = "yolo"
+		if !*o.Yolo {
+			// --no-yolo: suppress yolo, other modes stay as configured.
+			flag = ""
+		}
 	}
-	return cfg.Yolo
+	base := cfg.Mode()
+	if cfg.Project != nil && cfg.Project.DefaultMode != "" {
+		base = cfg.Project.DefaultMode
+	}
+	if flag != "" {
+		base = flag
+	}
+	if base == "yolo" && o.Yolo != nil && !*o.Yolo {
+		base = "default"
+	}
+	return base, nil
 }
 
 func parseArgs(args []string, stdin io.Reader) (Options, error) {
@@ -85,6 +109,7 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 	fs.StringVar(&o.Effort, "effort", "", "effort level")
 	approve := fs.Bool("approve", false, "trust project resources for this run")
 	noApprove := fs.Bool("no-approve", false, "skip project resources for this run")
+	mode := fs.String("mode", "", "permission mode for this run: default | auto | yolo")
 	yolo := fs.Bool("yolo", false, "turn all permission checks off for this run")
 	noYolo := fs.Bool("no-yolo", false, "keep permission checks on (overrides config yolo)")
 	fs.BoolVar(&o.Plan, "plan", false, "plan mode: write an implementation plan to docs/plans/, change nothing else")
@@ -113,6 +138,25 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 	}
 	if *yolo && *noYolo {
 		return o, usageError{errors.New("--yolo and --no-yolo are mutually exclusive")}
+	}
+	n := 0
+	if *mode != "" {
+		n++
+	}
+	if *yolo {
+		n++
+	}
+	if *noYolo {
+		n++
+	}
+	if n > 1 {
+		return o, usageError{errors.New("--mode, --yolo and --no-yolo are mutually exclusive")}
+	}
+	if *mode != "" {
+		if !slices.Contains(config.PermModes, *mode) {
+			return o, usageError{fmt.Errorf("--mode must be one of %s, got %q", strings.Join(config.PermModes, ", "), *mode)}
+		}
+		o.Mode = mode
 	}
 	if *yolo || *noYolo {
 		v := *yolo

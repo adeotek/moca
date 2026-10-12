@@ -14,6 +14,7 @@ import (
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/mcp"
+	"github.com/adeotek/moca/internal/permissions"
 	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
 	"github.com/adeotek/moca/internal/tools"
@@ -68,7 +69,6 @@ type Agent struct {
 	effort  llm.Effort
 	usage   llm.Usage
 	cost    float64
-	yolo    bool
 	plan    bool
 	steps   int // steps taken by the current run (run-end log line)
 	// doPlan/doPlanRel: the plan file a RunPlan run executes (abs, display).
@@ -93,16 +93,25 @@ type Agent struct {
 	// allow verdicts are cached; cleared when a new Agent replaces this
 	// one, e.g. /clear).
 	judgeCache map[string]bool
-	strict     struct {
-		paths tools.PathChecker
-		cmds  tools.CommandChecker
-		ask   tools.Asker
+	mode       PermMode
+	checkers   struct {
+		paths     tools.PathChecker
+		cmds      tools.CommandChecker
+		autoPaths tools.PathChecker // the auto view of paths: temp roots writable
+		autoCmds  tools.CommandChecker
+		ask       tools.Asker
 	}
 }
 
 func New(o Options) (*Agent, error) {
 	a := &Agent{opts: o, entries: o.Prior}
-	a.strict.paths, a.strict.cmds, a.strict.ask = o.Env.Paths, o.Env.Commands, o.Env.Ask
+	a.checkers.paths, a.checkers.cmds, a.checkers.ask = o.Env.Paths, o.Env.Commands, o.Env.Ask
+	a.checkers.autoPaths = o.Env.AutoJail
+	if s, ok := o.Env.Commands.(*permissions.Shell); ok {
+		aj, _ := o.Env.AutoJail.(*permissions.Jail)
+		a.checkers.autoCmds = s.AutoView(aj)
+	}
+	a.applyMode(ModeDefault)
 	if err := a.setModel(o.Model, o.Effort); err != nil {
 		return nil, err
 	}

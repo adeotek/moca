@@ -40,8 +40,11 @@ func TestParseArgs(t *testing.T) {
 		t.Fatal("resume/continue are exclusive")
 	}
 	o, _ = parseArgs([]string{"--no-yolo", "-p", "x"}, nil)
-	if o.Yolo == nil || *o.Yolo || o.YoloOn(config.Config{Yolo: true}) {
-		t.Fatal("--no-yolo overrides config")
+	if o.Yolo == nil || *o.Yolo {
+		t.Fatal("--no-yolo flag recorded")
+	}
+	if m, _ := o.ModeOf(config.Config{Yolo: true}); m != "default" {
+		t.Fatal("--no-yolo overrides config yolo")
 	}
 	o, _ = parseArgs([]string{"--plan", "-p", "x"}, nil)
 	if !o.Plan || !o.OneShot {
@@ -51,8 +54,11 @@ func TestParseArgs(t *testing.T) {
 		t.Fatal("plan mode must default off")
 	}
 	o, _ = parseArgs([]string{"-p", "x"}, nil)
-	if o.YoloOn(config.Config{}) || !o.YoloOn(config.Config{Yolo: true}) {
-		t.Fatal("no flag → config decides")
+	if m, _ := o.ModeOf(config.Config{}); m != "default" {
+		t.Fatal("no flag → default")
+	}
+	if m, _ := o.ModeOf(config.Config{Yolo: true}); m != "yolo" {
+		t.Fatal("no flag → config yolo decides")
 	}
 	if _, err := parseArgs([]string{"--effort", "med", "-p", "x"}, nil); err == nil {
 		t.Fatal("bad effort is a usage error")

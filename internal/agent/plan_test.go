@@ -209,7 +209,7 @@ func TestModeEntriesRecordBothFlags(t *testing.T) {
 			got = append(got, *e.PermissionMode)
 		}
 	}
-	want := []session.PermissionMode{{Yolo: true}, {Yolo: true, Plan: true}, {Plan: true}}
+	want := []session.PermissionMode{{Yolo: true, Mode: "yolo"}, {Yolo: true, Plan: true, Mode: "yolo"}, {Plan: true, Mode: "default"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
