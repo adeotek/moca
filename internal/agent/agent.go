@@ -89,7 +89,11 @@ type Agent struct {
 	// (provider overflow, or a length stop with the context full); the
 	// compact-and-retry surfaces it when recovery is impossible.
 	lastOverflow error
-	strict       struct {
+	// judgeCache remembers allow verdicts by the exact command (only
+	// allow verdicts are cached; cleared when a new Agent replaces this
+	// one, e.g. /clear).
+	judgeCache map[string]bool
+	strict     struct {
 		paths tools.PathChecker
 		cmds  tools.CommandChecker
 		ask   tools.Asker

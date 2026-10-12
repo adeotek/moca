@@ -122,6 +122,10 @@ type Env struct {
 	// write/edit there and read by the agent at run end.
 	Plan      bool
 	PlanWrote bool
+	// Judge clears the auto table's unsure tier with one classifier call
+	// (built by the agent in auto mode when permissions.auto.classifier is
+	// on; nil otherwise — the tier then lands in the ask ladder).
+	Judge func(ctx context.Context, command string) (allow bool, reason string)
 	// Edited/Unverified/MaxRepeat are per-run (runstate.go, reset by
 	// BeginRun): Edited is set by any successful write/edit; Unverified
 	// names the last code file changed since a verifying shell command;

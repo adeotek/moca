@@ -73,7 +73,17 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 		slog.Debug("shell refused") // the analyser's reason carries the command text: not logged
 		return errorf("refused: %v", err)
 	}
-	need = append(need, unsure...) // replaced by the judge step later
+	if len(unsure) > 0 {
+		// The auto table's unsure tier goes to the classifier first (§7.5):
+		// an allow clears the tier, anything else (or no judge) lands in
+		// the ask ladder, once, with allow-always offered.
+		if env.Judge != nil {
+			if ok, _ := env.Judge(ctx, a.Command); ok { // the agent's judge() logs decision/ms/cached
+				unsure = nil
+			}
+		}
+		need = append(need, unsure...)
+	}
 	if err := approve(ctx, env, need, a.Command, true); err != nil {
 		return errorf("%v", err)
 	}
