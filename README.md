@@ -5,7 +5,7 @@
 **A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, eight tools, no framework.**
 Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface area. It competes on *cost per task* and *read-the-whole-codebase-in-an-hour transparency*, not features: prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap; the agent ships MCP support that never floods the prompt (one ~200-token lazy proxy), loads Agent-Skills `SKILL.md` files written for other tools unchanged, searches the web and fetches pages without another tool (keyless by default), and prefers external token-savers (`rtk`, `graphify`) when they are installed.
 
-**Status: v0.3.0-beta** — first-run setup mode (a bare config opens the TUI with `/login` + `/model`), a `web` tool (page fetch + search, keyless out of the box), plan mode (`--plan`/`/plan` writes `docs/plans/`, nothing else; `--do`/`/do` executes a plan step by step), a harness pass measured on a seven-scenario eval corpus (`test/evals/`), self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
+**Status: v0.4.0-beta** — a permissions overhaul: three permission modes (`default` / `auto` / `yolo`) with a `--mode` flag, layered `allow/ask/deny` rules with wildcards (user config + a trusted per-project `.moca/config.jsonc`), auto mode (safe actions run, risky ones ask, unsure ones get a classifier's second opinion), Shift+Tab mode cycling, an arrow-key approval picker, `${…}` prompt templates and a role-colored status bar; plus first-run setup mode, the `web` tool, plan mode, self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
 
 ## Install
 
@@ -96,11 +96,51 @@ moca keeps a small diagnostic log per run in `~/.local/state/moca/logs/` (or `$X
 - Turn it off: `"log": { "level": "off" }` in the config, or `MOCA_LOG=off`.
 - Old logs are removed after `snapshot.retentionDays` (30 days by default).
 
+## Permission modes & rules
+
+Every shell command the agent proposes runs through a permission ladder. Three modes decide how strict:
+
+| Mode | Behavior |
+|---|---|
+| `default` | every non-allowlisted command asks (once / always / deny) |
+| `auto` | safe actions (reads, builds, tests, confined edits) just run; risky ones (`git push`, installs…) ask every time; commands the tables can't judge get a one-shot classifier opinion — allow or ask |
+| `yolo` | no permission checks |
+
+Pick per run with `moca --mode auto` (`--yolo`/`--no-yolo` are shorthands), in the config with `"permissions": { "defaultMode": "auto" }`, or in the TUI with **shift+tab** (`default → auto → plan → yolo`, `/mode` for the same). `plan` in the cycle is plan mode on top of auto: the run writes `docs/plans/`, nothing else.
+
+```jsonc
+// ~/.config/moca/config.jsonc
+{
+  "permissions": {
+    "defaultMode": "default",             // default | auto | yolo
+    "allow": ["rtk *", "make *", "git log *"],
+    "ask":   ["git commit *"],
+    "deny":  ["rm -rf *", "git push --force*"],
+    "auto":  { "classifier": true }       // "auto.model" defaults to your "model"
+  }
+}
+
+// <project>/.moca/config.jsonc — applies only when the workdir is trusted
+// (moca asks once on first open). May hold nothing but a permissions object,
+// and never yolo, a "*" allow rule or auto.model: a cloned repository cannot
+// switch off your checks or pick what model bills its classifier.
+{
+  "permissions": {
+    "allow": ["docker compose *"],
+    "deny":  ["terraform apply *"]
+  }
+}
+```
+
+Rules are whitespace-separated words with bash-style wildcards: `git push *` (prefix), `*.go` in a word, `rm *` beats `rm` on 100 spellings, and `mkfs*` style names still hard-deny no matter what the rules say. Project rules win over user rules; within one list, deny wins over ask, ask over allow. `shell.allow` (written by the approval prompt's *allow always*) keeps working and folds into the same user list — except for `rm`, which always asks unless a real `permissions.allow` rule covers the exact command. Safe things (reads, builds, tests, confined file edits, plain downloads) need no rule in auto mode; the risk table covers them.
+
+**In the TUI** the current mode is always the first status-bar item (`default` / green `AUTO` / red `YOLO`, plus blue `PLAN` when plan mode is on), and an approval prompt is a picker: `↑`/`↓` and `enter` alongside the classic `a` / `ctrl+a` / `d` — with text in the input box, keys go to the draft as usual.
+
 ## Use
 
 ```bash
 moca                            # TUI in the current directory
-moca -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
+moca --mode auto -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
 moca --plan -p "add a --json flag"   # write docs/plans/<slug>.md, change nothing else
 moca --do docs/plans/add-json-flag.md # execute it step by step, ticking each - [ ] box
 ```
@@ -118,13 +158,14 @@ moca --do docs/plans/add-json-flag.md # execute it step by step, ticking each - 
 | `alt+t` | pager on the latest thinking block (the whole reasoning chain) |
 | `alt+p` | paste chips (large pastes collapsed, buffer intact) |
 | `ctrl+r` | search prompt history (type to filter · `enter` uses the match, doesn't send) |
-| `shift+tab` | cycle the effort level |
+| `shift+tab` | cycle the permission mode (default → auto → plan → yolo) |
+| `ctrl+t` | cycle the effort level |
 | `@` + path | complete a workdir file (`tab`/`enter` inserts it) |
 | `ctrl+c` ×2 | quit (or `/exit`) |
-| `a` / `ctrl+a` / `d` | approval: allow once / allow always / deny |
+| `a` / `↑↓` `enter` / `ctrl+a` / `d` | approval picker: allow once / move+confirm / allow always / deny (arrows+enter only with an empty draft) |
 | `↑`/`↓` · `tab` · `esc` | in the `/` dropdown: pick · complete · dismiss |
 
-**Slash commands**: `/model` · `/effort` · `/hard` · `/yolo` · `/plan` · `/do` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). Typing `/` opens a dropdown of every command and loaded template as you type — `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. The first run drops a starter **`/create-command`** template into that directory: run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands are usable the moment the run that wrote them finishes — no restart. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results. **`/plan <request>`** (or `--plan`) turns a run into **plan mode**: the agent reads (shell, web and MCP stay available for investigation under their normal permission rules), writes an implementation plan to `docs/plans/`, and every write outside `docs/plans/*.md` is refused.
+**Slash commands**: `/model` · `/effort` · `/mode` · `/hard` · `/yolo` · `/plan` · `/do` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). Typing `/` opens a dropdown of every command and loaded template as you type — `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. The first run drops a starter **`/create-command`** template into that directory: run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands are usable the moment the run that wrote them finishes — no restart. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results. **`/plan <request>`** (or `--plan`) turns a run into **plan mode**: the agent reads (shell, web and MCP stay available for investigation under their normal permission rules), writes an implementation plan to `docs/plans/`, and every write outside `docs/plans/*.md` is refused.
 
 ## Extend
 
