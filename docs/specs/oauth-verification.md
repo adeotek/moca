@@ -1,7 +1,7 @@
 # OAuth verification record (phase 7 — §3 policy gate)
 
 Retrieved: **2026-10-06** (every URL below was fetched live on this date; quoted text is verbatim from the
-sources). Gate: DESIGN.md §3 — before any OAuth code is written for a provider, verify (a) that the vendor's
+sources). Gate: SPECS.md §6.5 — before any OAuth code is written for a provider, verify (a) that the vendor's
 current terms permit subscription OAuth from third-party clients and (b) how a third-party developer registers
 a client. `unclear` is treated as `not permitted`. No workarounds, no spoofed client identities.
 
@@ -62,7 +62,7 @@ Anthropic's own clients; using one would be spoofing — prohibited by this gate
 ### 1.3 Decision
 
 **`api_key only`.** Enforced in config validation: `providers.anthropic.auth: "oauth"` is rejected with the
-recorded reason; the §3 table drops the OAuth option; §12/README updated (DESIGN rev 12).
+recorded reason; the §3 table drops the OAuth option; §12/README updated (rev 12).
 
 ---
 

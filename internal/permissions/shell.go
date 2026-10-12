@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
+	"unicode"
 
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -27,35 +27,96 @@ var errNonLiteral = errors.New("non-literal command name refused (e.g. $CMD); wr
 // Shell analyses commands for the model-facing shell tool (§7). Not a
 // sandbox: an allowlisted interpreter can do anything the user can.
 type Shell struct {
-	mu    sync.Mutex
-	allow map[string]bool
+	rules *Rules
+	auto  bool // auto mode: the risk table (auto.go) replaces "needs approval"
 	jail  *Jail
 	goos  string
 }
 
-func NewShell(allow []string, jail *Jail, goos string) *Shell {
-	s := &Shell{allow: map[string]bool{}, jail: jail, goos: goos}
-	for _, a := range allow {
-		s.allow[a] = true
+// AutoView returns the auto-mode view of s: the same Rules (an allow-always
+// learned in either view applies in both), the jail j (normally
+// s.jail.WithWritable(TempRoots()...)), and the risk table instead of the
+// default "needs approval" class.
+func (s *Shell) AutoView(j *Jail) *Shell {
+	return &Shell{rules: s.rules, auto: true, jail: j, goos: s.goos}
+}
+
+func NewShell(rules *Rules, jail *Jail, goos string) *Shell {
+	if rules == nil {
+		rules = NewRules()
 	}
-	return s
+	return &Shell{rules: rules, jail: jail, goos: goos}
 }
 
+// learnable reports whether name may enter an allow list as a plain command
+// name: one literal word (what Rules.Learn accepts) that is not hard-deny,
+// mkfs*, or an ask-every-time class (an allow rule would lift that ask).
+// winToo adds the Windows ask names.
+func learnable(name string, winToo bool) bool {
+	if name == "" || strings.Contains(name, "*") || strings.IndexFunc(name, unicode.IsSpace) >= 0 {
+		return false
+	}
+	lower := strings.ToLower(filepath.Base(strings.ReplaceAll(name, `\`, "/")))
+	if hardDeny[lower] || strings.HasPrefix(lower, "mkfs") || askEvery[lower] || (winToo && winAsk[lower]) {
+		return false
+	}
+	return true
+}
+
+// LegacyAllowNames filters the legacy shell.allow list down to the names that
+// are accepted: single literal command names only, never a wildcard and never
+// a hard-deny or ask-every-time name (on every OS, so a shared config cannot
+// differ by platform).
+func LegacyAllowNames(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if learnable(n, true) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// RulesFromAllow builds a single "user" layer whose allow rules are the
+// accepted legacy command names (see LegacyAllowNames).
+func RulesFromAllow(names []string) *Rules {
+	rs := RuleSet{Name: "user"}
+	for _, n := range LegacyAllowNames(names) {
+		if r, err := ParseRule(n); err == nil {
+			rs.Allow = append(rs.Allow, r)
+		}
+	}
+	return NewRules(rs)
+}
+
+// Learnable reports whether Allow would record name (tools.LearnableCommands:
+// the asker offers allow-always only then).
+func (s *Shell) Learnable(name string) bool { return learnable(name, s.goos == "windows") }
+
+// Allow records an allow-always answer, subject to the same predicate.
 func (s *Shell) Allow(name string) {
-	s.mu.Lock()
-	s.allow[strings.ToLower(name)] = true
-	s.allow[name] = true
-	s.mu.Unlock()
-}
-
-func (s *Shell) allowed(name string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.allow[name]
+	if !s.Learnable(name) {
+		return
+	}
+	s.rules.Learn(name)
+	if lower2 := strings.ToLower(name); lower2 != name {
+		s.rules.Learn(lower2)
+	}
 }
 
 type verdictAcc struct {
-	need, every []string
+	need, every, unsure []string
+}
+
+// cmdState is what the walk knows when it reaches a command: whether a
+// cd/pushd/popd (or env -C) made the cwd unknown, and — auto mode only —
+// whether something before it may have changed how a command name or its
+// arguments resolve (an assignment, export/declare, printf -v, a cd to an
+// unconfined or unknown directory). A tainted command is never allowed by
+// the risk table; it goes to the classifier.
+type cmdState struct {
+	cwdUnknown bool
+	tainted    bool
 }
 
 func (v *verdictAcc) add(list *[]string, name string) {
@@ -64,24 +125,123 @@ func (v *verdictAcc) add(list *[]string, name string) {
 	}
 }
 
-func (s *Shell) classify(name string, v *verdictAcc) error {
-	base := filepath.Base(name)
+// shortCmd renders at most the first three words of a command for an error
+// message, so a heredoc is never dumped.
+func shortCmd(ws []Word) string {
+	var parts []string
+	for i, w := range ws {
+		if i == 3 {
+			break
+		}
+		if w.Literal {
+			parts = append(parts, w.Text)
+		} else {
+			parts = append(parts, "?")
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// classify judges one command (ws = its words from the classified index to
+// the end of the call). Hard-deny and refused come first and no rule can
+// override them; then the layered rules; then the built-in classes.
+func (s *Shell) classify(ws []Word, v *verdictAcc, st cmdState) error {
+	win := s.goos == "windows"
+	head := ws[0].Text
+	var base string
+	if win {
+		base = baseName(head)
+	} else {
+		base = filepath.Base(head)
+	}
 	// The safety classes match case-insensitively: on a case-insensitive
 	// filesystem (macOS, Windows) `SUDO` and `RM` resolve to the real
 	// binaries, and must not slip past hard-deny / ask-every-time.
 	lower := strings.ToLower(base)
 	switch {
-	case hardDeny[lower] || strings.HasPrefix(lower, "mkfs"):
+	case hardDeny[lower] || strings.HasPrefix(lower, "mkfs") || (win && lower == "format-volume"):
 		return fmt.Errorf("%s is never allowed (hard-deny)", base)
-	case refused[lower]:
+	case !win && refused[lower]:
 		return fmt.Errorf("%s is refused: it runs code the analyser cannot see", base)
-	case builtinsOK[base]:
-	case askEvery[lower]:
+	}
+	// A path-qualified head is its own identity (ruling 14): `./tool` is not
+	// `tool`, so prompts show (and learn) the full head text. That holds for
+	// rule-Ask entries in both modes and for every auto-mode entry; only the
+	// default-mode ask-every-time class (askEvery/winAsk) shows the base name
+	// (`/bin/rm x` → `rm`, as TestShellRules expects).
+	name := base
+	pathHead := strings.ContainsAny(head, `/\`)
+	if pathHead {
+		name = head
+	}
+	switch d, layer, src := s.rules.Decide(ws); d {
+	case Deny:
+		return fmt.Errorf("`%s` is denied by the permissions rule %q (%s config)", shortCmd(ws), src, layer)
+	case Ask:
+		v.add(&v.every, name)
+		return nil
+	case Allow:
+		return nil
+	}
+	// A builtin is only a builtin by its bare name: `./echo` runs whatever
+	// file is there.
+	builtin := !pathHead && (builtinsOK[base] || (win && builtinsOK[lower]))
+	if s.auto {
+		switch {
+		case builtin:
+		default:
+			// Windows runs the same table on its best-effort words, behind
+			// winPathCheck (plain relative paths only) and with the
+			// PowerShell removal aliases judged as rm.
+			conf, tws := s.pathCheck(st.cwdUnknown), ws
+			if win {
+				conf = winPathCheck(conf)
+				if !pathHead && winAsk[lower] {
+					tws = append([]Word{{Text: "rm", Literal: true}}, ws[1:]...)
+				}
+			}
+			verdict := autoClassify(tws, conf)
+			if verdict == autoAllow && st.tainted {
+				verdict = autoUnsure
+			}
+			// rm runs without a prompt only on literal paths the table
+			// placed inside the workdir or a temp root; anything it cannot
+			// place (a glob, a variable, a cd before it) asks every time
+			// and never reaches the classifier.
+			if verdict == autoUnsure && (askEvery[lower] || (win && winAsk[lower])) {
+				verdict = autoAsk
+			}
+			if win && winAlwaysAsk[lower] {
+				verdict = autoAsk
+			}
+			switch verdict {
+			case autoAllow:
+			case autoAsk:
+				v.add(&v.every, name)
+			default:
+				v.add(&v.unsure, name)
+			}
+		}
+		return nil
+	}
+	switch {
+	case builtin:
+	case askEvery[lower] || (win && winAsk[lower]):
 		v.add(&v.every, base)
-	case !s.allowed(base):
-		v.add(&v.need, base)
+	default:
+		v.add(&v.need, name)
 	}
 	return nil
+}
+
+// toWords converts call arguments to analyser words.
+func toWords(args []*syntax.Word) []Word {
+	ws := make([]Word, len(args))
+	for i, a := range args {
+		t, ok := wordLit(a)
+		ws[i] = Word{Text: t, Literal: ok}
+	}
+	return ws
 }
 
 // literalSafe reports whether a word part's runtime value is exactly its
@@ -369,8 +529,18 @@ func (s *Shell) checkTarget(w *syntax.Word, cwdUnknown bool) error {
 	if !ok {
 		return fmt.Errorf("non-literal redirect/tee target refused")
 	}
+	return s.checkTargetText(t, cwdUnknown)
+}
+
+func (s *Shell) checkTargetText(t string, cwdUnknown bool) error {
 	if t == "/dev/null" || t == "/dev/stdout" || t == "/dev/stderr" {
 		return nil
+	}
+	if strings.HasPrefix(t, "~") && t != "~" && !strings.HasPrefix(t, "~/") {
+		return fmt.Errorf("redirect target %q: ~user, ~+ and ~- are not resolved; write the path out", t)
+	}
+	if innerDotDot(t) {
+		return fmt.Errorf("redirect target %q has .. after a directory (a symlink would be followed first); write the path without it", t)
 	}
 	if cwdUnknown && !filepath.IsAbs(t) && t != "~" && !strings.HasPrefix(t, "~/") {
 		return fmt.Errorf("relative redirect target %q after a cd/pushd/popd cannot be resolved; use an absolute path or run the cd separately", t)
@@ -381,16 +551,185 @@ func (s *Shell) checkTarget(w *syntax.Word, cwdUnknown bool) error {
 	return nil
 }
 
-func (s *Shell) Check(command string) ([]string, []string, error) {
+// pathCheck classifies literal path operands for the auto table against
+// s.jail (the workdir plus its writable roots). After a cd a relative path
+// cannot be placed; `~user`, `~+` and `~-` are never resolved.
+func (s *Shell) pathCheck(cwdUnknown bool) pathFunc {
+	// The guards compare case-folded: on a case-insensitive filesystem
+	// `.GIT` is .git (stricter on Linux, where it is merely a sibling).
+	fold := strings.ToLower
+	root := s.jail.Root()
+	return func(p string, write bool) pathClass {
+		home := p == "~" || strings.HasPrefix(p, "~/")
+		if strings.HasPrefix(p, "~") && !home {
+			return pathOut
+		}
+		if innerDotDot(p) {
+			return pathOut
+		}
+		if cwdUnknown && !filepath.IsAbs(p) && !home {
+			return pathOut
+		}
+		res, err := s.jail.Resolve(p, write)
+		if err != nil {
+			return pathOut // outside, and every ancestor of the workdir
+		}
+		roots := append([]string{root}, s.jail.writable...)
+		for _, r := range roots {
+			if fold(res) == fold(r) {
+				return pathRoot // the workdir or a writable root itself
+			}
+		}
+		for _, r := range roots {
+			if within(fold(res), fold(r)) {
+				// An ancestor of the workdir (or of another writable root)
+				// that lies inside a writable root: treated as outside.
+				return pathOut
+			}
+		}
+		if gitComponent(p) || gitComponent(res) {
+			return pathGit
+		}
+		return pathOK
+	}
+}
+
+// gitComponent reports whether any path component of p is `.git`
+// (case-folded; trailing dots/spaces ignored, as Windows does). The match is
+// the whole component: `.gitignore` is not one.
+func gitComponent(p string) bool {
+	for _, c := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if strings.EqualFold(strings.TrimRight(c, ". "), ".git") {
+			return true
+		}
+	}
+	return false
+}
+
+// gitTarget reports whether a write target names .git or lands in it after
+// resolution (a symlink to .git).
+func (s *Shell) gitTarget(t string) bool {
+	if gitComponent(t) {
+		return true
+	}
+	res, err := s.jail.Resolve(t, true)
+	return err == nil && gitComponent(res)
+}
+
+// headName is the identity a command head is shown under (ruling 14): the
+// full text when path-qualified, else the base name.
+func headName(t string) string {
+	if strings.ContainsAny(t, `/\`) {
+		return t
+	}
+	return filepath.Base(t)
+}
+
+// stmtLabel names a statement for an every-time ask about one of its
+// redirects: the command it runs, or "redirect".
+func stmtLabel(x *syntax.Stmt) string {
+	if call, ok := x.Cmd.(*syntax.CallExpr); ok && len(call.Args) > 0 {
+		if idxs, err := unwrap(call.Args); err == nil && len(idxs) > 0 {
+			if t, ok := wordLit(call.Args[idxs[len(idxs)-1]]); ok {
+				return headName(t)
+			}
+		}
+	}
+	return "redirect"
+}
+
+// innerDotDot reports whether p has a `..` after a named component
+// (`link/..`). The jail cleans paths lexically, but the kernel applies `..`
+// after following a symlink — `escape/../x` lands beside the symlink's
+// target, not in the workdir — so such paths are not placed. A leading
+// `../` is fine: it applies to the canonical workdir.
+func innerDotDot(p string) bool {
+	named := false
+	for _, c := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		switch c {
+		case "..":
+			if named {
+				return true
+			}
+		case ".":
+		default:
+			named = true
+		}
+	}
+	return false
+}
+
+// cdConfined reports whether a cd goes to one literal directory inside the
+// confinement. pushd/popd (a directory stack), a bare cd (home), `cd -`
+// and a non-literal target do not.
+func (s *Shell) cdConfined(ws []Word, cwdUnknown bool) bool {
+	if strings.ToLower(filepath.Base(ws[0].Text)) != "cd" {
+		return false
+	}
+	_, args := splitArgs(ws, 1)
+	if len(args) != 1 || !args[0].Literal || args[0].Text == "-" {
+		return false
+	}
+	return s.pathCheck(cwdUnknown)(args[0].Text, false) != pathOut
+}
+
+// checkWrapperOutputs checks every output file of a `time` wrapper (GNU
+// time writes the last `-o FILE` / `--output[=]FILE`) as a redirect target.
+// The wrapper words are walked with timeSpec, so option values (`-f FMT`,
+// an earlier `-o`) never end the scan early. ws[:last idx] holds the
+// wrapper words; unwrap already validated their options. In auto mode a
+// target inside .git asks every time.
+func (s *Shell) checkWrapperOutputs(ws []Word, idxs []int, cwdUnknown bool, v *verdictAcc) error {
+	end := len(ws)
+	if len(idxs) > 0 {
+		end = idxs[len(idxs)-1]
+	}
+	for i := 0; i < end; i++ {
+		if strings.ToLower(filepath.Base(ws[i].Text)) != "time" {
+			continue
+		}
+	walk:
+		for j := i + 1; j < end; j++ {
+			t := ws[j].Text
+			target, has := "", false
+			switch {
+			case t == "-o" || t == "--output":
+				if j+1 < len(ws) {
+					target, has = ws[j+1].Text, true
+				}
+				j++
+			case strings.HasPrefix(t, "--output="):
+				target, has = strings.TrimPrefix(t, "--output="), true
+			case timeSpec.arg[t]:
+				j++ // -f/--format FMT
+			case strings.HasPrefix(t, "-"):
+			default:
+				break walk // the wrapped command
+			}
+			if !has {
+				continue
+			}
+			if err := s.checkTargetText(target, cwdUnknown); err != nil {
+				return err
+			}
+			if s.auto && s.gitTarget(target) {
+				v.add(&v.every, headName(ws[i].Text))
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Shell) Check(command string) (need, every, unsure []string, err error) {
 	if s.goos == "windows" {
 		return s.checkWindows(command)
 	}
 	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(command), "")
 	if err != nil {
-		return nil, nil, fmt.Errorf("cannot parse command (refused, no best-effort guessing): %v", err)
+		return nil, nil, nil, fmt.Errorf("cannot parse command (refused, no best-effort guessing): %v", err)
 	}
 	var v verdictAcc
-	var cwdUnknown bool
+	var cwdUnknown, tainted bool
 	var firstErr error
 	fail := func(e error) {
 		if firstErr == nil {
@@ -404,43 +743,72 @@ func (s *Shell) Check(command string) ([]string, []string, error) {
 		switch x := n.(type) {
 		case *syntax.Stmt:
 			for _, r := range x.Redirs {
+				check := false
 				switch r.Op {
 				case syntax.RdrOut, syntax.AppOut, syntax.RdrAll, syntax.AppAll, syntax.ClbOut, syntax.RdrInOut:
-					if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
-						fail(err)
-					}
+					check = true
 				case syntax.DplOut:
-					if t, ok := wordLit(r.Word); !ok || (t != "-" && strings.Trim(t, "0123456789") != "") {
-						if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
-							fail(err)
-						}
-					}
+					t, ok := wordLit(r.Word)
+					check = !ok || (t != "-" && strings.Trim(t, "0123456789") != "")
+				}
+				if !check {
+					continue
+				}
+				if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
+					fail(err)
+				} else if t, _ := wordLit(r.Word); s.auto && s.gitTarget(t) {
+					v.add(&v.every, stmtLabel(x)) // .git/config, hooks: code that git runs later
 				}
 			}
+		case *syntax.DeclClause:
+			tainted = true // export/declare/local/readonly/typeset: PATH and friends
 		case *syntax.CallExpr:
 			if len(x.Args) == 0 {
-				return true // pure assignment
+				tainted = true // a pure assignment (PATH=…) changes later commands
+				return true
 			}
 			idxs, uerr := unwrap(x.Args)
 			if uerr != nil {
 				fail(uerr)
 				return false
 			}
+			ws := toWords(x.Args)
+			if err := s.checkWrapperOutputs(ws, idxs, cwdUnknown, &v); err != nil {
+				fail(err)
+				return false
+			}
 			for _, idx := range idxs {
-				name, ok := wordLit(x.Args[idx])
-				if !ok {
+				if !ws[idx].Literal {
 					fail(errNonLiteral)
 					return false
 				}
-				if err := s.classify(name, &v); err != nil {
+				st := cmdState{cwdUnknown: cwdUnknown, tainted: tainted || len(x.Assigns) > 0}
+				for _, pw := range ws[:idx] { // wrapper words: env NAME=VALUE, env -C DIR
+					if !strings.HasPrefix(pw.Text, "-") && strings.Contains(pw.Text, "=") {
+						st.tainted = true
+					}
+					if pw.Text == "-C" || strings.HasPrefix(pw.Text, "--chdir") {
+						st.cwdUnknown, st.tainted = true, true
+					}
+				}
+				if err := s.classify(ws[idx:], &v, st); err != nil {
 					fail(err)
 					return false
 				}
-				switch filepath.Base(name) {
+				switch filepath.Base(ws[idx].Text) {
+				case "printf":
+					if hasOpt(ws, idx+1, "v") {
+						tainted = true // printf -v PATH …
+					}
 				case "cd", "pushd", "popd":
 					// Relative redirect targets are resolved against the jail
 					// root, which is only correct while the cwd is unchanged;
-					// after a cd only absolute targets can be checked.
+					// after a cd only absolute targets can be checked. In auto
+					// mode a cd anywhere but a confined directory also taints
+					// what follows (a bare `ls` would read it).
+					if s.auto && !s.cdConfined(ws[idx:], cwdUnknown) {
+						tainted = true
+					}
 					cwdUnknown = true
 				case "tee":
 					for _, a := range x.Args[idx+1:] {
@@ -449,6 +817,8 @@ func (s *Shell) Check(command string) ([]string, []string, error) {
 						}
 						if err := s.checkTarget(a, cwdUnknown); err != nil {
 							fail(err)
+						} else if t, _ := wordLit(a); s.auto && s.gitTarget(t) {
+							v.add(&v.every, headName(ws[idx].Text))
 						}
 					}
 				}
@@ -457,7 +827,7 @@ func (s *Shell) Check(command string) ([]string, []string, error) {
 		return true
 	})
 	if firstErr != nil {
-		return nil, nil, firstErr
+		return nil, nil, nil, firstErr
 	}
-	return v.need, v.every, nil
+	return v.need, v.every, v.unsure, nil
 }

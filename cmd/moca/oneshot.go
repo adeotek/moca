@@ -47,7 +47,17 @@ func resolveResume(o Options, wd string) (string, error) {
 	if o.Continue {
 		return session.FindForWorkdir(dir, wd)
 	}
-	return session.Find(dir, o.Resume)
+	path, err := session.Find(dir, o.Resume, wd)
+	if err != nil {
+		return "", err
+	}
+	// A session resumes only in its own workdir: the trust decision, the
+	// project rules and `!` all belong to the cwd (checked again by
+	// agent.Resume for every caller).
+	if !session.InWorkdir(path, wd) {
+		return "", fmt.Errorf("session %s belongs to another directory (%s); cd there and run moca --resume %s", o.Resume, session.WorkdirOf(path), o.Resume)
+	}
+	return path, nil
 }
 
 func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stderr io.Writer) int {
@@ -87,20 +97,34 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 			fmt.Fprintf(stderr, "warning: %s\n", e.Text)
 		}
 	}
-	yolo := o.YoloOn(cfg)
-	trusted := yolo
+	trustMode := modeWithoutProject(o, cfg)
+	trusted := trustMode == "yolo"
 	if o.Approve != nil {
 		trusted = *o.Approve
 	}
-	if yolo {
-		fmt.Fprintln(stderr, "yolo mode: all permission checks are off")
+	if trusted {
+		// Project rules and defaultMode join in; a project file that does
+		// not parse is a config error (exit 2) for a trusted workdir only.
+		p, err := config.LoadProject(wd)
+		if err != nil {
+			fmt.Fprintln(stderr, "moca:", err)
+			return exitUsage
+		}
+		cfg.Project = p
 	}
-	if o.Plan {
+	mode, plan := o.ResolveMode(cfg)
+	switch mode {
+	case "yolo":
+		fmt.Fprintln(stderr, "yolo mode: all permission checks are off")
+	case "auto":
+		fmt.Fprintln(stderr, "auto mode: safe actions run, risky ones are refused (no one to ask)")
+	}
+	if plan {
 		fmt.Fprintln(stderr, "plan mode: the run writes an implementation plan to docs/plans/ (no other writes)")
 	}
 	var a *agent.Agent
 	so := agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model,
-		Trusted: trusted, Yolo: yolo, Plan: o.Plan, Emit: emit, Slug: oneShotSlug(o)}
+		Trusted: trusted, Mode: agent.PermMode(mode), Plan: plan, Emit: emit, Slug: oneShotSlug(o)}
 	if resumePath != "" {
 		a, err = agent.Resume(so, resumePath)
 	} else {

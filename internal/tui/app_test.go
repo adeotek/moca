@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/tools"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // newTestModel builds a model without an agent (agent-dependent commands are
@@ -129,14 +132,14 @@ func TestRunDoneClearsTransient(t *testing.T) {
 // (an approved interpreter runs the heredoc below its first line), and the
 // overflow is counted.
 func TestApprovalPromptSanitized(t *testing.T) {
-	got := approvalPanel(tools.Question{Subject: "seq", Detail: "seq 'x\x1b[2Jy'\nsecond line"}, 80, 6)
+	got := approvalPanel(&approvalState{approvalMsg: approvalMsg{q: tools.Question{Subject: "seq", Detail: "seq 'x\x1b[2Jy'\nsecond line"}}}, 80, 6)
 	if strings.Contains(got, "\x1b[2J") {
 		t.Fatalf("unescaped control byte in prompt: %q", got)
 	}
 	if !strings.Contains(got, "^[[2J") || !strings.Contains(got, "second line") {
 		t.Fatalf("every detail line is shown, sanitized: %q", got)
 	}
-	long := approvalPanel(tools.Question{Subject: "python3", Detail: "python3 - <<'EOF'\na\nb\nc\nd\ne\nf\nEOF"}, 80, 4)
+	long := approvalPanel(&approvalState{approvalMsg: approvalMsg{q: tools.Question{Subject: "python3", Detail: "python3 - <<'EOF'\na\nb\nc\nd\ne\nf\nEOF"}}}, 80, 4)
 	if !strings.Contains(long, "a") || strings.Contains(long, "│ d") || !strings.Contains(long, "+5 lines") {
 		t.Fatalf("overflow must be capped and counted: %q", long)
 	}
@@ -182,5 +185,26 @@ func TestInputRulesAndNoPrefix(t *testing.T) {
 	}
 	if rule := strings.Repeat("─", 120); strings.Count(v, rule) != 2 {
 		t.Fatalf("want two full-width rules:\n%s", v)
+	}
+}
+
+// A skill invoked by name starts a run whose message points the agent at
+// the skill's path — the scrollback echoes it, exactly like a prompt
+// template's expansion.
+func TestSkillSubmissionStartsARun(t *testing.T) {
+	m := newAgentModel(t)
+	writeSkill(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "moca", "skills"), "deploy", "ship it")
+	m.agent.ReloadSkills()
+	out, _ := simulate(m, tuiCmd(t, m, "/deploy prod"))
+	// The echo is styled (and wrapped/padded to the terminal width by
+	// printlnUser): strip the SGR sequences before matching.
+	norm := strings.Join(strings.Fields(ansi.Strip(out)), " ")
+	for _, want := range []string{"Load and follow the deploy skill", "skills/deploy/SKILL.md", "for this request: prod"} {
+		if !strings.Contains(norm, want) {
+			t.Fatalf("skill submission echo missing %q:\n%s", want, norm)
+		}
+	}
+	if m.running {
+		t.Fatal("the run must complete")
 	}
 }

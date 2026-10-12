@@ -78,8 +78,9 @@ func TestFilterSkillsDropsMissingBuiltins(t *testing.T) {
 // would ship the raw token to the model), and every resolvable slot must be
 // used (a dead slot is silent debt).
 func TestPromptTemplateSlots(t *testing.T) {
-	known := []string{"{{workdir}}", "{{os}}", "{{arch}}", "{{date}}", "{{git}}", "{{verify}}", "{{rtk}}", "{{version}}"}
-	re := regexp.MustCompile(`\{\{[a-z-]+\}\}`)
+	known := []string{"{{workdir}}", "{{os}}", "{{arch}}", "{{date}}", "{{git}}", "{{verify}}", "{{rtk}}", "{{version}}",
+		"{{config_dir}}", "{{prompts_dir}}", "{{skills_dir}}"}
+	re := regexp.MustCompile(`\{\{[a-z_-]+\}\}`)
 	used := map[string]bool{}
 	for _, tok := range re.FindAllString(promptTemplate, -1) {
 		used[tok] = true
@@ -105,11 +106,20 @@ func TestPromptTemplateSlots(t *testing.T) {
 	}
 	// Rendering must consume every slot, with and without optional lines.
 	for name, in := range map[string]PromptInput{
-		"full": {Workdir: "/w", OS: "o", Arch: "a", Date: "d", Git: "g", Version: "v", Verify: "vk", RTK: true},
+		"full": {Workdir: "/w", OS: "o", Arch: "a", Date: "d", Git: "g", Version: "v", Verify: "vk", RTK: true,
+			ConfigDir: "/cfg", PromptsDir: "/prompts", SkillsDir: "/skills"},
 		"bare": {},
 	} {
-		if out := BuildSystemPrompt(in); strings.Contains(out, "{{") {
+		out := BuildSystemPrompt(in)
+		if strings.Contains(out, "{{") {
 			t.Errorf("%s render leaves a raw slot:\n%s", name, out)
+		}
+		if name == "full" {
+			for _, dir := range []string{"/cfg", "/prompts", "/skills"} {
+				if !strings.Contains(out, dir) {
+					t.Errorf("render must name the user-level dir %s:\n%s", dir, out)
+				}
+			}
 		}
 	}
 }

@@ -15,8 +15,8 @@ func TestUnjailedAndAllowAll(t *testing.T) {
 		t.Fatal(p)
 	}
 	for _, cmd := range []string{"sudo rm -rf /tmp/x", "eval $CMD", "if then fi (", "cat > ../outside"} {
-		if need, every, err := (AllowAll{}).Check(cmd); need != nil || every != nil || err != nil {
-			t.Errorf("%q: %v %v %v", cmd, need, every, err)
+		if need, every, unsure, err := (AllowAll{}).Check(cmd); need != nil || every != nil || unsure != nil || err != nil {
+			t.Errorf("%q: %v %v %v %v", cmd, need, every, unsure, err)
 		}
 	}
 }

@@ -4,8 +4,7 @@ One Go binary: a minimal TUI coding agent (`github.com/adeotek/moca`, binary `mo
 
 ## Ground truth (read before changing behavior)
 
-- `docs/specs/SPECS.md` — **living, normative** description of what is implemented today (CLI contract, config keys, wire behavior, tools, agent loop). Update it in the same PR as any behavior change (SPECS §16). When it and `docs/specs/DESIGN.md` disagree, SPECS wins for the current code.
-- `docs/specs/DESIGN.md` — v1 contract/vision. `README.md` — user-facing.
+- `docs/specs/SPECS.md` — **the single source of truth** for all design, specs, features and constraints: a living, normative description of what is implemented today (CLI contract, config keys, wire behavior, tools, agent loop, threat model, non-goals). Update it in the same PR as any behavior or design change (SPECS §16). The retired `DESIGN.md` v1 contract was deleted 2026-10-13 — its content lives in SPECS and git history. `README.md` — user-facing.
 
 ## Commands
 
@@ -25,7 +24,7 @@ mise run <task>                             # the make targets, as mise tasks
 - **CI gate** (`.github/workflows/ci.yml`): `gofmt -l .` empty, `go vet ./...`, `go build ./...`, `go test ./... -race`. `make vet` runs the first two locally.
 - **Release workflow** (`.github/workflows/release.yml`): a **manual dispatch only** (Actions → Release → Run workflow — no tag trigger) packages linux/amd64, linux/arm64, windows/amd64 + `checksums.txt` into a GitHub Release; the asset names (`moca-<version>-<os>-<arch>.tar.gz|zip`) are a contract with `internal/update` (`moca update`). `install.sh` / `install.ps1` (repo root) install and update from those packages (in-place, safe to re-run).
 - Single package/test: `go test ./internal/agent -run TestName -race -count=1`.
-- **Eval corpus** (DESIGN rev 21; not in CI, same `.env` key, a build first): `make build && bash test/evals/run.sh -n 3 -l <label>` — seven scenarios, metrics per run in the gitignored `test/evals/results/`; compare labels with `go run ./test/evals/evalstats -summary <file>`. `bash test/evals/run.sh --selftest` checks the checkers (no model). Harness or prompt changes should show their delta against `test/evals/BASELINE.md`.
+- **Eval corpus** (rev 21; not in CI, same `.env` key, a build first): `make build && bash test/evals/run.sh -n 3 -l <label>` — seven scenarios, metrics per run in the gitignored `test/evals/results/`; compare labels with `go run ./test/evals/evalstats -summary <file>`. `bash test/evals/run.sh --selftest` checks the checkers (no model). Harness or prompt changes should show their delta against `test/evals/BASELINE.md`.
 - **Ship gate** (not in CI, needs repo `.env` with `OPENCODE_GO_KEY`, and a build first): `make build && bash test/shipgate/run.sh`. The checker is `//go:build shipgate`, so plain `go test ./...` skips it. Several `internal/tools` tests are `//go:build !windows`.
 
 ## Layout & dependency rules
@@ -33,15 +32,16 @@ mise run <task>                             # the make targets, as mise tasks
 - Entrypoint `cmd/moca/main.go`; `run()` is the testable core. Sibling files handle `-p`, the TUI, login, `mcp` and `update` subcommands.
 - Strict import direction: `llm`/`config`/`update` import nothing internal → `provider` (llm, config) → `mcp` (tools, config, llm) → `agent` (everything) → `tui` (agent + pure pkgs). Never reverse. `tools`/`permissions`/`session`/`skills`/`compact` are mutually independent and use structural interfaces, not shared types.
 - Logging: packages call the standard `log/slog` directly; `internal/applog` (the file handler, redaction, caps) is imported **only** by `cmd/moca`. Log metadata only — never prompts, file contents, command text or secrets (SPECS §13.5).
-- Exactly **eight frozen tools** (the `web` tool joined in DESIGN rev 19); schemas are golden (`internal/tools/testdata/schemas.golden.json`). Changing a schema is a v2 discussion; description-only edits (rev 21) are batched into one golden update — each one costs every user a prompt-cache reset.
+- Exactly **eight frozen tools** (the `web` tool joined as rev 19); schemas are golden (`internal/tools/testdata/schemas.golden.json`). Changing a schema is a v2 discussion; description-only edits (rev 21) are batched into one golden update — each one costs every user a prompt-cache reset.
 
 ## Conventions & gotchas
 
 - Config decode is **strict**: unknown keys are rejected. Adding a config key means defaults + validation + a SPECS update.
 - The system prompt is built once per run and stored in the session; never rebuilt. Its fixed text is the embedded `internal/agent/system-prompt.md` (`{{token}}` slots rendered at start).
-- `config.Standardize` (JSONC) preserves byte offsets so decode errors keep original `line:col`; `internal/config/testdata/example.jsonc` is the byte-exact DESIGN §12 fixture.
+- `config.Standardize` (JSONC) preserves byte offsets so decode errors keep original `line:col`; `internal/config/testdata/example.jsonc` is the byte-exact SPECS §4 fixture.
 - Secrets: config `apiKey` must be an `env:VAR` reference (literals rejected). `.env` and `*.key` are gitignored — never commit them.
 - Thinking blocks/signatures are model-bound; cross-provider transforms happen in the agent before each request (see SPECS §14).
+- `tools.CommandChecker.Check` returns a 4-tuple (`need, askEveryTime, unsure, err`) since the v0.4 rule engine — `unsure` feeds auto mode's classifier (`Env.Judge`); new tools' test fakes must match it (see SPECS §11).
 - Git flow: `main` is PR-only — a local `.git/hooks/pre-push` blocks pushes to it (`--no-verify` is an emergency bypass only). Branch `phase/N-<slug>` or `chore/<slug>`, conventional commits, one version bump per PR.
 - Never create a commit without the user's explicit approval.
 

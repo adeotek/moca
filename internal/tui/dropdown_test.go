@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -176,6 +178,51 @@ func TestDropdownRendersCursorAndLegend(t *testing.T) {
 	m.syncTextarea()
 	if strings.Contains(m.View().Content, "esc dismiss") {
 		t.Fatal("multi-line draft must hide the dropdown")
+	}
+}
+
+// Skills join the dropdown tagged `skill: ` (prompt templates `prompt: `);
+// a name shadowed by a built-in or a prompt is listed once — its winner —
+// and tab completes a skill name like any other word.
+func TestDropdownListsSkillsAndTags(t *testing.T) {
+	m := newAgentModel(t)
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "moca", "skills")
+	writeSkill(t, dir, "deploy", "ship it")
+	writeSkill(t, dir, "review", "shadowed by the prompt template")
+	writeSkill(t, dir, "model", "shadowed by the built-in")
+	m.opts.Prompts = []skills.Prompt{{Name: "review", ArgumentHint: "<path>", Description: "review code"}}
+	m.agent.ReloadSkills()
+	m.input.SetBuffer("/")
+	m.syncTextarea()
+	d := m.dropdown()
+	if d == nil {
+		t.Fatal("no dropdown for /")
+	}
+	row := func(name string) (dropItem, bool) {
+		for _, it := range d.items {
+			if it.name == name {
+				return it, true
+			}
+		}
+		return dropItem{}, false
+	}
+	if it, ok := row("deploy"); !ok || it.hint != "skill: ship it" {
+		t.Fatalf("skill row: %+v ok=%v", it, ok)
+	}
+	if it, ok := row("review"); !ok || !strings.HasPrefix(it.hint, "prompt: ") {
+		t.Fatalf("the prompt must win the name and carry its tag: %+v", it)
+	}
+	names := dropNames(d)
+	if count(names, "review") != 1 || count(names, "model") != 1 {
+		t.Fatalf("shadowed names must be listed once: %v", names)
+	}
+	// Tab completes a skill name (prefix filter sees it like any other).
+	m.input.SetBuffer("/dep")
+	m.syncTextarea()
+	m.drop = nil
+	m.Update(key("tab"))
+	if got := m.input.Buffer(); got != "/deploy " {
+		t.Fatalf("tab completion: %q", got)
 	}
 }
 

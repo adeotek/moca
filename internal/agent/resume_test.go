@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -29,7 +30,7 @@ func TestResumeRebuildsExactContext(t *testing.T) {
 	sys := a.opts.System
 	a.Session().Close()
 
-	b, err := Resume(StartOptions{Config: a.opts.Config, Workdir: "/ignored", HTTP: s.srv.Client()}, path)
+	b, err := Resume(StartOptions{Config: a.opts.Config, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +56,7 @@ func TestResumeAfterCrashMidTool(t *testing.T) {
 	a.append(session.Entry{Type: session.TypeToolUse, ToolUse: &session.ToolUse{MessageID: m.ID, Call: llm.ToolCall{ID: "c1", Name: "shell"}}})
 	path := a.Session().Path()
 	a.Session().Close()
-	b, err := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client()}, path)
+	b, err := Resume(StartOptions{Config: a.opts.Config, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,12 +73,12 @@ func TestResumeNeverRestoresYolo(t *testing.T) {
 	a.SetYolo(true)
 	path := a.Session().Path()
 	a.Session().Close()
-	b, err := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client()}, path)
+	b, err := Resume(StartOptions{Config: a.opts.Config, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
 	if err != nil || b.Yolo() {
 		t.Fatal("resume starts with checks on unless the resuming process asks for yolo", err)
 	}
 	b.Session().Close()
-	c, _ := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client(), Yolo: true}, path)
+	c, _ := Resume(StartOptions{Config: a.opts.Config, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client(), Mode: ModeYolo}, path)
 	if !c.Yolo() {
 		t.Fatal("--yolo on resume applies")
 	}
@@ -94,7 +95,7 @@ func TestResumeHonoursCompaction(t *testing.T) {
 	_ = u1
 	path := a.Session().Path()
 	a.Session().Close()
-	b, _ := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client()}, path)
+	b, _ := Resume(StartOptions{Config: a.opts.Config, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
 	b.Run(context.Background(), "new")
 	body := mustJSONString(s.bodies[0])
 	if !strings.Contains(body, "SUMMARY") || strings.Contains(body, "old answer") {
@@ -102,10 +103,69 @@ func TestResumeHonoursCompaction(t *testing.T) {
 	}
 }
 
+// A pre-Task-7 session header has no "mode" key (default was kept implicit)
+// and recorded yolo only as a bare flag: it must resume as default mode with
+// checks on, never yolo, and nothing must be rewritten on disk.
+func TestResumeOldSessionDefaultsMode(t *testing.T) {
+	s := newScript(t)
+	a, work, _ := startTestWith(t, s, "", "")
+	a.Session().Close()
+	path := filepath.Join(t.TempDir(), "old.jsonl")
+	// One JSON line per file line — no "mode" key (default kept implicit
+	// pre-Task-7) and yolo only as the bare flag.
+	line := `{"id":"s1","ts":"2026-01-02T03:04:05Z","type":"session","session":{"workdir":"` + work + `","provider":"fake","model":"fake/m",` +
+		`"startedAt":"2026-01-02T03:04:05Z","mocaVersion":"v0","systemPrompt":"SYS","yolo":true}}`
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Resume(StartOptions{Config: a.opts.Config, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Session().Close()
+	if b.Mode() != ModeDefault || b.Yolo() {
+		t.Fatalf("an old session must resume as default mode with checks on, got %s (yolo=%v)", b.Mode(), b.Yolo())
+	}
+	// No mode rewrite: default stays implicit, and the only extra entry is
+	// the model_change that records the model's default effort ("" in the
+	// header vs "off") — never a permission_mode entry.
+	if entries, _ := session.ReadFile(path); len(entries) != 2 ||
+		entries[1].Type != session.TypeModelChange ||
+		entries[1].PermissionMode != nil {
+		for i, e := range entries {
+			t.Errorf("entry %d: type=%q line=%+v", i, e.Type, e)
+		}
+	}
+}
+
 func TestResumeNotASession(t *testing.T) {
 	if _, err := Resume(StartOptions{}, t.TempDir()+"/nope.jsonl"); err == nil {
 		t.Fatal("missing file must fail")
 	}
+}
+
+// A session resumes only from its own workdir: another directory's trust
+// decision and project rules must never apply to it. Nothing is written.
+func TestResumeRefusesAnotherWorkdir(t *testing.T) {
+	s := newScript(t)
+	a, work, _ := startTestWith(t, s, "", "")
+	path := a.Session().Path()
+	a.Session().Close()
+	before, _ := session.ReadFile(path)
+	for _, wd := range []string{t.TempDir(), ""} {
+		_, err := Resume(StartOptions{Config: a.opts.Config, Workdir: wd, HTTP: s.srv.Client()}, path)
+		if err == nil || !strings.Contains(err.Error(), "another directory") || !strings.Contains(err.Error(), session.WorkdirOf(path)) {
+			t.Fatalf("workdir %q: %v", wd, err)
+		}
+	}
+	if after, _ := session.ReadFile(path); len(after) != len(before) {
+		t.Fatalf("a refused resume wrote entries: before=%d after=%d", len(before), len(after))
+	}
+	b, err := Resume(StartOptions{Config: a.opts.Config, Workdir: work, HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatalf("own workdir must resume: %v", err)
+	}
+	b.Close()
 }
 
 // A session whose workdir no longer exists must fail with a clear message
@@ -122,7 +182,7 @@ func TestResumeMissingWorkdir(t *testing.T) {
 	if err := os.RemoveAll(work); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client()}, path)
+	_, err := Resume(StartOptions{Config: a.opts.Config, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
 	if err == nil || !strings.Contains(err.Error(), "workdir") || !strings.Contains(err.Error(), work) {
 		t.Fatalf("%v", err)
 	}
@@ -185,7 +245,7 @@ func TestResumeRestoresModelAndEffortFromModelChange(t *testing.T) {
 	a.SetEffort(llm.EffortLow)
 	path := a.Session().Path()
 	a.Session().Close()
-	b, err := Resume(StartOptions{Config: cfg, HTTP: s.srv.Client()}, path)
+	b, err := Resume(StartOptions{Config: cfg, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +263,7 @@ func TestResumeEffortFlagOverridesStored(t *testing.T) {
 	a.SetEffort(llm.EffortLow)
 	path := a.Session().Path()
 	a.Session().Close()
-	b, err := Resume(StartOptions{Config: cfg, Effort: "high", HTTP: s.srv.Client()}, path)
+	b, err := Resume(StartOptions{Config: cfg, Workdir: session.WorkdirOf(path), Effort: "high", HTTP: s.srv.Client()}, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +274,7 @@ func TestResumeEffortFlagOverridesStored(t *testing.T) {
 	if mc := lastModelChange(t, path); mc == nil || mc.Effort != "high" {
 		t.Fatalf("the override must be recorded: %+v", mc)
 	}
-	c, err := Resume(StartOptions{Config: cfg, HTTP: s.srv.Client()}, path)
+	c, err := Resume(StartOptions{Config: cfg, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +282,7 @@ func TestResumeEffortFlagOverridesStored(t *testing.T) {
 	if c.Effort() != llm.EffortHigh {
 		t.Fatalf("a later plain resume restores the recorded override, got %s", c.Effort())
 	}
-	if _, err := Resume(StartOptions{Config: cfg, Effort: "bogus", HTTP: s.srv.Client()}, path); err == nil {
+	if _, err := Resume(StartOptions{Config: cfg, Workdir: session.WorkdirOf(path), Effort: "bogus", HTTP: s.srv.Client()}, path); err == nil {
 		t.Fatal("a bad effort is an error, not ignored")
 	}
 }
@@ -242,14 +302,14 @@ func TestResumeStoredModelNoLongerConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = Resume(StartOptions{Config: cfg, HTTP: s.srv.Client()}, path)
+	_, err = Resume(StartOptions{Config: cfg, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
 	if err == nil || !strings.Contains(err.Error(), "not configured") || !strings.Contains(err.Error(), "--model") || strings.Contains(err.Error(), "workdir") {
 		t.Fatalf("want a clear model error, got: %v", err)
 	}
 	if after, _ := session.ReadFile(path); len(after) != len(before) {
 		t.Fatalf("a failed resume must not append repair entries: %d → %d", len(before), len(after))
 	}
-	b, err := Resume(StartOptions{Config: cfg, Model: "other/x", HTTP: s.srv.Client()}, path)
+	b, err := Resume(StartOptions{Config: cfg, Workdir: session.WorkdirOf(path), Model: "other/x", HTTP: s.srv.Client()}, path)
 	if err != nil {
 		t.Fatalf("--model must rescue the session: %v", err)
 	}
@@ -275,7 +335,7 @@ func TestResumeRefusesSessionHeldByAnotherProcess(t *testing.T) {
 	a.append(session.Entry{Type: session.TypeToolUse, ToolUse: &session.ToolUse{MessageID: m.ID, Call: llm.ToolCall{ID: "c1", Name: "shell"}}})
 	path := a.Session().Path()
 	before, _ := session.ReadFile(path)
-	_, err := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client()}, path)
+	_, err := Resume(StartOptions{Config: a.opts.Config, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
 	var se *StartError
 	if !errors.Is(err, session.ErrInUse) || !errors.As(err, &se) {
 		t.Fatalf("resume of a live session must be refused as a runtime error: %v", err)
@@ -284,7 +344,7 @@ func TestResumeRefusesSessionHeldByAnotherProcess(t *testing.T) {
 		t.Fatal("a refused resume must not repair the other process's in-flight call")
 	}
 	a.Session().Close()
-	b, err := Resume(StartOptions{Config: a.opts.Config, HTTP: s.srv.Client()}, path)
+	b, err := Resume(StartOptions{Config: a.opts.Config, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
 	if err != nil {
 		t.Fatalf("once the holder is gone the session resumes (and is repaired): %v", err)
 	}
@@ -302,7 +362,7 @@ func TestResumeRestoresHardMode(t *testing.T) {
 	}
 	path := a.Session().Path()
 	a.Session().Close()
-	b, err := Resume(StartOptions{Config: cfg, HTTP: s.srv.Client()}, path)
+	b, err := Resume(StartOptions{Config: cfg, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +377,7 @@ func TestResumeRestoresHardMode(t *testing.T) {
 	c := startCatalog(t, s, cfg)
 	cpath := c.Session().Path()
 	c.Session().Close()
-	d, err := Resume(StartOptions{Config: cfg, HTTP: s.srv.Client()}, cpath)
+	d, err := Resume(StartOptions{Config: cfg, Workdir: session.WorkdirOf(cpath), HTTP: s.srv.Client()}, cpath)
 	if err != nil {
 		t.Fatal(err)
 	}

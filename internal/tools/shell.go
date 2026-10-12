@@ -31,15 +31,19 @@ func (shellTool) Spec() llm.ToolSpec {
 }
 
 func approve(ctx context.Context, env *Env, names []string, command string, canAlways bool) error {
+	lc, _ := env.Commands.(LearnableCommands)
 	for _, n := range names {
+		// A name the checker would ignore (auto mode's unsure `rm`) is not
+		// offered allow-always: the answer could never take effect.
+		always := canAlways && (lc == nil || lc.Learnable(n))
 		ans := Deny
 		if env.Ask != nil {
-			ans = env.Ask(ctx, Question{Kind: "shell", Subject: n, Detail: command, CanAlways: canAlways})
+			ans = env.Ask(ctx, Question{Kind: "shell", Subject: n, Detail: command, CanAlways: always})
 		}
 		slog.Debug("approval", "name", n, "answer", [...]string{"deny", "once", "always"}[ans])
 		switch ans {
 		case Deny:
-			if canAlways {
+			if always {
 				return fmt.Errorf("refused: `%s` is not allowlisted and the user did not approve it; ask the user to allow it or use another approach", n)
 			}
 			return fmt.Errorf("refused: `%s` needs explicit user approval for every call and it was not given", n)
@@ -68,10 +72,21 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	if strings.TrimSpace(a.Command) == "" {
 		return errorf("empty command")
 	}
-	need, every, err := env.Commands.Check(a.Command)
+	need, every, unsure, err := env.Commands.Check(a.Command)
 	if err != nil {
 		slog.Debug("shell refused") // the analyser's reason carries the command text: not logged
 		return errorf("refused: %v", err)
+	}
+	if len(unsure) > 0 {
+		// The auto table's unsure tier goes to the classifier first (§7.5):
+		// an allow clears the tier, anything else (or no judge) lands in
+		// the ask ladder, once, with allow-always offered.
+		if env.Judge != nil {
+			if ok, _ := env.Judge(ctx, a.Command); ok { // the agent's judge() logs decision/ms/cached
+				unsure = nil
+			}
+		}
+		need = append(need, unsure...)
 	}
 	if err := approve(ctx, env, need, a.Command, true); err != nil {
 		return errorf("%v", err)

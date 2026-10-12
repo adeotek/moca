@@ -71,7 +71,7 @@ func newAsker(send func(tea.Msg)) tools.Asker {
 // eventPipe delivers agent events to the program without ever blocking the
 // event loop. Bubble Tea's Program.Send is a blocking send on an unbuffered
 // channel and Update runs on the event-loop goroutine, so emitting
-// synchronously from Update — /yolo's YoloChanged, /clear's agent.Start
+// synchronously from Update — /mode's ModeChanged, /clear's agent.Start
 // warnings — would deadlock the program. A forwarder goroutine owns the
 // blocking send; emit only enqueues, preserving order (single FIFO channel).
 //

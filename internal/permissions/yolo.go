@@ -26,5 +26,5 @@ func (u *Unjailed) Resolve(path string, _ bool) (string, error) {
 // AllowAll is the yolo-mode CommandChecker: no analysis, no hard-deny.
 type AllowAll struct{}
 
-func (AllowAll) Check(string) ([]string, []string, error) { return nil, nil, nil }
+func (AllowAll) Check(string) (_, _, _ []string, _ error) { return nil, nil, nil, nil }
 func (AllowAll) Allow(string)                             {}

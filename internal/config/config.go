@@ -79,8 +79,64 @@ type Config struct {
 	Snapshot  SnapshotConfig            `json:"snapshot"`
 	Context   ContextConfig             `json:"context"`
 	TUI       TUIConfig                 `json:"tui"`
-	Yolo      bool                      `json:"yolo"` // all permission checks off by default (§7.5)
+	Yolo      bool                      `json:"yolo"` // legacy: all permission checks off by default (§7.5); see Mode
+	// Permissions holds the user-level mode and rules. Project is the trusted
+	// project file's block (set by cmd after the trust decision, never decoded).
+	Permissions PermissionsConfig  `json:"permissions"`
+	Project     *PermissionsConfig `json:"-"`
 }
+
+// PermissionsConfig is the permissions block of the user config and, with
+// fewer allowed keys, of a project .moca/config.jsonc.
+type PermissionsConfig struct {
+	DefaultMode string     `json:"defaultMode,omitempty"` // "default" | "auto" | "yolo"
+	Allow       []string   `json:"allow,omitempty"`
+	Ask         []string   `json:"ask,omitempty"`
+	Deny        []string   `json:"deny,omitempty"`
+	Auto        AutoConfig `json:"auto"`
+}
+
+// AutoConfig tunes auto mode.
+type AutoConfig struct {
+	Classifier *bool  `json:"classifier,omitempty"` // default true
+	Model      string `json:"model,omitempty"`      // default: config `model`
+}
+
+// PermModes are the valid permission modes.
+var PermModes = []string{"default", "auto", "yolo"}
+
+func (p PermissionsConfig) validate(key string) error {
+	if p.DefaultMode != "" && !slices.Contains(PermModes, p.DefaultMode) {
+		return fmt.Errorf("%s.defaultMode must be one of %s, got %q", key, strings.Join(PermModes, ", "), p.DefaultMode)
+	}
+	for _, l := range []struct {
+		name string
+		list []string
+	}{{"allow", p.Allow}, {"ask", p.Ask}, {"deny", p.Deny}} {
+		for i, r := range l.list {
+			if len(strings.Fields(r)) == 0 {
+				return fmt.Errorf("%s.%s[%d]: empty rule", key, l.name, i)
+			}
+		}
+	}
+	return nil
+}
+
+// Mode is the user-level default permission mode (§11): permissions.defaultMode,
+// else the legacy yolo flag, else "default". CLI flags and a trusted project
+// file are applied on top by cmd.
+func (c Config) Mode() string {
+	switch {
+	case c.Permissions.DefaultMode != "":
+		return c.Permissions.DefaultMode
+	case c.Yolo:
+		return "yolo"
+	}
+	return "default"
+}
+
+// ClassifierOn reports whether auto mode consults the classifier (default on).
+func (a AutoConfig) ClassifierOn() bool { return a.Classifier == nil || *a.Classifier }
 
 type ProviderConfig struct {
 	Auth     string                   `json:"auth"`               // "api_key" | "oauth"
@@ -295,6 +351,12 @@ func SplitModel(q string) (string, string, error) {
 // Validate checks structure only. Whether a built-in provider knows a model
 // id is checked by provider.Registry (it owns the catalog).
 func (c Config) Validate() error {
+	if err := c.Permissions.validate("permissions"); err != nil {
+		return err
+	}
+	if c.Yolo && c.Permissions.DefaultMode != "" && c.Permissions.DefaultMode != "yolo" {
+		return fmt.Errorf("yolo: true conflicts with permissions.defaultMode %q; drop one", c.Permissions.DefaultMode)
+	}
 	for _, q := range []string{c.Model, c.ModelHard} {
 		if q == "" {
 			continue

@@ -41,6 +41,12 @@ func Resume(o StartOptions, path string) (*Agent, error) {
 		return nil, fmt.Errorf("%s: not a moca session", path)
 	}
 	h := head[0].Session
+	// Only from the session's own workdir: the caller's trust decision,
+	// project rules and skills are the cwd's, so a session elsewhere would
+	// run under another directory's permissions.
+	if !session.InWorkdir(path, o.Workdir) {
+		return nil, fmt.Errorf("session %s belongs to another directory (%s); resume it from there", filepath.Base(path), h.Workdir)
+	}
 	if fi, err := os.Stat(h.Workdir); err != nil || !fi.IsDir() {
 		if err == nil {
 			err = errors.New("not a directory")

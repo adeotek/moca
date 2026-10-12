@@ -3,6 +3,7 @@ package skills
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -47,5 +48,45 @@ func TestEcosystemPromptsLoad(t *testing.T) {
 	}
 	if got := ExpandPrompt(ps[1].Body, "api fixes"); got != "Write a conventional commit message for the staged changes. Scope: api. Extra: api fixes\n" {
 		t.Fatalf("%q", got)
+	}
+}
+
+func TestExpandPromptBraceForms(t *testing.T) {
+	cases := []struct{ body, args, want string }{
+		{"${1:+Focus on $1.}", "auth", "Focus on auth."},
+		{"[${1:+Focus on $1.}]", "", "[]"},
+		{"${1:-all files}", "", "all files"},
+		{"${1:-all files}", "x.go", "x.go"},
+		{"${2-none}|${2:-empty}", `a ""`, "|empty"}, // $2 set but empty
+		{"${2+set}|${2:+nonempty}", `a ""`, "set|"},
+		{"${@:2}", "a b c", "b c"},
+		{"${@:2:1}", "a b c", "b"},
+		{"${@:0}", "a b", "a b"}, // bash: 0 treated as 1 for the slice start (pi parity)
+		{"${10}", "1 2 3 4 5 6 7 8 9 ten", "ten"},
+		{"$10", "one", "one0"}, // bash semantics, not pi's
+		{"${ARGUMENTS:-nothing}", "", "nothing"},
+		{"${@:+args: $@}", "x y", "args: x y"},
+		{"keep ${HOME} and ${FOO:-x}", "a", "keep ${HOME} and ${FOO:-x}"},
+		{"unterminated ${1:+oops", "a", "unterminated ${1:+oops"},
+		{`$1|$2`, `"a b" c`, "a b|c"}, // quote-aware split
+		{"${1:+$1 $$}", "v", "v $"},
+		{"${1:-$2}", " x", "x"},      // nested reference in the default word
+		{"${1:+$@}", "$2 z", "$2 z"}, // values are not re-expanded
+		{"${3:-${2}}", "a b", "b"},   // braces inside a default word
+		{"${2:-$1}", "a", "a"},
+		{"${1:+${2:-z}}", "x", "z"},
+	}
+	for _, c := range cases {
+		if got := ExpandPrompt(c.body, c.args); got != c.want {
+			t.Errorf("ExpandPrompt(%q, %q) = %q, want %q", c.body, c.args, got, c.want)
+		}
+	}
+}
+
+func TestSplitArgs(t *testing.T) {
+	got := SplitArgs(`a "b c" 'd e' f""g ""`)
+	want := []string{"a", "b c", "d e", "fg", ""}
+	if !slices.Equal(got, want) {
+		t.Fatalf("SplitArgs = %q, want %q", got, want)
 	}
 }

@@ -280,15 +280,15 @@ func TestLogoutClearsStoredCredential(t *testing.T) {
 }
 
 func TestLoginCommandParsingAndHelp(t *testing.T) {
-	p, _ := ParseInput("/login opencode-go", nil)
+	p, _ := ParseInput("/login opencode-go", nil, nil)
 	if p.Kind != KindCommand || p.Name != "login" || p.Args != "opencode-go" {
 		t.Fatalf("parse: %+v", p)
 	}
-	p, _ = ParseInput("/logout", nil)
+	p, _ = ParseInput("/logout", nil, nil)
 	if p.Kind != KindCommand || p.Name != "logout" {
 		t.Fatalf("parse: %+v", p)
 	}
-	h := HelpText(nil)
+	h := HelpText(nil, nil)
 	if !strings.Contains(h, "/login") || !strings.Contains(h, "/logout") {
 		t.Fatalf("help:\n%s", h)
 	}

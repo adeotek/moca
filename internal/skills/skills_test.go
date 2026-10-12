@@ -47,8 +47,24 @@ func TestExtractBuiltins(t *testing.T) {
 		t.Fatalf("extraction must be idempotent: %q vs %q, %v", dir, again, err)
 	}
 	got, errs := Discover([]Dir{{dir, "builtin"}})
-	if len(errs) != 0 || len(got) != 1 || got[0].Name != "rtk" {
+	if len(errs) != 0 || len(got) != 4 {
 		t.Fatalf("%+v %v", got, errs)
+	}
+	if got[0].Name != "create-command" || got[1].Name != "rtk" || got[2].Name != "self-configure" || got[3].Name != "self-knowledge" {
+		t.Fatalf("builtin skill set: %+v", got)
+	}
+	// create-command ships embedded (it used to be seeded into the config
+	// dir): its frontmatter must parse — the description feeds /help and
+	// the picker, and the argument-hint survives for /help.
+	if strings.TrimSpace(got[0].Description) == "" || got[0].ArgumentHint == "" {
+		t.Fatalf("create-command frontmatter lost: %+v", got[0])
+	}
+	// The self-* skills carry a description too (they are the answer-the-
+	// user surfaces).
+	for _, s := range got[2:] {
+		if strings.TrimSpace(s.Description) == "" {
+			t.Fatalf("%s frontmatter lost: %+v", s.Name, s)
+		}
 	}
 }
 

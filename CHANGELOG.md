@@ -1,8 +1,14 @@
 # Changelog
 
-## v0.4.0-beta (2026-10-11)
+## v0.4.0-beta (2026-10-12)
 
-The install scripts learn `--uninstall` / `-Uninstall`, and every run writes a bounded diagnostic log — still one binary, still no framework.
+A permissions overhaul — three permission modes instead of the boolean yolo flag, layered wildcard rules, a trusted per-project permissions file, and an `auto` mode that runs safe actions itself — plus TUI polish around it: a mode cycle on Shift+Tab, an arrow-key approval picker, `${…}` prompt templates, and a contrast-tested status bar. Still one binary, still no framework.
+
+Also in this release: the install scripts learn `--uninstall` / `-Uninstall`, every run writes a bounded diagnostic log, and the docs collapse to a single source of truth — still one binary, still no framework.
+
+### Docs
+
+- **`docs/specs/SPECS.md` is the single source of truth** for all design, specs, features and constraints. The retired `docs/specs/DESIGN.md` v1 contract was deleted; its still-current content (threat model, purpose, non-goals) was absorbed into SPECS §11/§1/§16, and everything else lives in git history. Design-level changes are now SPECS edits shipped in the same PR as the code — no separate design doc, no separate revision log.
 
 ### Installer
 
@@ -11,6 +17,39 @@ The install scripts learn `--uninstall` / `-Uninstall`, and every run writes a b
 ### Diagnostics
 
 - **A diagnostic log, safe to attach to bug reports.** Every TUI and `-p` run writes a small logfmt file to `~/.local/state/moca/logs/` — retries, MCP server lifecycle, how each run ended, tool panics with their stack — and never prompts, code, command text or keys (a redaction net blanks secret-named fields and URL credentials). `MOCA_LOG=debug` adds per-request and per-tool-call detail for one run; `log.level` (`info`/`debug`/`off`) sets the default. Files are capped at 10 MB and pruned with the snapshot retention.
+
+### Permissions
+
+- **Three permission modes** — `default` (every non-allowlisted command asks, as before), **`auto`** and `yolo`. `auto` runs safe actions itself through a deterministic risk table (reads, builds, tests, confined file edits, plain downloads) inside a confinement of the workdir **plus the temp dirs**; risky ones (`git push`, global installs, network state changes, anything touching `.git`) ask every time; commands the table cannot judge get one classifier opinion (`permissions.auto.model`, your `model` by default) that can only answer allow or ask, never deny, sees only the command and your latest message — never tool outputs — and fails closed (a timeout, an error, an unparsable reply → ask). `-p` runs in auto refuse instead of ask (no one to answer). Pick per run with **`--mode default|auto|yolo|plan`** — the whole flag surface now (**breaking**: `--plan`, `--yolo` and `--no-yolo` are gone): `--plan` → `--mode plan`, `--yolo` → `--mode yolo`, `--no-yolo` → `--mode default` (an explicit `--mode` wins over `permissions.defaultMode` and the legacy `yolo` flag; `plan` is a scope, not a fourth permission mode — it resolves to `default` + the plan scope) — in the config with `permissions.defaultMode`, or in the TUI. Mode changes happen between runs only and are recorded in the session; resume never restores one from the file.
+- **Layered rules** — `permissions.allow` / `ask` / `deny` in the config, bash-style wildcards over whitespace-separated words (`git push *`, `mkfs*`, `rtk *`). Project rules win over user rules; within a list, deny wins over ask, ask over allow; the hard-deny class (`sudo`, `dd`, `mkfs*`, …) and the analyser's refusals stay unoverridable. Allow matching is deliberately strict: `allow git` does not match `./git` or `/tmp/x/git`, and deny/ask rules treat non-literal words (`$X`, globs) conservatively — they match, so rules cannot be dodged by quoting. Rules are matched at every classified index, so `rtk *` allows rtk while `git log` behind it still needs its own rule.
+- **Per-project permissions, trust-gated** — a `.moca/config.jsonc` in the workdir may hold nothing but a `permissions` object (`allow`/`ask`/`deny`, `defaultMode: default|auto`, `auto.classifier: false`) and is read **only for a trusted workdir** — moca asks once, as it does for project skills. It can never set `yolo`, an allow-everything `"*"` rule, or `auto.model`: a cloned repository can loosen prompts a little, but cannot switch your checks off or choose what model bills its classifier. An untrusted workdir's file is ignored entirely — a malformed one cannot block startup.
+- **`shell.allow` keeps working** but only for plain single command names that are safe to lift (`rm`, wildcards and hard-deny names are ignored); `rm`'s ask-every-time default can now be lifted only by an explicit `permissions.allow` rule.
+- **`rm` in auto mode runs only inside the workdir or a temp dir** — a literal path the table places there runs; anything it cannot place (a glob, a variable, a `cd` before it) asks every time and is never handed to the classifier. "Allow always" is no longer offered for a command moca would never remember.
+- **Windows auto mode uses the Unix risk table** — plain commands (`ls`, `git status`, `go test ./...`, `rm build` and `Remove-Item` inside the workdir) run without asking, as on Unix. PowerShell's drive, provider, rooted, wildcard, array and redirect forms never pass the table, a `cd` or an alias/function definition makes the rest of the command ask, a `tee` target the table cannot place (a variable, a drive path, a wildcard) asks every time instead of reaching the classifier, and code runners (`iex`, `Start-Process`, `pwsh -c`, …) ask every time.
+- **Yolo and plan mode are mutually exclusive** — the mode is either yolo or plan: turning plan on in yolo drops back to `default` first, entering yolo turns plan off first, and `--mode plan` resolves to `default` whatever the config says (a configured yolo or project `defaultMode` yields to it — and never counts as yolo for the project-trust decision); the TUI cycle is `default → auto → yolo → plan → default`.
+
+### TUI
+
+- **Shift+Tab cycles the permission mode** (`default → auto → yolo → plan`; plan rides only on the default mode — entering plan from auto/yolo lands at `default`), refused mid-run like every other mode change; `/mode` shows the current state and the cycle and accepts **`default|auto|yolo|plan`** — `/mode plan` enters the plan scope (landing at `default`), `/mode default` exits it. **Breaking keybinding: effort moved to `ctrl+t`** (Shift+Tab used to cycle effort; `/effort` unchanged). The status bar leads line 2 with the mode as a Title-Case word — `Default`, a green `Auto`, a red `Yolo`, a blue `Plan` when plan mode is on — directly before the model, never dropped, so the safety state is visible at any width.
+- **The approval prompt is a picker** — in addition to the `a` / `ctrl+a` / `d` shortcuts, `↑`/`↓` move through `Allow once` / `Allow always` (when it can persist) / `Deny` and `enter` confirms. With text in the input box, arrows and enter keep their editing/history meaning — a prompt popping up mid-sentence can never be answered by prose, and "always" is never chosen by accident (the selection starts on *once*).
+- **Status bar colors** — every field is a role with an importance-ranked color: the mode badge and the context percent stand out first, the model and effort next, cost/branch/cwd after, reference fields last; every color clears WCAG 4.5:1 contrast on light and dark reference backgrounds, and the `·` separators deliberately recede. The plain text is unchanged — colors only. The **model field renders in the plan blue** (the same hue as the `Plan` badge), which keeps its measured contrast on all four reference backgrounds.
+- **Skills are in the `/` dropdown and invokable** — the picker lists skills beside built-ins (untagged) and prompt templates (`prompt:`), each skill row carrying a muted `skill:` prefix; `/name <args>` sends “Load and follow the `<name>` skill (`<path>`) …” and the agent reads the body — the mechanism skills already used to load. A name shadowed by an earlier source is listed exactly once (built-ins > prompt templates > skills), `/help` lists the skills block, and a skill added during a run is usable the moment it finishes (the same post-run reload prompts get).
+
+### Sessions
+
+- **A session resumes only from its own directory.** `--resume last` now means this directory's newest session (like `--continue`; a newer session elsewhere no longer wins, and `/resume last` in the TUI picks this directory's newest other session), and `moca --resume <id8>` for a session that started elsewhere is a usage error (exit 2) naming the directory to run it from — before the trust prompt and before anything is written; the TUI's `/resume` already refused it. The directory's trust decision, project rules and skills never apply to another directory's session.
+
+### Skills — self-management
+
+- **`/create-command` is a built-in skill now — nothing is seeded (breaking).** The starter template no longer lands in `~/.config/moca/prompts/` on first run; create-command ships embedded with the other built-ins and is invoked from the picker like any skill. An already-seeded `create-command.md` is user-owned and keeps winning (prompt templates beat skills) — delete it to pick up the built-in.
+- **`self-knowledge`** — answers questions about moca itself (CLI flags, config keys, permission modes and rules, slash commands, prompt/skill formats, sessions, MCP, update/logs) from **embedded references — byte-copies of `SPECS.md` and `README.md`, kept in sync by a test** — plus the live `config.jsonc`, which a session can read (it is a plain read root now).
+- **`self-configure`** — changes config, prompts and skills when asked. The **config file joins the jail as a read root and an ask-write root**: every write raises the approval prompt (`CanAlways:false`, never persisted), shell redirects still cannot reach it, and **`auth.json` beside it stays unreachable by construction** — credentials belong to `/login`/`moca login`. With yolo on, such a write is silent — that is yolo's existing contract.
+- The system prompt gained one line naming the user-level dirs (config · prompts · skills), so the skills above can cite real paths — a one-time prompt-cache reset after upgrading; new skills also change the prompt's skill listing once.
+
+### Templates & the small stuff
+
+- **`${…}` in prompt templates** — slash-command templates now take the bash parameter-expansion forms: `${1}`, `${10}`, `${X:-word}` / `${X-word}` / `${X:+word}` / `${X+word}` and the slices `${@:2}` / `${@:2:1}`, alongside `$1..$9`, `$@`, `$ARGUMENTS` and `$$`. Arguments split shell-like (quoted args stay one argument); unknown forms like `${HOME}` are left verbatim so shell snippets in templates keep working.
+- Rule matching is memoised and matching stays polynomial no matter how many wildcards pile up, and the auto table's GNU option parsing (`cp`, `mv`, `ln`, `touch`, `mkdir`) is spec-exact — value-taking option letters, `--`, long-option abbreviations — so e.g. `chmod -t .` asks again instead of relying on a guess.
 
 ## v0.3.0-beta (2026-10-09)
 

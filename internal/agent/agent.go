@@ -14,8 +14,10 @@ import (
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/mcp"
+	"github.com/adeotek/moca/internal/permissions"
 	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
+	"github.com/adeotek/moca/internal/skills"
 	"github.com/adeotek/moca/internal/tools"
 )
 
@@ -68,7 +70,6 @@ type Agent struct {
 	effort  llm.Effort
 	usage   llm.Usage
 	cost    float64
-	yolo    bool
 	plan    bool
 	steps   int // steps taken by the current run (run-end log line)
 	// doPlan/doPlanRel: the plan file a RunPlan run executes (abs, display).
@@ -89,16 +90,28 @@ type Agent struct {
 	// (provider overflow, or a length stop with the context full); the
 	// compact-and-retry surfaces it when recovery is impossible.
 	lastOverflow error
-	strict       struct {
-		paths tools.PathChecker
-		cmds  tools.CommandChecker
-		ask   tools.Asker
-	}
+	// judgeCache remembers allow verdicts by the exact command (only
+	// allow verdicts are cached; cleared when a new Agent replaces this
+	// one, e.g. /clear).
+	judgeCache map[string]bool
+	mode       PermMode
+	checkers   checkers // per-mode checkers built once (mode.go)
+	// skills is the session's discoverable skill list (name+description+
+	// path), shared by the system prompt's listing at start, the TUI's
+	// picker and /help; ReloadSkills refreshes it between runs.
+	skills    []skills.Skill
+	skillDirs []skills.Dir
 }
 
 func New(o Options) (*Agent, error) {
 	a := &Agent{opts: o, entries: o.Prior}
-	a.strict.paths, a.strict.cmds, a.strict.ask = o.Env.Paths, o.Env.Commands, o.Env.Ask
+	a.checkers.paths, a.checkers.cmds, a.checkers.ask = o.Env.Paths, o.Env.Commands, o.Env.Ask
+	a.checkers.autoPaths = o.Env.AutoJail
+	if s, ok := o.Env.Commands.(*permissions.Shell); ok {
+		aj, _ := o.Env.AutoJail.(*permissions.Jail)
+		a.checkers.autoCmds = s.AutoView(aj)
+	}
+	a.applyMode(ModeDefault)
 	if err := a.setModel(o.Model, o.Effort); err != nil {
 		return nil, err
 	}
@@ -127,6 +140,19 @@ func (a *Agent) Model() provider.Model        { return a.model }
 func (a *Agent) Effort() llm.Effort           { return a.effort }
 func (a *Agent) Totals() (llm.Usage, float64) { return a.usage, a.cost }
 func (a *Agent) Session() *session.Writer     { return a.opts.Session }
+
+// Skills returns the session's discoverable skills (the TUI picker and
+// /help list them; the system prompt's own listing is frozen at start).
+func (a *Agent) Skills() []skills.Skill { return a.skills }
+
+// ReloadSkills re-discovers skills after a run (self-configure may have
+// added one): the picker sees it immediately; the system prompt's listing
+// refreshes next session (the prompt is frozen per session, §14).
+// Between runs only — same call-site discipline as reloadPrompts.
+func (a *Agent) ReloadSkills() {
+	sk, _ := skills.Discover(a.skillDirs)
+	a.skills = filterSkills(sk)
+}
 
 // cacheKey is the session's prompt-cache routing key (openai
 // prompt_cache_key): stable for the session, so every request lands on the
