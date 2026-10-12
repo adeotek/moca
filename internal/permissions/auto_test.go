@@ -357,6 +357,9 @@ func TestAutoRmOnlyConfinedOrAsk(t *testing.T) {
 		"rm /etc/x":              {every: []string{"rm"}},
 		"npm install && rm *.o":  {unsure: []string{"npm"}, every: []string{"rm"}},
 		"rtk proxy rm $HOME/x":   {unsure: []string{"rtk"}, every: []string{"rm"}},
+		"echo x | tee out.log":   {},
+		`echo x | tee "$T"`:      {deny: "non-literal"}, // the walk refuses it; the table never sees it
+		"echo x | tee $(pwd)/x":  {deny: "non-literal"},
 	}
 	for cmd, want := range cases {
 		need, every, unsure, err := s.Check(cmd)
@@ -406,6 +409,13 @@ func TestAutoWindowsMatchesUnix(t *testing.T) {
 		"rm -r .":             {every: []string{"rm"}},
 		"rm ...":              {every: []string{"rm"}},
 		"ri x; rd y":          {}, // aliases of Remove-Item, judged as rm
+		// tee: only the table places targets on Windows (no redirect walk),
+		// so a target the table cannot place asks — never an allow.
+		"ls | tee out.log":     {},
+		`ls | tee $env:TEMP\x`: {every: []string{"tee"}},
+		`ls | tee C:\x`:        {every: []string{"tee"}},
+		"ls | tee *.log":       {every: []string{"tee"}},
+		"cd sub; ls | tee x":   {unsure: []string{"ls"}, every: []string{"tee"}},
 		// cd and definitions taint; redirects are never cleared
 		`cd C:\; rm x`:         {every: []string{"rm"}},
 		"cd sub; git status":   {unsure: []string{"git"}},

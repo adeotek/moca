@@ -176,7 +176,7 @@ func toolVerdict(ws []Word, lower string, conf pathFunc) autoVerdict {
 		_, args := splitArgs(ws, 1)
 		for _, a := range args {
 			if !a.Literal {
-				continue
+				return autoAsk // a value the table cannot place asks (on Unix the walk refuses it)
 			}
 			if c := conf(a.Text, true); c == pathGit || c == pathOut {
 				return autoAsk
