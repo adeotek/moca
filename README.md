@@ -5,6 +5,8 @@
 **A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, eight tools, no framework.**
 Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface area. It competes on *cost per task* and *read-the-whole-codebase-in-an-hour transparency*, not features: prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap; the agent ships MCP support that never floods the prompt (one ~200-token lazy proxy), loads Agent-Skills `SKILL.md` files written for other tools unchanged, searches the web and fetches pages without another tool (keyless by default), and prefers external token-savers (`rtk`, `graphify`) when they are installed.
 
+The eight tools: `read` · `write` · `edit` · `shell` · `search` · `ls` · `web` (search + fetch) · `mcp` (the lazy proxy — servers extend it on your say-so). The eight schemas are frozen by design; everything else is [Non-goals](#non-goals-v1-probably-forever).
+
 **Status: v0.4.0-beta** — a permissions overhaul: three permission modes (`default` / `auto` / `yolo`) with a single `--mode default|auto|yolo|plan` flag, layered `allow/ask/deny` rules with wildcards (user config + a trusted per-project `.moca/config.jsonc`), auto mode (safe actions run, risky ones ask, unsure ones get a classifier's second opinion), Shift+Tab mode cycling, an arrow-key approval picker, `${…}` prompt templates, a role-colored status bar and skills invokable from the `/` picker (tagged `prompt:`/`skill:`); the install scripts gained `--uninstall` / `-Uninstall`, every run writes a bounded diagnostic log, and moca ships `self-knowledge` and `self-configure` built-ins so it can answer questions about itself and manage its own config; plus first-run setup mode, the `web` tool, plan mode, self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
 
 ## Install
@@ -85,6 +87,8 @@ Both scripts remove the `moca` found on `PATH` (or the one in `--dir <path>` / `
 
 Optional TUI knob: `"tui": { "notify": "osc9" }` (`osc9` · `bell` · `off`) — a desktop notification (or bell) when a run longer than 30 s ends or an approval is waiting, only while the terminal is unfocused.
 
+Web search is keyless by default; to switch engines or lift tavily's rate limit: `"web": { "search": { "provider": "tavily", "apiKey": "env:TAVILY_API_KEY" } }` — `tavily` (default) or `exa` (a key is required). Fetching pages needs no config.
+
 Secrets never appear as literals: `apiKey` is an optional `env:VAR` reference — or drop it and store the credential with `/login` (TUI) / `moca login` below. A stored key wins over the env reference.
 
 ### Providers
@@ -134,7 +138,7 @@ Every shell command the agent proposes runs through a permission ladder. Three m
 | `auto` | safe actions (reads, builds, tests, confined edits) just run; risky ones (`git push`, installs…) ask every time; commands the tables can't judge get a one-shot classifier opinion — allow or ask |
 | `yolo` | no permission checks |
 
-Pick per run with `moca --mode default|auto|yolo|plan` — `plan` is **plan mode** as a flag value (the plan scope: the run writes `docs/plans/`, nothing else; pre-release builds spelled this `--plan`, `--yolo` and `--no-yolo`, which now map to `--mode plan`, `--mode yolo` and `--mode default`) — in the config with `"permissions": { "defaultMode": "auto" }`, or in the TUI with **shift+tab** (`default → auto → yolo → plan`, `/mode` for the same; plan rides only on `default`).
+Pick per run with `moca --mode default|auto|yolo|plan` — `plan` is **plan mode** as a flag value (the plan scope: the run writes `docs/plans/`, nothing else; the v0.4.0-beta dev builds spelled these `--plan`, `--yolo` and `--no-yolo`, which now map to `--mode plan`, `--mode yolo` and `--mode default`) — in the config with `"permissions": { "defaultMode": "auto" }`, or in the TUI with **shift+tab** (`default → auto → yolo → plan`, `/mode` for the same; plan rides only on `default`).
 
 ```jsonc
 // ~/.config/moca/config.jsonc
@@ -171,9 +175,12 @@ moca                            # TUI in the current directory
 moca --mode auto -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
 moca --mode plan -p "add a --json flag"   # write docs/plans/<slug>.md, change nothing else
 moca --do docs/plans/add-json-flag.md # execute it step by step, ticking each - [ ] box
+moca --continue                 # resume the latest session of this directory (or --resume <id8|last>)
 ```
 
 `-p` contract: stdout is the final answer text only; tool activity, retries and the token/cost summary go to stderr. Exit codes: `0` completed · `1` provider/runtime error · `2` config or usage error · `3` incomplete (step limit, or stopped after repeating the same failing call) · `130` interrupted.
+
+Sessions are append-only files under `~/.local/share/moca/sessions/`, keyed by working directory: `--continue` reopens this directory's latest, `--resume <id8|last>` any of them, and `/sessions` lists, switches or deletes them in the TUI.
 
 **TUI keys**
 
@@ -197,10 +204,10 @@ moca --do docs/plans/add-json-flag.md # execute it step by step, ticking each - 
 
 ## Extend
 
-- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged. moca ships built-in skills: `rtk`, `create-command`, `self-knowledge` (answers questions about moca itself from embedded copies of these docs) and `self-configure` (edits your config, commands and skills when you ask — config writes raise the approval prompt, and `auth.json` stays out of reach). See [docs/specs/external-tools.md](docs/specs/external-tools.md).
-- **MCP** — `mcp.servers` in the config (stdio + streamable HTTP). Lazy by design: one fixed ~200-token `mcp` proxy tool, server tool lists never enter the prompt, servers start on first use and stop when idle. `moca mcp import` imports Claude Code / OpenCode / Pi server configs.
+- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged, and every discovered skill is invokable from the TUI as `/name` (the `/` picker tags skills `skill:`). moca ships built-in skills: `rtk`, `create-command`, `self-knowledge` (answers questions about moca itself from embedded copies of these docs) and `self-configure` (edits your config, commands and skills when you ask — config writes raise the approval prompt, and `auth.json` stays out of reach). See [docs/specs/external-tools.md](docs/specs/external-tools.md).
+- **MCP** — `mcp.servers` in the config (stdio + streamable HTTP). Lazy by design: one fixed ~200-token `mcp` proxy tool, server tool lists never enter the prompt, servers start on first use and stop when idle. `moca mcp import` imports Claude Code / OpenCode / Pi server configs; `moca mcp index` prebuilds the discovery index from the CLI.
 - **Project instructions** — `AGENTS.md` / `CLAUDE.md`, loaded only in trusted projects (`--approve`).
-- **External tools** — `rtk` (token-compressed CLI output) and `graphify` (codebase knowledge graph) are allowlisted and ship built-in skills; see [docs/specs/external-tools.md](docs/specs/external-tools.md).
+- **External tools** — `rtk` (token-compressed CLI output) is allowlisted and ships a built-in skill teaching its use; `graphify` (codebase knowledge graph) is allowlisted too — its `SKILL.md` loads through the standard skills loader (`graphify install --platform moca` once the upstream PR lands, or copy it into your skills dir; manual copy works identically). See [docs/specs/external-tools.md](docs/specs/external-tools.md).
 
 ## Non-goals (v1, probably forever)
 
@@ -212,17 +219,18 @@ subagents · hooks · LSP · image gen · voice · telemetry · binary plugin sy
 mise install        # provisions Go 1.27.1 — pinned once, in go.mod
 make build          # bin/moca, version-stamped from git describe
 make test           # go test ./... -race -count=1
+make vet            # go vet ./... + gofmt -l . (both must be clean — the CI gate)
 make release        # five cross-compiled binaries in dist/
 ```
 
-`make` falls back to `mise x go -- go` when `go` is not on the PATH; with mise, the same targets run as `mise run build|test|vet|fmt|release|clean`.
+`make` falls back to `mise x go -- go` when `go` is not on the PATH; with mise, the same targets run as `mise run build|test|vet|fmt|release|clean`. Two scripted harnesses sit beside the unit suites (both need a model key in the repo `.env`, both build first): the **eval corpus** (`bash test/evals/run.sh -n 3 -l <label>` — seven scenarios with per-run metrics recorded under `test/evals/results/`, baseline in `test/evals/BASELINE.md`) and the **ship gate** (`bash test/shipgate/run.sh` — §14, a real bug behind a failing test fixed end to end; the checker is `//go:build shipgate`, so plain `go test ./...` skips it).
 
 ## Phases
 
 | # | Scope | Gate |
 |---|-------|------|
 | 1 | skeleton, 3 protocol adapters, streaming, retries, JSONC config | `-p 'hi'` streams via anthropic, opencode-go, openai; §12 example decodes intact — done |
-| 2 | 7 tools + agent loop + permissions + yolo mode + skills + AGENTS.md + session schema | edit + shell-analysis ladders green, jail enforced, `--no-approve` honoured, `--yolo` lifts all checks — done |
+| 2 | 7 tools + agent loop + permissions + yolo mode + skills + AGENTS.md + session schema | edit + shell-analysis ladders green, jail enforced, `--no-approve` honoured, `--mode yolo` lifts all checks — done |
 | 3 | TUI shell + slash commands + status bar + steering + pager | full session in TUI, `/model` `/effort` `/hard` (cross-provider), `/undo` — done |
 | 4 | context manager + compaction + resume | token-triggered compaction, `--continue` — done |
 | 5 | MCP lazy proxy (stdio + streamable HTTP, persisted index, `mcp import`) | real server via proxy, no schemas in prompt, 0 servers at start — done |
