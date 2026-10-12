@@ -29,7 +29,7 @@ func statusPalette(dark bool) palette {
 		return palette{
 			fg: map[role]string{
 				roleMode:   "#c9d1d9",
-				roleModel:  "#e6edf3",
+				roleModel:  "#60a5fa", // tier 2: the plan blue (Ben, 2026-10-12)
 				roleEffort: "#c4b5fd",
 				rolePct:    "#e6edf3",
 				roleHint:   "#f87171",
@@ -53,7 +53,7 @@ func statusPalette(dark bool) palette {
 	return palette{
 		fg: map[role]string{
 			roleMode:   "#3b434b",
-			roleModel:  "#1f2328",
+			roleModel:  "#1d4ed8", // tier 2: the plan blue (Ben, 2026-10-12)
 			roleEffort: "#6d28d9",
 			rolePct:    "#1f2328",
 			roleHint:   "#b91c1c",
@@ -76,7 +76,8 @@ func statusPalette(dark bool) palette {
 }
 
 // boldRoles are the tiers that render bold (tier 1 mode badge, tier 2
-// model); the percent's bold comes only with the hot pressure style.
+// model — which colors in the plan blue, like the Plan badge); the
+// percent's bold comes only with the hot pressure style.
 var boldRoles = map[role]bool{roleMode: true, roleModel: true}
 
 // roleStyle is the style for a role's text: the palette's hex foreground,
