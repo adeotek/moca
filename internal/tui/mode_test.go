@@ -285,3 +285,21 @@ func TestModeChangedNotices(t *testing.T) {
 	check(agent.ModeChanged{Mode: agent.ModeYolo}, "mode: Yolo — all permission checks are off")
 	check(agent.ModeChanged{Mode: agent.ModeDefault, Plan: true}, "mode: Plan — runs write a plan to docs/plans/")
 }
+
+// TestStatusBadgeReservesLine2Only: the badge's width comes off line 2
+// alone — line 1 renders exactly as RenderStatus does at the full width.
+func TestStatusBadgeReservesLine2Only(t *testing.T) {
+	m := newAgentModel(t)
+	m.refreshStatus()
+	m.status.Cwd = "~/projects/a-rather-long/workdir-name"
+	for w := 20; w <= 120; w++ {
+		m.width = w
+		want, _ := RenderStatus(m.status, w)
+		if got := ansi.Strip(firstLineOf(m.statusLine())); got != plainLine(want) {
+			t.Fatalf("width %d: line 1 %q, want %q", w, got, plainLine(want))
+		}
+		if got := ansi.StringWidth(secondLineOf(m.statusLine())); got > w {
+			t.Fatalf("width %d: line 2 is %d cells", w, got)
+		}
+	}
+}

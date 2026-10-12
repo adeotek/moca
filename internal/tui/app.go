@@ -250,8 +250,6 @@ var (
 	red = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
 	// planFg is the plan-mode badge/notice color (blue).
 	planFg = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true)
-	// autoFg is the auto-mode badge color (green).
-	autoFg = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
 	// orange marks the product name in the welcome line. One shade serves
 	// both light and dark terminals: the welcome prints before the terminal
 	// reports its background, and #d97706 keeps ≥3:1 contrast on white and
@@ -1602,9 +1600,11 @@ func (m *model) statusLine() string {
 	extra := 0
 	for _, b := range badges {
 		// The badge plus its leading " · " separator.
-		extra += len(" · ") + lipgloss.Width(b.text)
+		extra += lipgloss.Width(" · ") + lipgloss.Width(b.text)
 	}
-	l1, l2 := RenderStatus(m.status, max(13, w-extra))
+	// Only line 2 carries the badge: line 1 keeps the full width.
+	l1, _ := RenderStatus(m.status, w)
+	_, l2 := RenderStatus(m.status, max(13, w-extra))
 	if len(badges) > 0 {
 		l2 = append(badges, l2...)
 	}
@@ -1626,17 +1626,6 @@ func (m *model) rule() string {
 }
 
 func firstLineOf(s string) string { l, _, _ := strings.Cut(s, "\n"); return l }
-
-// secondLineOf is the second line of s ("" when s has at most one line) —
-// the status bar's second row, after firstLineOf's first.
-func secondLineOf(s string) string {
-	_, rest, ok := strings.Cut(s, "\n")
-	if !ok {
-		return ""
-	}
-	l, _, _ := strings.Cut(rest, "\n")
-	return l
-}
 
 // supportedEfforts lists a model's supported effort levels for /effort.
 func supportedEfforts(mo provider.Model) string {

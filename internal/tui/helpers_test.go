@@ -205,3 +205,14 @@ func simulate(m *model, cmd tea.Cmd) (out string, quit bool) {
 }
 
 func agentEvent(text string) agent.Event { return agent.TextDelta{Text: text} }
+
+// secondLineOf is the second line of s ("" when s has at most one line) —
+// the status bar's second row, after firstLineOf's first.
+func secondLineOf(s string) string {
+	_, rest, ok := strings.Cut(s, "\n")
+	if !ok {
+		return ""
+	}
+	l, _, _ := strings.Cut(rest, "\n")
+	return l
+}

@@ -106,16 +106,10 @@ func badgeStyle(mode agent.PermMode, plan, dark bool) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Bold(true)
 }
 
-// autoBadgeStyle is the green AUTO badge (the one style a test pins): always
-// the dark-theme table, since that is the canonical green.
+// autoBadgeStyle is the green Auto badge for the theme (the one style a
+// test pins).
 func autoBadgeStyle(dark bool) lipgloss.Style {
 	return badgeStyle(agent.ModeAuto, false, dark)
-}
-
-// separatorStyle is the " · " join style for the theme (decorative: lower
-// contrast than tier-4 text, so it recedes).
-func separatorStyle(dark bool) lipgloss.Style {
-	return statusPalette(dark).sep
 }
 
 // styleLine is the styled form of a status line: every segment carries its
