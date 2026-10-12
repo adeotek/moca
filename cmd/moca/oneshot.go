@@ -87,11 +87,7 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 			fmt.Fprintf(stderr, "warning: %s\n", e.Text)
 		}
 	}
-	trustMode, err := modeWithoutProject(o, cfg)
-	if err != nil {
-		fmt.Fprintln(stderr, "moca:", err)
-		return exitUsage
-	}
+	trustMode := modeWithoutProject(o, cfg)
 	trusted := trustMode == "yolo"
 	if o.Approve != nil {
 		trusted = *o.Approve
@@ -106,23 +102,19 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		}
 		cfg.Project = p
 	}
-	mode, err := o.ModeOf(cfg)
-	if err != nil {
-		fmt.Fprintln(stderr, "moca:", err)
-		return exitUsage
-	}
+	mode, plan := o.ResolveMode(cfg)
 	switch mode {
 	case "yolo":
 		fmt.Fprintln(stderr, "yolo mode: all permission checks are off")
 	case "auto":
 		fmt.Fprintln(stderr, "auto mode: safe actions run, risky ones are refused (no one to ask)")
 	}
-	if o.Plan {
+	if plan {
 		fmt.Fprintln(stderr, "plan mode: the run writes an implementation plan to docs/plans/ (no other writes)")
 	}
 	var a *agent.Agent
 	so := agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model,
-		Trusted: trusted, Mode: agent.PermMode(mode), Plan: o.Plan, Emit: emit, Slug: oneShotSlug(o)}
+		Trusted: trusted, Mode: agent.PermMode(mode), Plan: plan, Emit: emit, Slug: oneShotSlug(o)}
 	if resumePath != "" {
 		a, err = agent.Resume(so, resumePath)
 	} else {

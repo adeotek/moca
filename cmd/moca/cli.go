@@ -32,9 +32,8 @@ usage:
     --model <provider/model>   override config `+"`"+`model`+"`"+` for this session
     --effort <level>           override effort for this session (off|minimal|low|medium|high|xhigh|max)
     --approve | --no-approve   project trust for this run (-p default: --no-approve)
-    --mode <m>                 permission mode for this run: default | auto | yolo
-    --yolo | --no-yolo         shorthand for --mode yolo / leave yolo (overrides config)
-    --plan                     plan mode: analyze the request and write an implementation plan to docs/plans/ (no other writes; not with yolo)
+    --mode <m>                 permission mode for this run: default | auto | yolo | plan
+                               (plan = the plan scope: write an implementation plan to docs/plans/, no other writes)
   moca --do <plan.md> [-p "<notes>"]  execute an implementation plan step by step, ticking its - [ ] boxes
     --resume <id8|last>        resume a session
     --continue                 latest session in this workdir
@@ -59,8 +58,6 @@ type Options struct {
 	Effort     string
 	Approve    *bool
 	Mode       *string
-	Yolo       *bool
-	Plan       bool
 	Do         string // plan file to execute (implies a one-shot run)
 	Resume     string
 	Continue   bool
@@ -71,34 +68,27 @@ type Options struct {
 
 type usageError struct{ error }
 
-// starting MODES list (§11: any *mode or yolo flag is mutually exclusive
-// with plan, since plan runs at default). --no-yolo also maps a resolved
-// yolo to default on its own, plan or not.
-func (o Options) ModeOf(cfg config.Config) (string, error) {
-	var flag string
-	switch {
-	case o.Mode != nil:
-		flag = *o.Mode
-	case o.Yolo != nil:
-		flag = "yolo"
-		if !*o.Yolo {
-			// --no-yolo: suppress yolo, other modes stay as configured.
-			flag = ""
+// cliModes are the --mode values: the three permission modes plus plan —
+// the plan scope, which rides on default (the agent enforces the pairing).
+var cliModes = []string{"default", "auto", "yolo", "plan"}
+
+// ResolveMode resolves the run's permission mode and plan scope (§3): an
+// explicit --mode wins — plan maps to the plan scope at the default mode —
+// else a trusted project file's defaultMode, else the config's resolved
+// mode. A configured auto/yolo under --mode plan yields to plan (default),
+// so it never counts as yolo for the trust decision.
+func (o Options) ResolveMode(cfg config.Config) (string, bool) {
+	if o.Mode != nil {
+		if *o.Mode == "plan" {
+			return "default", true
 		}
+		return *o.Mode, false
 	}
 	base := cfg.Mode()
 	if cfg.Project != nil && cfg.Project.DefaultMode != "" {
 		base = cfg.Project.DefaultMode
 	}
-	if o.Plan {
-		base = "default" // plan rides only on default; flags widened it
-	} else if flag != "" {
-		base = flag
-	}
-	if base == "yolo" && o.Yolo != nil && !*o.Yolo {
-		base = "default"
-	}
-	return base, nil
+	return base, false
 }
 
 func parseArgs(args []string, stdin io.Reader) (Options, error) {
@@ -110,10 +100,7 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 	fs.StringVar(&o.Effort, "effort", "", "effort level")
 	approve := fs.Bool("approve", false, "trust project resources for this run")
 	noApprove := fs.Bool("no-approve", false, "skip project resources for this run")
-	mode := fs.String("mode", "", "permission mode for this run: default | auto | yolo")
-	yolo := fs.Bool("yolo", false, "turn all permission checks off for this run")
-	noYolo := fs.Bool("no-yolo", false, "keep permission checks on (overrides config yolo)")
-	fs.BoolVar(&o.Plan, "plan", false, "plan mode: write an implementation plan to docs/plans/, change nothing else")
+	mode := fs.String("mode", "", "permission mode for this run: default | auto | yolo | plan")
 	fs.StringVar(&o.Do, "do", "", "execute the implementation plan in this file (one-shot; -p adds instructions)")
 	fs.StringVar(&o.Resume, "resume", "", "resume session id8 | last")
 	fs.BoolVar(&o.Continue, "continue", false, "resume latest session in this workdir")
@@ -137,34 +124,11 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 		v := *approve
 		o.Approve = &v
 	}
-	if *yolo && *noYolo {
-		return o, usageError{errors.New("--yolo and --no-yolo are mutually exclusive")}
-	}
-	n := 0
 	if *mode != "" {
-		n++
-	}
-	if *yolo {
-		n++
-	}
-	if *noYolo {
-		n++
-	}
-	if n > 1 {
-		return o, usageError{errors.New("--mode, --yolo and --no-yolo are mutually exclusive")}
-	}
-	if *mode != "" {
-		if !slices.Contains(config.PermModes, *mode) {
-			return o, usageError{fmt.Errorf("--mode must be one of %s, got %q", strings.Join(config.PermModes, ", "), *mode)}
+		if !slices.Contains(cliModes, *mode) {
+			return o, usageError{fmt.Errorf("--mode must be one of %s, got %q", strings.Join(cliModes, ", "), *mode)}
 		}
 		o.Mode = mode
-	}
-	if *yolo || *noYolo {
-		v := *yolo
-		o.Yolo = &v
-	}
-	if o.Plan && (*yolo || (*mode != "" && *mode != "default")) {
-		return o, usageError{errors.New("--plan runs at the default permission mode (--yolo/--mode auto are mutually exclusive with plan)")}
 	}
 	if o.Effort != "" {
 		if _, err := llm.ParseEffort(o.Effort); err != nil {
@@ -182,8 +146,8 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 		o.Prompt = strings.TrimRight(string(b), "\n")
 	}
 	if o.Do != "" {
-		if o.Plan {
-			return o, usageError{errors.New("--do and --plan are mutually exclusive (plan mode only writes docs/plans/)")}
+		if o.Mode != nil && *o.Mode == "plan" {
+			return o, usageError{errors.New("--do and --mode plan are mutually exclusive (plan mode only writes docs/plans/)")}
 		}
 		o.OneShot = true // -p, when given, adds instructions
 	}

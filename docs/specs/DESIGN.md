@@ -289,7 +289,7 @@ MCP support ships in v1 **because Ben uses MCP servers daily** (OpenCode + Pi vi
 
   "log": { "level": "info" },            // diagnostic log in ~/.local/state/moca/logs (info|debug|off); MOCA_LOG overrides
 
-  "yolo": false,                         // true = all permission checks off by default (§7.5); --no-yolo overrides
+  "yolo": false,                         // true = all permission checks off by default (§7.5); --mode default overrides
 
   "context": { "reserveTokens": 16384, "keepRecentTokens": 20000, "maxSteps": 40 }
 }

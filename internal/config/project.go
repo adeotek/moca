@@ -47,7 +47,7 @@ func LoadProject(workdir string) (*PermissionsConfig, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	if p.DefaultMode == "yolo" {
-		return nil, fmt.Errorf("%s: a project file cannot set defaultMode \"yolo\" (use --yolo or /yolo)", path)
+		return nil, fmt.Errorf("%s: a project file cannot set defaultMode \"yolo\" (use --mode yolo or /yolo)", path)
 	}
 	if i := slices.IndexFunc(p.Allow, allowsEverything); i >= 0 {
 		return nil, fmt.Errorf("%s: a project file cannot allow %q (matches every command)", path, p.Allow[i])

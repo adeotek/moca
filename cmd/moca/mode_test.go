@@ -12,20 +12,30 @@ import (
 	"github.com/adeotek/moca/internal/config"
 )
 
-func TestModeFlags(t *testing.T) {
+// ResolveMode resolution order (§3): an explicit --mode wins — plan maps to
+// the plan scope at the default mode — else a trusted project file's
+// defaultMode, else the config's resolved mode. A configured auto/yolo
+// under --mode plan yields to plan (default), so it never counts as yolo
+// for the trust decision.
+func TestResolveMode(t *testing.T) {
+	cfgAuto := config.Config{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}
 	cases := []struct {
-		name string
-		args []string
-		cfg  config.Config
+		name     string
+		args     []string
+		cfg      config.Config
+		wantMode string
+		wantPlan bool
 	}{
-		{"--mode auto", []string{"--mode", "auto", "-p", "x"}, config.Config{}},
-		{"--yolo", []string{"--yolo", "-p", "x"}, config.Config{}},
-		{"--no-yolo overrides cfg yolo", []string{"--no-yolo", "-p", "x"}, config.Config{Yolo: true}},
-		{"--no-yolo leaves auto", []string{"--no-yolo", "-p", "x"}, config.Config{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}},
-		{"cfg defaultMode wins", []string{"-p", "x"}, config.Config{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}},
-		{"cfg yolo flag wins", []string{"-p", "x"}, config.Config{Yolo: true}},
-		{"defaults to default", []string{"-p", "x"}, config.Config{}},
-		{"--mode beats cfg auto", []string{"--mode", "default", "-p", "x"}, config.Config{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}},
+		{"--mode auto", []string{"--mode", "auto", "-p", "x"}, config.Config{}, "auto", false},
+		{"--mode yolo", []string{"--mode", "yolo", "-p", "x"}, config.Config{}, "yolo", false},
+		{"--mode default beats cfg auto", []string{"--mode", "default", "-p", "x"}, cfgAuto, "default", false},
+		{"--mode plan", []string{"--mode", "plan", "-p", "x"}, config.Config{}, "default", true},
+		{"--mode plan over cfg yolo", []string{"--mode", "plan", "-p", "x"}, config.Config{Yolo: true}, "default", true},
+		{"--mode plan over cfg defaultMode auto", []string{"--mode", "plan", "-p", "x"}, cfgAuto, "default", true},
+		{"--mode default over cfg yolo", []string{"--mode", "default", "-p", "x"}, config.Config{Yolo: true}, "default", false},
+		{"cfg defaultMode wins", []string{"-p", "x"}, cfgAuto, "auto", false},
+		{"cfg yolo flag wins", []string{"-p", "x"}, config.Config{Yolo: true}, "yolo", false},
+		{"defaults to default", []string{"-p", "x"}, config.Config{}, "default", false},
 	}
 	for _, c := range cases {
 		o, err := parseArgs(c.args, nil)
@@ -33,51 +43,42 @@ func TestModeFlags(t *testing.T) {
 			t.Errorf("%s: %v", c.name, err)
 			continue
 		}
-		got, err := o.ModeOf(c.cfg)
-		if err != nil {
-			t.Errorf("%s: %v", c.name, err)
-			continue
-		}
-		want := "default"
-		switch c.name {
-		case "--mode auto", "--no-yolo leaves auto", "cfg defaultMode wins":
-			want = "auto"
-		case "--yolo", "cfg yolo flag wins":
-			want = "yolo"
-		}
-		if got != want {
-			t.Errorf("%s: mode %q, want %q", c.name, got, want)
-		}
-	}
-	// Project receipts
-	proj := &config.PermissionsConfig{DefaultMode: "auto"}
-	o, _ := parseArgs([]string{"-p", "x"}, nil)
-	if m, _ := o.ModeOf(config.Config{}); m != "default" {
-		t.Errorf("no project: %q", m)
-	}
-	if m, err := (Options{}).ModeOf(config.Config{Project: proj}); err != nil || m != "auto" {
-		t.Errorf("defaultMode auto overrides cfg default: %q %v", m, err)
-	}
-	if m, _ := (Options{Mode: ptr("default")}).ModeOf(config.Config{Project: proj}); m != "default" {
-		t.Errorf("--mode default overrides project auto: %q", m)
-	}
-	if m, _ := (Options{Yolo: ptrT(true)}).ModeOf(config.Config{Project: proj}); m != "yolo" {
-		t.Errorf("--yolo: %q", m)
-	}
-	// Usage errors
-	for _, args := range [][]string{
-		{"--mode", "bogus", "-p", "x"},
-		{"--yolo", "--mode", "auto", "-p", "x"},
-		{"--no-yolo", "--mode", "auto", "-p", "x"},
-	} {
-		if _, err := parseArgs(args, nil); err == nil || !strings.Contains(err.Error(), "mode") {
-			t.Errorf("%v: want a usage error, got %v", args, err)
+		mode, plan := o.ResolveMode(c.cfg)
+		if mode != c.wantMode || plan != c.wantPlan {
+			t.Errorf("%s: (%q, %v), want (%q, %v)", c.name, mode, plan, c.wantMode, c.wantPlan)
 		}
 	}
 }
 
+// Project receipts: a trusted project file's defaultMode joins in — but
+// only when no flag overrode it, and plan still rides on default.
+func TestResolveModeProjectReceipts(t *testing.T) {
+	proj := &config.PermissionsConfig{DefaultMode: "auto"}
+	if mode, plan := (Options{}).ResolveMode(config.Config{}); mode != "default" || plan {
+		t.Errorf("no project: (%q, %v)", mode, plan)
+	}
+	if mode, plan := (Options{}).ResolveMode(config.Config{Project: proj}); mode != "auto" || plan {
+		t.Errorf("defaultMode auto overrides cfg default: (%q, %v)", mode, plan)
+	}
+	if mode, _ := (Options{Mode: ptr("default")}).ResolveMode(config.Config{Project: proj}); mode != "default" {
+		t.Errorf("--mode default overrides project auto: %q", mode)
+	}
+	if mode, plan := (Options{Mode: ptr("plan")}).ResolveMode(config.Config{Project: proj}); mode != "default" || !plan {
+		t.Errorf("--mode plan over project auto: (%q, %v), want (default, true)", mode, plan)
+	}
+}
+
 func ptr(s string) *string { return &s }
-func ptrT(b bool) *bool    { return &b }
+
+// The old --plan/--yolo/--no-yolo flags are gone: flag parsing refuses them
+// (exit 2 at the caller) and the error names the undefined flag.
+func TestRemovedModeFlags(t *testing.T) {
+	for _, flag := range []string{"--plan", "--yolo", "--no-yolo"} {
+		if _, err := parseArgs([]string{flag, "-p", "x"}, nil); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+			t.Errorf("%s: want 'flag provided but not defined', got %v", flag, err)
+		}
+	}
+}
 
 // TestLoadProjectIgnoredWhenUntrusted: a malformed .moca/config.jsonc must
 // only matter for a trusted run (§7): untrusted (-p default) starts
@@ -109,23 +110,20 @@ func TestLoadProjectIgnoredWhenUntrusted(t *testing.T) {
 	}
 }
 
-// Plan runs at the default permission mode: --plan with any widened mode
-// (--yolo, --mode yolo|--auto) is a usage error, and a configured yolo (or
-// project defaultMode yolo/auto) yields to --plan (default).
-func TestPlanExcludesYolo(t *testing.T) {
-	for _, args := range [][]string{{"--plan", "--yolo"}, {"--plan", "--mode", "yolo"}, {"--plan", "--mode", "auto"}} {
-		if _, err := parseArgs(args, nil); err == nil {
-			t.Fatalf("%v must be refused", args)
+// Plan runs at the default permission mode (rev 26): --mode plan resolves
+// to (default, plan=true) whatever the config says — a configured yolo or
+// project defaultMode never leaks through, so the run never counts as yolo
+// for the trust decision either.
+func TestPlanNeverResolvesWider(t *testing.T) {
+	for _, cfg := range []config.Config{
+		{Yolo: true},
+		{Permissions: config.PermissionsConfig{DefaultMode: "yolo"}},
+		{Permissions: config.PermissionsConfig{DefaultMode: "auto"}},
+		{Project: &config.PermissionsConfig{DefaultMode: "auto"}},
+	} {
+		mode, plan := (Options{Mode: ptr("plan")}).ResolveMode(cfg)
+		if mode != "default" || !plan {
+			t.Fatalf("--mode plan over %+v → (%q, %v), want (default, true)", cfg.Permissions, mode, plan)
 		}
-	}
-	o, _ := parseArgs([]string{"--plan"}, nil)
-	if m, _ := o.ModeOf(config.Config{Yolo: true}); m != "default" {
-		t.Fatalf("--plan over config yolo → %q, want default", m)
-	}
-	if m, _ := o.ModeOf(config.Config{Permissions: config.PermissionsConfig{DefaultMode: "yolo"}}); m != "default" {
-		t.Fatalf("--plan over defaultMode yolo → %q, want default", m)
-	}
-	if m, _ := o.ModeOf(config.Config{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}); m != "default" {
-		t.Fatalf("--plan over defaultMode auto → %q, want default", m)
 	}
 }

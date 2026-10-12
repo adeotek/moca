@@ -55,9 +55,10 @@ func decideTrust(ctx context.Context, o Options, wd string, yolo bool) (bool, er
 // modeWithoutProject resolves the mode ignoring the project layer: the
 // trust decision (yolo trusts, §7.5) must not depend on a file the workdir
 // may or may not be allowed to contribute.
-func modeWithoutProject(o Options, cfg config.Config) (string, error) {
+func modeWithoutProject(o Options, cfg config.Config) string {
 	cfg.Project = nil
-	return o.ModeOf(cfg)
+	mode, _ := o.ResolveMode(cfg)
+	return mode
 }
 
 // runTUI opens the interactive TUI (§11); prompt templates come from the
@@ -73,11 +74,7 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 		fmt.Fprintln(stderr, "moca:", err)
 		return exitUsage
 	}
-	trustMode, err := modeWithoutProject(o, cfg)
-	if err != nil {
-		fmt.Fprintln(stderr, "moca:", err)
-		return exitUsage
-	}
+	trustMode := modeWithoutProject(o, cfg)
 	trusted, err := decideTrust(ctx, o, wd, trustMode == "yolo")
 	if err != nil {
 		if !errors.Is(err, context.Canceled) { // ctrl+c at the trust prompt: quiet 130
@@ -96,11 +93,7 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 		}
 		cfg.Project = p
 	}
-	mode, err := o.ModeOf(cfg)
-	if err != nil {
-		fmt.Fprintln(stderr, "moca:", err)
-		return exitUsage
-	}
+	mode, plan := o.ResolveMode(cfg)
 	var pdirs []skills.Dir
 	if trusted {
 		pdirs = append(pdirs, skills.Dir{Path: filepath.Join(wd, ".moca", "prompts"), Source: "project"})
@@ -115,7 +108,7 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 	pdirs = append(pdirs, skills.Dir{Path: promptsDir, Source: "global"})
 	home, _ := os.UserHomeDir()
 	err = tui.Run(ctx, tui.AppOptions{
-		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Mode: agent.PermMode(mode), Plan: o.Plan, Slug: "tui"},
+		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Mode: agent.PermMode(mode), Plan: plan, Slug: "tui"},
 		ConfigPath: cfgPath, Prompts: skills.LoadPrompts(pdirs), PromptDirs: pdirs, Home: home,
 		ResumePath:  resumePath,
 		HintsPath:   filepath.Join(config.DataDir(), "hints.json"),

@@ -33,31 +33,32 @@ func TestParseArgs(t *testing.T) {
 	if _, err := parseArgs([]string{"--approve", "--no-approve", "-p", "x"}, nil); err == nil {
 		t.Fatal("approve flags are exclusive")
 	}
-	if _, err := parseArgs([]string{"--yolo", "--no-yolo", "-p", "x"}, nil); err == nil {
-		t.Fatal("yolo flags are exclusive")
+	// The retired mode flags are not registered at all (breaking change).
+	for _, flag := range []string{"--plan", "--yolo", "--no-yolo"} {
+		if _, err := parseArgs([]string{flag, "-p", "x"}, nil); err == nil {
+			t.Fatalf("%s must be refused", flag)
+		}
 	}
 	if _, err := parseArgs([]string{"--resume", "last", "--continue", "-p", "x"}, nil); err == nil {
 		t.Fatal("resume/continue are exclusive")
 	}
-	o, _ = parseArgs([]string{"--no-yolo", "-p", "x"}, nil)
-	if o.Yolo == nil || *o.Yolo {
-		t.Fatal("--no-yolo flag recorded")
+	// --mode default replaces --no-yolo: it suppresses a configured yolo.
+	o, _ = parseArgs([]string{"--mode", "default", "-p", "x"}, nil)
+	if m, plan := o.ResolveMode(config.Config{Yolo: true}); m != "default" || plan {
+		t.Fatal("--mode default overrides config yolo")
 	}
-	if m, _ := o.ModeOf(config.Config{Yolo: true}); m != "default" {
-		t.Fatal("--no-yolo overrides config yolo")
+	o, _ = parseArgs([]string{"--mode", "plan", "-p", "x"}, nil)
+	if o.Mode == nil || *o.Mode != "plan" || !o.OneShot {
+		t.Fatalf("--mode plan: %+v", o)
 	}
-	o, _ = parseArgs([]string{"--plan", "-p", "x"}, nil)
-	if !o.Plan || !o.OneShot {
-		t.Fatalf("--plan: %+v", o)
-	}
-	if o, _ = parseArgs([]string{"-p", "x"}, nil); o.Plan {
-		t.Fatal("plan mode must default off")
+	if mode, plan := o.ResolveMode(config.Config{}); mode != "default" || !plan {
+		t.Fatal("--mode plan resolves to default + the plan scope")
 	}
 	o, _ = parseArgs([]string{"-p", "x"}, nil)
-	if m, _ := o.ModeOf(config.Config{}); m != "default" {
-		t.Fatal("no flag → default")
+	if mode, plan := o.ResolveMode(config.Config{}); mode != "default" || plan {
+		t.Fatal("no flag → default without plan")
 	}
-	if m, _ := o.ModeOf(config.Config{Yolo: true}); m != "yolo" {
+	if m, _ := o.ResolveMode(config.Config{Yolo: true}); m != "yolo" {
 		t.Fatal("no flag → config yolo decides")
 	}
 	if _, err := parseArgs([]string{"--effort", "med", "-p", "x"}, nil); err == nil {
@@ -76,10 +77,16 @@ func TestHelpListsSurface(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("%s: exit %d stderr %q", arg, code, errb.String())
 		}
-		for _, want := range []string{"moca -p", "--model", "--effort", "--approve", "--yolo", "--resume", "--continue",
+		for _, want := range []string{"moca -p", "--model", "--effort", "--approve", "--mode", "--resume", "--continue",
 			"moca login", "moca logout", "moca update", "moca mcp import", "moca mcp index", "moca --version", "MOCA_LOG"} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("%s: usage missing %q", arg, want)
+			}
+		}
+		// The consolidated flag surface: no retired mode flags.
+		for _, gone := range []string{"--plan", "--yolo", "--no-yolo"} {
+			if strings.Contains(out.String(), gone) {
+				t.Errorf("%s: usage still documents %q", arg, gone)
 			}
 		}
 	}
@@ -470,12 +477,12 @@ func TestNoApproveSkipsProjectInstructions(t *testing.T) {
 	}
 	sawRules = false
 	errb.Reset()
-	run(context.Background(), []string{"--config", cfg, "--yolo", "-p", "x"}, nil, &out, &errb)
+	run(context.Background(), []string{"--config", cfg, "--mode", "yolo", "-p", "x"}, nil, &out, &errb)
 	if !sawRules || !strings.HasPrefix(errb.String(), "yolo mode: all permission checks are off") {
 		t.Fatal("yolo trusts project resources and warns on stderr")
 	}
 	sawRules = true
-	run(context.Background(), []string{"--config", cfg, "--yolo", "--no-approve", "-p", "x"}, nil, &out, &errb)
+	run(context.Background(), []string{"--config", cfg, "--mode", "yolo", "--no-approve", "-p", "x"}, nil, &out, &errb)
 	if sawRules {
 		t.Fatal("explicit --no-approve wins over yolo")
 	}
@@ -611,8 +618,8 @@ func TestParseArgsDo(t *testing.T) {
 	if o, err = parseArgs([]string{"--do", "x.md", "-p", "small commits"}, nil); err != nil || o.Prompt != "small commits" {
 		t.Fatalf("%+v %v", o, err)
 	}
-	if _, err = parseArgs([]string{"--do", "x.md", "--plan"}, nil); err == nil {
-		t.Fatal("--do with --plan must be refused")
+	if _, err = parseArgs([]string{"--do", "x.md", "--mode", "plan"}, nil); err == nil {
+		t.Fatal("--do with --mode plan must be refused")
 	}
 	if oneShotSlug(Options{Do: "docs/plans/add-json.md"}) != session.Slug("do add-json") {
 		t.Fatal("slug")
