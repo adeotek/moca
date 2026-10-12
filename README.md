@@ -5,7 +5,7 @@
 **A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, eight tools, no framework.**
 Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface area. It competes on *cost per task* and *read-the-whole-codebase-in-an-hour transparency*, not features: prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap; the agent ships MCP support that never floods the prompt (one ~200-token lazy proxy), loads Agent-Skills `SKILL.md` files written for other tools unchanged, searches the web and fetches pages without another tool (keyless by default), and prefers external token-savers (`rtk`, `graphify`) when they are installed.
 
-**Status: v0.4.0-beta** — a permissions overhaul: three permission modes (`default` / `auto` / `yolo`) with a `--mode` flag, layered `allow/ask/deny` rules with wildcards (user config + a trusted per-project `.moca/config.jsonc`), auto mode (safe actions run, risky ones ask, unsure ones get a classifier's second opinion), Shift+Tab mode cycling, an arrow-key approval picker, `${…}` prompt templates and a role-colored status bar; the install scripts gained `--uninstall` / `-Uninstall` and every run writes a bounded diagnostic log; plus first-run setup mode, the `web` tool, plan mode, self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
+**Status: v0.4.0-beta** — a permissions overhaul: three permission modes (`default` / `auto` / `yolo`) with a single `--mode default|auto|yolo|plan` flag, layered `allow/ask/deny` rules with wildcards (user config + a trusted per-project `.moca/config.jsonc`), auto mode (safe actions run, risky ones ask, unsure ones get a classifier's second opinion), Shift+Tab mode cycling, an arrow-key approval picker, `${…}` prompt templates, a role-colored status bar and skills invokable from the `/` picker (tagged `prompt:`/`skill:`); the install scripts gained `--uninstall` / `-Uninstall`, every run writes a bounded diagnostic log, and moca ships `self-knowledge` and `self-configure` built-ins so it can answer questions about itself and manage its own config; plus first-run setup mode, the `web` tool, plan mode, self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
 
 ## Install
 
@@ -134,7 +134,7 @@ Every shell command the agent proposes runs through a permission ladder. Three m
 | `auto` | safe actions (reads, builds, tests, confined edits) just run; risky ones (`git push`, installs…) ask every time; commands the tables can't judge get a one-shot classifier opinion — allow or ask |
 | `yolo` | no permission checks |
 
-Pick per run with `moca --mode auto` (`--yolo`/`--no-yolo` are shorthands), in the config with `"permissions": { "defaultMode": "auto" }`, or in the TUI with **shift+tab** (`default → auto → plan → yolo`, `/mode` for the same). `plan` in the cycle is plan mode on top of auto: the run writes `docs/plans/`, nothing else.
+Pick per run with `moca --mode default|auto|yolo|plan` — `plan` is **plan mode** as a flag value (the plan scope: the run writes `docs/plans/`, nothing else; pre-release builds spelled this `--plan`, `--yolo` and `--no-yolo`, which now map to `--mode plan`, `--mode yolo` and `--mode default`) — in the config with `"permissions": { "defaultMode": "auto" }`, or in the TUI with **shift+tab** (`default → auto → yolo → plan`, `/mode` for the same; plan rides only on `default`).
 
 ```jsonc
 // ~/.config/moca/config.jsonc
@@ -162,14 +162,14 @@ Pick per run with `moca --mode auto` (`--yolo`/`--no-yolo` are shorthands), in t
 
 Rules are whitespace-separated words with bash-style wildcards: `git push *` (prefix), `*.go` in a word, `rm *` beats `rm` on 100 spellings, and `mkfs*` style names still hard-deny no matter what the rules say. Project rules win over user rules; within one list, deny wins over ask, ask over allow. `shell.allow` (written by the approval prompt's *allow always*) keeps working and folds into the same user list — except for `rm`, which always asks unless a real `permissions.allow` rule covers the exact command. Safe things (reads, builds, tests, confined file edits, plain downloads) need no rule in auto mode; the risk table covers them.
 
-**In the TUI** the current mode is always the first status-bar item (`default` / green `AUTO` / red `YOLO`, plus blue `PLAN` when plan mode is on), and an approval prompt is a picker: `↑`/`↓` and `enter` alongside the classic `a` / `ctrl+a` / `d` — with text in the input box, keys go to the draft as usual.
+**In the TUI** the mode badge always leads status line 2, directly before the model (`Default` / green `Auto` / red `Yolo`, plus blue `Plan` when plan mode is on) — and the model field renders in that same plan blue. An approval prompt is a picker: `↑`/`↓` and `enter` alongside the classic `a` / `ctrl+a` / `d` — with text in the input box, keys go to the draft as usual.
 
 ## Use
 
 ```bash
 moca                            # TUI in the current directory
 moca --mode auto -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
-moca --plan -p "add a --json flag"   # write docs/plans/<slug>.md, change nothing else
+moca --mode plan -p "add a --json flag"   # write docs/plans/<slug>.md, change nothing else
 moca --do docs/plans/add-json-flag.md # execute it step by step, ticking each - [ ] box
 ```
 
@@ -186,18 +186,18 @@ moca --do docs/plans/add-json-flag.md # execute it step by step, ticking each - 
 | `alt+t` | pager on the latest thinking block (the whole reasoning chain) |
 | `alt+p` | paste chips (large pastes collapsed, buffer intact) |
 | `ctrl+r` | search prompt history (type to filter · `enter` uses the match, doesn't send) |
-| `shift+tab` | cycle the permission mode (default → auto → plan → yolo) |
+| `shift+tab` | cycle the permission mode (default → auto → yolo → plan) |
 | `ctrl+t` | cycle the effort level |
 | `@` + path | complete a workdir file (`tab`/`enter` inserts it) |
 | `ctrl+c` ×2 | quit (or `/exit`) |
 | `a` / `↑↓` `enter` / `ctrl+a` / `d` | approval picker: allow once / move+confirm / allow always / deny (arrows+enter only with an empty draft) |
 | `↑`/`↓` · `tab` · `esc` | in the `/` dropdown: pick · complete · dismiss |
 
-**Slash commands**: `/model` · `/effort` · `/mode` · `/hard` · `/yolo` · `/plan` · `/do` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`). Typing `/` opens a dropdown of every command and loaded template as you type — `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. The first run drops a starter **`/create-command`** template into that directory: run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands are usable the moment the run that wrote them finishes — no restart. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results. **`/plan <request>`** (or `--plan`) turns a run into **plan mode**: the agent reads (shell, web and MCP stay available for investigation under their normal permission rules), writes an implementation plan to `docs/plans/`, and every write outside `docs/plans/*.md` is refused.
+**Slash commands**: `/model` · `/effort` · `/mode` · `/hard` · `/yolo` · `/plan` · `/do` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`) and skills (`self-knowledge`, `create-command`, rtk's own — any skill is invokable as `/name`). Typing `/` opens a dropdown of every command, loaded template and skill as you type — templates are tagged `prompt:` and skills `skill:`, in that muted hint region; `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. **`/create-command`** is a built-in skill (nothing is dropped into your config dir): run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands and skills are usable the moment the run that wrote them finishes — no restart. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results. **`/plan <request>`** (or `--mode plan`) turns a run into **plan mode**: the agent reads (shell, web and MCP stay available for investigation under their normal permission rules), writes an implementation plan to `docs/plans/`, and every write outside `docs/plans/*.md` is refused.
 
 ## Extend
 
-- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged. See [docs/specs/external-tools.md](docs/specs/external-tools.md).
+- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged. moca ships built-in skills: `rtk`, `create-command`, `self-knowledge` (answers questions about moca itself from embedded copies of these docs) and `self-configure` (edits your config, commands and skills when you ask — config writes raise the approval prompt, and `auth.json` stays out of reach). See [docs/specs/external-tools.md](docs/specs/external-tools.md).
 - **MCP** — `mcp.servers` in the config (stdio + streamable HTTP). Lazy by design: one fixed ~200-token `mcp` proxy tool, server tool lists never enter the prompt, servers start on first use and stop when idle. `moca mcp import` imports Claude Code / OpenCode / Pi server configs.
 - **Project instructions** — `AGENTS.md` / `CLAUDE.md`, loaded only in trusted projects (`--approve`).
 - **External tools** — `rtk` (token-compressed CLI output) and `graphify` (codebase knowledge graph) are allowlisted and ship built-in skills; see [docs/specs/external-tools.md](docs/specs/external-tools.md).
