@@ -110,6 +110,46 @@ func TestJailApprovable(t *testing.T) {
 	}
 }
 
+// The user config file is the self-configure root: read allowed, writes
+// approvable — and exactly that file: auth.json beside it stays out of
+// reach, for reads and approvals alike (the sibling-file guarantee).
+func TestJailConfigFileRoot(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := t.TempDir()
+	cfg := filepath.Join(cfgDir, "config.jsonc")
+	skillsDir := filepath.Join(cfgDir, "skills")
+	j, err := NewJail(root, []string{cfg}, []string{skillsDir, cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The file need not exist yet (a fresh install can create it): the read
+	// root survives resolveDeep.
+	if _, err := j.Resolve(cfg, false); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if _, err := j.Resolve(cfg, true); err == nil {
+		t.Fatal("a config write must go through the approval ask")
+	}
+	if abs, ok := j.Approvable(cfg); !ok || abs != cfg {
+		t.Fatalf("approvable: %q %v", abs, ok)
+	}
+	// The global skills dir is ask-write too (self-configure installs skills).
+	if _, ok := j.Approvable(filepath.Join(skillsDir, "x", "SKILL.md")); !ok {
+		t.Fatal("the skills dir must be an ask-write root")
+	}
+	// auth.json beside the config file: unreachable either way.
+	auth := filepath.Join(cfgDir, "auth.json")
+	if _, err := j.Resolve(auth, false); err == nil {
+		t.Fatal("auth.json must not be readable")
+	}
+	if _, ok := j.Approvable(auth); ok {
+		t.Fatal("auth.json must not be approvable")
+	}
+	if _, err := j.Resolve(auth, true); err == nil {
+		t.Fatal("auth.json must not resolve for write")
+	}
+}
+
 func TestJailTildeExpands(t *testing.T) {
 	root, _, _ := setup(t)
 	t.Setenv("HOME", root)

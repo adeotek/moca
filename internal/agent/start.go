@@ -94,9 +94,15 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	globalSkills := filepath.Join(config.ConfigDir(), "skills")
 	promptsDir := config.PromptsDir()
 	// readOnly: the prompt templates are readable (the agent may update a
-	// command it is shown). askWrite: a write there — outside the workdir —
-	// needs the user's approval (the write/edit tools ask; the shell's
-	// redirect check does not).
+	// command it is shown), the global skills dir (self-configure may add a
+	// skill), and the config file itself (self-knowledge answers "what is
+	// configured now" from it). askWrite: a write to any of them — outside
+	// the workdir — needs the user's approval (the write/edit tools ask;
+	// the shell's redirect check does not, so config edits go through
+	// write/edit and its snapshots either way). The config entry is the
+	// FILE, not its directory: auth.json sits beside it and stays
+	// unreachable (pinned by test).
+	configFile := config.ConfigFile()
 	// This process's overflow dir is readable too: over-cap tool outputs are
 	// saved there in full and the cut result names the file (tools.Spill).
 	// Only its own dir — other sessions' outputs (other projects, possibly
@@ -105,7 +111,9 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	if err != nil {
 		return nil, &StartError{err}
 	}
-	jail, err := permissions.NewJail(jailRoot, []string{globalSkills, builtinDir, promptsDir, spillDir}, []string{promptsDir})
+	jail, err := permissions.NewJail(jailRoot,
+		[]string{globalSkills, builtinDir, promptsDir, spillDir, configFile},
+		[]string{promptsDir, globalSkills, configFile})
 	if err != nil {
 		return nil, &StartError{err}
 	}
@@ -335,6 +343,7 @@ func Start(o StartOptions) (*Agent, error) {
 	verify, verifySrc := DetectVerify(jail.Root())
 	system := BuildSystemPrompt(PromptInput{Workdir: jail.Root(), OS: osName, Arch: arch, Verify: verify, VerifySource: verifySrc,
 		Date: time.Now().Format("2006-01-02"), Git: GitState(jail.Root()), Version: config.Version,
+		ConfigDir: config.ConfigDir(), PromptsDir: config.PromptsDir(), SkillsDir: filepath.Join(config.ConfigDir(), "skills"),
 		RTK: toolOnPath("rtk"), Skills: st.skills, Servers: servers, Instructions: instr})
 
 	session.Prune(filepath.Join(config.DataDir(), "snapshot"), cfg.RetentionDays())

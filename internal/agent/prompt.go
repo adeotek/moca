@@ -17,6 +17,10 @@ type ServerLine struct{ Name, Description string }
 type PromptInput struct {
 	Workdir, OS, Arch, Date, Git, Version string
 	RTK                                   bool // rtk is on PATH: only then is it advertised
+	// ConfigDir/PromptsDir/SkillsDir are the user-level moca dirs (the
+	// self-knowledge / self-configure / create-command skills need the real
+	// XDG-aware paths).
+	ConfigDir, PromptsDir, SkillsDir string
 	// Verify/VerifySource: the project's detected check command (DetectVerify)
 	// and the file it came from; "" omits the line.
 	Verify, VerifySource string
@@ -49,6 +53,9 @@ func renderPrompt(in PromptInput, verify, rtk string) string {
 		"{{verify}}", verify,
 		"{{rtk}}", rtk,
 		"{{version}}", in.Version,
+		"{{config_dir}}", in.ConfigDir,
+		"{{prompts_dir}}", in.PromptsDir,
+		"{{skills_dir}}", in.SkillsDir,
 	).Replace(promptTemplate)
 }
 
