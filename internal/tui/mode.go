@@ -85,11 +85,14 @@ func modeCycleHelp(m agent.PermMode, plan bool) string {
 	return fmt.Sprintf("cycle (shift+tab): %s → %s", modeBadgeText(m, plan), modeBadgeText(next, nextPlan))
 }
 
-// modeNames lists the words /mode accepts.
-var modeNames = []string{string(agent.ModeDefault), string(agent.ModeAuto), string(agent.ModeYolo)}
+// modeNames lists the words /mode accepts — the same set as the --mode flag
+// (plan is the scope; it lands at default, the agent's rule).
+var modeNames = []string{string(agent.ModeDefault), string(agent.ModeAuto), string(agent.ModeYolo), "plan"}
 
 // runMode is the /mode built-in: no args → the current mode + the cycle;
-// `default|auto|yolo` → set it (between runs). Plan is left as-is.
+// `default|auto|yolo|plan` → set it (between runs). `plan` enters the plan
+// scope (landing at default, even from a wider mode); `default` exits plan;
+// auto/yolo drop it through SetMode.
 func (m *model) runMode(args string) tea.Cmd {
 	st := m.agent.Status()
 	if args == "" {
@@ -102,7 +105,14 @@ func (m *model) runMode(args string) tea.Cmd {
 		return cmd
 	}
 	if !slices.Contains(modeNames, args) {
-		return m.println("usage: /mode default|auto|yolo — no args shows the current mode")
+		return m.println("usage: /mode default|auto|yolo|plan — no args shows the current mode")
+	}
+	if args == "plan" {
+		m.agent.SetPlan(true) // ModeChanged prints + refreshes
+		return nil
+	}
+	if m.agent.Plan() && args == "default" {
+		m.agent.SetPlan(false) // /mode default exits plan; auto/yolo drop it in SetMode
 	}
 	m.agent.SetMode(agent.PermMode(args)) // ModeChanged prints + refreshes
 	return nil

@@ -161,7 +161,7 @@ func TestModeCommandShowsAndSets(t *testing.T) {
 	if m.agent.Mode() != agent.ModeAuto {
 		t.Fatalf("bad arg must not change the mode: %v", m.agent.Mode())
 	}
-	if !strings.Contains(out, "usage: /mode default|auto|yolo") {
+	if !strings.Contains(out, "usage: /mode default|auto|yolo|plan") {
 		t.Fatalf("bad arg names the modes: %q", out)
 	}
 	m.running = true
@@ -177,6 +177,44 @@ func TestModeCommandShowsAndSets(t *testing.T) {
 	out = drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "bogus"}))
 	if !strings.Contains(out, "finish or interrupt the run first") {
 		t.Fatalf("mid-run /mode bogus must show the run refusal: %q", out)
+	}
+}
+
+// /mode accepts the same values as --mode: plan enters the plan scope (and
+// lands at default — the agent's rule, even from a wider mode), default
+// exits it, and auto/yolo drop it through SetMode.
+func TestModeCommandPlanSymmetry(t *testing.T) {
+	m := newAgentModel(t)
+	out := drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "plan"}))
+	if !m.agent.Plan() || m.agent.Mode() != agent.ModeDefault {
+		t.Fatalf("/mode plan: mode %v plan %v, want default + plan (%q)", m.agent.Mode(), m.agent.Plan(), out)
+	}
+	// From a wider mode, plan still lands at default.
+	m.agent.SetMode(agent.ModeAuto)
+	m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "plan"})
+	if !m.agent.Plan() || m.agent.Mode() != agent.ModeDefault {
+		t.Fatalf("/mode plan from auto: mode %v plan %v, want default + plan", m.agent.Mode(), m.agent.Plan())
+	}
+	out = drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "default"}))
+	if m.agent.Plan() || m.agent.Mode() != agent.ModeDefault {
+		t.Fatalf("/mode default must exit plan: mode %v plan %v (%q)", m.agent.Mode(), m.agent.Plan(), out)
+	}
+	// auto/yolo drop plan through SetMode's own rule.
+	m.agent.SetPlan(true)
+	m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "auto"})
+	if m.agent.Plan() || m.agent.Mode() != agent.ModeAuto {
+		t.Fatalf("/mode auto must drop plan: mode %v plan %v", m.agent.Mode(), m.agent.Plan())
+	}
+	m.agent.SetPlan(true)
+	m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "yolo"})
+	if m.agent.Plan() || m.agent.Mode() != agent.ModeYolo {
+		t.Fatalf("/mode yolo must drop plan: mode %v plan %v", m.agent.Mode(), m.agent.Plan())
+	}
+	// The usage line names all four values.
+	m.agent.SetMode(agent.ModeDefault)
+	out = drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "bogus"}))
+	if !strings.Contains(out, "usage: /mode default|auto|yolo|plan") {
+		t.Fatalf("usage must list four values: %q", out)
 	}
 }
 
