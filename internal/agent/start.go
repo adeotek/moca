@@ -169,7 +169,10 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	if err != nil {
 		return nil, err
 	}
-	a.applyMode(m)
+	// The mode and plan never cross: plan rides only on default (a plan
+	// run at default even when the resolved mode is wider — the TUI's
+	// SetPlan-to-plan lands there the same way).
+	a.applyMode(o.mode())
 	if o.Plan {
 		a.applyPlan(true)
 	}
@@ -178,13 +181,12 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	return a, nil
 }
 
-// mode is the starting permission mode: default when unset, and never yolo
-// with plan (they are mutually exclusive; cmd rejects --plan with an
-// explicit yolo flag and resolves a configured yolo to default under
-// --plan, so this only guards other callers — plan wins, the narrower one).
+// mode is the starting permission mode: default when unset, and always
+// default under plan (plan rides only on default, so the TUI's plan
+// toggle lands there too — this guards every caller).
 func (o StartOptions) mode() PermMode {
 	switch {
-	case o.Mode == "", o.Plan && o.Mode == ModeYolo:
+	case o.Mode == "", o.Plan:
 		return ModeDefault
 	}
 	return o.Mode

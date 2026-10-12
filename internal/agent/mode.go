@@ -4,9 +4,10 @@ package agent
 // on the asker), auto (risk table + temp-dir jail + optional classifier)
 // and yolo (everything passes). SetMode swaps the checkers between runs
 // only; every swap is recorded as a permission_mode entry and announced as
-// a ModeChanged event (the TUI's status line and notice). Yolo and plan are
-// mutually exclusive: entering one turns the other off first (SetMode,
-// SetPlan), so the agent is never in both.
+// a ModeChanged event (the TUI's status line and notice). Plan mode rides
+// only on default: entering plan (SetPlan) leaves a wider mode for default
+// first, and SetMode to anything non-default drops plan first — the agent
+// is never in plan with a mode other than default, in yolo, or in both.
 
 import (
 	"context"
@@ -74,10 +75,11 @@ func (a *Agent) applyMode(m PermMode) {
 }
 
 // SetMode switches the permission mode between runs (never during Run) and
-// records the decision in the session. Entering yolo turns plan mode off
-// first (its own PlanChanged): yolo and plan never hold together.
+// records the decision in the session. Moving to a non-default mode drops
+// plan mode first (its own PlanChanged): plan rides only on default, so
+// auto and yolo never hold together with it — previously only yolo did.
 func (a *Agent) SetMode(m PermMode) {
-	if m == ModeYolo && a.plan {
+	if m != ModeDefault && a.plan {
 		a.SetPlan(false)
 	}
 	a.applyMode(m)

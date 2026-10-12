@@ -92,12 +92,13 @@ func TestStyledStatusSameTextAsPlain(t *testing.T) {
 }
 
 func TestYoloBadgeNeverPlanBlue(t *testing.T) {
-	// yolo never carries plan: the badge style must stay red even if a plan
-	// bool ever reaches it (state layer normalizes it; this is the style-layer
-	// mirror — pin #f87171's RGB against the plan blue #60a5fa).
+	// No mode ever renders combined with plan: a plan bool reaching a yolo
+	// (or auto) badge style must not turn it blue (state layer normalizes
+	// plan to its own badge; this is the style-layer mirror — pin #f87171's
+	// RGB against the plan blue #60a5fa).
 	st := badgeStyle(agent.ModeYolo, true, true)
-	got := st.Render("YOLO")
-	if exp := lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).Bold(true).Render("YOLO"); got != exp {
+	got := st.Render("Yolo")
+	if exp := lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).Bold(true).Render("Yolo"); got != exp {
 		t.Errorf("yolo badge with plan=true = %q, want the red style %q", got, exp)
 	}
 }

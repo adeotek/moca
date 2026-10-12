@@ -1581,23 +1581,20 @@ func fmtThinkDuration(d time.Duration) string {
 	return fmtElapsed(d)
 }
 
-// statusLine renders the two-line bar; the permission-mode badge always
-// leads line 1 (a safety state that must never be dropped) and is never
-// dropped — the rest gets the remaining width. Both lines render as styled
-// segments (role → color per theme, task 10): the plain text is unchanged.
+// statusLine renders the two-line bar; the permission-mode badge opens
+// line 2, just before the model (a safety state that must never be
+// missed) and is never dropped — the rest gets the remaining width. Both
+// lines render as styled segments (role → color per theme, task 10): the
+// plain text is unchanged.
 func (m *model) statusLine() string {
 	w := max(20, m.width)
-	// Badge segments lead line 1: the permission state, its ever-visible
-	// placement (Task 8) preserved. Auto+plan splits into two badges, each
-	// with its own color (yolo never carries plan: the agent keeps them
-	// mutually exclusive).
+	// Badge segments lead line 2, before the model: the permission state,
+	// its ever-visible placement (Task 8, moved to line 2) preserved. One
+	// badge per state — plan rides only on default, so no split.
 	var badges []segment
 	if m.agent != nil {
 		mode, plan := m.agent.Mode(), m.agent.Status().Plan
-		badges = append(badges, segment{text: badgeText(mode, plan), role: roleMode, drop: 0, badgeMode: mode, badgePlan: plan && mode == agent.ModeAuto})
-		if mode == agent.ModeAuto && plan {
-			badges = append(badges, segment{text: "PLAN", role: roleMode, drop: 0, badgePlan: true})
-		}
+		badges = append(badges, segment{text: badgeText(mode, plan), role: roleMode, drop: 0, badgeMode: mode, badgePlan: plan})
 	}
 	extra := 0
 	for _, b := range badges {
@@ -1606,20 +1603,17 @@ func (m *model) statusLine() string {
 	}
 	l1, l2 := RenderStatus(m.status, max(13, w-extra))
 	if len(badges) > 0 {
-		l1 = append(badges, l1...)
+		l2 = append(badges, l2...)
 	}
 	return styleLine(l1, m.darkBG, pressureOK) + "\n" +
 		styleLine(l2, m.darkBG, m.status.pressure())
 }
 
-// badgeText is the plain badge text for one status-bar badge: a plan tag
-// (default · PLAN) rides the mode badge; the auto+plan split adds PLAN as
-// its own second badge, so AUTO carries no plan tag there.
+// badgeText is the plain badge text for one status-bar badge: a single
+// Title-Case word per state (Default · Auto · Yolo · Plan). Plan is its own
+// badge — it rides only on the default mode, so there is no combined form.
 func badgeText(mode agent.PermMode, plan bool) string {
-	if plan && mode != agent.ModeAuto {
-		return modeBadgeText(mode, true)
-	}
-	return modeBadgeText(mode, false)
+	return modeBadgeText(mode, plan)
 }
 
 // rule is the full-width dim separator between the scrollback output, the
@@ -1629,6 +1623,17 @@ func (m *model) rule() string {
 }
 
 func firstLineOf(s string) string { l, _, _ := strings.Cut(s, "\n"); return l }
+
+// secondLineOf is the second line of s ("" when s has at most one line) —
+// the status bar's second row, after firstLineOf's first.
+func secondLineOf(s string) string {
+	_, rest, ok := strings.Cut(s, "\n")
+	if !ok {
+		return ""
+	}
+	l, _, _ := strings.Cut(rest, "\n")
+	return l
+}
 
 // supportedEfforts lists a model's supported effort levels for /effort.
 func supportedEfforts(mo provider.Model) string {

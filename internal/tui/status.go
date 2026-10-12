@@ -13,7 +13,8 @@ import (
 
 // StatusInfo is the plain-text status bar content (§11); each field carries a
 // role (styled per theme by styleLine in status_style.go). Line 1: version ·
-// cwd · branch. Line 2: model · effort · ctx W · P% · in/out · cost.
+// cwd · branch. Line 2: model · effort · ctx W · P% · in/out · cost — the
+// caller opens line 2 with the permission-mode badge, before the model.
 type StatusInfo struct {
 	Version      string
 	Cwd, Branch  string
@@ -77,8 +78,9 @@ type segment struct {
 	role role
 	drop int
 	// badge state (roleMode lead badges only): badgeMode colors the badge
-	// for its mode, and badgePlan switches to the plan blue (the PLAN badge
-	// of the auto+plan split; never set for yolo — yolo never carries plan).
+	// for its mode, and badgePlan switches to the plan blue (the standalone
+	// Plan badge; plan rides only on default, so plan and mode never
+	// combine).
 	badgeMode agent.PermMode
 	badgePlan bool
 }
@@ -97,7 +99,9 @@ func plainLine(segs []segment) string {
 
 // RenderStatus renders the two-line bar as segment lists (plain text =
 // plainLine of each). Neither line's plain text is ever wider than width
-// terminal cells (wide runes count 2) and neither wraps.
+// terminal cells (wide runes count 2) and neither wraps. The line-2 caller
+// prepends the permission-mode badge (before the model) and reserves its
+// width; nothing here is badge-aware.
 // Line 1 shrink order: drop cwd, then branch, then truncate the version.
 // Line 2 shrink order: drop in/out, then truncate the model, then truncate.
 func RenderStatus(s StatusInfo, width int) (l1, l2 []segment) {

@@ -38,7 +38,7 @@ var builtinHelp = map[string]string{
 	"model":    "[provider/model]  pick a model or switch (forfeits prompt cache)",
 	"effort":   "[level]  show or set effort (off|minimal|low|medium|high|xhigh|max)",
 	"hard":     "toggle modelHard + high effort",
-	"mode":     "[default|auto|yolo]  show the permission mode or set it (shift+tab cycles default→auto→plan→yolo; between runs only)",
+	"mode":     "[default|auto|yolo]  show the permission mode or set it (shift+tab cycles default→auto→yolo→plan; between runs only)",
 	"yolo":     "toggle yolo mode: ALL permission checks off (between runs only)",
 	"plan":     "[request]  toggle plan mode (runs write an implementation plan to docs/plans/, change nothing else); with a request, plan it now",
 	"do":       "<plan.md> [instructions]  execute an implementation plan step by step, ticking its - [ ] boxes",

@@ -15,8 +15,8 @@ import (
 // recede below tier-4 text; higher tiers render bold.
 type palette struct {
 	fg    map[role]string           // per-role text color (#rrggbb)
-	badge map[agent.PermMode]string // mode-badge colors: default/AUTO/YOLO
-	plan  string                    // the PLAN badge (also colors `default · PLAN`)
+	badge map[agent.PermMode]string // mode-badge colors: Default/Auto/Yolo
+	plan  string                    // the Plan badge (a default run under the plan scope)
 	warn  lipgloss.Style            // percent at ≥ 70% of the window
 	hot   lipgloss.Style            // percent at/past the auto-compact trigger (bold)
 	sep   lipgloss.Style            // " · " separators (structure, not content)
@@ -91,7 +91,7 @@ func (p palette) roleStyle(r role) lipgloss.Style {
 
 // badgeStyle styles the mode badge: the mode's tier-1 palette color, bold —
 // the safety state must never be missed. Plan tags the blue plan color (the
-// auto+plan split shows both, so each gets its own hue). dark is the theme
+// Plan badge of a default run under the plan scope). dark is the theme
 // the caller wants (tests pass an explicit theme; the model passes m.darkBG).
 func badgeStyle(mode agent.PermMode, plan, dark bool) lipgloss.Style {
 	p := statusPalette(dark)

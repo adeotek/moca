@@ -9,23 +9,20 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// nextMode is the shift+tab cycle: default → auto → plan (auto + plan
-// scope) → yolo → default. A state reached another way (/plan in default,
-// --plan --yolo) moves to the next position after plan: yolo. Yolo itself
-// never carries plan (yolo+plan → yolo stays).
+// nextMode is the shift+tab cycle: default → auto → yolo → plan → default.
+// Plan rides only on default (the agent keeps plan out of auto/yolo), so
+// the plan stop toggles the plan flag (the mode lands at default through
+// SetPlan's rule) and the stop after plan wraps around.
 func TestNextMode(t *testing.T) {
 	type st struct {
 		m    agent.PermMode
 		plan bool
 	}
-	seq := []st{{agent.ModeDefault, false}, {agent.ModeAuto, false}, {agent.ModeAuto, true}, {agent.ModeYolo, false}, {agent.ModeDefault, false}}
+	seq := []st{{agent.ModeDefault, false}, {agent.ModeAuto, false}, {agent.ModeYolo, false}, {agent.ModeDefault, true}, {agent.ModeDefault, false}}
 	for i := 0; i+1 < len(seq); i++ {
 		if m, p := nextMode(seq[i].m, seq[i].plan); m != seq[i+1].m || p != seq[i+1].plan {
 			t.Errorf("from %+v → %v/%v, want %+v", seq[i], m, p, seq[i+1])
 		}
-	}
-	if m, p := nextMode(agent.ModeYolo, true); m != agent.ModeYolo || p {
-		t.Error("yolo+plan → yolo")
 	}
 }
 
@@ -39,30 +36,24 @@ func TestShiftTabCyclesMode(t *testing.T) {
 		t.Fatalf("shift+tab → auto, got %v", m.agent.Mode())
 	}
 	// shift+tab must not touch effort any more (and it walks the mode, so
-	// the next stop is auto+plan from here).
+	// the next stop is yolo from here).
 	start := m.agent.Status().Effort
 	m.Update(keyMsg("shift+tab"))
 	if got := m.agent.Status().Effort; got != start {
 		t.Fatalf("shift+tab must not cycle effort: %v → %v", start, got)
 	}
-	if m.agent.Mode() != agent.ModeAuto || !m.agent.Plan() {
-		t.Fatalf("auto → auto+plan, got %v plan=%v", m.agent.Mode(), m.agent.Plan())
-	}
-	// Continue the walk on real keys: auto+plan → yolo (plan off) → default,
-	// and from yolo+plan (reached via /plan) shift+tab keeps yolo and drops
-	// plan.
-	m.Update(keyMsg("shift+tab"))
 	if m.agent.Mode() != agent.ModeYolo || m.agent.Plan() {
-		t.Fatalf("auto+plan → yolo (plan off), got %v plan=%v", m.agent.Mode(), m.agent.Plan())
+		t.Fatalf("auto → yolo, got %v plan=%v", m.agent.Mode(), m.agent.Plan())
+	}
+	// Continue the walk on real keys: yolo → plan (the mode lands at
+	// default — plan rides only on default) → default.
+	m.Update(keyMsg("shift+tab"))
+	if m.agent.Mode() != agent.ModeDefault || !m.agent.Plan() {
+		t.Fatalf("yolo → plan (mode default), got %v plan=%v", m.agent.Mode(), m.agent.Plan())
 	}
 	m.Update(keyMsg("shift+tab"))
-	if m.agent.Mode() != agent.ModeDefault {
-		t.Fatalf("yolo → default, got %v", m.agent.Mode())
-	}
-	m.agent.SetPlan(true) // plan in default (out-of-cycle state)
-	m.Update(keyMsg("shift+tab"))
-	if m.agent.Mode() != agent.ModeYolo || m.agent.Plan() {
-		t.Fatalf("plan → next after plan: yolo, got %v plan=%v", m.agent.Mode(), m.agent.Plan())
+	if m.agent.Mode() != agent.ModeDefault || m.agent.Plan() {
+		t.Fatalf("plan → default, got %v plan=%v", m.agent.Mode(), m.agent.Plan())
 	}
 }
 
@@ -106,7 +97,7 @@ func TestYoloNeverCarriesPlan(t *testing.T) {
 	if m.agent.Mode() != agent.ModeYolo {
 		t.Fatalf("mode: %v", m.agent.Mode())
 	}
-	if got := modeBadgeText(m.agent.Mode(), m.agent.Plan()); got != "YOLO" {
+	if got := modeBadgeText(m.agent.Mode(), m.agent.Plan()); got != "Yolo" {
 		t.Fatalf("badge text: %q", got)
 	}
 	// And the agent-level SetMode drops plan itself: plan is really off
@@ -118,12 +109,18 @@ func TestYoloNeverCarriesPlan(t *testing.T) {
 		t.Fatal("SetMode(yolo) must turn plan off")
 	}
 	m2.refreshStatus()
-	l1 := ansi.Strip(firstLineOf(m2.statusLine()))
-	if !strings.Contains(l1, "YOLO · ") {
-		t.Fatalf("yolo badge must lead line 1: %q", l1)
+	// Line 1 keeps identity content (the badge lives on line 2 — checked as
+	// a separator-anchored segment: tmpdir names can contain "Yolo").
+	if l1 := ansi.Strip(firstLineOf(m2.statusLine())); strings.Contains(l1, "· Yolo") {
+		t.Fatalf("version line must not carry the badge: %q", l1)
 	}
-	if strings.Contains(l1, "PLAN") {
-		t.Fatalf("yolo badge must not show plan: %q", l1)
+	// The badge moved to line 2, just before the model.
+	l2 := ansi.Strip(secondLineOf(m2.statusLine()))
+	if !strings.HasPrefix(l2, "Yolo · ") {
+		t.Fatalf("yolo badge must open line 2: %q", l2)
+	}
+	if strings.Contains(l2, "Plan") {
+		t.Fatalf("yolo badge must not show plan: %q", l2)
 	}
 	// The other way round: /plan in yolo leaves yolo for default.
 	m2.runCommand(Parsed{Kind: KindCommand, Name: "plan"})
@@ -148,7 +145,7 @@ func TestShiftTabRefusedWhileRunning(t *testing.T) {
 func TestModeCommandShowsAndSets(t *testing.T) {
 	m := newAgentModel(t)
 	out := drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode"}))
-	if !strings.Contains(out, "mode: default") {
+	if !strings.Contains(out, "mode: Default") {
 		t.Fatalf("no-arg /mode prints the current mode: %q", out)
 	}
 	out = drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "auto"}))
@@ -157,7 +154,7 @@ func TestModeCommandShowsAndSets(t *testing.T) {
 	}
 	settle(m)
 	out = drained(m, m.handleAgent(agent.ModeChanged{Mode: agent.ModeAuto}))
-	if !strings.Contains(out, "mode: auto") {
+	if !strings.Contains(out, "mode: Auto") {
 		t.Fatalf("/mode auto notice: %q", out)
 	}
 	out = drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "bogus"}))
@@ -183,48 +180,53 @@ func TestModeCommandShowsAndSets(t *testing.T) {
 	}
 }
 
-// TestStatusAlwaysShowsMode: the permission badge leads line 1 of the status
-// bar in every mode and is never dropped, even at narrow widths.
+// TestStatusAlwaysShowsMode: the permission badge opens line 2 of the status
+// bar, just before the model, in every mode and is never dropped, even at
+// narrow widths; line 1 keeps its original version/cwd/branch content.
 func TestStatusAlwaysShowsMode(t *testing.T) {
 	m := newAgentModel(t)
 	m.refreshStatus()
 	check := func(want string) {
 		t.Helper()
-		l1 := firstLineOf(m.statusLine())
-		if !strings.Contains(ansi.Strip(l1), want+" · ") {
-			t.Fatalf("status line 1 must lead with %q: %q", want, l1)
+		s := m.statusLine()
+		l1, l2 := firstLineOf(s), secondLineOf(s)
+		if !strings.HasPrefix(ansi.Strip(l2), want+" · ") {
+			t.Fatalf("status line 2 must open with %q: %q", want, l2)
+		}
+		if strings.Contains(ansi.Strip(l1), want) {
+			t.Fatalf("line 1 must not carry the badge %q: %q", want, l1)
 		}
 	}
-	check("default")
+	check("Default")
 	m.agent.SetPlan(true)
-	check("default · PLAN")
+	check("Plan")
 	m.agent.SetPlan(false)
 	// AUTO badge keeps its green (palette) style — the one new badge style;
 	// Task 10 moved the color to the theme palette (green in either).
 	m.agent.SetMode(agent.ModeAuto)
-	if !strings.Contains(firstLineOf(m.statusLine()), autoBadgeStyle(true).Render("AUTO")) {
+	if !strings.Contains(secondLineOf(m.statusLine()), autoBadgeStyle(true).Render("Auto")) {
 		t.Fatal("AUTO badge must be green")
 	}
 	m.agent.SetPlan(true)
-	check("AUTO · PLAN")
+	check("Plan")
 	m.agent.SetMode(agent.ModeYolo)
 	m.agent.SetPlan(false)
-	check("YOLO")
+	check("Yolo")
 
 	// Width 20 leaves the badge whole (never dropped, never truncated):
-	// the layout reserves the badge width and shrinks line 1's body to the
+	// the layout reserves the badge width and shrinks line 2's body to the
 	// remainder.
 	m.width = 20
 	m.status = StatusInfo{Version: "v", Cwd: "~/x/y", Branch: "longbranch*", Git: true,
 		Model: "opencode-go/glm-5.3-flash", Effort: "med", Window: 200_000, Used: 30_000, In: 1, Out: 1}
-	l1 := ansi.Strip(firstLineOf(m.statusLine()))
-	if !strings.Contains(l1, "YOLO · ") {
-		t.Fatalf("YOLO badge must survive width 20: %q", l1)
+	l2 := ansi.Strip(secondLineOf(m.statusLine()))
+	if !strings.HasPrefix(l2, "Yolo · ") {
+		t.Fatalf("Yolo badge must survive width 20: %q", l2)
 	}
 	m.agent.SetMode(agent.ModeAuto)
 	m.agent.SetPlan(true)
-	if l1 := ansi.Strip(firstLineOf(m.statusLine())); !strings.Contains(l1, "AUTO · PLAN · ") {
-		t.Fatalf("AUTO · PLAN must survive width 20: %q", l1)
+	if l2 := ansi.Strip(secondLineOf(m.statusLine())); !strings.HasPrefix(l2, "Plan · ") {
+		t.Fatalf("plan badge (SetPlan leaves auto for default) must survive width 20: %q", l2)
 	}
 }
 
@@ -240,8 +242,8 @@ func TestModeChangedNotices(t *testing.T) {
 			t.Fatalf("notice for %v: got %q, want %q", e, out, want)
 		}
 	}
-	check(agent.ModeChanged{Mode: agent.ModeAuto}, "mode: auto — safe actions run, risky ones ask")
-	check(agent.ModeChanged{Mode: agent.ModeDefault}, "mode: default — every non-allowlisted command asks")
-	check(agent.ModeChanged{Mode: agent.ModeYolo}, "mode: YOLO — ALL permission checks are off")
-	check(agent.ModeChanged{Mode: agent.ModeAuto, Plan: true}, "mode: plan — runs write a plan to docs/plans/")
+	check(agent.ModeChanged{Mode: agent.ModeAuto}, "mode: Auto — safe actions run, risky ones ask")
+	check(agent.ModeChanged{Mode: agent.ModeDefault}, "mode: Default — every non-allowlisted command asks")
+	check(agent.ModeChanged{Mode: agent.ModeYolo}, "mode: Yolo — all permission checks are off")
+	check(agent.ModeChanged{Mode: agent.ModeDefault, Plan: true}, "mode: Plan — runs write a plan to docs/plans/")
 }

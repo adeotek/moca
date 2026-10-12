@@ -71,12 +71,9 @@ type Options struct {
 
 type usageError struct{ error }
 
-// ModeOf resolves the run's permission mode: an explicit flag wins
-// (--mode/--yolo/--no-yolo, mutually exclusive), else a trusted project
-// file's defaultMode, else the user config Mode() (§11). --no-yolo maps a
-// resolved yolo to default and leaves auto alone; so does --plan (yolo and
-// plan are mutually exclusive — parseArgs rejects --plan with an explicit
-// --yolo/--mode yolo, a configured yolo yields to the flag).
+// starting MODES list (§11: any *mode or yolo flag is mutually exclusive
+// with plan, since plan runs at default). --no-yolo also maps a resolved
+// yolo to default on its own, plan or not.
 func (o Options) ModeOf(cfg config.Config) (string, error) {
 	var flag string
 	switch {
@@ -93,10 +90,12 @@ func (o Options) ModeOf(cfg config.Config) (string, error) {
 	if cfg.Project != nil && cfg.Project.DefaultMode != "" {
 		base = cfg.Project.DefaultMode
 	}
-	if flag != "" {
+	if o.Plan {
+		base = "default" // plan rides only on default; flags widened it
+	} else if flag != "" {
 		base = flag
 	}
-	if base == "yolo" && (o.Plan || (o.Yolo != nil && !*o.Yolo)) {
+	if base == "yolo" && o.Yolo != nil && !*o.Yolo {
 		base = "default"
 	}
 	return base, nil
@@ -164,8 +163,8 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 		v := *yolo
 		o.Yolo = &v
 	}
-	if o.Plan && (*yolo || *mode == "yolo") {
-		return o, usageError{errors.New("--plan and yolo mode are mutually exclusive (plan mode keeps writes inside docs/plans/)")}
+	if o.Plan && (*yolo || (*mode != "" && *mode != "default")) {
+		return o, usageError{errors.New("--plan runs at the default permission mode (--yolo/--mode auto are mutually exclusive with plan)")}
 	}
 	if o.Effort != "" {
 		if _, err := llm.ParseEffort(o.Effort); err != nil {

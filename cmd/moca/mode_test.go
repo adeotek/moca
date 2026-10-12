@@ -109,26 +109,23 @@ func TestLoadProjectIgnoredWhenUntrusted(t *testing.T) {
 	}
 }
 
-// Yolo and plan are mutually exclusive: --plan with an explicit yolo flag
-// is a usage error, and a configured yolo yields to --plan (default).
+// Plan runs at the default permission mode: --plan with any widened mode
+// (--yolo, --mode yolo|--auto) is a usage error, and a configured yolo (or
+// project defaultMode yolo/auto) yields to --plan (default).
 func TestPlanExcludesYolo(t *testing.T) {
-	for _, args := range [][]string{{"--plan", "--yolo"}, {"--plan", "--mode", "yolo"}} {
+	for _, args := range [][]string{{"--plan", "--yolo"}, {"--plan", "--mode", "yolo"}, {"--plan", "--mode", "auto"}} {
 		if _, err := parseArgs(args, nil); err == nil {
 			t.Fatalf("%v must be refused", args)
 		}
 	}
-	o, err := parseArgs([]string{"--plan", "--mode", "auto"}, nil)
-	if err != nil {
-		t.Fatalf("--plan --mode auto: %v", err)
-	}
-	if m, _ := o.ModeOf(config.Config{}); m != "auto" {
-		t.Fatalf("--plan --mode auto → %q", m)
-	}
-	o, _ = parseArgs([]string{"--plan"}, nil)
+	o, _ := parseArgs([]string{"--plan"}, nil)
 	if m, _ := o.ModeOf(config.Config{Yolo: true}); m != "default" {
 		t.Fatalf("--plan over config yolo → %q, want default", m)
 	}
 	if m, _ := o.ModeOf(config.Config{Permissions: config.PermissionsConfig{DefaultMode: "yolo"}}); m != "default" {
 		t.Fatalf("--plan over defaultMode yolo → %q, want default", m)
+	}
+	if m, _ := o.ModeOf(config.Config{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}); m != "default" {
+		t.Fatalf("--plan over defaultMode auto → %q, want default", m)
 	}
 }

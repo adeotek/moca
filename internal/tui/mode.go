@@ -9,27 +9,27 @@ import (
 	"github.com/adeotek/moca/internal/agent"
 )
 
-// nextMode is the Shift+Tab cycle: default → auto → plan (auto + plan
-// scope) → yolo → default. A plan state reached another way (/plan in
-// default) moves to the next position after plan: yolo. Yolo never carries
-// plan (the agent keeps them mutually exclusive).
+// nextMode is the Shift+Tab cycle: default → auto → yolo → plan → default.
+// Plan rides only on default (the agent keeps plan out of auto/yolo), so
+// the plan stop toggles the plan flag and lands at the default mode, and
+// the stop after plan wraps around.
 func nextMode(m agent.PermMode, plan bool) (agent.PermMode, bool) {
 	switch {
 	case plan:
-		return agent.ModeYolo, false
+		return agent.ModeDefault, false
 	case m == agent.ModeDefault:
 		return agent.ModeAuto, false
 	case m == agent.ModeAuto:
-		return agent.ModeAuto, true
+		return agent.ModeYolo, false
 	}
-	return agent.ModeDefault, false // yolo
+	return agent.ModeDefault, true // yolo → plan
 }
 
 // cycleMode is shift+tab: the next stop of the permission-mode cycle
-// (default → auto → plan → yolo → default), refused where /mode is. The plan
-// flag and the mode are applied in an order that never passes through a
-// wider state: plan is set before the mode moves (auto+plan), and entering
-// yolo drops plan inside SetMode (yolo and plan never hold together).
+// (default → auto → yolo → plan → default), refused where /mode is. The
+// plan flag moves through SetPlan — entering plan leaves a wider mode for
+// default itself (the agent's rule), and leaving plan is the plain toggle
+// — so no state passes through plan-under-auto/yolo en route.
 func (m *model) cycleMode() tea.Cmd {
 	if m.agent == nil {
 		return nil
@@ -38,30 +38,29 @@ func (m *model) cycleMode() tea.Cmd {
 		return cmd
 	}
 	mode, plan := nextMode(m.agent.Mode(), m.agent.Plan())
-	if plan && !m.agent.Plan() {
-		m.agent.SetPlan(true)
+	if plan != m.agent.Plan() {
+		m.agent.SetPlan(plan) // lands on default either way (the agent's rule)
 	}
 	if m.agent.Mode() != mode {
-		m.agent.SetMode(mode) // entering yolo turns plan off first
+		m.agent.SetMode(mode)
 	}
 	return nil
 }
 
-// modeBadgeText is the plain badge text for a mode (styled in Task 10): the
-// permission state is always visible — `default` keeps its lowercase form so
-// it reads as a word, risky modes shout.
+// modeBadgeText is the plain badge text for a mode (styled in Task 10): a
+// Title-Case word per state — `Default` reads as a word, `Auto`/`Yolo`/`Plan`
+// stand out; plan is its own badge (a default run under the plan scope).
 func modeBadgeText(mode agent.PermMode, plan bool) string {
-	s := "default"
+	if plan {
+		return "Plan"
+	}
 	switch mode {
 	case agent.ModeAuto:
-		s = "AUTO"
+		return "Auto"
 	case agent.ModeYolo:
-		s = "YOLO"
+		return "Yolo"
 	}
-	if plan {
-		s += " · PLAN"
-	}
-	return s
+	return "Default"
 }
 
 // modeNotice is the one-line ModeChanged notice for a state.
@@ -69,13 +68,13 @@ func modeNotice(mode agent.PermMode, plan bool) (string, bool) {
 	switch {
 	case mode == agent.ModeYolo:
 		// Checked before plan: the red yolo warning must never be masked.
-		return "mode: YOLO — ALL permission checks are off (shift+tab to leave)", true
+		return "mode: Yolo — all permission checks are off (shift+tab to leave)", true
 	case plan:
-		return "mode: plan — runs write a plan to docs/plans/, nothing else changes", false
+		return "mode: Plan — runs write a plan to docs/plans/, nothing else changes", false
 	case mode == agent.ModeAuto:
-		return "mode: auto — safe actions run, risky ones ask (workdir + temp only)", false
+		return "mode: Auto — safe actions run, risky ones ask (workdir + temp only)", false
 	default:
-		return "mode: default — every non-allowlisted command asks", false
+		return "mode: Default — every non-allowlisted command asks", false
 	}
 }
 

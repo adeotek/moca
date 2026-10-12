@@ -22,11 +22,11 @@ func (a *Agent) applyPlan(on bool) {
 // SetPlan toggles plan mode between runs (never during Run). The tools layer
 // enforces the write confinement (write/edit only reach docs/plans/*.md);
 // shell, mcp, web and the read tools stay available under their normal
-// permission rules; the envelope rides every request while it is on.
-// Turning plan on in yolo leaves yolo for default first (its own
-// ModeChanged): yolo and plan never hold together.
+// permission rules; the envelope rides every request while it is on. Plan
+// rides only on default: turning plan on leaves a wider mode (auto, yolo)
+// for default first (its own ModeChanged) — previously only yolo did.
 func (a *Agent) SetPlan(on bool) {
-	if on && a.mode == ModeYolo {
+	if on && a.mode != ModeDefault {
 		a.SetMode(ModeDefault)
 	}
 	a.applyPlan(on)

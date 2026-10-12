@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -81,13 +82,29 @@ func TestStatusYoloFollowsMode(t *testing.T) {
 	}
 }
 
+// Plan rides only on default: turning plan on in a wider mode leaves it
+// for default first (its own permission_mode entry), so an entry never
+// records a plan flag beside auto or yolo.
 func TestSetPlanKeepsMode(t *testing.T) {
 	a, _, _ := startTest(t, newScript(t), 40)
 	a.SetMode(ModeAuto)
 	a.SetPlan(true)
-	pm := a.entries[len(a.entries)-1].PermissionMode
-	if pm.Mode != "auto" || !pm.Plan {
-		t.Fatalf("%+v", pm)
+	if got := a.Mode(); got != ModeDefault {
+		t.Fatalf("SetPlan(auto) must land on default, got %v", got)
+	}
+	var got []session.PermissionMode
+	for _, e := range a.entries {
+		if e.Type == session.TypePermissionMode {
+			got = append(got, *e.PermissionMode)
+		}
+	}
+	want := []session.PermissionMode{
+		{Mode: "auto"},
+		{Mode: "default"},             // SetPlan leaves auto first
+		{Plan: true, Mode: "default"}, // then the plan entry
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
 
@@ -165,9 +182,9 @@ func TestYoloTurnsEveryCheckOff(t *testing.T) {
 	}
 }
 
-// A start with plan and yolo together (a caller that bypassed cmd's usage
-// check) starts in default + plan: plan wins, the narrower state.
-func TestStartModeNeverYoloWithPlan(t *testing.T) {
+// A start with plan and a wider mode together (a caller that bypassed
+// cmd's usage check) starts in default + plan: plan rides only on default.
+func TestStartModeNeverWiderThanPlan(t *testing.T) {
 	cases := []struct {
 		o    StartOptions
 		want PermMode
@@ -175,7 +192,7 @@ func TestStartModeNeverYoloWithPlan(t *testing.T) {
 		{StartOptions{}, ModeDefault},
 		{StartOptions{Mode: ModeYolo}, ModeYolo},
 		{StartOptions{Mode: ModeYolo, Plan: true}, ModeDefault},
-		{StartOptions{Mode: ModeAuto, Plan: true}, ModeAuto},
+		{StartOptions{Mode: ModeAuto, Plan: true}, ModeDefault},
 	}
 	for _, c := range cases {
 		if got := c.o.mode(); got != c.want {
