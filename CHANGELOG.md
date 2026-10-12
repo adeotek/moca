@@ -1,12 +1,18 @@
 # Changelog
 
-## Unreleased
+## v0.4.0-beta (2026-10-12)
+
+A permissions overhaul — three permission modes instead of the boolean yolo flag, layered wildcard rules, a trusted per-project permissions file, and an `auto` mode that runs safe actions itself — plus TUI polish around it: a mode cycle on Shift+Tab, an arrow-key approval picker, `${…}` prompt templates, and a contrast-tested status bar. Still one binary, still no framework.
+
+Also in this release: the install scripts learn `--uninstall` / `-Uninstall`, and every run writes a bounded diagnostic log — still one binary, still no framework.
+
+### Installer
+
+- **`--uninstall` / `-Uninstall` in the install scripts.** `install.sh`/`install.ps1` remove the installed `moca` binary (from `--dir`/`-Dir`, else the `moca` on PATH — verified to really be moca via its `--version` output) instead of installing, leaving the config, data and state directories untouched. `--remove-data` / `-RemoveData` (implies `--uninstall`) is the full uninstall: the binary plus the config, data and state directories (`~/.config/moca`, `~/.local/share/moca`, `~/.local/state/moca`, or their `$XDG_*_HOME` equivalents — config, credentials, sessions, logs) are deleted.
 
 ### Diagnostics
 
 - **A diagnostic log, safe to attach to bug reports.** Every TUI and `-p` run writes a small logfmt file to `~/.local/state/moca/logs/` — retries, MCP server lifecycle, how each run ended, tool panics with their stack — and never prompts, code, command text or keys (a redaction net blanks secret-named fields and URL credentials). `MOCA_LOG=debug` adds per-request and per-tool-call detail for one run; `log.level` (`info`/`debug`/`off`) sets the default. Files are capped at 10 MB and pruned with the snapshot retention.
-
-## v0.4.0-beta (2026-10-12)
 
 A permissions overhaul — three permission modes instead of the boolean yolo flag, layered wildcard rules, a trusted per-project permissions file, and an `auto` mode that runs safe actions itself — plus TUI polish around it: a mode cycle on Shift+Tab, an arrow-key approval picker, `${…}` prompt templates, and a contrast-tested status bar. Still one binary, still no framework.
 
