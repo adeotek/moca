@@ -34,7 +34,7 @@ usage:
     --approve | --no-approve   project trust for this run (-p default: --no-approve)
     --mode <m>                 permission mode for this run: default | auto | yolo
     --yolo | --no-yolo         shorthand for --mode yolo / leave yolo (overrides config)
-    --plan                     plan mode: analyze the request and write an implementation plan to docs/plans/ (no other writes)
+    --plan                     plan mode: analyze the request and write an implementation plan to docs/plans/ (no other writes; not with yolo)
   moca --do <plan.md> [-p "<notes>"]  execute an implementation plan step by step, ticking its - [ ] boxes
     --resume <id8|last>        resume a session
     --continue                 latest session in this workdir
@@ -74,7 +74,9 @@ type usageError struct{ error }
 // ModeOf resolves the run's permission mode: an explicit flag wins
 // (--mode/--yolo/--no-yolo, mutually exclusive), else a trusted project
 // file's defaultMode, else the user config Mode() (§11). --no-yolo maps a
-// resolved yolo to default and leaves auto alone.
+// resolved yolo to default and leaves auto alone; so does --plan (yolo and
+// plan are mutually exclusive — parseArgs rejects --plan with an explicit
+// --yolo/--mode yolo, a configured yolo yields to the flag).
 func (o Options) ModeOf(cfg config.Config) (string, error) {
 	var flag string
 	switch {
@@ -94,7 +96,7 @@ func (o Options) ModeOf(cfg config.Config) (string, error) {
 	if flag != "" {
 		base = flag
 	}
-	if base == "yolo" && o.Yolo != nil && !*o.Yolo {
+	if base == "yolo" && (o.Plan || (o.Yolo != nil && !*o.Yolo)) {
 		base = "default"
 	}
 	return base, nil
@@ -161,6 +163,9 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 	if *yolo || *noYolo {
 		v := *yolo
 		o.Yolo = &v
+	}
+	if o.Plan && (*yolo || *mode == "yolo") {
+		return o, usageError{errors.New("--plan and yolo mode are mutually exclusive (plan mode keeps writes inside docs/plans/)")}
 	}
 	if o.Effort != "" {
 		if _, err := llm.ParseEffort(o.Effort); err != nil {

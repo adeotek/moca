@@ -197,19 +197,27 @@ func TestPlanEnvelopeKeepsPrefixStable(t *testing.T) {
 }
 
 // TestModeEntriesRecordBothFlags: each permission_mode entry records the
-// full mode state, so toggling one mode never logs the other as off.
+// full mode state, so toggling one mode never logs the other as off — and
+// yolo and plan are mutually exclusive: plan in yolo leaves yolo for
+// default first, yolo in plan turns plan off first.
 func TestModeEntriesRecordBothFlags(t *testing.T) {
 	a, _, _ := startTest(t, newScript(t), 40)
 	a.SetYolo(true)
 	a.SetPlan(true)
 	a.SetYolo(false)
+	a.SetYolo(true)
 	var got []session.PermissionMode
 	for _, e := range a.entries {
 		if e.Type == session.TypePermissionMode {
 			got = append(got, *e.PermissionMode)
 		}
 	}
-	want := []session.PermissionMode{{Yolo: true, Mode: "yolo"}, {Yolo: true, Plan: true, Mode: "yolo"}, {Plan: true, Mode: "default"}}
+	want := []session.PermissionMode{
+		{Yolo: true, Mode: "yolo"},
+		{Mode: "default"}, {Plan: true, Mode: "default"}, // SetPlan(true): yolo off, then plan on
+		{Plan: true, Mode: "default"},
+		{Mode: "default"}, {Yolo: true, Mode: "yolo"}, // SetYolo(true): plan off, then yolo
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}

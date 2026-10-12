@@ -23,7 +23,12 @@ func (a *Agent) applyPlan(on bool) {
 // enforces the write confinement (write/edit only reach docs/plans/*.md);
 // shell, mcp, web and the read tools stay available under their normal
 // permission rules; the envelope rides every request while it is on.
+// Turning plan on in yolo leaves yolo for default first (its own
+// ModeChanged): yolo and plan never hold together.
 func (a *Agent) SetPlan(on bool) {
+	if on && a.mode == ModeYolo {
+		a.SetMode(ModeDefault)
+	}
 	a.applyPlan(on)
 	a.append(session.Entry{Type: session.TypePermissionMode,
 		PermissionMode: &session.PermissionMode{Yolo: a.mode == ModeYolo, Plan: on, Mode: string(a.mode)}})

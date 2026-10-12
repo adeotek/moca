@@ -97,7 +97,7 @@ func badgeStyle(mode agent.PermMode, plan, dark bool) lipgloss.Style {
 	p := statusPalette(dark)
 	hex := p.badge[mode]
 	if mode == agent.ModeYolo {
-		plan = false // yolo never carries plan (Status() normalizes it); keep the red
+		plan = false // yolo never carries plan (the agent excludes it); keep the red
 	}
 	if plan {
 		hex = p.plan

@@ -141,10 +141,7 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	if err != nil {
 		return nil, err
 	}
-	m := o.Mode
-	if m == "" {
-		m = ModeDefault
-	}
+	m := o.mode()
 	env := &tools.Env{
 		Root: jail.Root(), Paths: jail, AutoJail: jail.WithWritable(permissions.TempRoots()...),
 		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps,
@@ -179,6 +176,18 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	a.logger().Info("session", "resumed", prior != nil, "workdir", jail.Root(), "model", model,
 		"effort", string(effort), "mode", m, "plan", o.Plan)
 	return a, nil
+}
+
+// mode is the starting permission mode: default when unset, and never yolo
+// with plan (they are mutually exclusive; cmd rejects --plan with an
+// explicit yolo flag and resolves a configured yolo to default under
+// --plan, so this only guards other callers — plan wins, the narrower one).
+func (o StartOptions) mode() PermMode {
+	switch {
+	case o.Mode == "", o.Plan && o.Mode == ModeYolo:
+		return ModeDefault
+	}
+	return o.Mode
 }
 
 // rules builds the permission rules once for both shell views: the trusted
@@ -334,7 +343,7 @@ func Start(o StartOptions) (*Agent, error) {
 	}
 	w, err := session.Create(filepath.Join(config.DataDir(), "sessions"), session.Header{
 		Workdir: jail.Root(), Provider: m.Provider, Model: cfg.Model, Effort: string(effort),
-		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.Mode == ModeYolo, Mode: string(o.Mode)}, slug)
+		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.mode() == ModeYolo, Mode: string(o.mode())}, slug)
 	if err != nil {
 		return nil, &StartError{err}
 	}

@@ -4,7 +4,9 @@ package agent
 // on the asker), auto (risk table + temp-dir jail + optional classifier)
 // and yolo (everything passes). SetMode swaps the checkers between runs
 // only; every swap is recorded as a permission_mode entry and announced as
-// a ModeChanged event (the TUI's status line and notice).
+// a ModeChanged event (the TUI's status line and notice). Yolo and plan are
+// mutually exclusive: entering one turns the other off first (SetMode,
+// SetPlan), so the agent is never in both.
 
 import (
 	"context"
@@ -23,8 +25,12 @@ const (
 )
 
 // ModeChanged replaces YoloChanged: the TUI refreshes its badge and prints
-// the mode's one-line notice.
-type ModeChanged struct{ Mode PermMode }
+// the mode's one-line notice. Plan is the plan flag at emission time (the
+// TUI handles the event later, after a following SetPlan may have run).
+type ModeChanged struct {
+	Mode PermMode
+	Plan bool
+}
 
 func (ModeChanged) isEvent() {}
 
@@ -68,12 +74,16 @@ func (a *Agent) applyMode(m PermMode) {
 }
 
 // SetMode switches the permission mode between runs (never during Run) and
-// records the decision in the session.
+// records the decision in the session. Entering yolo turns plan mode off
+// first (its own PlanChanged): yolo and plan never hold together.
 func (a *Agent) SetMode(m PermMode) {
+	if m == ModeYolo && a.plan {
+		a.SetPlan(false)
+	}
 	a.applyMode(m)
 	a.append(session.Entry{Type: session.TypePermissionMode,
 		PermissionMode: &session.PermissionMode{Yolo: m == ModeYolo, Plan: a.plan, Mode: string(m)}})
-	a.emit(ModeChanged{Mode: m})
+	a.emit(ModeChanged{Mode: m, Plan: a.plan})
 }
 
 // SetYolo toggles yolo mode between runs (never during Run): the /yolo

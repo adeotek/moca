@@ -109,18 +109,14 @@ func TestYoloNeverCarriesPlan(t *testing.T) {
 	if got := modeBadgeText(m.agent.Mode(), m.agent.Plan()); got != "YOLO" {
 		t.Fatalf("badge text: %q", got)
 	}
-	// And the agent-level SetMode never records plan under yolo: the
-	// session's permission_mode entry carries the mode's own plan state.
+	// And the agent-level SetMode drops plan itself: plan is really off
+	// (no docs/plans confinement, no envelope), not just hidden.
 	m2 := newAgentModel(t)
 	m2.agent.SetPlan(true)
 	m2.agent.SetMode(agent.ModeYolo)
-	if m2.agent.Status().Plan {
-		t.Fatal("SetMode(yolo) must not carry plan")
+	if m2.agent.Plan() || m2.agent.Status().Plan {
+		t.Fatal("SetMode(yolo) must turn plan off")
 	}
-	// And the status bar's badge reads the guarded plan too: a --plan --yolo
-	// start state renders a plain YOLO badge, never YOLO · PLAN (the badge
-	// must agree with Status()/`/mode`/the notices, which all read the
-	// guarded value).
 	m2.refreshStatus()
 	l1 := ansi.Strip(firstLineOf(m2.statusLine()))
 	if !strings.Contains(l1, "YOLO · ") {
@@ -128,6 +124,11 @@ func TestYoloNeverCarriesPlan(t *testing.T) {
 	}
 	if strings.Contains(l1, "PLAN") {
 		t.Fatalf("yolo badge must not show plan: %q", l1)
+	}
+	// The other way round: /plan in yolo leaves yolo for default.
+	m2.runCommand(Parsed{Kind: KindCommand, Name: "plan"})
+	if !m2.agent.Plan() || m2.agent.Mode() != agent.ModeDefault {
+		t.Fatalf("/plan in yolo: mode %v plan %v, want default + plan", m2.agent.Mode(), m2.agent.Plan())
 	}
 }
 
@@ -242,7 +243,5 @@ func TestModeChangedNotices(t *testing.T) {
 	check(agent.ModeChanged{Mode: agent.ModeAuto}, "mode: auto — safe actions run, risky ones ask")
 	check(agent.ModeChanged{Mode: agent.ModeDefault}, "mode: default — every non-allowlisted command asks")
 	check(agent.ModeChanged{Mode: agent.ModeYolo}, "mode: YOLO — ALL permission checks are off")
-	settle(m)
-	m.agent.SetPlan(true)
-	check(agent.ModeChanged{Mode: agent.ModeAuto}, "mode: plan — runs write a plan to docs/plans/")
+	check(agent.ModeChanged{Mode: agent.ModeAuto, Plan: true}, "mode: plan — runs write a plan to docs/plans/")
 }

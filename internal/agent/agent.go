@@ -94,13 +94,7 @@ type Agent struct {
 	// one, e.g. /clear).
 	judgeCache map[string]bool
 	mode       PermMode
-	checkers   struct {
-		paths     tools.PathChecker
-		cmds      tools.CommandChecker
-		autoPaths tools.PathChecker // the auto view of paths: temp roots writable
-		autoCmds  tools.CommandChecker
-		ask       tools.Asker
-	}
+	checkers   checkers // per-mode checkers built once (mode.go)
 }
 
 func New(o Options) (*Agent, error) {

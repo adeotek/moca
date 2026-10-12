@@ -968,11 +968,8 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
-		// Yolo can never carry plan: entering it drops plan first (two
-		// notices — PlanChanged then ModeChanged).
-		if !m.agent.Yolo() && m.agent.Plan() {
-			m.agent.SetPlan(false)
-		}
+		// Entering yolo drops plan first (SetMode: two notices —
+		// PlanChanged then ModeChanged).
 		m.agent.SetYolo(!m.agent.Yolo()) // ModeChanged prints + refreshes
 		return nil
 	case "mode":
@@ -1341,8 +1338,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		return m.printlnMuted("↳ sent: " + strings.Join(e.Texts, " · "))
 	case agent.ModeChanged:
 		m.refreshStatus()
-		plan := m.agent.Status().Plan
-		line, isRed := modeNotice(e.Mode, plan)
+		line, isRed := modeNotice(e.Mode, e.Plan)
 		if isRed {
 			return m.println(red.Render(line))
 		}
@@ -1442,7 +1438,8 @@ func (m *model) View() tea.View {
 	} else if m.approval != nil {
 		rows := approvalDetailRows
 		if m.height > 0 {
-			rows = min(rows, max(1, m.height-inputChrome-4))
+			// The picker rows sit above the command lines.
+			rows = min(rows, max(1, m.height-inputChrome-4-len(m.approval.options())))
 		}
 		sb.WriteString(approvalPanel(m.approval, max(20, m.width), rows) + "\n")
 	} else if m.busy() {
@@ -1592,9 +1589,8 @@ func (m *model) statusLine() string {
 	w := max(20, m.width)
 	// Badge segments lead line 1: the permission state, its ever-visible
 	// placement (Task 8) preserved. Auto+plan splits into two badges, each
-	// with its own color; plan comes from the guarded Status() read (yolo
-	// never carries plan), so the badge agrees with /mode and the notices —
-	// e.g. --plan --yolo renders plain YOLO.
+	// with its own color (yolo never carries plan: the agent keeps them
+	// mutually exclusive).
 	var badges []segment
 	if m.agent != nil {
 		mode, plan := m.agent.Mode(), m.agent.Status().Plan

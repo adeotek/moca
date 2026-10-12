@@ -10,8 +10,9 @@ import (
 )
 
 // nextMode is the Shift+Tab cycle: default → auto → plan (auto + plan
-// scope) → yolo → default. A state reached another way (/plan in default,
-// --plan --yolo) moves to the next position after plan: yolo.
+// scope) → yolo → default. A plan state reached another way (/plan in
+// default) moves to the next position after plan: yolo. Yolo never carries
+// plan (the agent keeps them mutually exclusive).
 func nextMode(m agent.PermMode, plan bool) (agent.PermMode, bool) {
 	switch {
 	case plan:
@@ -27,8 +28,8 @@ func nextMode(m agent.PermMode, plan bool) (agent.PermMode, bool) {
 // cycleMode is shift+tab: the next stop of the permission-mode cycle
 // (default → auto → plan → yolo → default), refused where /mode is. The plan
 // flag and the mode are applied in an order that never passes through a
-// wider state: entering yolo drops plan first; leaving yolo lands on default
-// before the plan flag is set anywhere.
+// wider state: plan is set before the mode moves (auto+plan), and entering
+// yolo drops plan inside SetMode (yolo and plan never hold together).
 func (m *model) cycleMode() tea.Cmd {
 	if m.agent == nil {
 		return nil
@@ -37,22 +38,11 @@ func (m *model) cycleMode() tea.Cmd {
 		return cmd
 	}
 	mode, plan := nextMode(m.agent.Mode(), m.agent.Plan())
-	if plan {
-		if !m.agent.Plan() {
-			m.agent.SetPlan(true)
-		}
-		if m.agent.Mode() != mode {
-			m.agent.SetMode(mode)
-		}
-		return nil
-	}
-	// Entering yolo from a plan state: plan off first (yolo never carries
-	// it). Both steps emit their own notice.
-	if mode == agent.ModeYolo && m.agent.Plan() {
-		m.agent.SetPlan(false)
+	if plan && !m.agent.Plan() {
+		m.agent.SetPlan(true)
 	}
 	if m.agent.Mode() != mode {
-		m.agent.SetMode(mode)
+		m.agent.SetMode(mode) // entering yolo turns plan off first
 	}
 	return nil
 }
@@ -77,10 +67,11 @@ func modeBadgeText(mode agent.PermMode, plan bool) string {
 // modeNotice is the one-line ModeChanged notice for a state.
 func modeNotice(mode agent.PermMode, plan bool) (string, bool) {
 	switch {
+	case mode == agent.ModeYolo:
+		// Checked before plan: the red yolo warning must never be masked.
+		return "mode: YOLO — ALL permission checks are off (shift+tab to leave)", true
 	case plan:
 		return "mode: plan — runs write a plan to docs/plans/, nothing else changes", false
-	case mode == agent.ModeYolo:
-		return "mode: YOLO — ALL permission checks are off (shift+tab to leave)", true
 	case mode == agent.ModeAuto:
 		return "mode: auto — safe actions run, risky ones ask (workdir + temp only)", false
 	default:

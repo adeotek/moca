@@ -108,3 +108,27 @@ func TestLoadProjectIgnoredWhenUntrusted(t *testing.T) {
 		t.Fatalf("trusted must fail with exit 2 naming the file: exit %d stderr %q", code, errb.String())
 	}
 }
+
+// Yolo and plan are mutually exclusive: --plan with an explicit yolo flag
+// is a usage error, and a configured yolo yields to --plan (default).
+func TestPlanExcludesYolo(t *testing.T) {
+	for _, args := range [][]string{{"--plan", "--yolo"}, {"--plan", "--mode", "yolo"}} {
+		if _, err := parseArgs(args, nil); err == nil {
+			t.Fatalf("%v must be refused", args)
+		}
+	}
+	o, err := parseArgs([]string{"--plan", "--mode", "auto"}, nil)
+	if err != nil {
+		t.Fatalf("--plan --mode auto: %v", err)
+	}
+	if m, _ := o.ModeOf(config.Config{}); m != "auto" {
+		t.Fatalf("--plan --mode auto → %q", m)
+	}
+	o, _ = parseArgs([]string{"--plan"}, nil)
+	if m, _ := o.ModeOf(config.Config{Yolo: true}); m != "default" {
+		t.Fatalf("--plan over config yolo → %q, want default", m)
+	}
+	if m, _ := o.ModeOf(config.Config{Permissions: config.PermissionsConfig{DefaultMode: "yolo"}}); m != "default" {
+		t.Fatalf("--plan over defaultMode yolo → %q, want default", m)
+	}
+}

@@ -164,3 +164,22 @@ func TestYoloTurnsEveryCheckOff(t *testing.T) {
 		t.Fatal("toggle writes one permission_mode entry")
 	}
 }
+
+// A start with plan and yolo together (a caller that bypassed cmd's usage
+// check) starts in default + plan: plan wins, the narrower state.
+func TestStartModeNeverYoloWithPlan(t *testing.T) {
+	cases := []struct {
+		o    StartOptions
+		want PermMode
+	}{
+		{StartOptions{}, ModeDefault},
+		{StartOptions{Mode: ModeYolo}, ModeYolo},
+		{StartOptions{Mode: ModeYolo, Plan: true}, ModeDefault},
+		{StartOptions{Mode: ModeAuto, Plan: true}, ModeAuto},
+	}
+	for _, c := range cases {
+		if got := c.o.mode(); got != c.want {
+			t.Errorf("%+v → %v, want %v", c.o, got, c.want)
+		}
+	}
+}

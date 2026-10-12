@@ -212,10 +212,6 @@ func (a *Agent) contextTokensLocked() int {
 func (a *Agent) Status() Status {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	plan := a.plan
-	if a.mode == ModeYolo {
-		plan = false // yolo never carries plan: --plan --yolo / a stray toggle keep writes wide open
-	}
 	return Status{Model: a.model, Effort: a.effort, ContextTokens: a.contextTokensLocked(), Window: a.model.ContextWindow,
-		Usage: a.usage, Cost: a.cost, Sub: a.opts.Config.Providers[a.model.Provider].Auth == "oauth", Hard: a.hard != nil, Yolo: a.mode == ModeYolo, Plan: plan}
+		Usage: a.usage, Cost: a.cost, Sub: a.opts.Config.Providers[a.model.Provider].Auth == "oauth", Hard: a.hard != nil, Yolo: a.mode == ModeYolo, Plan: a.plan}
 }
