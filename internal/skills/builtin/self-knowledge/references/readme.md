@@ -180,7 +180,7 @@ moca --continue                 # resume the latest session of this directory (o
 
 `-p` contract: stdout is the final answer text only; tool activity, retries and the token/cost summary go to stderr. Exit codes: `0` completed · `1` provider/runtime error · `2` config or usage error · `3` incomplete (step limit, or stopped after repeating the same failing call) · `130` interrupted.
 
-Sessions are append-only files under `~/.local/share/moca/sessions/`, keyed by working directory: `--continue` reopens this directory's latest, `--resume <id8|last>` any of them, and `/sessions` lists, switches or deletes them in the TUI.
+Sessions are append-only files under `~/.local/share/moca/sessions/`, keyed by working directory: `--continue` reopens this directory's latest, `--resume <id8>` any of its sessions and `--resume last` its newest (a session resumes only from the directory it started in), and `/sessions` lists, switches or deletes them in the TUI.
 
 **TUI keys**
 
