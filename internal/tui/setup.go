@@ -27,18 +27,48 @@ import (
 // configured (§3.5) — a session needs one.
 func (m *model) unconfigured() bool { return m.agent == nil }
 
-// setupNotice is the setup line. Without a stored credential it is the red
-// no-provider notice; once auth.json holds one, only the model is missing. The
-// same text answers a message or an agent-dependent command while
+// setupNotice is the setup line. When no provider is usable it is the red
+// no-provider notice; once one is (a stored login or key, or one the config's
+// env: reference resolves), only the model is missing. A credential store or
+// registry that cannot be read is reported as itself — folding it into "no
+// provider configured" would send the user to /login to hit the same error.
+// The same text answers a message or an agent-dependent command while
 // unconfigured, so the way out of the state is always one keystroke away.
 func (m *model) setupNotice() string {
-	if provider.NewDefaultStore().HasCredentials() {
+	if err := provider.NewDefaultStore().Validate(); err != nil {
+		return red.Render("error: " + err.Error())
+	}
+	reg, err := m.setupRegistry()
+	if err != nil {
+		return red.Render("error: " + err.Error())
+	}
+	if anyProviderUsable(reg) {
 		return mutedFg.Render("no model selected yet — /model picks one and starts the session")
 	}
 	return red.Render("no provider configured") + " — run /login first (store an API key or sign in), then /model picks a model"
 }
 
-func (m *model) printlnNoProvider() tea.Cmd { return m.println(m.setupNotice()) }
+// anyProviderUsable is the /model picker's own test — CheckCredential, no
+// network — lifted to "is there anything to pick": some provider's
+// credential passes. A credential belongs to a provider, so one probe per
+// provider covers all its models.
+func anyProviderUsable(reg *provider.Registry) bool {
+	seen := map[string]bool{}
+	for _, mod := range reg.Models() {
+		if seen[mod.Provider] {
+			continue
+		}
+		seen[mod.Provider] = true
+		if reg.CheckCredential(mod.Qualified()) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// printlnSetupNotice prints the setup line (the guidance, or the error that
+// replaces it).
+func (m *model) printlnSetupNotice() tea.Cmd { return m.println(m.setupNotice()) }
 
 // setupModelHint follows a successful login in the unconfigured TUI: the
 // credential alone starts nothing — a model is still missing, so the picker

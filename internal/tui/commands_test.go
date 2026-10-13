@@ -111,7 +111,7 @@ func TestParseInputSkills(t *testing.T) {
 	// /help lists the skills block; a name shadowed by a built-in or a
 	// prompt is listed once (its winner).
 	h := HelpText(nil, sk)
-	if !strings.Contains(h, "skills (invoke with /name — the agent loads and follows them):") || !strings.Contains(h, "/rtk      compressed CLI") {
+	if !strings.Contains(h, "skills (invoke with /name — the agent loads and follows them):") || !strings.Contains(h, "/rtk compressed CLI") {
 		t.Fatalf("help must list the skill:\n%s", h)
 	}
 	shadowed := []skills.Skill{{Name: "model", Path: "/x"}, {Name: "review", Path: "/y"}, {Name: "rtk", Path: "/z"}}
@@ -130,5 +130,58 @@ func TestParseInputSkills(t *testing.T) {
 	}
 	if n := countLines("/review "); n != 1 {
 		t.Fatalf("/review listed %d times:\n%s", n, h)
+	}
+}
+
+// /help lines up descriptions in one column per block, whatever the names are
+// called: the built-ins and prompt templates share a column sized to the
+// longest of them, the skills get their own under their heading. A fixed
+// width used to push long names (`self-knowledge`, a long template) off it.
+func TestHelpTextAlignsDescriptions(t *testing.T) {
+	prompts := []skills.Prompt{
+		{Name: "review", Description: "review a diff"},
+		{Name: "a-very-long-template-name", ArgumentHint: "<x>", Description: "long"},
+	}
+	sk := []skills.Skill{
+		{Name: "self-knowledge", Description: "about moca"},
+		{Name: "rtk", Description: "compressed CLI"},
+	}
+	// descCol is the column the description starts in: past the name and the
+	// padding after it.
+	descCol := func(line string) int {
+		name, rest, _ := strings.Cut(line, " ")
+		return len(name) + 1 + len(rest) - len(strings.TrimLeft(rest, " "))
+	}
+	check := func(h string) {
+		t.Helper()
+		block, want, cmdCol := "commands", -1, -1
+		for _, ln := range strings.Split(h, "\n") {
+			switch {
+			case strings.HasPrefix(ln, "skills ("):
+				block, want = "skills", -1
+			case strings.HasPrefix(ln, "!cmd"):
+				// The shell line closes the listing in the command column.
+				if col := descCol(ln); col != cmdCol {
+					t.Errorf("!cmd line starts its description in column %d, want the commands' %d", col, cmdCol)
+				}
+			case strings.HasPrefix(ln, "/"):
+				col := descCol(ln)
+				if want == -1 {
+					want = col
+					if block == "commands" {
+						cmdCol = col
+					}
+				} else if col != want {
+					t.Errorf("%s block: %q starts its description in column %d, want %d", block, ln, col, want)
+				}
+			}
+		}
+	}
+	check(HelpText(nil, nil))
+	check(HelpText(prompts, sk))
+	// The long template name widens the command block, not the skills block.
+	h := HelpText(prompts, sk)
+	if !strings.Contains(h, "/self-knowledge about moca") {
+		t.Errorf("skills block must be sized to its own longest name:\n%s", h)
 	}
 }

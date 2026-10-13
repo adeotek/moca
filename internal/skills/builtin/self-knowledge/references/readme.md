@@ -138,7 +138,7 @@ Every shell command the agent proposes runs through a permission ladder. Three m
 | `auto` | safe actions (reads, builds, tests, confined edits) just run; risky ones (`git push`, installs…) ask every time; commands the tables can't judge get a one-shot classifier opinion — allow or ask |
 | `yolo` | no permission checks |
 
-Pick per run with `moca --mode default|auto|yolo|plan` — `plan` is **plan mode** as a flag value (the plan scope: the run writes `docs/plans/`, nothing else; the v0.4.0-beta dev builds spelled these `--plan`, `--yolo` and `--no-yolo`, which now map to `--mode plan`, `--mode yolo` and `--mode default`) — in the config with `"permissions": { "defaultMode": "auto" }`, or in the TUI with **shift+tab** (`default → auto → yolo → plan`, `/mode` for the same; plan rides only on `default`).
+Pick per run with `moca --mode default|auto|yolo|plan` — `plan` is **plan mode** as a flag value (the plan scope: the run writes `docs/plans/`, nothing else; the v0.4.0-beta dev builds spelled these `--plan`, `--yolo` and `--no-yolo`, which now map to `--mode plan`, `--mode yolo` and `--mode default`) — in the config with `"permissions": { "defaultMode": "auto" }`, or in the TUI with **shift+tab** (`default → auto → plan → yolo`, `/mode` for the same; plan rides only on `default`).
 
 ```jsonc
 // ~/.config/moca/config.jsonc
@@ -174,7 +174,7 @@ Rules are whitespace-separated words with bash-style wildcards: `git push *` (pr
 moca                            # TUI in the current directory
 moca --mode auto -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
 moca --mode plan -p "add a --json flag"   # write docs/plans/<slug>.md, change nothing else
-moca implement docs/plans/add-json-flag.md # execute it step by step, ticking each - [ ] box
+moca execute docs/plans/add-json-flag.md   # execute it step by step, ticking each - [ ] box
 moca --continue                 # resume the latest session of this directory (or --resume <id8|last>)
 ```
 
@@ -193,14 +193,14 @@ Sessions are append-only files under `~/.local/share/moca/sessions/`, keyed by w
 | `alt+t` | pager on the latest thinking block (the whole reasoning chain) |
 | `alt+p` | paste chips (large pastes collapsed, buffer intact) |
 | `ctrl+r` | search prompt history (type to filter · `enter` uses the match, doesn't send) |
-| `shift+tab` | cycle the permission mode (default → auto → yolo → plan) |
+| `shift+tab` | cycle the permission mode (default → auto → plan → yolo) |
 | `ctrl+t` | cycle the effort level |
 | `@` + path | complete a workdir file (`tab`/`enter` inserts it) |
 | `ctrl+c` ×2 | quit (or `/exit`) |
 | `a` / `↑↓` `enter` / `ctrl+a` / `d` | approval picker: allow once / move+confirm / allow always / deny (arrows+enter only with an empty draft) |
 | `↑`/`↓` · `tab` · `esc` | in the `/` dropdown: pick · complete · dismiss |
 
-**Slash commands**: `/model` · `/effort` · `/mode` · `/hard` · `/yolo` · `/plan` · `/implement` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`) and skills (`self-knowledge`, `create-command`, rtk's own — any skill is invokable as `/name`). Typing `/` opens a dropdown of every command, loaded template and skill as you type — templates are tagged `prompt:` and skills `skill:`, in that muted hint region; `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. **`/create-command`** is a built-in skill (nothing is dropped into your config dir): run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands and skills are usable the moment the run that wrote them finishes — no restart. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results. **`/plan <request>`** (or `--mode plan`) turns a run into **plan mode**: the agent reads (shell, web and MCP stay available for investigation under their normal permission rules), writes an implementation plan to `docs/plans/`, and every write outside `docs/plans/*.md` is refused.
+**Slash commands**: `/model` · `/effort` · `/mode` · `/hard` · `/yolo` · `/plan` · `/execute` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`) and skills (`self-knowledge`, `create-command`, rtk's own — any skill is invokable as `/name`). Typing `/` opens a dropdown of every command, loaded template and skill as you type — templates are tagged `prompt:` and skills `skill:`, in that muted hint region; `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. **`/create-command`** is a built-in skill (nothing is dropped into your config dir): run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands and skills are usable the moment the run that wrote them finishes — no restart. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results. **`/plan <request>`** (or `--mode plan`) turns a run into **plan mode**: the agent reads (shell, web and MCP stay available for investigation under their normal permission rules), writes an implementation plan to `docs/plans/`, and every write outside `docs/plans/*.md` is refused.
 
 ## Extend
 

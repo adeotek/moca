@@ -195,19 +195,12 @@ func (s *Store) GetAPIKey(p string) (string, bool, error) {
 	return k, ok && k != "", nil
 }
 
-// HasCredentials reports whether auth.json holds any stored token or API key
-// (a plain read: an unreadable or missing file means no).
-func (s *Store) HasCredentials() bool {
-	f, err := s.read()
-	if err != nil {
-		return false
-	}
-	for _, k := range f.APIKeys {
-		if k != "" {
-			return true
-		}
-	}
-	return len(f.Providers) > 0
+// Validate reports an auth.json that exists but cannot be read or parsed; a
+// missing file is fine (nothing is stored yet). The error says how to reset
+// the file. A plain read, no lock.
+func (s *Store) Validate() error {
+	_, err := s.read()
+	return err
 }
 
 func (s *Store) Put(p string, t Token) error {

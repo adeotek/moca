@@ -9,10 +9,10 @@ import (
 	"github.com/adeotek/moca/internal/agent"
 )
 
-// nextMode is the Shift+Tab cycle: default → auto → yolo → plan → default.
+// nextMode is the Shift+Tab cycle: default → auto → plan → yolo → default.
 // Plan rides only on default (the agent keeps plan out of auto/yolo), so
-// the plan stop toggles the plan flag and lands at the default mode, and
-// the stop after plan wraps around.
+// the plan stop toggles the plan flag and lands at the default mode, the
+// stop after plan is yolo (plan drops first), and yolo wraps to default.
 func nextMode(m agent.PermMode, plan bool) (agent.PermMode, bool) {
 	switch {
 	case plan:
@@ -20,16 +20,17 @@ func nextMode(m agent.PermMode, plan bool) (agent.PermMode, bool) {
 	case m == agent.ModeDefault:
 		return agent.ModeAuto, false
 	case m == agent.ModeAuto:
-		return agent.ModeDefault, true
+		return agent.ModeDefault, true // auto → plan
 	}
 	return agent.ModeDefault, false // yolo → default
 }
 
 // cycleMode is shift+tab: the next stop of the permission-mode cycle
-// (default → auto → yolo → plan → default), refused where /mode is. The
+// (default → auto → plan → yolo → default), refused where /mode is. The
 // plan flag moves through SetPlan — entering plan leaves a wider mode for
 // default itself (the agent's rule), and leaving plan is the plain toggle
-// — so no state passes through plan-under-auto/yolo en route.
+// before SetMode(yolo) — so no state passes through plan-under-auto/yolo
+// en route.
 func (m *model) cycleMode() tea.Cmd {
 	if m.agent == nil {
 		return nil

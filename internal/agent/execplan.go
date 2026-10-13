@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// Plan execution (§14, rev 21): `/implement <plan>` / `moca implement <plan>` runs an
+// Plan execution (§14, rev 21): `/execute <plan>` / `moca execute <plan>` runs an
 // implementation plan step by step. The ticked plan file is the durable
 // progress record — it survives compaction and resume — so moca gets a todo
 // list without a new tool under the schema freeze.
@@ -26,7 +26,7 @@ func uncheckedSteps(abs string) int {
 	return len(uncheckedRe.FindAllIndex(b, -1))
 }
 
-func doPrompt(rel string, n int, extra string) string {
+func execPrompt(rel string, n int, extra string) string {
 	p := fmt.Sprintf("Execute the implementation plan in %s (%d unchecked steps). Work through its unchecked `- [ ]` steps in order: "+
 		"for each, make the change, run the verification the step names, then tick its box (`- [ ]` → `- [x]`) in %s with edit "+
 		"before moving on. If a step is blocked or the plan turns out wrong, stop and explain instead of improvising a different plan. "+
@@ -37,9 +37,9 @@ func doPrompt(rel string, n int, extra string) string {
 	return p
 }
 
-// doNudge is persisted when a plan-execution run is about to end with steps
+// execNudge is persisted when a plan-execution run is about to end with steps
 // still unchecked: one bounded nudge.
-func doNudge(rel string, n int) string {
+func execNudge(rel string, n int) string {
 	return fmt.Sprintf("%d step(s) in %s are still unchecked. Continue with the next one (verify it, then tick it), "+
 		"or explain what blocks it.", n, rel)
 }
@@ -66,21 +66,21 @@ func (a *Agent) RunPlan(ctx context.Context, path, extra string) (Outcome, error
 		rel = abs
 	}
 	rel = filepath.ToSlash(rel)
-	a.doPlan, a.doPlanRel = abs, rel
-	defer func() { a.doPlan, a.doPlanRel = "", "" }()
-	return a.Run(ctx, doPrompt(rel, n, extra))
+	a.execPlan, a.execPlanRel = abs, rel
+	defer func() { a.execPlan, a.execPlanRel = "", "" }()
+	return a.Run(ctx, execPrompt(rel, n, extra))
 }
 
-// nudgeDoPlan appends the unchecked-steps nudge when the plan being executed
+// nudgeExecPlan appends the unchecked-steps nudge when the plan being executed
 // still has open steps; it reports whether it did.
-func (a *Agent) nudgeDoPlan() (bool, error) {
-	if a.doPlan == "" {
+func (a *Agent) nudgeExecPlan() (bool, error) {
+	if a.execPlan == "" {
 		return false, nil
 	}
-	n := uncheckedSteps(a.doPlan)
+	n := uncheckedSteps(a.execPlan)
 	if n == 0 {
 		return false, nil
 	}
-	err := a.nudge("do", doNudge(a.doPlanRel, n))
+	err := a.nudge("execute", execNudge(a.execPlanRel, n))
 	return err == nil, err
 }

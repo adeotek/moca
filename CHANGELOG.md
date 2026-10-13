@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Plan execution is `moca execute <plan.md>` and `/execute <plan.md>`.** It replaces `moca --do <plan.md>` and `/do <plan>` (v0.3.0-beta) with no alias — `--do` is now an unknown flag and `/do` an unknown command (or whatever prompt template or skill of that name you have). Behavior is unchanged: the plan is executed step by step, ticking its `- [ ]` boxes, `-p` adds instructions, `--mode plan` is refused. One-shot plan runs name their session `execute-<plan>`. `/execute` is a built-in, so it wins over a prompt template or skill of the same name, and `/ex` now matches both `/execute` and `/exit` — Enter completes the first, so type `/exi` for exit.
+- **Shift+Tab cycles `default → auto → plan → yolo → default`** (it was `default → auto → yolo → plan`), so plan sits before yolo and yolo wraps to `default`. Plan still rides only on the default mode: entering it from auto lands at `default`, and the stop after it turns plan off before entering yolo, so the two are never on together.
+
+### Fixed
+
+- **`/help` aligns its descriptions whatever the names are.** The command column was a fixed 8 characters, so long names pushed their descriptions out of line — a prompt template with a long name, or a skill like `self-knowledge`. Built-ins and templates now share a column sized to the longest name, skills get their own under their heading, a template with no argument hint no longer lands a column right, and the `!cmd` line follows the command column.
+- **The first-run notice no longer calls any stored credential a configured provider, or hides a corrupt `auth.json`.** "No provider configured" now means no provider the `/model` picker could use: a key stored for an unknown provider doesn't count, and a key resolved from a provider's `env:` reference does. An `auth.json` that cannot be parsed is shown as that error (with the file and how to reset it) instead of sending you to `/login` to hit it again.
+
 ## v0.4.0-beta (2026-10-12)
 
 A permissions overhaul — three permission modes instead of the boolean yolo flag, layered wildcard rules, a trusted per-project permissions file, and an `auto` mode that runs safe actions itself — plus TUI polish around it: a mode cycle on Shift+Tab, an arrow-key approval picker, `${…}` prompt templates, and a contrast-tested status bar. Still one binary, still no framework.

@@ -37,7 +37,7 @@ usage:
                                (plan = the plan scope: write an implementation plan to docs/plans/, no other writes)
     --model <provider/model>   override config `+"`"+`model`+"`"+` for this session
     --resume <id8|last>        resume a session of this directory (last = its newest)
-  moca implement <plan.md> [-p "<notes>"] execute an implementation plan step by step, ticking its - [ ] boxes
+  moca execute <plan.md> [-p "<notes>"] execute an implementation plan step by step, ticking its - [ ] boxes
   moca login <provider>        sign in (subscription OAuth where permitted) or store an API key
     --api-key                  prompt for an API key instead of the OAuth flow
     --no-browser               headless OAuth: print the URL, read the pasted code from stdin
@@ -48,9 +48,7 @@ usage:
   moca mcp index               prebuild the persisted MCP discovery index
   moca --version
 
-logs: ~/.local/state/moca/logs/<date>-<pid>.log
-  — config `+"`"+`log.path`+"`"+` and `+"`"+`log.level`+"`"+` (info|debug|off)
-  - `+"`"+`MOCA_LOG`+"`"+` overrides for one run
+logs: ~/.local/state/moca/logs/<date>-<pid>.log — config `+"`"+`log.level`+"`"+` (info|debug|off); MOCA_LOG overrides it for one run
 `)
 }
 
@@ -61,7 +59,7 @@ type Options struct {
 	Effort     string
 	Approve    *bool
 	Mode       *string
-	Do         string // plan file to execute (implies a one-shot run)
+	Execute    string // plan file to execute (implies a one-shot run)
 	Resume     string
 	Continue   bool
 	Version    bool
@@ -73,7 +71,7 @@ type usageError struct{ error }
 
 // cliModes are the --mode values: the three permission modes plus plan —
 // the plan scope, which rides on default (the agent enforces the pairing).
-var cliModes = []string{"default", "auto", "plan", "yolo"}
+var cliModes = []string{"default", "auto", "yolo", "plan"}
 
 // ResolveMode resolves the run's permission mode and plan scope (§3): an
 // explicit --mode wins — plan maps to the plan scope at the default mode —
@@ -114,13 +112,16 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 		}
 		return o, usageError{err}
 	}
-	// `implement <plan.md>`: the plan is positional; flags may follow it.
-	if a := fs.Args(); len(a) > 0 && a[0] == "implement" {
-		if len(a) < 2 {
-			return o, usageError{errors.New("usage: moca implement <plan.md> [-p \"<notes>\"]")}
+	// `execute <plan.md>`: the plan is positional; flags may follow it.
+	if a := fs.Args(); len(a) > 0 && a[0] == "execute" {
+		if len(a) < 2 || strings.HasPrefix(a[1], "-") {
+			return o, usageError{errors.New("usage: moca execute <plan.md> [-p \"<notes>\"]")}
 		}
-		o.Do = a[1]
+		o.Execute = a[1]
 		if err := fs.Parse(a[2:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return o, errHelp
+			}
 			return o, usageError{err}
 		}
 		if len(fs.Args()) > 0 {
@@ -160,13 +161,13 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 		}
 		o.Prompt = strings.TrimRight(string(b), "\n")
 	}
-	if o.Do != "" {
+	if o.Execute != "" {
 		if o.Mode != nil && *o.Mode == "plan" {
-			return o, usageError{errors.New("implement and --mode plan are mutually exclusive (plan mode only writes docs/plans/)")}
+			return o, usageError{errors.New("execute and --mode plan are mutually exclusive (plan mode only writes docs/plans/)")}
 		}
 		o.OneShot = true // -p, when given, adds instructions
 	}
-	if o.OneShot && o.Do == "" && strings.TrimSpace(o.Prompt) == "" {
+	if o.OneShot && o.Execute == "" && strings.TrimSpace(o.Prompt) == "" {
 		return o, usageError{errors.New("-p needs a non-empty prompt")}
 	}
 	if o.Resume != "" && o.Continue {

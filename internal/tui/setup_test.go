@@ -218,6 +218,45 @@ func TestSetupNoticeFollowsCredential(t *testing.T) {
 	}
 }
 
+// "A provider is configured" means what the /model picker means: some
+// provider's credential passes CheckCredential. A key stored for a name moca
+// has no models for does not count, and a key resolved from the environment
+// does even with nothing stored.
+func TestSetupNoticeCountsOnlyUsableProviders(t *testing.T) {
+	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
+	if err := provider.NewDefaultStore().PutAPIKey("nonesuch", "k"); err != nil {
+		t.Fatal(err)
+	}
+	if n := m.setupNotice(); !strings.Contains(n, "no provider configured") {
+		t.Fatalf("a key for an unknown provider is not a configured provider: %q", n)
+	}
+	t.Setenv("MOCA_SETUP_KEY", "k")
+	if n := m.setupNotice(); !strings.Contains(n, "no model selected yet") || strings.Contains(n, "no provider") {
+		t.Fatalf("an env-resolved key makes the provider usable: %q", n)
+	}
+}
+
+// A corrupt auth.json is reported as itself — on the welcome line too —
+// instead of reading as "no provider configured", which would send the user
+// to /login only to hit the same error there.
+func TestSetupNoticeReportsACorruptStore(t *testing.T) {
+	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
+	store := provider.NewDefaultStore()
+	if err := os.MkdirAll(filepath.Dir(store.Path()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.Path(), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	n := m.setupNotice()
+	if !strings.Contains(n, "unreadable") || !strings.Contains(n, store.Path()) || strings.Contains(n, "no provider configured") {
+		t.Fatalf("corrupt store: %q", n)
+	}
+	if out := printed(m.Init()); !strings.Contains(out, "unreadable") {
+		t.Fatalf("the welcome must carry the store error: %q", out)
+	}
+}
+
 // /resume needs no configured model: the stored session's model wins.
 func TestResumeFindsItsModelWithoutConfig(t *testing.T) {
 	setupEnv(t)
