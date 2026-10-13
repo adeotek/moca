@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// Plan execution (§14, rev 21): `/do <plan>` / `--do <plan>` runs an
+// Plan execution (§14, rev 21): `/implement <plan>` / `moca implement <plan>` runs an
 // implementation plan step by step. The ticked plan file is the durable
 // progress record — it survives compaction and resume — so moca gets a todo
 // list without a new tool under the schema freeze.

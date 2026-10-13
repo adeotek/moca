@@ -410,7 +410,7 @@ func (m *model) startRun(text string) tea.Cmd {
 }
 
 // startRunWith starts a run echoing label as the user line; run is the
-// agent call (Run, or RunPlan for /do).
+// agent call (Run, or RunPlan for /implement).
 func (m *model) startRunWith(label string, run func(context.Context) (agent.Outcome, error)) tea.Cmd {
 	if m.agent == nil {
 		return nil
@@ -986,19 +986,19 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		}
 		m.agent.SetPlan(!m.agent.Plan()) // PlanChanged prints + refreshes
 		return nil
-	case "do":
+	case "implement":
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
 		path, extra, _ := strings.Cut(strings.TrimSpace(c.Args), " ")
 		if path == "" {
-			return m.println("usage: /do <plan.md> [instructions]")
+			return m.println("usage: /implement <plan.md> [instructions]")
 		}
 		if m.agent.Plan() {
-			return m.printlnError("error: plan mode is on (writes are confined to docs/plans/) — /plan to turn it off, then /do")
+			return m.printlnError("error: plan mode is on (writes are confined to docs/plans/) — /plan to turn it off, then /implement")
 		}
 		a := m.agent
-		return m.startRunWith("/do "+strings.TrimSpace(c.Args), func(ctx context.Context) (agent.Outcome, error) {
+		return m.startRunWith("/implement "+strings.TrimSpace(c.Args), func(ctx context.Context) (agent.Outcome, error) {
 			return a.RunPlan(ctx, path, extra)
 		})
 	case "clear":

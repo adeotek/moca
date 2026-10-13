@@ -168,10 +168,10 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 	return exitOK
 }
 
-// oneShotSlug names the session file: the prompt, or for --do the plan.
+// oneShotSlug names the session file: the prompt, or for implement the plan.
 func oneShotSlug(o Options) string {
 	if o.Do != "" {
-		return session.Slug("do " + strings.TrimSuffix(filepath.Base(o.Do), filepath.Ext(o.Do)))
+		return session.Slug("implement " + strings.TrimSuffix(filepath.Base(o.Do), filepath.Ext(o.Do)))
 	}
 	return session.Slug(o.Prompt)
 }

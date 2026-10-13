@@ -37,7 +37,7 @@ usage:
                                (plan = the plan scope: write an implementation plan to docs/plans/, no other writes)
     --model <provider/model>   override config `+"`"+`model`+"`"+` for this session
     --resume <id8|last>        resume a session of this directory (last = its newest)
-  moca --do <plan.md> [-p "<notes>"] execute an implementation plan step by step, ticking its - [ ] boxes
+  moca implement <plan.md> [-p "<notes>"] execute an implementation plan step by step, ticking its - [ ] boxes
   moca login <provider>        sign in (subscription OAuth where permitted) or store an API key
     --api-key                  prompt for an API key instead of the OAuth flow
     --no-browser               headless OAuth: print the URL, read the pasted code from stdin
@@ -104,7 +104,6 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 	approve := fs.Bool("approve", false, "trust project resources for this run")
 	noApprove := fs.Bool("no-approve", false, "skip project resources for this run")
 	mode := fs.String("mode", "", "permission mode for this run: default | auto | yolo | plan")
-	fs.StringVar(&o.Do, "do", "", "execute the implementation plan in this file (one-shot; -p adds instructions)")
 	fs.StringVar(&o.Resume, "resume", "", "resume session id8 | last")
 	fs.BoolVar(&o.Continue, "continue", false, "resume latest session in this workdir")
 	fs.BoolVar(&o.Version, "version", false, "print version")
@@ -114,6 +113,19 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 			return o, errHelp
 		}
 		return o, usageError{err}
+	}
+	// `implement <plan.md>`: the plan is positional; flags may follow it.
+	if a := fs.Args(); len(a) > 0 && a[0] == "implement" {
+		if len(a) < 2 {
+			return o, usageError{errors.New("usage: moca implement <plan.md> [-p \"<notes>\"]")}
+		}
+		o.Do = a[1]
+		if err := fs.Parse(a[2:]); err != nil {
+			return o, usageError{err}
+		}
+		if len(fs.Args()) > 0 {
+			return o, usageError{fmt.Errorf("unexpected argument %q", fs.Args()[0])}
+		}
 	}
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "p" {
@@ -150,7 +162,7 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 	}
 	if o.Do != "" {
 		if o.Mode != nil && *o.Mode == "plan" {
-			return o, usageError{errors.New("--do and --mode plan are mutually exclusive (plan mode only writes docs/plans/)")}
+			return o, usageError{errors.New("implement and --mode plan are mutually exclusive (plan mode only writes docs/plans/)")}
 		}
 		o.OneShot = true // -p, when given, adds instructions
 	}

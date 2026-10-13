@@ -610,18 +610,18 @@ func TestExitForOAuthSentinels(t *testing.T) {
 	}
 }
 
-func TestParseArgsDo(t *testing.T) {
-	o, err := parseArgs([]string{"--do", "docs/plans/x.md"}, nil)
+func TestParseArgsImplement(t *testing.T) {
+	o, err := parseArgs([]string{"implement", "docs/plans/x.md"}, nil)
 	if err != nil || !o.OneShot || o.Do != "docs/plans/x.md" || o.Prompt != "" {
 		t.Fatalf("%+v %v", o, err)
 	}
-	if o, err = parseArgs([]string{"--do", "x.md", "-p", "small commits"}, nil); err != nil || o.Prompt != "small commits" {
+	if o, err = parseArgs([]string{"implement", "x.md", "-p", "small commits"}, nil); err != nil || o.Prompt != "small commits" {
 		t.Fatalf("%+v %v", o, err)
 	}
-	if _, err = parseArgs([]string{"--do", "x.md", "--mode", "plan"}, nil); err == nil {
-		t.Fatal("--do with --mode plan must be refused")
+	if _, err = parseArgs([]string{"implement", "x.md", "--mode", "plan"}, nil); err == nil {
+		t.Fatal("implement with --mode plan must be refused")
 	}
-	if oneShotSlug(Options{Do: "docs/plans/add-json.md"}) != session.Slug("do add-json") {
+	if oneShotSlug(Options{Do: "docs/plans/add-json.md"}) != session.Slug("implement add-json") {
 		t.Fatal("slug")
 	}
 }

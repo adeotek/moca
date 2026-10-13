@@ -75,16 +75,16 @@ func TestPlanCommandRefusedMidRun(t *testing.T) {
 
 func TestDoCommand(t *testing.T) {
 	m := newAgentModel(t)
-	if out := simulateAll(m, m.runCommand(Parsed{Kind: KindCommand, Name: "do"})); !strings.Contains(out, "usage: /do") {
+	if out := simulateAll(m, m.runCommand(Parsed{Kind: KindCommand, Name: "implement"})); !strings.Contains(out, "usage: /implement") {
 		t.Fatalf("no path: %q", out)
 	}
 	m.agent.SetPlan(true)
-	if out := simulateAll(m, m.runCommand(Parsed{Kind: KindCommand, Name: "do", Args: "docs/plans/x.md"})); !strings.Contains(out, "plan mode is on") {
+	if out := simulateAll(m, m.runCommand(Parsed{Kind: KindCommand, Name: "implement", Args: "docs/plans/x.md"})); !strings.Contains(out, "plan mode is on") {
 		t.Fatalf("plan mode: %q", out)
 	}
 	m.agent.SetPlan(false)
-	out := simulateAll(m, tuiCmd(t, m, "/do docs/plans/x.md keep it small"))
-	if !strings.Contains(out, "› /do docs/plans/x.md keep it small") {
-		t.Fatalf("/do must start a run: %q", out)
+	out := simulateAll(m, tuiCmd(t, m, "/implement docs/plans/x.md keep it small"))
+	if !strings.Contains(out, "› /implement docs/plans/x.md keep it small") {
+		t.Fatalf("/implement must start a run: %q", out)
 	}
 }
