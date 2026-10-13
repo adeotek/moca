@@ -1,8 +1,13 @@
 # The Go version is pinned once, in go.mod's `toolchain` directive — mise
 # reads it natively via the idiomatic Go version file enabled below (no
-# [tools] entry; requires a recent mise).
+# [tools] entry for go itself; requires a recent mise).
 [settings]
 idiomatic_version_file_enable_tools = ["go"]
+
+# gopls (Go language server) isn't in mise's registry, so it goes through the
+# `go:` backend; mise installs it with the go version resolved above.
+[tools]
+"go:golang.org/x/tools/gopls" = "latest"
 
 # These tasks mirror the Makefile targets — keep the two in sync. `make`
 # stays the canonical interface for machines without mise.

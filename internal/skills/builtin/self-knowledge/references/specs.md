@@ -22,7 +22,7 @@ The bet: **a tight agent loop plus disciplined context handling beats a feature-
 ## 2. Build, test, verify
 
 ```bash
-mise install                      # provisions Go 1.27.1 from go.mod; `go` is not on the global PATH
+mise install                      # provisions Go 1.27.1 from go.mod + gopls (mise.toml); `go` is not on the global PATH
 export PATH="$(mise where go)/bin:$PATH"
 make build                        # bin/moca, version-stamped from `git describe` (or: go build ./...)
 make test                         # go test ./... -race -count=1

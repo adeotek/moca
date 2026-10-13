@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.1-beta (2026-10-14)
 
 ### Changed
 
@@ -11,6 +11,15 @@
 
 - **`/help` aligns its descriptions whatever the names are.** The command column was a fixed 8 characters, so long names pushed their descriptions out of line — a prompt template with a long name, or a skill like `self-knowledge`. Built-ins and templates now share a column sized to the longest name, skills get their own under their heading, a template with no argument hint no longer lands a column right, and the `!cmd` line follows the command column.
 - **The first-run notice no longer calls any stored credential a configured provider, or hides a corrupt `auth.json`.** "No provider configured" now means no provider the `/model` picker could use: a key stored for an unknown provider doesn't count, and a key resolved from a provider's `env:` reference does. An `auth.json` that cannot be parsed is shown as that error (with the file and how to reset it) instead of sending you to `/login` to hit it again.
+
+### Build
+
+- **Windows builds produce `bin/moca.exe`.** `make build` and `mise run build` take the suffix from `go env GOEXE` (it was a bare `bin/moca`), and the mise tasks run under `bash -c` — mise defaults to `cmd.exe` on Windows, which cannot run their POSIX scripts.
+- **`mise install` also installs `gopls`.** It is a `[tools]` entry in `mise.toml` through the `go:` backend (`go:golang.org/x/tools/gopls`, `latest`) — `gopls` is not in mise's registry — built with the Go version `go.mod` pins.
+
+### Docs
+
+- **The README's `Phases` table is gone.** The implementation history lives in `docs/specs/SPECS.md` §1; the README keeps the status line and the feature docs. The `mise install` lines in the README, `AGENTS.md` and SPECS §2 now mention `gopls`.
 
 ## v0.4.0-beta (2026-10-12)
 

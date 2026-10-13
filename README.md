@@ -216,7 +216,7 @@ subagents · hooks · LSP · image gen · voice · telemetry · binary plugin sy
 ## Development
 
 ```bash
-mise install        # provisions Go 1.27.1 — pinned once, in go.mod
+mise install        # provisions Go 1.27.1 (pinned once, in go.mod) and gopls
 make build          # bin/moca, version-stamped from git describe
 make test           # go test ./... -race -count=1
 make vet            # go vet ./... + gofmt -l . (both must be clean — the CI gate)
@@ -224,18 +224,6 @@ make release        # five cross-compiled binaries in dist/
 ```
 
 `make` falls back to `mise x go -- go` when `go` is not on the PATH; with mise, the same targets run as `mise run build|test|vet|fmt|release|clean`. Two scripted harnesses sit beside the unit suites (both need a model key in the repo `.env`, both build first): the **eval corpus** (`bash test/evals/run.sh -n 3 -l <label>` — seven scenarios with per-run metrics recorded under `test/evals/results/`, baseline in `test/evals/BASELINE.md`) and the **ship gate** (`bash test/shipgate/run.sh` — §14, a real bug behind a failing test fixed end to end; the checker is `//go:build shipgate`, so plain `go test ./...` skips it).
-
-## Phases
-
-| # | Scope | Gate |
-|---|-------|------|
-| 1 | skeleton, 3 protocol adapters, streaming, retries, JSONC config | `-p 'hi'` streams via anthropic, opencode-go, openai; §12 example decodes intact — done |
-| 2 | 7 tools + agent loop + permissions + yolo mode + skills + AGENTS.md + session schema | edit + shell-analysis ladders green, jail enforced, `--no-approve` honoured, `--mode yolo` lifts all checks — done |
-| 3 | TUI shell + slash commands + status bar + steering + pager | full session in TUI, `/model` `/effort` `/hard` (cross-provider), `/undo` — done |
-| 4 | context manager + compaction + resume | token-triggered compaction, `--continue` — done |
-| 5 | MCP lazy proxy (stdio + streamable HTTP, persisted index, `mcp import`) | real server via proxy, no schemas in prompt, 0 servers at start — done |
-| 6 | rtk + graphify + skills ecosystem compatibility | rtk preferred in real session, pi SKILL.md loads — done |
-| 7 | OAuth providers + upstream graphify PR + v0.1 | ship-gate demo passes (§14), live legs green (2026-10-07) — shipped as `v0.1.1-alpha`; current line `v0.4.0-beta` |
 
 ## Docs
 
