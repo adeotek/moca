@@ -29,15 +29,15 @@ func printUsage(w io.Writer) {
 usage:
   moca                         TUI in the current directory
   moca -p "<prompt>"           one-shot; prompt also accepted on stdin (`+"`"+`-p -`+"`"+`)
-    --model <provider/model>   override config `+"`"+`model`+"`"+` for this session
-    --effort <level>           override effort for this session (off|minimal|low|medium|high|xhigh|max)
     --approve | --no-approve   project trust for this run (-p default: --no-approve)
+    --effort <level>           override effort for this session (off|minimal|low|medium|high|xhigh|max)
+    --config <path>            config file (dev/test)
+    --continue                 latest session in this workdir
     --mode <m>                 permission mode for this run: default | auto | yolo | plan
                                (plan = the plan scope: write an implementation plan to docs/plans/, no other writes)
-  moca --do <plan.md> [-p "<notes>"]  execute an implementation plan step by step, ticking its - [ ] boxes
+    --model <provider/model>   override config `+"`"+`model`+"`"+` for this session
     --resume <id8|last>        resume a session of this directory (last = its newest)
-    --continue                 latest session in this workdir
-    --config <path>            config file (dev/test)
+  moca --do <plan.md> [-p "<notes>"] execute an implementation plan step by step, ticking its - [ ] boxes
   moca login <provider>        sign in (subscription OAuth where permitted) or store an API key
     --api-key                  prompt for an API key instead of the OAuth flow
     --no-browser               headless OAuth: print the URL, read the pasted code from stdin
@@ -47,7 +47,10 @@ usage:
   moca mcp import              import MCP servers from Claude Code / OpenCode / Pi configs
   moca mcp index               prebuild the persisted MCP discovery index
   moca --version
-  logs: ~/.local/state/moca/logs/<date>-<pid>.log — config log.level (info|debug|off); MOCA_LOG overrides for one run
+
+logs: ~/.local/state/moca/logs/<date>-<pid>.log
+  — config `+"`"+`log.path`+"`"+` and `+"`"+`log.level`+"`"+` (info|debug|off)
+  - `+"`"+`MOCA_LOG`+"`"+` overrides for one run
 `)
 }
 
@@ -70,7 +73,7 @@ type usageError struct{ error }
 
 // cliModes are the --mode values: the three permission modes plus plan —
 // the plan scope, which rides on default (the agent enforces the pairing).
-var cliModes = []string{"default", "auto", "yolo", "plan"}
+var cliModes = []string{"default", "auto", "plan", "yolo"}
 
 // ResolveMode resolves the run's permission mode and plan scope (§3): an
 // explicit --mode wins — plan maps to the plan scope at the default mode —

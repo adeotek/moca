@@ -195,6 +195,21 @@ func (s *Store) GetAPIKey(p string) (string, bool, error) {
 	return k, ok && k != "", nil
 }
 
+// HasCredentials reports whether auth.json holds any stored token or API key
+// (a plain read: an unreadable or missing file means no).
+func (s *Store) HasCredentials() bool {
+	f, err := s.read()
+	if err != nil {
+		return false
+	}
+	for _, k := range f.APIKeys {
+		if k != "" {
+			return true
+		}
+	}
+	return len(f.Providers) > 0
+}
+
 func (s *Store) Put(p string, t Token) error {
 	return s.withLock(context.Background(), func() error {
 		f, err := s.read()

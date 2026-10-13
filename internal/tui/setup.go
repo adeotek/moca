@@ -27,22 +27,27 @@ import (
 // configured (§3.5) — a session needs one.
 func (m *model) unconfigured() bool { return m.agent == nil }
 
-// noProviderNotice is the red setup line. The same text answers a message or
-// an agent-dependent command while unconfigured, so the way out of the state
-// is always one keystroke away.
-func noProviderNotice() string {
+// setupNotice is the setup line. Without a stored credential it is the red
+// no-provider notice; once auth.json holds one, only the model is missing. The
+// same text answers a message or an agent-dependent command while
+// unconfigured, so the way out of the state is always one keystroke away.
+func (m *model) setupNotice() string {
+	if provider.NewDefaultStore().HasCredentials() {
+		return mutedFg.Render("no model selected yet — /model picks one and starts the session")
+	}
 	return red.Render("no provider configured") + " — run /login first (store an API key or sign in), then /model picks a model"
 }
 
-func (m *model) printlnNoProvider() tea.Cmd { return m.println(noProviderNotice()) }
+func (m *model) printlnNoProvider() tea.Cmd { return m.println(m.setupNotice()) }
 
 // setupModelHint follows a successful login in the unconfigured TUI: the
-// credential alone starts nothing — a model is still missing.
+// credential alone starts nothing — a model is still missing, so the picker
+// opens right away (a cancelled picker leaves /model for later).
 func (m *model) setupModelHint() tea.Cmd {
 	if !m.unconfigured() {
 		return nil
 	}
-	return m.printlnMuted("no model selected yet — /model picks one and starts the session")
+	return m.runModelSetup("")
 }
 
 // setupRegistry lazily builds the registry the unconfigured TUI lists /model

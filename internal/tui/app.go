@@ -374,7 +374,7 @@ func (m *model) Init() tea.Cmd {
 	// notice takes the greeting's row.
 	welcome := welcomeText()
 	if m.unconfigured() {
-		welcome += "\n" + noProviderNotice()
+		welcome += "\n" + m.setupNotice()
 	}
 	return tea.Batch(m.println(welcome), m.branchCmd(), tea.RequestBackgroundColor, tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return hintCheckMsg{} }))
 }

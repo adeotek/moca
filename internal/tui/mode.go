@@ -16,13 +16,13 @@ import (
 func nextMode(m agent.PermMode, plan bool) (agent.PermMode, bool) {
 	switch {
 	case plan:
-		return agent.ModeDefault, false
+		return agent.ModeYolo, false
 	case m == agent.ModeDefault:
 		return agent.ModeAuto, false
 	case m == agent.ModeAuto:
-		return agent.ModeYolo, false
+		return agent.ModeDefault, true
 	}
-	return agent.ModeDefault, true // yolo → plan
+	return agent.ModeDefault, false // yolo → default
 }
 
 // cycleMode is shift+tab: the next stop of the permission-mode cycle

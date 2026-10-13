@@ -11,6 +11,7 @@ import (
 
 	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
 )
 
@@ -185,8 +186,8 @@ func TestUncredentialedModelRefused(t *testing.T) {
 	}
 }
 
-// A stored key alone still says a model is missing: /model is the next step.
-func TestLoginInSetupHintsAtModel(t *testing.T) {
+// A stored key alone starts nothing: the login opens the model picker.
+func TestLoginInSetupOpensModelPicker(t *testing.T) {
 	t.Setenv("MOCA_SETUP_KEY", "k")
 	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
 	if out, _ := simulate(m, m.runLogin("fake")); out != "" {
@@ -197,8 +198,23 @@ func TestLoginInSetupHintsAtModel(t *testing.T) {
 	}
 	m.login.appendKey("k")
 	out, _ := simulate(m, m.loginKeyInput(keyMsg("enter")))
-	if !strings.Contains(out, "stored API key for fake") || !strings.Contains(out, "no model selected yet") {
-		t.Fatalf("login printed %q", out)
+	if !strings.Contains(out, "stored API key for fake") || m.pick == nil {
+		t.Fatalf("login printed %q, picker open: %v", out, m.pick != nil)
+	}
+}
+
+// With a stored credential the setup notice only says the model is missing;
+// without one it is the red no-provider line.
+func TestSetupNoticeFollowsCredential(t *testing.T) {
+	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
+	if n := m.setupNotice(); !strings.Contains(n, "no provider configured") {
+		t.Fatalf("no credential: %q", n)
+	}
+	if err := provider.NewDefaultStore().PutAPIKey("fake", "k"); err != nil {
+		t.Fatal(err)
+	}
+	if n := m.setupNotice(); !strings.Contains(n, "no model selected yet") || strings.Contains(n, "no provider") {
+		t.Fatalf("credential stored: %q", n)
 	}
 }
 
