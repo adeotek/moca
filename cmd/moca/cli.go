@@ -46,6 +46,10 @@ usage:
     --check                    only report whether a newer release exists
   moca mcp import              import MCP servers from Claude Code / OpenCode / Pi configs
   moca mcp index               prebuild the persisted MCP discovery index
+  moca acp                     serve the Agent Client Protocol on stdio (Zed, VS Code, Paseo, …)
+    --model / --effort / --mode   as above, for every session the editor opens
+    --approve / --no-approve   trust / do not trust project resources (default: the
+                               saved decision for the folder, else trusted)
   moca --version
   logs: ~/.local/state/moca/logs/<date>-<pid>.log — config log.level (info|debug|off); MOCA_LOG overrides for one run
 `)
@@ -152,7 +156,7 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 		return o, usageError{errors.New("--resume and --continue are mutually exclusive")}
 	}
 	o.Sub = fs.Args()
-	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp" || o.Sub[0] == "update") {
+	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp" || o.Sub[0] == "update" || o.Sub[0] == "acp") {
 		return o, usageError{fmt.Errorf("unknown command %q", o.Sub[0])}
 	}
 	return o, nil

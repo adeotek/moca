@@ -68,6 +68,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		switch o.Sub[0] {
 		case "mcp":
 			return runMCP(ctx, o, cfg, path, stdin, stdout, stderr)
+		case "acp":
+			return runACP(ctx, o, cfg, path, stdin, stdout, stderr)
 		case "login":
 			return runLogin(ctx, o, cfg, path, stdin, stdout, stderr)
 		case "logout":
