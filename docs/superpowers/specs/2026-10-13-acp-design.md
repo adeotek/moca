@@ -115,6 +115,10 @@ in a terminal".
 
 ### `session/new`
 
+Updates emitted while the agent starts (e.g. config warnings) are held until
+the response is written, then flushed — the client cannot route a
+notification for a session id it has not received yet.
+
 1. Validate `cwd`: absolute, an existing directory → else `-32602`.
 2. `mcpServers`: ignored; the count is logged at debug level.
 3. Trust: unless `--no-approve`, `config.LoadProject(cwd)` is merged
@@ -176,7 +180,7 @@ the ctx error → `stopReason: cancelled`. No running prompt → no-op.
 | `ToolStart` | `tool_call` `{toolCallId: call.ID, title, kind, status: in_progress, rawInput, locations}` |
 | `ToolEnd` | `tool_call_update` `{toolCallId, status: completed\|failed, content}` |
 | `ModeChanged`, `PlanChanged` | `current_mode_update` |
-| `Warning` | the spec's user-facing notice update if the pinned schema defines it; else `agent_thought_chunk` prefixed `moca: ` |
+| `Warning` | `agent_thought_chunk` prefixed `moca: ` (universally rendered; ACP's newer notice update is a later refinement) |
 | `Retry`, `TurnEnd`, `Resumed`, `SteeringApplied` | none (logged) |
 
 ### Tool calls
@@ -212,9 +216,9 @@ the ctx error → `stopReason: cancelled`. No running prompt → no-op.
   from the TUI badge wording). `plan` = `SetMode(default)` + `SetPlan(true)`;
   any other mode also sets `SetPlan(false)`.
 - Initial `currentModeId` from the resolved mode / plan flag.
-- Accepted while idle. Whether `Agent.SetMode` / `SetPlan` are safe during a
-  run is verified first; if not, a mid-run `set_mode` → error "wait for the
-  current prompt to finish".
+- Accepted only while idle: `Agent.SetMode` / `SetPlan` are documented
+  between-runs only (they swap the tools' checkers). A mid-run `set_mode` →
+  error "wait for the current prompt to finish".
 
 ### Model picker (`session/set_config_option`)
 
@@ -227,10 +231,11 @@ the ctx error → `stopReason: cancelled`. No running prompt → no-op.
 
 ### `session/list`
 
-`session.ListAll(<data>/sessions, cwd, 100)` → `sessions: [{sessionId: id8,
-cwd, title, updatedAt}]`, no `nextCursor`. `cwd` is optional in the spec:
-without it, all sessions are listed (newest first, same cap) — if
-`session.ListAll` cannot take an empty workdir filter, it gains that mode.
+`session.List(<data>/sessions, cwd, "", 100)` → `sessions: [{sessionId: id8,
+cwd, title: <first user line>, updatedAt}]`, newest first, no `nextCursor`.
+`cwd` is optional in the spec: without it, sessions of every workdir are
+listed (`session.List` treats `""` as any). Sessions that never received a
+prompt are skipped.
 
 ### `session/load`
 
