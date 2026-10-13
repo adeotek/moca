@@ -29,6 +29,8 @@ type session struct {
 	// set_mode / set_config_option never overlap a running prompt.
 	runMu  sync.Mutex
 	cancel context.CancelFunc // non-nil while a prompt runs
+	closed bool               // session/close or delete: no new prompt may begin
+	runWG  sync.WaitGroup     // the running prompt, awaited by shutdown
 
 	// sendMu orders writes and guards ready/early: updates emitted before
 	// the client has the session id (agent.Start warnings) are held, then
@@ -222,10 +224,14 @@ func (s *session) ask(ctx context.Context, q tools.Question) tools.Answer {
 func (s *session) begin(ctx context.Context) (context.Context, error) {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
+	if s.closed {
+		return nil, notFound("session %s is closed", s.id)
+	}
 	if s.cancel != nil {
 		return nil, busy("a prompt is already running in this session")
 	}
 	ctx, s.cancel = context.WithCancel(ctx)
+	s.runWG.Add(1)
 	s.mu.Lock()
 	s.lastStop = ""
 	s.mu.Unlock()
@@ -238,6 +244,7 @@ func (s *session) end() {
 	if s.cancel != nil {
 		s.cancel()
 		s.cancel = nil
+		s.runWG.Done()
 	}
 }
 
@@ -249,11 +256,33 @@ func (s *session) cancelPrompt() {
 	}
 }
 
+// shutdown ends the session (session/close, delete): running work is
+// cancelled as by session/cancel and awaited, then the agent is closed —
+// its MCP servers stop and the session file's writer lock is released.
+// Idempotent.
+func (s *session) shutdown() {
+	s.runMu.Lock()
+	if s.closed {
+		s.runMu.Unlock()
+		return
+	}
+	s.closed = true
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.runMu.Unlock()
+	s.runWG.Wait()
+	s.agent.Close()
+}
+
 // idle runs f only while no prompt runs: the agent's mode and model setters
 // are between-runs only.
 func (s *session) idle(f func() (any, error)) (any, error) {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
+	if s.closed {
+		return nil, notFound("session %s is closed", s.id)
+	}
 	if s.cancel != nil {
 		return nil, busy("wait for the current prompt to finish")
 	}

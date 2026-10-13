@@ -87,6 +87,12 @@ func (srv *Server) Request(ctx context.Context, method string, params json.RawMe
 		return srv.listSessions(params)
 	case "session/load":
 		return srv.loadSession(params)
+	case "session/close":
+		return srv.closeSession(params)
+	case "session/resume":
+		return srv.resumeSession(params)
+	case "session/delete":
+		return srv.deleteSession(params)
 	}
 	return nil, &RPCError{Code: codeMethodNotFound, Message: "method not found: " + method}
 }
@@ -114,7 +120,7 @@ func (srv *Server) initialize(params json.RawMessage) (any, error) {
 		AgentCapabilities: AgentCapabilities{
 			LoadSession:         true,
 			PromptCapabilities:  PromptCapabilities{EmbeddedContext: true},
-			SessionCapabilities: SessionCapabilities{List: &struct{}{}},
+			SessionCapabilities: SessionCapabilities{List: &struct{}{}, Delete: &struct{}{}, Resume: &struct{}{}, Close: &struct{}{}},
 		},
 		AuthMethods: []AuthMethod{},
 		AgentInfo:   Implementation{Name: "moca", Title: "moca", Version: srv.opts.Version},
@@ -124,6 +130,12 @@ func (srv *Server) initialize(params json.RawMessage) (any, error) {
 func (srv *Server) add(s *session) {
 	srv.mu.Lock()
 	srv.sessions[s.id] = s
+	srv.mu.Unlock()
+}
+
+func (srv *Server) remove(id string) {
+	srv.mu.Lock()
+	delete(srv.sessions, id)
 	srv.mu.Unlock()
 }
 

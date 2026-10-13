@@ -69,4 +69,9 @@ func TestProtocolShapesConform(t *testing.T) {
 		Options: []PermissionOption{{OptionID: optAllowOnce, Name: "Allow once", Kind: "allow_once"},
 			{OptionID: optAllowAlways, Name: "Always allow", Kind: "allow_always"},
 			{OptionID: optReject, Name: "Deny", Kind: "reject_once"}}})
+	conform(t, "InitializeResponse", InitializeResponse{ProtocolVersion: ProtocolVersion,
+		AgentCapabilities: AgentCapabilities{LoadSession: true, SessionCapabilities: SessionCapabilities{
+			List: &struct{}{}, Delete: &struct{}{}, Resume: &struct{}{}, Close: &struct{}{}}},
+		AuthMethods: []AuthMethod{}, AgentInfo: Implementation{Name: "moca", Version: "1"}})
+	conform(t, "ResumeSessionResponse", ResumeSessionResponse{})
 }

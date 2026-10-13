@@ -16,7 +16,7 @@ var acpMethods = []string{
 	"initialize", "authenticate", "session/new", "session/prompt", "session/cancel",
 	"session/update", "session/request_permission",
 	"session/set_mode", "session/set_config_option", "session/list", "session/load",
-	"$/cancel_request",
+	"$/cancel_request", "session/close", "session/resume", "session/delete",
 }
 
 // session/update discriminators.
@@ -85,9 +85,31 @@ type MCPCapabilities struct {
 	SSE  bool `json:"sse"`
 }
 
-// SessionCapabilities: a non-nil List advertises session/list.
+// SessionCapabilities: each non-nil field advertises the method of that name.
 type SessionCapabilities struct {
-	List *struct{} `json:"list,omitempty"`
+	List   *struct{} `json:"list,omitempty"`
+	Delete *struct{} `json:"delete,omitempty"`
+	Resume *struct{} `json:"resume,omitempty"`
+	Close  *struct{} `json:"close,omitempty"`
+}
+
+type ResumeSessionRequest struct {
+	SessionID  string            `json:"sessionId"`
+	Cwd        string            `json:"cwd"`
+	MCPServers []json.RawMessage `json:"mcpServers"`
+}
+
+type ResumeSessionResponse struct {
+	Modes         *SessionModeState `json:"modes,omitempty"`
+	ConfigOptions []ConfigOption    `json:"configOptions,omitempty"`
+}
+
+type CloseSessionRequest struct {
+	SessionID string `json:"sessionId"`
+}
+
+type DeleteSessionRequest struct {
+	SessionID string `json:"sessionId"`
 }
 
 type AuthMethod struct {

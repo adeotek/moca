@@ -2,6 +2,8 @@ package acp
 
 import (
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -41,39 +43,116 @@ func (srv *Server) loadSession(params json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !id8.MatchString(req.SessionID) {
-		return nil, invalidParams("sessionId must be a moca session id (8 hex chars), got %q", req.SessionID)
-	}
-	if s, ok := srv.get(req.SessionID); ok {
-		return s.idle(func() (any, error) {
-			s.replay()
-			s.sendCommands()
-			return LoadSessionResponse{Modes: s.modeState(), ConfigOptions: s.configOptions()}, nil
-		})
-	}
-	cfg, trusted, err := srv.sessionConfig(req.Cwd)
+	return srv.reopen(req.SessionID, req.Cwd, true)
+}
+
+// resumeSession is session/load without the history replay.
+func (srv *Server) resumeSession(params json.RawMessage) (any, error) {
+	req, err := decode[ResumeSessionRequest](params)
 	if err != nil {
 		return nil, err
 	}
-	path, err := msession.Find(sessionsDir(), req.SessionID, req.Cwd)
+	r, err := srv.reopen(req.SessionID, req.Cwd, false)
 	if err != nil {
-		return nil, notFound("%v", err)
+		return nil, err
 	}
-	if !msession.InWorkdir(path, req.Cwd) {
-		return nil, invalidParams("session %s belongs to another directory (%s)", req.SessionID, msession.WorkdirOf(path))
+	return ResumeSessionResponse{Modes: r.Modes, ConfigOptions: r.ConfigOptions}, nil
+}
+
+// reopen serves session/load (replay) and session/resume (no replay): an
+// open session is reused, a stored one resumed in its own workdir only.
+func (srv *Server) reopen(id, cwd string, replay bool) (LoadSessionResponse, error) {
+	if !id8.MatchString(id) {
+		return LoadSessionResponse{}, invalidParams("sessionId must be a moca session id (8 hex chars), got %q", id)
 	}
-	s := newSession(srv, req.Cwd, trusted)
+	if s, ok := srv.get(id); ok {
+		if filepath.Clean(s.cwd) != filepath.Clean(cwd) {
+			return LoadSessionResponse{}, invalidParams("session %s belongs to another directory (%s)", id, s.cwd)
+		}
+		r, err := s.idle(func() (any, error) {
+			if replay {
+				s.replay()
+			}
+			s.sendCommands()
+			return LoadSessionResponse{Modes: s.modeState(), ConfigOptions: s.configOptions()}, nil
+		})
+		if err != nil {
+			return LoadSessionResponse{}, err
+		}
+		return r.(LoadSessionResponse), nil
+	}
+	cfg, trusted, err := srv.sessionConfig(cwd)
+	if err != nil {
+		return LoadSessionResponse{}, err
+	}
+	path, err := msession.Find(sessionsDir(), id, cwd)
+	if err != nil {
+		return LoadSessionResponse{}, notFound("%v", err)
+	}
+	if !msession.InWorkdir(path, cwd) {
+		return LoadSessionResponse{}, invalidParams("session %s belongs to another directory (%s)", id, msession.WorkdirOf(path))
+	}
+	s := newSession(srv, cwd, trusted)
 	a, err := agent.Resume(srv.startOptions(cfg, s), path)
 	if err != nil {
-		return nil, &RPCError{Code: codeInternal, Message: err.Error()}
+		return LoadSessionResponse{}, &RPCError{Code: codeInternal, Message: err.Error()}
 	}
 	s.attach(a)
 	s.reloadCommands()
 	srv.add(s)
 	s.markReady() // the client named this id: updates may flow now
-	s.replay()
+	if replay {
+		s.replay()
+	}
 	s.sendCommands()
 	return LoadSessionResponse{Modes: s.modeState(), ConfigOptions: s.configOptions()}, nil
+}
+
+func (srv *Server) closeSession(params json.RawMessage) (any, error) {
+	req, err := decode[CloseSessionRequest](params)
+	if err != nil {
+		return nil, err
+	}
+	s, err := srv.lookup(req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	srv.remove(s.id)
+	s.shutdown()
+	slog.Info("acp session closed", "session", s.id)
+	return struct{}{}, nil
+}
+
+// deleteSession removes a stored session (one session/list shows). A
+// session open here is closed first — this process's writer holds the file
+// lock — unless a prompt runs; one held by another moca process is refused.
+func (srv *Server) deleteSession(params json.RawMessage) (any, error) {
+	req, err := decode[DeleteSessionRequest](params)
+	if err != nil {
+		return nil, err
+	}
+	if !id8.MatchString(req.SessionID) {
+		return nil, invalidParams("sessionId must be a moca session id (8 hex chars), got %q", req.SessionID)
+	}
+	if s, ok := srv.get(req.SessionID); ok {
+		if _, err := s.idle(func() (any, error) { return nil, nil }); err != nil {
+			return nil, err // busy: a prompt is running
+		}
+		srv.remove(s.id)
+		s.shutdown()
+	}
+	path, err := msession.Find(sessionsDir(), req.SessionID, "")
+	if err != nil {
+		return nil, notFound("%v", err)
+	}
+	if err := msession.Delete(path); err != nil {
+		if errors.Is(err, msession.ErrInUse) {
+			return nil, busy("session " + req.SessionID + " is open in another moca process: close it there first")
+		}
+		return nil, &RPCError{Code: codeInternal, Message: err.Error()}
+	}
+	slog.Info("acp session deleted", "session", req.SessionID)
+	return struct{}{}, nil
 }
 
 // replay streams the whole conversation as the model sees it (after any
