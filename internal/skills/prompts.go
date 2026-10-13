@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -227,4 +228,14 @@ func SplitArgs(s string) []string {
 		out = append(out, cur.String())
 	}
 	return out
+}
+
+// SkillMessage is what a /skill invocation sends: the model loads the body
+// with read (the message names the path) and follows it. Shared by the TUI
+// and the ACP server.
+func SkillMessage(s Skill, args string) string {
+	if args == "" {
+		return fmt.Sprintf("Load and follow the %s skill (%s).", s.Name, s.Path)
+	}
+	return fmt.Sprintf("Load and follow the %s skill (%s) for this request: %s", s.Name, s.Path, args)
 }

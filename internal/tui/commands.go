@@ -88,21 +88,12 @@ func ParseInput(s string, prompts []skills.Prompt, sk []skills.Skill) (Parsed, e
 		}
 		for _, k := range sk {
 			if k.Name == name {
-				return Parsed{Kind: KindSkill, Name: name, Args: args, Text: skillMessage(k, args)}, nil
+				return Parsed{Kind: KindSkill, Name: name, Args: args, Text: skills.SkillMessage(k, args)}, nil
 			}
 		}
 		return Parsed{}, fmt.Errorf("unknown command /%s (try /help)", name)
 	}
 	return Parsed{Kind: KindText, Text: s}, nil
-}
-
-// skillMessage is what a /skill submission sends: the model loads the
-// body with read (the message names the path) and follows it.
-func skillMessage(s skills.Skill, args string) string {
-	if args == "" {
-		return fmt.Sprintf("Load and follow the %s skill (%s).", s.Name, s.Path)
-	}
-	return fmt.Sprintf("Load and follow the %s skill (%s) for this request: %s", s.Name, s.Path, args)
 }
 
 // promptNamed reports whether a prompt template owns the name (built-in

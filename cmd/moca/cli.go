@@ -78,17 +78,11 @@ var cliModes = []string{"default", "auto", "yolo", "plan"}
 // mode. A configured auto/yolo under --mode plan yields to plan (default),
 // so it never counts as yolo for the trust decision.
 func (o Options) ResolveMode(cfg config.Config) (string, bool) {
+	flag := ""
 	if o.Mode != nil {
-		if *o.Mode == "plan" {
-			return "default", true
-		}
-		return *o.Mode, false
+		flag = *o.Mode
 	}
-	base := cfg.Mode()
-	if cfg.Project != nil && cfg.Project.DefaultMode != "" {
-		base = cfg.Project.DefaultMode
-	}
-	return base, false
+	return config.ResolveMode(flag, cfg)
 }
 
 func parseArgs(args []string, stdin io.Reader) (Options, error) {

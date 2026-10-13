@@ -275,3 +275,25 @@ func TestPermissionsValidation(t *testing.T) {
 		t.Error("default mode")
 	}
 }
+
+func TestResolveMode(t *testing.T) {
+	base := Config{}
+	proj := Config{Project: &PermissionsConfig{DefaultMode: "auto"}}
+	cases := []struct {
+		flag string
+		cfg  Config
+		mode string
+		plan bool
+	}{
+		{"", base, base.Mode(), false},
+		{"", proj, "auto", false},
+		{"yolo", proj, "yolo", false},
+		{"plan", proj, "default", true},
+	}
+	for _, c := range cases {
+		m, p := ResolveMode(c.flag, c.cfg)
+		if m != c.mode || p != c.plan {
+			t.Errorf("ResolveMode(%q) = %q,%v; want %q,%v", c.flag, m, p, c.mode, c.plan)
+		}
+	}
+}
