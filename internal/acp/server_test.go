@@ -28,7 +28,7 @@ func TestUnknownMethodAndSession(t *testing.T) {
 	if _, err := c.call("session/nope", map[string]any{}); err == nil || err.Code != codeMethodNotFound {
 		t.Fatalf("unknown method: %+v", err)
 	}
-	if _, err := c.prompt("deadbeef", "hi"); err == nil || err.Code != codeInvalidParams {
+	if _, err := c.prompt("deadbeef", "hi"); err == nil || err.Code != codeResourceNotFound {
 		t.Fatalf("unknown session: %+v", err)
 	}
 }

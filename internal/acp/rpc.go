@@ -18,12 +18,14 @@ import (
 )
 
 const (
-	codeParse          = -32700
-	codeInvalidRequest = -32600
-	codeMethodNotFound = -32601
-	codeInvalidParams  = -32602
-	codeInternal       = -32603
-	codeAuthRequired   = -32000 // ACP: authentication required
+	codeParse            = -32700
+	codeInvalidRequest   = -32600
+	codeMethodNotFound   = -32601
+	codeInvalidParams    = -32602
+	codeInternal         = -32603
+	codeAuthRequired     = -32000 // ACP: authentication required
+	codeResourceNotFound = -32002 // ACP: e.g. an unknown sessionId
+	codeRequestCancelled = -32800 // ACP: answered after $/cancel_request
 )
 
 // RPCError is a JSON-RPC error object; handlers return it to choose the code.
@@ -37,6 +39,10 @@ func (e *RPCError) Error() string { return e.Message }
 
 func invalidParams(format string, a ...any) error {
 	return &RPCError{Code: codeInvalidParams, Message: fmt.Sprintf(format, a...)}
+}
+
+func notFound(format string, a ...any) error {
+	return &RPCError{Code: codeResourceNotFound, Message: fmt.Sprintf(format, a...)}
 }
 
 // busy reports a request the session cannot take while a prompt runs.
@@ -70,18 +76,19 @@ type message struct {
 
 // Conn is one JSON-RPC peer over newline-delimited JSON.
 type Conn struct {
-	w       io.Writer
-	wmu     sync.Mutex
-	h       Handler
-	mu      sync.Mutex
-	nextID  int64
-	pending map[int64]chan message
-	closed  bool
-	wg      sync.WaitGroup
+	w        io.Writer
+	wmu      sync.Mutex
+	h        Handler
+	mu       sync.Mutex
+	nextID   int64
+	pending  map[int64]chan message
+	inflight map[string]context.CancelFunc // incoming request id → its cancel (guarded by mu)
+	closed   bool
+	wg       sync.WaitGroup
 }
 
 func NewConn(w io.Writer, h Handler) *Conn {
-	return &Conn{w: w, h: h, pending: map[int64]chan message{}}
+	return &Conn{w: w, h: h, pending: map[int64]chan message{}, inflight: map[string]context.CancelFunc{}}
 }
 
 // Serve reads messages until r ends or ctx is done, then cancels in-flight
@@ -132,11 +139,27 @@ func (c *Conn) dispatch(ctx context.Context, line []byte) {
 		return
 	}
 	switch {
+	case m.Method == "$/cancel_request" && len(m.ID) == 0:
+		c.cancelInflight(m.Params)
 	case m.Method != "" && len(m.ID) > 0:
+		// Register the cancel func here, before the goroutine starts: a
+		// $/cancel_request right behind this request runs inline on the read
+		// loop and would otherwise find nothing to cancel.
+		reqCtx, cancel := context.WithCancel(ctx)
+		key := string(bytes.TrimSpace(m.ID))
+		c.mu.Lock()
+		c.inflight[key] = cancel
+		c.mu.Unlock()
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
-			c.serveRequest(ctx, m)
+			defer func() {
+				c.mu.Lock()
+				delete(c.inflight, key)
+				c.mu.Unlock()
+				cancel()
+			}()
+			c.serveRequest(reqCtx, m)
 		}()
 	case m.Method != "":
 		c.h.Notify(ctx, m.Method, m.Params)
@@ -154,7 +177,12 @@ func (c *Conn) serveRequest(ctx context.Context, m message) {
 	out := message{ID: m.ID}
 	if err != nil {
 		var re *RPCError
-		if !errors.As(err, &re) {
+		switch {
+		case errors.As(err, &re):
+		case ctx.Err() != nil && errors.Is(err, context.Canceled):
+			// $/cancel_request or shutdown: ACP's "request cancelled".
+			re = &RPCError{Code: codeRequestCancelled, Message: "request cancelled"}
+		default:
 			re = &RPCError{Code: codeInternal, Message: err.Error()}
 		}
 		out.Error = re
@@ -166,6 +194,24 @@ func (c *Conn) serveRequest(ctx context.Context, m message) {
 	c.write(out)
 	if then != nil && out.Error == nil {
 		then()
+	}
+}
+
+// cancelInflight serves $/cancel_request: the named request's context is
+// cancelled and its handler still answers — a result such as stopReason
+// "cancelled", or -32800. Unknown and finished ids are ignored.
+func (c *Conn) cancelInflight(params json.RawMessage) {
+	var p struct {
+		RequestID json.RawMessage `json:"requestId"`
+	}
+	if json.Unmarshal(params, &p) != nil {
+		return
+	}
+	c.mu.Lock()
+	cancel := c.inflight[string(bytes.TrimSpace(p.RequestID))]
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }
 
@@ -252,6 +298,9 @@ func (c *Conn) Call(ctx context.Context, method string, params, result any) erro
 		}
 		return nil
 	case <-ctx.Done():
+		// Cascade the cancellation (ACP): the client may drop its UI for this
+		// request; a late answer finds no pending entry and is ignored.
+		c.Notify("$/cancel_request", map[string]int64{"requestId": id})
 		return ctx.Err()
 	}
 }

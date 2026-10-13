@@ -117,3 +117,10 @@ func TestInitializeAdvertisesLoadAndList(t *testing.T) {
 		t.Fatalf("%s", res)
 	}
 }
+
+func TestLoadUnknownSessionNotFound(t *testing.T) {
+	c := startClient(t, testOptions(t, newScript(t)))
+	if _, err := c.call("session/load", LoadSessionRequest{SessionID: "deadbeef", Cwd: t.TempDir()}); err == nil || err.Code != codeResourceNotFound {
+		t.Fatalf("%+v", err)
+	}
+}

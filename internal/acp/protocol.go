@@ -16,6 +16,7 @@ var acpMethods = []string{
 	"initialize", "authenticate", "session/new", "session/prompt", "session/cancel",
 	"session/update", "session/request_permission",
 	"session/set_mode", "session/set_config_option", "session/list", "session/load",
+	"$/cancel_request",
 }
 
 // session/update discriminators.

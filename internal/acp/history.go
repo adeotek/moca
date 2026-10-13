@@ -57,7 +57,7 @@ func (srv *Server) loadSession(params json.RawMessage) (any, error) {
 	}
 	path, err := msession.Find(sessionsDir(), req.SessionID, req.Cwd)
 	if err != nil {
-		return nil, invalidParams("%v", err)
+		return nil, notFound("%v", err)
 	}
 	if !msession.InWorkdir(path, req.Cwd) {
 		return nil, invalidParams("session %s belongs to another directory (%s)", req.SessionID, msession.WorkdirOf(path))

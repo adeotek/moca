@@ -96,3 +96,31 @@ func TestEOFDuringPermissionDenies(t *testing.T) {
 		t.Fatal("rm ran without an answer")
 	}
 }
+
+// session/cancel while the editor sits on a permission prompt: the agent
+// must not wait for the answer, and must tell the client to drop the prompt.
+func TestSessionCancelCascadesToPermission(t *testing.T) {
+	s, work := rmScript(t)
+	c := startClient(t, testOptions(t, s))
+	sid := c.newSession(work)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse {
+		c.notify("session/cancel", CancelNotification{SessionID: sid})
+		<-release // the editor never answers
+		return cancelledOutcome()
+	}
+	stop, err := c.prompt(sid, "delete x")
+	if err != nil || stop != stopCancelled {
+		t.Fatalf("stop %q err %+v", stop, err)
+	}
+	c.mu.Lock()
+	n := len(c.cancels)
+	c.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("want one $/cancel_request for the pending permission, got %d", n)
+	}
+	if _, err := os.Stat(filepath.Join(work, "x.txt")); err != nil {
+		t.Fatal("cancelled rm ran")
+	}
+}

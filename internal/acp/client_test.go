@@ -51,6 +51,7 @@ type testClient struct {
 	waiting      map[string]chan wireMsg
 	updates      []map[string]any
 	perms        []RequestPermissionRequest
+	cancels      []json.RawMessage // requestIds of $/cancel_request from the agent
 	onPermission func(RequestPermissionRequest) RequestPermissionResponse
 	done         chan struct{} // closed when Serve returns (receivable any number of times)
 }
@@ -128,6 +129,14 @@ func (c *testClient) read(r io.Reader) {
 				b, _ := json.Marshal(c.onPermission(req))
 				c.write(wireMsg{JSONRPC: "2.0", ID: id, Result: b})
 			}(m.ID)
+		case "$/cancel_request":
+			var p struct {
+				RequestID json.RawMessage `json:"requestId"`
+			}
+			json.Unmarshal(m.Params, &p)
+			c.mu.Lock()
+			c.cancels = append(c.cancels, p.RequestID)
+			c.mu.Unlock()
 		case "":
 			c.mu.Lock()
 			ch := c.waiting[string(m.ID)]

@@ -28,6 +28,9 @@ func (h *echoHandler) Request(ctx context.Context, method string, params json.Ra
 	case "slow":
 		<-h.release
 		return map[string]string{"ok": "slow"}, nil
+	case "wait":
+		<-ctx.Done()
+		return nil, ctx.Err()
 	case "deferred":
 		return Deferred{Result: map[string]int{"n": 1}, Then: func() { close(h.then) }}, nil
 	case "bad":
@@ -211,5 +214,36 @@ func TestUnknownNotificationGetsNoReply(t *testing.T) {
 	io.WriteString(in, `{"jsonrpc":"2.0","id":9,"method":"echo","params":0}`+"\n")
 	if m := readMsg(t, sc); m["id"] != float64(9) {
 		t.Fatalf("a notification was answered: %v", m)
+	}
+}
+
+func TestCancelRequest(t *testing.T) {
+	_, in, sc, _ := pipePeer(t, &echoHandler{})
+	io.WriteString(in, `{"jsonrpc":"2.0","id":5,"method":"wait"}`+"\n")
+	io.WriteString(in, `{"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":99}}`+"\n") // unknown: ignored
+	io.WriteString(in, `{"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":5}}`+"\n")
+	m := readMsg(t, sc)
+	if m["id"] != float64(5) || m["error"].(map[string]any)["code"] != float64(codeRequestCancelled) {
+		t.Fatalf("a cancelled request must answer -32800: %v", m)
+	}
+	io.WriteString(in, `{"jsonrpc":"2.0","id":"s","method":"echo","params":1}`+"\n")
+	if m := readMsg(t, sc); m["id"] != "s" {
+		t.Fatalf("connection unusable after a cancel: %v", m)
+	}
+}
+
+func TestCallCascadesCancel(t *testing.T) {
+	c, _, sc, _ := pipePeer(t, &echoHandler{})
+	ctx, cancel := context.WithCancel(context.Background())
+	got := make(chan error, 1)
+	go func() { got <- c.Call(ctx, "client/thing", nil, nil) }()
+	req := readMsg(t, sc)
+	cancel()
+	m := readMsg(t, sc)
+	if m["method"] != "$/cancel_request" || m["params"].(map[string]any)["requestId"] != req["id"] {
+		t.Fatalf("want $/cancel_request for id %v, got %v", req["id"], m)
+	}
+	if err := <-got; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Call: %v", err)
 	}
 }

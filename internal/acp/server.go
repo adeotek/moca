@@ -138,7 +138,7 @@ func (srv *Server) lookup(id string) (*session, error) {
 	if s, ok := srv.get(id); ok {
 		return s, nil
 	}
-	return nil, invalidParams("unknown session %q", id)
+	return nil, notFound("unknown session %q", id)
 }
 
 // sessionConfig validates cwd and returns the config for a session there
