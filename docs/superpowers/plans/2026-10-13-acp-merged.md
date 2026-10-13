@@ -27,7 +27,10 @@
 - After code changes run `graphify update .` (project CLAUDE.md).
 - **Permission requests have no timeout** (settled). `session/cancel` and stdin EOF are the only ways out of a pending request. A timeout would silently deny under clients without auto-accept (a known pitfall in other ACP agents), so do not add one.
 - **Project trust per workdir** (merged rule): an explicit `--approve`/`--no-approve` wins; else yolo mode trusts; else a saved `trust.json` decision for that workdir is honoured; else trusted (the editor opening the folder is the trust act). ACP never writes `trust.json`.
-- **`usage_update` ships** (settled) if the pinned schema defines it. Otherwise it is dropped and listed as a known limitation (Task 2, Step 2).
+- **`usage_update` ships** (settled). It is stable in `schema-v1.25.0`; if a newer pinned tag dropped it, it would be removed and listed as a known limitation (Task 2, Step 2).
+- **Client-gated updates.** `notice`, `compaction_update` and `compaction_summary_chunk` are sent **only** when the client advertised `clientCapabilities.session.notices` / `.compaction` at `initialize` (spec MUST). Otherwise moca falls back to a thought line or the summarized-note chunk.
+- **ACP v1 only.** The schema is pinned to the newest `schema-v1.x.y` tag under `schema/v1/`; never vendor a `schema-v2.*` alpha or a crate tag (`vX.Y.Z`).
+- **Import alias.** Every `internal/acp` file that uses `internal/session` imports it as `msession`: the package declares `type session struct`, and Go rejects the clash.
 - Version: this PR is **v0.5.0-beta** (settled; one bump per PR). The binary's version comes from the release ldflags (`internal/config/version.go` defaults to `0.0.0-dev`), so the bump is in docs (SPECS header, README status, CHANGELOG) and the release tag.
 
 ## Review Focus
@@ -53,8 +56,9 @@
 | `internal/acp/session.go` | create | per-session state, event translator, permission bridge, run state |
 | `internal/acp/commands.go` | create | prompt flattening, slash commands |
 | `internal/acp/modes.go` | create | modes and model config option |
-| `internal/acp/history.go` | create | `session/list`, `session/load`, replay |
-| `internal/acp/*_test.go` | create | tests; `script_test.go` and `client_test.go` are harnesses |
+| `internal/acp/history.go` | create | `session/list`, `session/load`, `session/resume`, `session/close`, `session/delete`, replay |
+| `internal/acp/*_test.go` | create | tests; `script_test.go` and `client_test.go` are harnesses; `lifecycle_test.go` (Task 11), `updates_test.go` (Task 12, with the agent-less `bareSession` harness) |
+| `internal/acp/testdata/meta.json` | create | pinned v1 method table; `TestMethodsInPinnedMeta` checks every method moca uses against it |
 | `internal/skills/prompts.go` | modify | gains `SkillMessage` (moved from tui) |
 | `internal/session/rebuild.go` | modify | exports `SummaryPrefix` |
 | `internal/config/config.go` | modify | gains `ResolveMode` (moved from cmd/moca) |
@@ -616,23 +620,31 @@ git commit -m "feat(acp): bidirectional JSON-RPC 2.0 connection"
 
 - [ ] **Step 1: Vendor the schema (data only, never executed)**
 
+The upstream repo publishes three kinds of release in one stream: Rust crate releases (`v1.11.0`), v1 schema releases (`schema-v1.25.0`) and v2 schema alphas (`schema-v2.0.0-alpha.8`). So `releases/latest` can return any of the three. Since `schema-v1.25.0`, the files also live under `schema/v1/` (with `schema/v2/` beside it), so the old `schema/schema.json` path returns 404. moca speaks ACP **v1**: pin the newest `schema-v1.x.y` tag, and vendor the `v1` stable and unstable schemas plus `meta.json` (the method table).
+
 ```bash
-TAG=$(gh api repos/agentclientprotocol/agent-client-protocol/releases/latest --jq .tag_name)
-echo "$TAG"
+TAG=$(gh api 'repos/agentclientprotocol/agent-client-protocol/releases?per_page=100' --paginate --jq '.[].tag_name' \
+  | grep -E '^schema-v1\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+echo "$TAG"   # schema-v1.25.0 or newer; never a v2 alpha or a crate tag
 mkdir -p internal/acp/testdata
-curl -fsSL "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/$TAG/schema/schema.json" -o internal/acp/testdata/schema.json
-python3 -I -c "import json,sys; d=json.load(open('internal/acp/testdata/schema.json')); print(sorted((d.get('\$defs') or d.get('definitions')).keys()))"
+for f in schema.json schema.unstable.json meta.json; do
+  curl -fsSL "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/$TAG/schema/v1/$f" -o "internal/acp/testdata/$f" || exit 1
+done
+python3 -I -c "import json; d=json.load(open('internal/acp/testdata/schema.json')); print(sorted(d['\$defs'].keys()))"
+python3 -I -c "import json; m=json.load(open('internal/acp/testdata/meta.json')); print(m['version'], sorted(m['agentMethods'].values()))"
 ```
 
-If the repository has moved, `gh` follows the redirect. If the path `schema/schema.json` 404s, list the tag's tree (`gh api repos/agentclientprotocol/agent-client-protocol/git/trees/$TAG?recursive=1 --jq '.tree[].path' | grep schema`) and use the stable `schema.json` it contains. If any of these defs are missing from the printed list: `SessionNotification`, `InitializeResponse`, `NewSessionResponse`, `PromptResponse`, `RequestPermissionRequest`, `LoadSessionResponse`, `ListSessionsResponse`, `SetSessionConfigOptionResponse` (or the schema's name for the `session/set_config_option` response). Those then live in the unstable schema: fetch `schema.unstable.json` from the same directory too, save it as `internal/acp/testdata/schema.unstable.json`, and `conform` loads both (Step 3 handles it). Where the schema names a def differently, use the schema's name in the tests; only names may differ from this plan.
+The second print must start with `1`. If `schema/v1/` 404s for the chosen tag, the layout has moved again: list the tag's tree (`gh api "repos/agentclientprotocol/agent-client-protocol/git/trees/$TAG?recursive=1" --jq '.tree[].path' | grep '^schema/'`) and take the **v1** stable schema, unstable schema and meta file from it — never a `v2` path. As of `schema-v1.25.0`, every def this plan uses is in the stable `schema.json`: `SessionNotification`, `InitializeResponse`, `NewSessionResponse`, `PromptResponse`, `RequestPermissionRequest`, `LoadSessionResponse`, `ListSessionsResponse`, `SetSessionConfigOptionResponse`, `ResumeSessionResponse`, `CloseSessionResponse`, `DeleteSessionResponse`, `Notice`, `CompactionUpdate`, `SessionInfoUpdate`, `ConfigOptionUpdate`, `UsageUpdate`, `CancelRequestNotification`. `conform` loads the unstable schema as a fallback only. Where a newer tag renames a def, use the schema's name in the tests; only names may differ from this plan.
 
 Write `internal/acp/testdata/SOURCE.md`:
 
 ```markdown
-ACP JSON schema, vendored for conformance tests (data only).
-Source: https://github.com/agentclientprotocol/agent-client-protocol, tag <TAG>, path schema/schema.json
-(and schema.unstable.json when present). Refresh: re-run Task 2 Step 1 of
-docs/superpowers/plans/2026-10-13-acp.md and fix whatever `go test ./internal/acp` reports.
+ACP JSON schema (protocol v1), vendored for conformance tests (data only).
+Source: https://github.com/agentclientprotocol/agent-client-protocol, tag <TAG>,
+files schema/v1/schema.json, schema/v1/schema.unstable.json, schema/v1/meta.json.
+Pick the newest `schema-v1.x.y` tag (the repo also tags crate releases `vX.Y.Z`
+and v2 alphas `schema-v2.*`). Refresh: re-run Task 2 Step 1 of
+docs/superpowers/plans/2026-10-13-acp-merged.md and fix whatever `go test ./internal/acp` reports.
 ```
 
 Replace `<TAG>` with the printed tag.
@@ -655,7 +667,7 @@ Confirm:
 - `StopReason` contains `end_turn, max_tokens, max_turn_requests, refusal, cancelled`.
 - `PermissionOptionKind` contains `allow_once, allow_always, reject_once`.
 
-Also look for the `usage_update` variant: run `grep -c '"usage_update"' internal/acp/testdata/schema.json` (and the same on `schema.unstable.json` if vendored). If it is present in either, keep `UsageUpdate` and its `conform` case. Check its property names (`used`, `size`, `cost{amount,currency}`) and rename tags to match. If it is absent from both, delete `UsageUpdate`, `Cost`, `updUsage`, the conform case and Task 5's `usage_update` step, and add "no `usage_update` (not in the pinned schema)" to the SPECS non-goals in Task 12.
+Also look for the `usage_update` variant: run `grep -c '"usage_update"' internal/acp/testdata/schema.json` (and the same on `schema.unstable.json`). It is stable as of `schema-v1.25.0`. If it is present in either, keep `UsageUpdate` and its `conform` case. Check its property names (`used`, `size`, `cost{amount,currency}`) and rename tags to match. If it is absent from both, delete `UsageUpdate`, `Cost`, `updUsage`, the conform case and Task 5's `usage_update` step, and add "no `usage_update` (not in the pinned schema)" to the SPECS non-goals in Task 15.
 
 If `ContentChunk` has no `messageId` property, delete the `MessageID` field from `ContentChunk` in Step 4, and delete every `MessageID:` assignment and the `msgIDs` map in Task 5. If `SessionConfigOption`'s select variant uses different property names than `id, name, category, type, currentValue, options[{value, name}]`, rename the JSON tags of `ConfigOption`/`ConfigOptionValue` to match. Tags are the only thing that may change.
 
@@ -873,7 +885,40 @@ func TestConformRejectsBadShapes(t *testing.T) {
 ```go
 package acp
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"testing"
+)
+
+// Every method moca serves or calls must exist in the pinned v1 method table
+// (meta.json): a typo or a renamed method fails here, not in an editor.
+func TestMethodsInPinnedMeta(t *testing.T) {
+	b, err := os.ReadFile("testdata/meta.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta struct {
+		Version         int               `json:"version"`
+		AgentMethods    map[string]string `json:"agentMethods"`
+		ClientMethods   map[string]string `json:"clientMethods"`
+		ProtocolMethods map[string]string `json:"protocolMethods"`
+	}
+	if err := json.Unmarshal(b, &meta); err != nil || meta.Version != 1 {
+		t.Fatalf("meta.json: version %d, err %v (want a v1 schema)", meta.Version, err)
+	}
+	known := map[string]bool{}
+	for _, m := range []map[string]string{meta.AgentMethods, meta.ClientMethods, meta.ProtocolMethods} {
+		for _, v := range m {
+			known[v] = true
+		}
+	}
+	for _, m := range acpMethods {
+		if !known[m] {
+			t.Errorf("method %q is not in the pinned ACP v1 schema", m)
+		}
+	}
+}
 
 func TestProtocolShapesConform(t *testing.T) {
 	conform(t, "InitializeResponse", InitializeResponse{
@@ -930,6 +975,15 @@ import (
 
 // ProtocolVersion is the ACP major version moca speaks.
 const ProtocolVersion = 1
+
+// acpMethods lists every method name moca serves or calls; a test checks
+// each against the pinned schema's meta.json. Later tasks append to it as
+// they add methods.
+var acpMethods = []string{
+	"initialize", "authenticate", "session/new", "session/prompt", "session/cancel",
+	"session/update", "session/request_permission",
+	"session/set_mode", "session/set_config_option", "session/list", "session/load",
+}
 
 // session/update discriminators.
 const (
@@ -1231,7 +1285,7 @@ Expected: PASS. If `conform` reports a mismatch, fix the JSON tag or omitempty i
 
 ```bash
 git add internal/acp/protocol.go internal/acp/protocol_test.go internal/acp/schema_test.go internal/acp/testdata
-git commit -m "feat(acp): protocol types checked against the pinned ACP schema"
+git commit -m "feat(acp): protocol types checked against the pinned ACP v1 schema"
 ```
 
 ---
@@ -3564,11 +3618,11 @@ import (
 	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
-	"github.com/adeotek/moca/internal/session"
+	msession "github.com/adeotek/moca/internal/session"
 	"github.com/adeotek/moca/internal/tools"
 )
 
-// id8 is the only sessionId form load accepts: session.Find also takes
+// id8 is the only sessionId form load accepts: msession.Find also takes
 // "last", which must never reach it from a client.
 var id8 = regexp.MustCompile(`^[0-9a-f]{8}$`)
 
@@ -3583,7 +3637,7 @@ func (srv *Server) listSessions(params json.RawMessage) (any, error) {
 		return nil, invalidParams("cwd must be an absolute path, got %q", req.Cwd)
 	}
 	out := ListSessionsResponse{Sessions: []SessionInfo{}}
-	for _, in := range session.List(sessionsDir(), req.Cwd, "", 100) {
+	for _, in := range msession.List(sessionsDir(), req.Cwd, "", 100) {
 		out.Sessions = append(out.Sessions, SessionInfo{SessionID: in.ID8, Cwd: in.Workdir, Title: in.Preview,
 			UpdatedAt: in.Modified.UTC().Format(time.RFC3339)})
 	}
@@ -3609,12 +3663,12 @@ func (srv *Server) loadSession(params json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	path, err := session.Find(sessionsDir(), req.SessionID, req.Cwd)
+	path, err := msession.Find(sessionsDir(), req.SessionID, req.Cwd)
 	if err != nil {
 		return nil, invalidParams("%v", err)
 	}
-	if !session.InWorkdir(path, req.Cwd) {
-		return nil, invalidParams("session %s belongs to another directory (%s)", req.SessionID, session.WorkdirOf(path))
+	if !msession.InWorkdir(path, req.Cwd) {
+		return nil, invalidParams("session %s belongs to another directory (%s)", req.SessionID, msession.WorkdirOf(path))
 	}
 	s := newSession(srv, req.Cwd, trusted)
 	a, err := agent.Resume(srv.startOptions(cfg, s), path)
@@ -3647,7 +3701,7 @@ func (s *session) replay() {
 		for _, b := range m.Content {
 			switch {
 			case b.Type == llm.BlockText && m.Role == llm.RoleUser:
-				if strings.HasPrefix(strings.TrimSpace(b.Text), session.SummaryPrefix) {
+				if strings.HasPrefix(strings.TrimSpace(b.Text), msession.SummaryPrefix) {
 					s.send(s.chunk(updAgentMessage, "_(earlier conversation was summarized)_\n\n"))
 				} else {
 					s.send(s.chunk(updUserMessage, b.Text))
@@ -3701,7 +3755,1238 @@ git commit -m "feat(acp): session/list and session/load with full history replay
 
 ---
 
-### Task 10: `moca acp` subcommand
+### Task 10: Request cancellation (`$/cancel_request`) and ACP error codes
+
+ACP v1 stabilized request cancellation (`docs/protocol/v1/cancellation.mdx` at the pinned tag). The receiver of `$/cancel_request` may stop the named request's work and **must** still answer it: either with a valid result (for a prompt, `stopReason: "cancelled"`) or with error `-32800`. Cancellation also cascades. When a prompt is cancelled, the agent sends `$/cancel_request` for its own requests still pending at the client, which here means a permission prompt nobody answered. ACP also defines `-32002` (resource not found) for unknown ids, where both plans used `-32602`.
+
+**Files:**
+- Modify: `internal/acp/rpc.go` (codes, per-request contexts, `$/cancel_request` in and out)
+- Modify: `internal/acp/server.go` (`lookup` → `-32002`), `internal/acp/history.go` (`session.Find` misses → `-32002`), `internal/acp/protocol.go` (`acpMethods`)
+- Modify: `internal/acp/client_test.go` (record `$/cancel_request`), `internal/acp/server_test.go` (`TestUnknownMethodAndSession` code)
+- Test: `internal/acp/rpc_test.go`, `internal/acp/permission_test.go`, `internal/acp/history_test.go`
+
+**Interfaces:**
+- Consumes: Task 1 `Conn`, `message`, `serveRequest`, `Call`; Task 5 `lookup`; Task 9 `loadSession`.
+- Produces: constants `codeRequestCancelled = -32800`, `codeResourceNotFound = -32002`; `func notFound(format string, a ...any) error`; `Conn.inflight map[string]context.CancelFunc`; `func (c *Conn) cancelInflight(params json.RawMessage)`; `testClient.cancels []json.RawMessage`.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `internal/acp/rpc_test.go`, add a `"wait"` case to `echoHandler.Request` (before `"deferred"`):
+
+```go
+	case "wait":
+		<-ctx.Done()
+		return nil, ctx.Err()
+```
+
+and append:
+
+```go
+func TestCancelRequest(t *testing.T) {
+	_, in, sc, _ := pipePeer(t, &echoHandler{})
+	io.WriteString(in, `{"jsonrpc":"2.0","id":5,"method":"wait"}`+"\n")
+	io.WriteString(in, `{"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":99}}`+"\n") // unknown: ignored
+	io.WriteString(in, `{"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":5}}`+"\n")
+	m := readMsg(t, sc)
+	if m["id"] != float64(5) || m["error"].(map[string]any)["code"] != float64(codeRequestCancelled) {
+		t.Fatalf("a cancelled request must answer -32800: %v", m)
+	}
+	io.WriteString(in, `{"jsonrpc":"2.0","id":"s","method":"echo","params":1}`+"\n")
+	if m := readMsg(t, sc); m["id"] != "s" {
+		t.Fatalf("connection unusable after a cancel: %v", m)
+	}
+}
+
+func TestCallCascadesCancel(t *testing.T) {
+	c, _, sc, _ := pipePeer(t, &echoHandler{})
+	ctx, cancel := context.WithCancel(context.Background())
+	got := make(chan error, 1)
+	go func() { got <- c.Call(ctx, "client/thing", nil, nil) }()
+	req := readMsg(t, sc)
+	cancel()
+	m := readMsg(t, sc)
+	if m["method"] != "$/cancel_request" || m["params"].(map[string]any)["requestId"] != req["id"] {
+		t.Fatalf("want $/cancel_request for id %v, got %v", req["id"], m)
+	}
+	if err := <-got; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Call: %v", err)
+	}
+}
+```
+
+In `internal/acp/client_test.go`, add the field `cancels []json.RawMessage // requestIds of $/cancel_request from the agent` to `testClient`, and a case to `read`'s switch:
+
+```go
+		case "$/cancel_request":
+			var p struct {
+				RequestID json.RawMessage `json:"requestId"`
+			}
+			json.Unmarshal(m.Params, &p)
+			c.mu.Lock()
+			c.cancels = append(c.cancels, p.RequestID)
+			c.mu.Unlock()
+```
+
+Append to `internal/acp/permission_test.go`:
+
+```go
+// session/cancel while the editor sits on a permission prompt: the agent
+// must not wait for the answer, and must tell the client to drop the prompt.
+func TestSessionCancelCascadesToPermission(t *testing.T) {
+	s, work := rmScript(t)
+	c := startClient(t, testOptions(t, s))
+	sid := c.newSession(work)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse {
+		c.notify("session/cancel", CancelNotification{SessionID: sid})
+		<-release // the editor never answers
+		return cancelledOutcome()
+	}
+	stop, err := c.prompt(sid, "delete x")
+	if err != nil || stop != stopCancelled {
+		t.Fatalf("stop %q err %+v", stop, err)
+	}
+	c.mu.Lock()
+	n := len(c.cancels)
+	c.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("want one $/cancel_request for the pending permission, got %d", n)
+	}
+	if _, err := os.Stat(filepath.Join(work, "x.txt")); err != nil {
+		t.Fatal("cancelled rm ran")
+	}
+}
+```
+
+Ordering makes this deterministic. `Call` writes `$/cancel_request` before `ask` returns `Deny`, so it precedes the prompt response on the wire, and the client reads lines in order.
+
+In `internal/acp/server_test.go` `TestUnknownMethodAndSession`, change the unknown-session expectation from `codeInvalidParams` to `codeResourceNotFound`. Append to `internal/acp/history_test.go`:
+
+```go
+func TestLoadUnknownSessionNotFound(t *testing.T) {
+	c := startClient(t, testOptions(t, newScript(t)))
+	if _, err := c.call("session/load", LoadSessionRequest{SessionID: "deadbeef", Cwd: t.TempDir()}); err == nil || err.Code != codeResourceNotFound {
+		t.Fatalf("%+v", err)
+	}
+}
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `go test ./internal/acp -run 'CancelRequest|CallCascades|SessionCancelCascades|UnknownMethodAndSession|LoadUnknownSession' -race -count=1`
+Expected: FAIL (`undefined: codeRequestCancelled`, `undefined: codeResourceNotFound`)
+
+- [ ] **Step 3: Implement**
+
+In `rpc.go`, extend the code constants and add the helper:
+
+```go
+	codeResourceNotFound = -32002 // ACP: e.g. an unknown sessionId
+	codeRequestCancelled = -32800 // ACP: answered after $/cancel_request
+```
+
+```go
+func notFound(format string, a ...any) error {
+	return &RPCError{Code: codeResourceNotFound, Message: fmt.Sprintf(format, a...)}
+}
+```
+
+Add `inflight map[string]context.CancelFunc // incoming request id → its cancel (guarded by mu)` to `Conn`, and initialize it in `NewConn`: `inflight: map[string]context.CancelFunc{}`.
+
+In `dispatch`, handle the protocol notification before the request case (it never reaches the `Handler`):
+
+```go
+	switch {
+	case m.Method == "$/cancel_request" && len(m.ID) == 0:
+		c.cancelInflight(m.Params)
+	case m.Method != "" && len(m.ID) > 0:
+```
+
+Register each request's cancel func **in `dispatch`, before the goroutine starts**. If the handler goroutine registered it, a `$/cancel_request` arriving right after the request could be processed first (notifications run inline on the read loop) and be ignored. Replace the request case:
+
+```go
+	case m.Method != "" && len(m.ID) > 0:
+		reqCtx, cancel := context.WithCancel(ctx)
+		key := string(bytes.TrimSpace(m.ID))
+		c.mu.Lock()
+		c.inflight[key] = cancel
+		c.mu.Unlock()
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			defer func() {
+				c.mu.Lock()
+				delete(c.inflight, key)
+				c.mu.Unlock()
+				cancel()
+			}()
+			c.serveRequest(reqCtx, m)
+		}()
+```
+
+Then replace the head of `serveRequest`, up to and including the error mapping (`ctx` is now the per-request context):
+
+```go
+func (c *Conn) serveRequest(ctx context.Context, m message) {
+	res, err := c.h.Request(ctx, m.Method, m.Params)
+	var then func()
+	if d, ok := res.(Deferred); ok {
+		res, then = d.Result, d.Then
+	}
+	out := message{ID: m.ID}
+	if err != nil {
+		var re *RPCError
+		switch {
+		case errors.As(err, &re):
+		case ctx.Err() != nil && errors.Is(err, context.Canceled):
+			// $/cancel_request or shutdown: ACP's "request cancelled".
+			re = &RPCError{Code: codeRequestCancelled, Message: "request cancelled"}
+		default:
+			re = &RPCError{Code: codeInternal, Message: err.Error()}
+		}
+		out.Error = re
+	} else if b, merr := json.Marshal(res); merr != nil {
+```
+
+(the rest of `serveRequest` is unchanged). Then add:
+
+```go
+// cancelInflight serves $/cancel_request: the named request's context is
+// cancelled and its handler still answers — a result such as stopReason
+// "cancelled", or -32800. Unknown and finished ids are ignored.
+func (c *Conn) cancelInflight(params json.RawMessage) {
+	var p struct {
+		RequestID json.RawMessage `json:"requestId"`
+	}
+	if json.Unmarshal(params, &p) != nil {
+		return
+	}
+	c.mu.Lock()
+	cancel := c.inflight[string(bytes.TrimSpace(p.RequestID))]
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+```
+
+In `Call`, replace the `ctx.Done()` branch:
+
+```go
+	case <-ctx.Done():
+		// Cascade the cancellation (ACP): the client may drop its UI for this
+		// request; a late answer finds no pending entry and is ignored.
+		c.Notify("$/cancel_request", map[string]int64{"requestId": id})
+		return ctx.Err()
+```
+
+`session/prompt` needs no change. Its run context already derives from the request context, so `$/cancel_request` on a prompt ends the run and the prompt answers `stopReason: "cancelled"`, which the spec allows.
+
+In `server.go` `lookup`, return `notFound("unknown session %q", id)`. In `history.go` `loadSession`, the `session.Find` failure becomes `return nil, notFound("%v", err)`: after the id8 check, a `Find` error can only mean "no such session". Append `"$/cancel_request"` to `acpMethods` in `protocol.go`.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `go test ./internal/acp -race -count=1`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/acp
+git commit -m "feat(acp): \$/cancel_request both ways, -32800 and -32002"
+```
+
+---
+
+### Task 11: Session lifecycle: `session/close`, `session/resume`, `session/delete`
+
+All three methods are stable in v1, and each is advertised by an empty object in `sessionCapabilities` (`close`, `resume`, `delete`).
+- `session/close` must behave as `session/cancel` for running work, then free the session.
+- `session/resume` is `session/load` without the history replay.
+- `session/delete` removes a session that appears in `session/list`. moca already has `session.Delete(path)`, which refuses (`session.ErrInUse`) a file that a live writer holds, including this process's own open agent.
+
+**Files:**
+- Modify: `internal/acp/protocol.go` (types, capabilities, `acpMethods`), `internal/acp/session.go` (closed state, run wait group), `internal/acp/server.go` (method table, `remove`, `initialize`), `internal/acp/history.go` (`reopen`, `resumeSession`, `deleteSession`, `closeSession`)
+- Test: `internal/acp/lifecycle_test.go`, `internal/acp/protocol_test.go`
+
+**Interfaces:**
+- Consumes: Task 9 `loadSession` body, `id8`, `sessionsDir`; Task 10 `notFound`; `session.Delete(path string) error`, `session.ErrInUse`; `(*agent.Agent).Close() error`.
+- Produces: `ResumeSessionRequest`, `ResumeSessionResponse`, `CloseSessionRequest`, `DeleteSessionRequest`; `SessionCapabilities{List, Delete, Resume, Close *struct{}}`; `func (srv *Server) remove(id string)`; `func (s *session) shutdown()`; `func (srv *Server) reopen(id, cwd string, replay bool) (LoadSessionResponse, error)`; `closeSession`, `resumeSession`, `deleteSession` handlers.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `TestProtocolShapesConform` in `protocol_test.go`:
+
+```go
+	conform(t, "InitializeResponse", InitializeResponse{ProtocolVersion: ProtocolVersion,
+		AgentCapabilities: AgentCapabilities{LoadSession: true, SessionCapabilities: SessionCapabilities{
+			List: &struct{}{}, Delete: &struct{}{}, Resume: &struct{}{}, Close: &struct{}{}}},
+		AuthMethods: []AuthMethod{}, AgentInfo: Implementation{Name: "moca", Version: "1"}})
+	conform(t, "ResumeSessionResponse", ResumeSessionResponse{})
+```
+
+`internal/acp/lifecycle_test.go`:
+
+```go
+package acp
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestInitializeAdvertisesLifecycle(t *testing.T) {
+	c := startClient(t, testOptions(t, newScript(t)))
+	res, _ := c.call("initialize", InitializeRequest{ProtocolVersion: 1})
+	var r InitializeResponse
+	json.Unmarshal(res, &r)
+	sc := r.AgentCapabilities.SessionCapabilities
+	if sc.Close == nil || sc.Resume == nil || sc.Delete == nil || sc.List == nil {
+		t.Fatalf("%s", res)
+	}
+}
+
+// session/close mid-prompt: the prompt ends as cancelled, the session is gone.
+func TestCloseCancelsAndFrees(t *testing.T) {
+	s, work := rmScript(t)
+	c := startClient(t, testOptions(t, s))
+	sid := c.newSession(work)
+	closed := make(chan *RPCError, 1)
+	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse {
+		_, err := c.call("session/close", CloseSessionRequest{SessionID: sid})
+		closed <- err
+		return cancelledOutcome()
+	}
+	stop, err := c.prompt(sid, "delete x")
+	if err != nil || stop != stopCancelled {
+		t.Fatalf("stop %q err %+v", stop, err)
+	}
+	if e := <-closed; e != nil {
+		t.Fatalf("close: %+v", e)
+	}
+	if _, err := c.prompt(sid, "again"); err == nil || err.Code != codeResourceNotFound {
+		t.Fatalf("prompt after close: %+v", err)
+	}
+	if _, err := c.call("session/close", CloseSessionRequest{SessionID: sid}); err == nil || err.Code != codeResourceNotFound {
+		t.Fatalf("second close: %+v", err)
+	}
+	if _, err := os.Stat(filepath.Join(work, "x.txt")); err != nil {
+		t.Fatal("rm ran after close")
+	}
+}
+
+func TestResumeWithoutReplay(t *testing.T) {
+	work := t.TempDir()
+	s := newScript(t, textTurn("first"))
+	o := testOptions(t, s)
+	c := startClient(t, o)
+	sid := c.newSession(work)
+	c.prompt(sid, "remember the word kumquat")
+	c2 := startClient(t, o)
+	res, err := c2.call("session/resume", ResumeSessionRequest{SessionID: sid, Cwd: work, MCPServers: []json.RawMessage{}})
+	if err != nil {
+		t.Fatal(err.Message)
+	}
+	var r ResumeSessionResponse
+	json.Unmarshal(res, &r)
+	conform(t, "ResumeSessionResponse", r)
+	if r.Modes == nil || len(r.ConfigOptions) == 0 {
+		t.Fatalf("%s", res)
+	}
+	if n := len(c2.updatesOf(updUserMessage)) + len(c2.updatesOf(updAgentMessage)); n != 0 {
+		t.Fatalf("resume replayed %d chunks", n)
+	}
+	s.mu.Lock()
+	s.turns = append(s.turns, textTurn("kumquat"))
+	s.mu.Unlock()
+	if stop, err := c2.prompt(sid, "which word?"); err != nil || stop != stopEndTurn {
+		t.Fatalf("prompt after resume: %q %+v", stop, err)
+	}
+	if !strings.Contains(lastUserText(t, s), "which word?") {
+		t.Fatal("the follow-up prompt did not reach the model")
+	}
+	s.mu.Lock()
+	last := mustJSON(s.bodies[len(s.bodies)-1])
+	s.mu.Unlock()
+	if !strings.Contains(last, "remember the word kumquat") {
+		t.Fatal("the resumed history did not reach the model")
+	}
+}
+
+func TestDeleteSession(t *testing.T) {
+	work := t.TempDir()
+	o := testOptions(t, newScript(t, textTurn("ok")))
+	c := startClient(t, o)
+	sid := c.newSession(work)
+	c.prompt(sid, "hello")
+	// Open and idle in this process: delete closes it first (our own writer
+	// holds the file lock), then removes the file.
+	if _, err := c.call("session/delete", DeleteSessionRequest{SessionID: sid}); err != nil {
+		t.Fatalf("delete: %+v", err)
+	}
+	res, _ := c.call("session/list", ListSessionsRequest{Cwd: work})
+	var l ListSessionsResponse
+	json.Unmarshal(res, &l)
+	if len(l.Sessions) != 0 {
+		t.Fatalf("deleted session still listed: %+v", l)
+	}
+	if _, err := c.call("session/delete", DeleteSessionRequest{SessionID: sid}); err == nil || err.Code != codeResourceNotFound {
+		t.Fatalf("second delete: %+v", err)
+	}
+	if _, err := c.call("session/delete", DeleteSessionRequest{SessionID: "last"}); err == nil || err.Code != codeInvalidParams {
+		t.Fatalf("delete last: %+v", err)
+	}
+}
+
+func TestDeleteRunningSessionRefused(t *testing.T) {
+	s, work := rmScript(t)
+	c := startClient(t, testOptions(t, s))
+	sid := c.newSession(work)
+	got := make(chan *RPCError, 1)
+	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse {
+		_, err := c.call("session/delete", DeleteSessionRequest{SessionID: sid})
+		got <- err
+		return selected(optReject)
+	}
+	c.prompt(sid, "delete x")
+	if e := <-got; e == nil || e.Code != codeInvalidRequest {
+		t.Fatalf("delete mid-prompt: %+v", e)
+	}
+}
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `go test ./internal/acp -run 'Lifecycle|Close|Resume|Delete|ProtocolShapes' -race -count=1`
+Expected: FAIL (`undefined: CloseSessionRequest`, `unknown field Delete`)
+
+- [ ] **Step 3: Add the types**
+
+In `protocol.go`, replace `SessionCapabilities` and add the request/response types:
+
+```go
+// SessionCapabilities: each non-nil field advertises the method of that name.
+type SessionCapabilities struct {
+	List   *struct{} `json:"list,omitempty"`
+	Delete *struct{} `json:"delete,omitempty"`
+	Resume *struct{} `json:"resume,omitempty"`
+	Close  *struct{} `json:"close,omitempty"`
+}
+
+type ResumeSessionRequest struct {
+	SessionID  string            `json:"sessionId"`
+	Cwd        string            `json:"cwd"`
+	MCPServers []json.RawMessage `json:"mcpServers"`
+}
+
+type ResumeSessionResponse struct {
+	Modes         *SessionModeState `json:"modes,omitempty"`
+	ConfigOptions []ConfigOption    `json:"configOptions,omitempty"`
+}
+
+type CloseSessionRequest struct {
+	SessionID string `json:"sessionId"`
+}
+
+type DeleteSessionRequest struct {
+	SessionID string `json:"sessionId"`
+}
+```
+
+Append `"session/close", "session/resume", "session/delete"` to `acpMethods`.
+
+- [ ] **Step 4: Closed state in `session.go`**
+
+Add to `session` (in the `runMu`-guarded group):
+
+```go
+	closed bool           // session/close or delete: no new prompt may begin
+	runWG  sync.WaitGroup // the running prompt, awaited by shutdown
+```
+
+In `begin`, refuse a closed session and count the run:
+
+```go
+	if s.closed {
+		return nil, notFound("session %s is closed", s.id)
+	}
+	if s.cancel != nil {
+		return nil, busy("a prompt is already running in this session")
+	}
+	ctx, s.cancel = context.WithCancel(ctx)
+	s.runWG.Add(1)
+```
+
+In `end`, call `s.runWG.Done()` inside the `if s.cancel != nil` block. In `idle`, return `notFound("session %s is closed", s.id)` first when `s.closed`. Add:
+
+```go
+// shutdown ends the session (session/close, delete): running work is
+// cancelled as by session/cancel and awaited, then the agent is closed —
+// its MCP servers stop and the session file's writer lock is released.
+// Idempotent.
+func (s *session) shutdown() {
+	s.runMu.Lock()
+	if s.closed {
+		s.runMu.Unlock()
+		return
+	}
+	s.closed = true
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.runMu.Unlock()
+	s.runWG.Wait()
+	s.agent.Close()
+}
+```
+
+In `server.go`, add:
+
+```go
+func (srv *Server) remove(id string) {
+	srv.mu.Lock()
+	delete(srv.sessions, id)
+	srv.mu.Unlock()
+}
+```
+
+`closeAll` stays as it is: it runs after every handler has returned.
+
+- [ ] **Step 5: Handlers in `history.go`**
+
+Rename `loadSession`'s body into `reopen`, which is shared by load and resume. It differs from Task 9 in two ways: the replay is conditional, and an already-open session must belong to the same `cwd`.
+
+```go
+func (srv *Server) loadSession(params json.RawMessage) (any, error) {
+	req, err := decode[LoadSessionRequest](params)
+	if err != nil {
+		return nil, err
+	}
+	return srv.reopen(req.SessionID, req.Cwd, true)
+}
+
+// resumeSession is session/load without the history replay.
+func (srv *Server) resumeSession(params json.RawMessage) (any, error) {
+	req, err := decode[ResumeSessionRequest](params)
+	if err != nil {
+		return nil, err
+	}
+	r, err := srv.reopen(req.SessionID, req.Cwd, false)
+	if err != nil {
+		return nil, err
+	}
+	return ResumeSessionResponse{Modes: r.Modes, ConfigOptions: r.ConfigOptions}, nil
+}
+
+// reopen serves session/load (replay) and session/resume (no replay): an
+// open session is reused, a stored one resumed in its own workdir only.
+func (srv *Server) reopen(id, cwd string, replay bool) (LoadSessionResponse, error) {
+	if !id8.MatchString(id) {
+		return LoadSessionResponse{}, invalidParams("sessionId must be a moca session id (8 hex chars), got %q", id)
+	}
+	if s, ok := srv.get(id); ok {
+		if filepath.Clean(s.cwd) != filepath.Clean(cwd) {
+			return LoadSessionResponse{}, invalidParams("session %s belongs to another directory (%s)", id, s.cwd)
+		}
+		r, err := s.idle(func() (any, error) {
+			if replay {
+				s.replay()
+			}
+			s.sendCommands()
+			return LoadSessionResponse{Modes: s.modeState(), ConfigOptions: s.configOptions()}, nil
+		})
+		if err != nil {
+			return LoadSessionResponse{}, err
+		}
+		return r.(LoadSessionResponse), nil
+	}
+	cfg, trusted, err := srv.sessionConfig(cwd)
+	if err != nil {
+		return LoadSessionResponse{}, err
+	}
+	path, err := msession.Find(sessionsDir(), id, cwd)
+	if err != nil {
+		return LoadSessionResponse{}, notFound("%v", err)
+	}
+	if !msession.InWorkdir(path, cwd) {
+		return LoadSessionResponse{}, invalidParams("session %s belongs to another directory (%s)", id, msession.WorkdirOf(path))
+	}
+	s := newSession(srv, cwd, trusted)
+	a, err := agent.Resume(srv.startOptions(cfg, s), path)
+	if err != nil {
+		return LoadSessionResponse{}, &RPCError{Code: codeInternal, Message: err.Error()}
+	}
+	s.attach(a)
+	s.reloadCommands()
+	srv.add(s)
+	s.markReady() // the client named this id: updates may flow now
+	if replay {
+		s.replay()
+	}
+	s.sendCommands()
+	return LoadSessionResponse{Modes: s.modeState(), ConfigOptions: s.configOptions()}, nil
+}
+
+func (srv *Server) closeSession(params json.RawMessage) (any, error) {
+	req, err := decode[CloseSessionRequest](params)
+	if err != nil {
+		return nil, err
+	}
+	s, err := srv.lookup(req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	srv.remove(s.id)
+	s.shutdown()
+	slog.Info("acp session closed", "session", s.id)
+	return struct{}{}, nil
+}
+
+// deleteSession removes a stored session (one session/list shows). A
+// session open here is closed first — this process's writer holds the file
+// lock — unless a prompt runs; one held by another moca process is refused.
+func (srv *Server) deleteSession(params json.RawMessage) (any, error) {
+	req, err := decode[DeleteSessionRequest](params)
+	if err != nil {
+		return nil, err
+	}
+	if !id8.MatchString(req.SessionID) {
+		return nil, invalidParams("sessionId must be a moca session id (8 hex chars), got %q", req.SessionID)
+	}
+	if s, ok := srv.get(req.SessionID); ok {
+		if _, err := s.idle(func() (any, error) { return nil, nil }); err != nil {
+			return nil, err // busy: a prompt is running
+		}
+		srv.remove(s.id)
+		s.shutdown()
+	}
+	path, err := msession.Find(sessionsDir(), req.SessionID, "")
+	if err != nil {
+		return nil, notFound("%v", err)
+	}
+	if err := msession.Delete(path); err != nil {
+		if errors.Is(err, msession.ErrInUse) {
+			return nil, busy("session " + req.SessionID + " is open in another moca process: close it there first")
+		}
+		return nil, &RPCError{Code: codeInternal, Message: err.Error()}
+	}
+	slog.Info("acp session deleted", "session", req.SessionID)
+	return struct{}{}, nil
+}
+```
+
+Add `"errors"` and `"log/slog"` to `history.go`'s imports. `session.Find`'s workdir argument only matters for `"last"`, which the id8 check already excludes.
+
+- [ ] **Step 6: Wire it in**
+
+In `server.go` `Request`, add:
+
+```go
+	case "session/close":
+		return srv.closeSession(params)
+	case "session/resume":
+		return srv.resumeSession(params)
+	case "session/delete":
+		return srv.deleteSession(params)
+```
+
+In `initialize`, advertise all four: `SessionCapabilities: SessionCapabilities{List: &struct{}{}, Delete: &struct{}{}, Resume: &struct{}{}, Close: &struct{}{}}`.
+
+- [ ] **Step 7: Run the tests to verify they pass**
+
+Run: `go test ./internal/acp -race -count=1`
+Expected: PASS
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add internal/acp
+git commit -m "feat(acp): session/close, session/resume and session/delete"
+```
+
+---
+
+### Task 12: Richer session updates: notices, compaction, session info, effort, config updates
+
+There are five additions, all mapping events or state moca already has:
+
+| ACP | moca source | Rule |
+|---|---|---|
+| `notice` | `agent.Warning`, `agent.Retry` | **only** when the client advertised `clientCapabilities.session.notices` (spec MUST). Otherwise a Warning stays a `moca: …` thought line and a Retry sends nothing. |
+| `compaction_summary_chunk` + `compaction_update` | `agent.Compacted`; the summary message in `History()` | **only** with `clientCapabilities.session.compaction` (spec MUST). moca's summarizer returns the summary whole, so it is sent as one chunk (which opens the compaction) followed by `compaction_update {status: completed}`. Without the capability: a thought line, and on replay the existing "_(earlier conversation was summarized)_" chunk. |
+| `session_info_update` | the first prompt's first line (the same rule as `session/list`'s title) | after each prompt: `updatedAt` always; `title` once, only for sessions created in this process (loaded and resumed ones already have one) |
+| `effort` config option | `provider.Model.ClampEffort`, `Agent.SetEffort` | a `select` with category `thought_level`, offered only when the model accepts ≥ 2 levels; idle only |
+| `config_option_update` | `buildConfigOptions` | sent after a prompt when the options differ from what the client last saw. Example: a `moca login` in a terminal makes another provider's models usable. `set_config_option` responses carry the options themselves. |
+
+**Files:**
+- Modify: `internal/acp/protocol.go` (types, discriminators, `InitializeRequest.ClientCapabilities`), `internal/acp/server.go` (client capabilities, prompt tail), `internal/acp/session.go` (`emit` cases, `compacted`, `sendInfo`, fields), `internal/acp/modes.go` (effort, `buildConfigOptions`, `reportConfig`, `setConfigOption`), `internal/acp/history.go` (`replayMessages`, `titled` on reopen), `internal/acp/client_test.go` (an uncredentialed provider in `testOptions`)
+- Test: `internal/acp/updates_test.go`, `internal/acp/protocol_test.go`
+
+**Interfaces:**
+- Consumes: `agent.Warning{Text}`, `agent.Retry{Notice provider.RetryNotice{Attempt, Max int; Wait time.Duration}}`, `agent.Compacted{TokensBefore, TokensAfter int}` (emitted outside `a.mu`, `internal/agent/compaction.go:168`), `session.SummaryPrefix`, `llm.Efforts`, `provider.Model.ClampEffort`, `(*agent.Agent).Effort()`, `.SetEffort(llm.Effort) (llm.Effort, error)`.
+- Produces: discriminators `updNotice, updCompaction, updCompactionChunk, updSessionInfo, updConfigOptions`; types `Notice, CompactionSummaryChunk, CompactionUpdate, SessionInfoUpdate, ConfigOptionUpdate, ClientCapabilities, ClientSessionCapabilities`; `func (srv *Server) clientSupports() (notices, compaction bool)`; `func summaryOf(text string) string`; `func summaryText([]llm.Message) string`; `func (s *session) compacted(summary string, before, after int)`; `func (s *session) replayMessages([]llm.Message)`; `func (s *session) sendInfo(text string)`; `func effortLevels(provider.Model) []llm.Effort`; `func effortOption(provider.Model, llm.Effort) *ConfigOption`; `func (s *session) buildConfigOptions() []ConfigOption`; `func (s *session) reportConfig()`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `TestProtocolShapesConform` in `protocol_test.go`:
+
+```go
+	title := "fix the parser"
+	for _, u := range []any{
+		Notice{SessionUpdate: updNotice, Severity: "warning", Title: "run stopped", Description: "details"},
+		CompactionSummaryChunk{SessionUpdate: updCompactionChunk, CompactionID: "c1", Content: ContentBlock{Type: "text", Text: "summary"}},
+		CompactionUpdate{SessionUpdate: updCompaction, CompactionID: "c1", Status: "completed"},
+		SessionInfoUpdate{SessionUpdate: updSessionInfo, Title: &title, UpdatedAt: "2026-10-13T10:00:00Z"},
+		ConfigOptionUpdate{SessionUpdate: updConfigOptions, ConfigOptions: []ConfigOption{{ID: "model", Name: "Model",
+			Category: "model", Type: "select", CurrentValue: "a/b", Options: []ConfigOptionValue{{Value: "a/b", Name: "a/b"}}}}},
+	} {
+		conform(t, "SessionNotification", SessionNotification{SessionID: "abcd1234", Update: u})
+	}
+```
+
+In `internal/acp/client_test.go` `testOptions`, add a provider whose key is unset, so its model is not offered until the env var appears. Insert into the config's `providers` object:
+
+```
+"other":{"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_OTHER","models":{"x":{"contextWindow":65536}}}
+```
+
+(pass `s.srv.URL` a second time to `fmt.Sprintf`), and add `t.Setenv("MOCA_T_OTHER", "")` next to `MOCA_T_KEY`. Task 8's `TestNewSessionAdvertisesModesAndModels` still sees exactly two models: `other/x` has no credential.
+
+`internal/acp/updates_test.go`:
+
+```go
+package acp
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/adeotek/moca/internal/agent"
+	"github.com/adeotek/moca/internal/llm"
+	"github.com/adeotek/moca/internal/provider"
+	msession "github.com/adeotek/moca/internal/session"
+)
+
+// bareSession is a session without an agent on a Server whose conn writes
+// into a buffer: for the event-mapping rules. notices/compaction stand for
+// the client's advertised capabilities.
+func bareSession(t *testing.T, notices, compaction bool) (*session, func() []map[string]any) {
+	t.Helper()
+	var buf bytes.Buffer
+	srv := &Server{sessions: map[string]*session{}, notices: notices, compaction: compaction}
+	srv.conn = NewConn(&buf, srv)
+	s := newSession(srv, "/w", true)
+	s.id = "abcd1234"
+	s.markReady()
+	return s, func() []map[string]any {
+		var out []map[string]any
+		sc := bufio.NewScanner(bytes.NewReader(buf.Bytes()))
+		for sc.Scan() {
+			var m struct {
+				Params SessionNotification `json:"params"`
+			}
+			json.Unmarshal(sc.Bytes(), &m)
+			out = append(out, m.Params.Update.(map[string]any))
+		}
+		return out
+	}
+}
+
+func TestWarningAndRetryNotices(t *testing.T) {
+	s, ups := bareSession(t, true, false)
+	s.emit(agent.Warning{Text: "run stopped: the same failing call repeated 3 times"})
+	s.emit(agent.Retry{Notice: provider.RetryNotice{Attempt: 2, Max: 5, Wait: 1500 * time.Millisecond}})
+	got := ups()
+	if len(got) != 2 || got[0]["sessionUpdate"] != updNotice || got[0]["severity"] != "warning" ||
+		got[1]["severity"] != "info" || !strings.Contains(got[1]["description"].(string), "attempt 2 of 5") {
+		t.Fatalf("%v", got)
+	}
+	for _, u := range got {
+		conform(t, "SessionNotification", SessionNotification{SessionID: s.id, Update: u})
+	}
+	// Without the capability: no notice at all (spec MUST); the warning
+	// stays visible as a thought line, the retry is silent.
+	s2, ups2 := bareSession(t, false, false)
+	s2.emit(agent.Warning{Text: "careful"})
+	s2.emit(agent.Retry{Notice: provider.RetryNotice{Attempt: 1, Max: 5}})
+	got = ups2()
+	if len(got) != 1 || got[0]["sessionUpdate"] != updThought || !strings.Contains(mustJSON(got[0]), "moca: careful") {
+		t.Fatalf("%v", got)
+	}
+}
+
+func TestCompactedUpdates(t *testing.T) {
+	s, ups := bareSession(t, false, true)
+	s.compacted("the summary", 90000, 12000)
+	got := ups()
+	if len(got) != 2 || got[0]["sessionUpdate"] != updCompactionChunk || got[1]["sessionUpdate"] != updCompaction ||
+		got[1]["status"] != "completed" || got[0]["compactionId"] != got[1]["compactionId"] ||
+		got[0]["content"].(map[string]any)["text"] != "the summary" {
+		t.Fatalf("%v", got)
+	}
+	for _, u := range got {
+		conform(t, "SessionNotification", SessionNotification{SessionID: s.id, Update: u})
+	}
+	s2, ups2 := bareSession(t, false, false)
+	s2.compacted("the summary", 90000, 12000)
+	if got := ups2(); len(got) != 1 || got[0]["sessionUpdate"] != updThought || !strings.Contains(mustJSON(got[0]), "90000 → 12000") {
+		t.Fatalf("without the capability: %v", got)
+	}
+}
+
+func TestSummaryText(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: msession.SummaryPrefix + "\nWe fixed the parser."}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "ok"}}},
+	}
+	if got := summaryText(msgs); got != "We fixed the parser." {
+		t.Fatalf("%q", got)
+	}
+	if summaryText(msgs[1:]) != "" {
+		t.Fatal("no summary message, no summary")
+	}
+}
+
+func TestReplayCompactionNeedsCapability(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: msession.SummaryPrefix + "\nS"}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "hi"}}},
+	}
+	s, ups := bareSession(t, false, true)
+	s.replayMessages(msgs)
+	if got := ups(); len(got) != 3 || got[0]["sessionUpdate"] != updCompactionChunk || got[1]["sessionUpdate"] != updCompaction || got[2]["sessionUpdate"] != updAgentMessage {
+		t.Fatalf("with capability: %v", got)
+	}
+	s2, ups2 := bareSession(t, false, false)
+	s2.replayMessages(msgs)
+	if got := ups2(); len(got) != 2 || !strings.Contains(mustJSON(got[0]), "earlier conversation was summarized") {
+		t.Fatalf("without capability: %v", got)
+	}
+}
+
+// The client's {} vs null decides: notices on, compaction off. testEmit
+// (tests only) fires a warning on the new session as soon as it is ready.
+func TestInitializeRecordsClientCapabilities(t *testing.T) {
+	o := testOptions(t, newScript(t))
+	var notices, compaction bool
+	o.testEmit = func(s *session) {
+		notices, compaction = s.srv.clientSupports()
+		s.emit(agent.Warning{Text: "hello"})
+	}
+	c := startClient(t, o)
+	c.call("initialize", map[string]any{"protocolVersion": 1,
+		"clientCapabilities": map[string]any{"session": map[string]any{"notices": map[string]any{}, "compaction": nil}}})
+	c.newSession(t.TempDir())
+	deadline := time.Now().Add(5 * time.Second)
+	for len(c.updatesOf(updNotice)) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n, th := len(c.updatesOf(updNotice)), len(c.updatesOf(updThought)); n != 1 || th != 0 {
+		t.Fatalf("notices advertised: want 1 notice and no thought line, got %d / %d", n, th)
+	}
+	if !notices || compaction {
+		t.Fatalf("parsed capabilities: notices %v (want true), compaction %v (want false: null)", notices, compaction)
+	}
+}
+
+func TestSessionInfoAfterPrompts(t *testing.T) {
+	c := startClient(t, testOptions(t, newScript(t, textTurn("a"), textTurn("b"))))
+	sid := c.newSession(t.TempDir())
+	c.prompt(sid, "fix the parser\nit chokes on tabs")
+	c.prompt(sid, "and the lexer")
+	info := c.updatesOf(updSessionInfo)
+	if len(info) != 2 || info[0]["title"] != "fix the parser" || info[1]["title"] != nil {
+		t.Fatalf("title once, from the first prompt's first line: %v", info)
+	}
+	for _, u := range info {
+		if _, err := time.Parse(time.RFC3339, u["updatedAt"].(string)); err != nil {
+			t.Fatalf("updatedAt: %v", u)
+		}
+		conform(t, "SessionNotification", SessionNotification{SessionID: sid, Update: u})
+	}
+}
+
+func TestEffortOption(t *testing.T) {
+	thinking := provider.Model{Provider: "p", ID: "m", ThinkingMode: "openai",
+		ThinkingLevelMap: map[llm.Effort]string{llm.EffortLow: "low", llm.EffortHigh: "high"}}
+	if got := effortLevels(thinking); len(got) != 2 || got[0] != llm.EffortLow || got[1] != llm.EffortHigh {
+		t.Fatalf("levels %v", got)
+	}
+	o := effortOption(thinking, llm.EffortHigh)
+	if o == nil || o.ID != "effort" || o.Category != "thought_level" || o.CurrentValue != "high" || len(o.Options) != 2 {
+		t.Fatalf("%+v", o)
+	}
+	conform(t, "SessionNotification", SessionNotification{SessionID: "abcd1234",
+		Update: ConfigOptionUpdate{SessionUpdate: updConfigOptions, ConfigOptions: []ConfigOption{*o}}})
+	if effortOption(provider.Model{ThinkingMode: "none"}, llm.EffortOff) != nil {
+		t.Fatal("a model without thinking has nothing to pick")
+	}
+}
+
+func TestConfigOptionUpdateWhenCredentialAppears(t *testing.T) {
+	c := startClient(t, testOptions(t, newScript(t, textTurn("a"), textTurn("b"))))
+	sid := c.newSession(t.TempDir())
+	c.prompt(sid, "one")
+	if n := len(c.updatesOf(updConfigOptions)); n != 0 {
+		t.Fatalf("nothing changed, yet %d config_option_update", n)
+	}
+	t.Setenv("MOCA_T_OTHER", "k2") // as if the user ran `moca login` in a terminal
+	c.prompt(sid, "two")
+	ups := c.updatesOf(updConfigOptions)
+	if len(ups) != 1 || !strings.Contains(mustJSON(ups[0]), "other/x") {
+		t.Fatalf("%v", ups)
+	}
+}
+```
+
+The test hook is `Options.testEmit func(*session)`: unexported, nil in production, added in Step 4. It runs inside `Deferred.Then`, i.e. *after* the `session/new` response, so `c.newSession` can return before it. The test therefore polls until the notice arrives and reads the captured values only afterwards. The capture happens before the notice is written, and the pipe orders the write before the client's read, so this is race-free under `-race`.
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `go test ./internal/acp -run 'ProtocolShapes|Notices|Compact|SummaryText|ReplayCompaction|ClientCapabilities|SessionInfo|EffortOption|ConfigOptionUpdate' -race -count=1`
+Expected: FAIL (undefined types and functions)
+
+- [ ] **Step 3: Types in `protocol.go`**
+
+```go
+	updNotice          = "notice"
+	updCompaction      = "compaction_update"
+	updCompactionChunk = "compaction_summary_chunk"
+	updSessionInfo     = "session_info_update"
+	updConfigOptions   = "config_option_update"
+```
+
+(in the discriminator block), and:
+
+```go
+type InitializeRequest struct {
+	ProtocolVersion    int                `json:"protocolVersion"`
+	ClientCapabilities ClientCapabilities `json:"clientCapabilities"`
+}
+
+// ClientCapabilities: only the session extensions moca reacts to. A field
+// present as {} advertises support; omitted or null does not.
+type ClientCapabilities struct {
+	Session *ClientSessionCapabilities `json:"session,omitempty"`
+}
+
+type ClientSessionCapabilities struct {
+	Notices    *struct{} `json:"notices,omitempty"`
+	Compaction *struct{} `json:"compaction,omitempty"`
+}
+
+// Notice is a live, fire-and-forget message for the user (not history).
+type Notice struct {
+	SessionUpdate string `json:"sessionUpdate"`
+	Severity      string `json:"severity"` // info | warning | error
+	Title         string `json:"title"`
+	Description   string `json:"description,omitempty"`
+}
+
+// CompactionSummaryChunk appends to a compaction's summary; a first-seen id
+// opens an in-progress compaction.
+type CompactionSummaryChunk struct {
+	SessionUpdate string       `json:"sessionUpdate"`
+	CompactionID  string       `json:"compactionId"`
+	Content       ContentBlock `json:"content"`
+}
+
+// CompactionUpdate patches a compaction by id (here: marks it completed).
+type CompactionUpdate struct {
+	SessionUpdate string `json:"sessionUpdate"`
+	CompactionID  string `json:"compactionId"`
+	Status        string `json:"status"`
+}
+
+type SessionInfoUpdate struct {
+	SessionUpdate string  `json:"sessionUpdate"`
+	Title         *string `json:"title,omitempty"`
+	UpdatedAt     string  `json:"updatedAt,omitempty"`
+}
+
+type ConfigOptionUpdate struct {
+	SessionUpdate string         `json:"sessionUpdate"`
+	ConfigOptions []ConfigOption `json:"configOptions"`
+}
+```
+
+- [ ] **Step 4: Client capabilities in `server.go`**
+
+Add to `Server`: `notices, compaction bool // the client's advertised session extensions (guarded by mu)`, and `testEmit func(*session)` to `Options` (unexported; tests only). Replace `initialize`'s decode:
+
+```go
+	req, err := decode[InitializeRequest](params)
+	if err != nil {
+		return nil, err
+	}
+	if sc := req.ClientCapabilities.Session; sc != nil {
+		srv.mu.Lock()
+		srv.notices, srv.compaction = sc.Notices != nil, sc.Compaction != nil
+		srv.mu.Unlock()
+	}
+```
+
+and add:
+
+```go
+// clientSupports reports the client's notices and compaction extensions:
+// ACP forbids sending those updates to a client that did not advertise them.
+func (srv *Server) clientSupports() (notices, compaction bool) {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	return srv.notices, srv.compaction
+}
+```
+
+In `newSession`'s `Deferred.Then`, after `s.markReady()`, add `if srv.opts.testEmit != nil { srv.opts.testEmit(s) }`.
+
+In `prompt`, name the expanded text and add the post-run updates:
+
+```go
+	expanded := s.expand(text)
+	out, err := s.agent.Run(runCtx, expanded)
+	if s.reloadCommands() {
+		s.sendCommands()
+	}
+	s.sendInfo(expanded)
+	s.reportConfig()
+```
+
+- [ ] **Step 5: Events in `session.go`**
+
+Add fields: `titled bool` (in the `mu` group) and `lastConfig string // JSON of the config options the client last saw (guarded by mu)`. Replace the `agent.Warning` case and add two more:
+
+```go
+	case agent.Warning:
+		if notices, _ := s.srv.clientSupports(); notices {
+			s.send(Notice{SessionUpdate: updNotice, Severity: "warning", Title: e.Text})
+		} else {
+			s.send(s.chunk(updThought, "moca: "+e.Text+"\n"))
+		}
+	case agent.Retry:
+		if notices, _ := s.srv.clientSupports(); notices {
+			s.send(Notice{SessionUpdate: updNotice, Severity: "info", Title: "Retrying the model request",
+				Description: fmt.Sprintf("attempt %d of %d, waiting %s", e.Notice.Attempt, e.Notice.Max, e.Notice.Wait.Round(100*time.Millisecond))})
+		}
+	case agent.Compacted:
+		// Emitted outside a.mu (compaction.go): History is safe here.
+		if s.agent != nil {
+			s.compacted(summaryText(s.agent.History()), e.TokensBefore, e.TokensAfter)
+		}
+```
+
+and add:
+
+```go
+// compacted reports a finished compaction. With the client's compaction
+// extension: one summary chunk (moca's summarizer returns the summary whole;
+// the chunk opens the compaction) and a completed update. Without it: a
+// thought line (before/after <= 0: replay, sizes unknown — see replay).
+func (s *session) compacted(summary string, before, after int) {
+	if _, ok := s.srv.clientSupports(); ok {
+		id := newMessageID()
+		if summary != "" {
+			s.send(CompactionSummaryChunk{SessionUpdate: updCompactionChunk, CompactionID: id,
+				Content: ContentBlock{Type: "text", Text: summary}})
+		}
+		s.send(CompactionUpdate{SessionUpdate: updCompaction, CompactionID: id, Status: "completed"})
+		return
+	}
+	s.send(s.chunk(updThought, fmt.Sprintf("moca: context compacted (%d → %d tokens)\n", before, after)))
+}
+
+// summaryOf strips the compaction summary message's prefix.
+func summaryOf(text string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), msession.SummaryPrefix))
+}
+
+// summaryText is the current compaction summary in msgs (History() puts it
+// first), or "".
+func summaryText(msgs []llm.Message) string {
+	for _, m := range msgs {
+		if m.Role != llm.RoleUser {
+			continue
+		}
+		for _, b := range m.Content {
+			if b.Type == llm.BlockText && strings.HasPrefix(strings.TrimSpace(b.Text), msession.SummaryPrefix) {
+				return summaryOf(b.Text)
+			}
+		}
+	}
+	return ""
+}
+
+// sendInfo updates the client's session metadata after a prompt: the title
+// once (session/list's rule: the first line of the first user message), the
+// update time always.
+func (s *session) sendInfo(text string) {
+	u := SessionInfoUpdate{SessionUpdate: updSessionInfo, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+	s.mu.Lock()
+	if !s.titled {
+		s.titled = true
+		line, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+		if r := []rune(line); len(r) > 80 {
+			line = string(r[:80])
+		}
+		u.Title = &line
+	}
+	s.mu.Unlock()
+	s.send(u)
+}
+```
+
+Add `"strings"`, `"time"` and `msession "github.com/adeotek/moca/internal/session"` to `session.go`'s imports. The alias is required: this package declares `type session struct`, and Go rejects a file that also imports a package named `session` ("session already declared through import of package"). Every `internal/acp` file that uses the package imports it as `msession`, including `history.go` (Task 9) and the tests.
+
+- [ ] **Step 6: Replay in `history.go`**
+
+Split `replay` so it can be tested without an agent, and route the summary message through the capability rule:
+
+```go
+func (s *session) replay() { s.replayMessages(s.agent.History()) }
+
+// replayMessages streams msgs (see replay): user and agent text, thinking,
+// tool calls with their results; the compaction summary as a compaction
+// (client extension) or as one summarized-note chunk.
+func (s *session) replayMessages(msgs []llm.Message) {
+```
+
+This is the old `replay` body without its first line (`msgs := s.agent.History()`). Its summary branch becomes:
+
+```go
+				if strings.HasPrefix(strings.TrimSpace(b.Text), msession.SummaryPrefix) {
+					if _, ok := s.srv.clientSupports(); ok {
+						s.compacted(summaryOf(b.Text), 0, 0)
+					} else {
+						s.send(s.chunk(updAgentMessage, "_(earlier conversation was summarized)_\n\n"))
+					}
+				} else {
+```
+
+In `reopen`, mark resumed sessions as titled: add `s.titled = true` right after `s := newSession(srv, cwd, trusted)`.
+
+- [ ] **Step 7: Effort and config updates in `modes.go`**
+
+Rename `configOptions` to `buildConfigOptions` and append the effort option before its `return`:
+
+```go
+	opts := []ConfigOption{{ID: "model", Name: "Model", Category: "model", Type: "select", CurrentValue: cur, Options: vals}}
+	if e := effortOption(s.agent.Model(), s.agent.Effort()); e != nil {
+		opts = append(opts, *e)
+	}
+	return opts
+```
+
+Then add:
+
+```go
+// configOptions builds the options for a response and records them as what
+// the client has seen.
+func (s *session) configOptions() []ConfigOption {
+	opts := s.buildConfigOptions()
+	b, _ := json.Marshal(opts)
+	s.mu.Lock()
+	s.lastConfig = string(b)
+	s.mu.Unlock()
+	return opts
+}
+
+// reportConfig sends config_option_update when the options changed since
+// the client last saw them — e.g. a `moca login` in a terminal made another
+// provider's models usable. Called after each prompt.
+func (s *session) reportConfig() {
+	opts := s.buildConfigOptions()
+	b, _ := json.Marshal(opts)
+	s.mu.Lock()
+	changed := string(b) != s.lastConfig
+	s.lastConfig = string(b)
+	s.mu.Unlock()
+	if changed {
+		s.send(ConfigOptionUpdate{SessionUpdate: updConfigOptions, ConfigOptions: opts})
+	}
+}
+
+// effortLevels are the efforts m takes as-is, in llm.Efforts order; a model
+// without thinking takes only "off".
+func effortLevels(m provider.Model) []llm.Effort {
+	var out []llm.Effort
+	for _, e := range llm.Efforts {
+		if m.ClampEffort(e) == e {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// effortOption is the "effort" select, or nil when m has fewer than two
+// levels (nothing to pick).
+func effortOption(m provider.Model, cur llm.Effort) *ConfigOption {
+	lv := effortLevels(m)
+	if len(lv) < 2 {
+		return nil
+	}
+	o := ConfigOption{ID: "effort", Name: "Effort", Category: "thought_level", Type: "select", CurrentValue: string(cur)}
+	for _, e := range lv {
+		o.Options = append(o.Options, ConfigOptionValue{Value: string(e), Name: string(e)})
+	}
+	return &o
+}
+```
+
+Replace `setConfigOption`'s body after the `lookup`:
+
+```go
+	var value string
+	if err := json.Unmarshal(req.Value, &value); err != nil {
+		return nil, invalidParams("%s value must be a string", req.ConfigID)
+	}
+	var apply func() error
+	switch req.ConfigID {
+	case "model":
+		apply = func() error { return s.agent.SetModel(value, "") }
+	case "effort":
+		apply = func() error {
+			if !slices.Contains(effortLevels(s.agent.Model()), llm.Effort(value)) {
+				return fmt.Errorf("effort %q is not offered by %s", value, s.agent.Model().Qualified())
+			}
+			_, err := s.agent.SetEffort(llm.Effort(value))
+			return err
+		}
+	default:
+		return nil, invalidParams("unknown config option %q", req.ConfigID)
+	}
+	return s.idle(func() (any, error) {
+		if err := apply(); err != nil {
+			return nil, invalidParams("%v", err)
+		}
+		return SetConfigOptionResponse{ConfigOptions: s.configOptions()}, nil
+	})
+```
+
+Add `"fmt"`, `"github.com/adeotek/moca/internal/llm"` and `"github.com/adeotek/moca/internal/provider"` to `modes.go`. Task 8's `TestSetModel` still passes: its `effort`/`high` case gets `-32602`, because the fake models take only `off`.
+
+- [ ] **Step 8: Run the tests to verify they pass**
+
+Run: `go test ./internal/acp -race -count=1`
+Expected: PASS. If `TestConfigOptionUpdateWhenCredentialAppears` never sees `other/x`, check that the registry lists every configured provider's models (`Agent.Models()`), not just the active provider's. If it lists only the active one, assert on the effort option instead: switch `fake/m` → `fake/m2` through `set_config_option`, and check that the next prompt sends no update (the response already carried them).
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add internal/acp
+git commit -m "feat(acp): notices, compaction, session info, effort option and config updates"
+```
+
+---
+
+### Task 13: `moca acp` subcommand
 
 **Files:**
 - Create: `cmd/moca/acp.go`, `cmd/moca/acp_test.go`
@@ -3972,7 +5257,7 @@ graphify update .
 
 ---
 
-### Task 11: End-to-end gate over the built binary
+### Task 14: End-to-end gate over the built binary
 
 The `internal/acp` tests drive `Serve` in-process. This gate drives the **built binary** the way an editor does: a child process, pipes, flags and real stdout. It catches what in-process tests can't — stray stdout writes from `cmd/moca`, log setup, exit codes, and a second process reopening a session. It follows the house `test/shipgate` pattern (a bash wrapper plus a Go checker behind a build tag), but is fully hermetic: the provider is an in-test `httptest` server, so no API key or network is needed.
 
@@ -4218,6 +5503,17 @@ func TestACPGate(t *testing.T) {
 	if r["error"] != nil || !strings.Contains(fmt.Sprint(ups), "say hello") || !strings.Contains(fmt.Sprint(ups), "Hello from the gate.") {
 		t.Fatalf("load: %v updates %v", r, kinds(ups))
 	}
+	// 5b. Close, then delete: the session leaves session/list.
+	if r, _ := q.call("session/close", map[string]any{"sessionId": sid}, allow); r["error"] != nil {
+		t.Fatalf("close: %v", r)
+	}
+	if r, _ := q.call("session/delete", map[string]any{"sessionId": sid}, allow); r["error"] != nil {
+		t.Fatalf("delete: %v", r)
+	}
+	r, _ = q.call("session/list", map[string]any{"cwd": work}, allow)
+	if n := len(r["result"].(map[string]any)["sessions"].([]any)); n != 0 {
+		t.Fatalf("deleted session still listed (%d)", n)
+	}
 	if err := q.exit(); err != nil {
 		t.Fatalf("second process exit: %v", err)
 	}
@@ -4276,7 +5572,7 @@ git commit -m "test(acp): hermetic end-to-end gate over the built binary"
 
 ---
 
-### Task 12: Documentation
+### Task 15: Documentation
 
 **Files:**
 - Modify: `docs/specs/SPECS.md` (new `## 9.5 ACP server (`moca acp`)`; §1 implemented line; §3 CLI surface; layout block; dependency rule)
@@ -4300,7 +5596,11 @@ Add the section `## 9.5 ACP server (\`moca acp\`)` after §9. Its content is the
 - list/load (id8 only, same workdir, full replay);
 - slash commands;
 - error codes;
-- non-goals (client fs/terminal, client MCP servers, images/audio, terminal-auth, effort option, TUI built-ins, `session/resume|close|delete`, elicitation).
+- `session/resume`, `session/close` (cancels, then frees), `session/delete` (closes an idle open session first; refuses a running one or one held by another process);
+- `$/cancel_request` in both directions (`-32800`), and `-32002` for unknown sessions;
+- client-gated updates: `notice` (Warning, Retry) and `compaction_summary_chunk` + `compaction_update`, only with the client's `session.notices` / `session.compaction` capability, with their fallbacks;
+- `session_info_update` (title once, `updatedAt` per prompt), the `effort` config option (models with ≥ 2 levels), `config_option_update` after a prompt when the options changed;
+- non-goals: client fs/terminal delegation, client MCP servers, images/audio, `authenticate`/`logout` flows, `additionalDirectories`, terminal tool content, elicitation, `plan` updates, TUI built-ins, and all unstable methods (`session/fork`, `providers/*`, `nes/*`, `document/*`, `mcp/message`).
 
 Copy the tables from `docs/superpowers/specs/2026-10-13-acp-design.md` and adjust anything the implementation changed (e.g. a JSON tag renamed in Task 2). Also:
 - §3: add the `moca acp` usage lines exactly as in `printUsage`.
@@ -4325,7 +5625,7 @@ Add an `## Editors (ACP)` section after `## Configure`:
 
 VS Code (any ACP client extension) and Paseo take the same command line: `moca acp`. Optional flags apply to every session the editor opens: `--model provider/model`, `--effort <level>`, `--mode default|auto|yolo|plan`, `--approve` / `--no-approve`. By default a folder you already answered in moca's TUI trust prompt keeps that answer; any other folder the editor opens is trusted (project rules, AGENTS.md and project skills/prompts apply).
 
-What you get: streamed replies and thinking, tool calls with diffs, approval prompts, cancel, the permission-mode picker, the model picker, your prompt templates and skills in the `/` menu, and session history (reopen past moca sessions of the folder). Not supported: images, editor-provided MCP servers (configure them in moca), and TUI-only commands (`/compact`, `/undo`, …).
+What you get: streamed replies and thinking, tool calls with diffs, approval prompts, cancel, the permission-mode picker, the model and effort pickers, your prompt templates and skills in the `/` menu, session titles, context-usage and compaction info, warnings as notices (where the editor supports them), and session history: reopen, resume, close and delete past moca sessions of the folder. Not supported: images, editor-provided MCP servers (configure them in moca), and TUI-only commands (`/compact`, `/undo`, …).
 ````
 
 Update the status line to v0.5.0-beta and mention the ACP server. In the Phases table, add row 8: `| 8 | ACP server (` + "`moca acp`" + `) | Zed gate + ACP TCK + test/acpgate — done |`, and change row 7's "current line" to `v0.5.0-beta`.
@@ -4339,7 +5639,7 @@ Add at the top:
 
 ### Editors
 
-- **`moca acp` — an Agent Client Protocol server.** Zed, VS Code ACP extensions and agent UIs like Paseo can drive moca: `{"command": "moca", "args": ["acp"]}`. Streamed replies and thinking, tool calls with diffs, approvals (`allow once` / `always` / `deny`), cancel, a permission-mode picker (`default` / `auto` / `yolo` / `plan`), a model picker, prompt templates and skills as `/` commands, and session history (`session/list` + `session/load` replaying the whole conversation), and context/cost via `usage_update`. Permission requests never time out (cancel instead). Hand-rolled JSON-RPC, no new dependency; the TUI and `-p` are unchanged. Trust: a folder's saved trust answer is honoured, any other folder is trusted (`--approve` / `--no-approve` override). Editor-supplied MCP servers and images are not supported yet.
+- **`moca acp` — an Agent Client Protocol server.** Zed, VS Code ACP extensions and agent UIs like Paseo can drive moca: `{"command": "moca", "args": ["acp"]}`. Streamed replies and thinking, tool calls with diffs, approvals (`allow once` / `always` / `deny`), cancel, a permission-mode picker (`default` / `auto` / `yolo` / `plan`), a model picker, prompt templates and skills as `/` commands, session history (`session/list`, `session/load` replaying the whole conversation, `session/resume`, `session/close`, `session/delete`), an effort picker, session titles (`session_info_update`), context/cost via `usage_update`, compaction and warning notices for editors that support them, and request cancellation (`$/cancel_request`). Permission requests never time out (cancel instead). Hand-rolled JSON-RPC, no new dependency; the TUI and `-p` are unchanged. Trust: a folder's saved trust answer is honoured, any other folder is trusted (`--approve` / `--no-approve` override). Editor-supplied MCP servers and images are not supported yet.
 ```
 
 - [ ] **Step 4: AGENTS.md**
@@ -4360,7 +5660,7 @@ git commit -m "docs: moca acp in SPECS, README, CHANGELOG and AGENTS"
 
 ---
 
-### Task 13: Manual gates (Zed, ACP TCK) and finish
+### Task 16: Manual gates (Zed, ACP TCK) and finish
 
 **Files:**
 - Modify: `docs/specs/SPECS.md` §15 (gate evidence)
@@ -4382,10 +5682,12 @@ git commit -m "docs: moca acp in SPECS, README, CHANGELOG and AGENTS"
 9. `grep -c . ~/.local/state/moca/logs/<today>-*.log` shows ACP entries and no prompt text.
 10. The usage display (if Zed shows `usage_update`) moves after each turn.
 11. A folder you previously answered "no" to in the TUI trust prompt: project prompts are absent from the `/` menu.
+12. The thread title becomes the first line of the first prompt; the effort picker appears for a thinking model and switching it changes the next request's effort (check the log).
+13. Delete a thread from history: it disappears, and its file is gone from `~/.local/share/moca/sessions/`.
 
 - [ ] **Step 3: Record and fix**
 
-Fix any failure as its own test-first change in the owning task's package (an ACP client quirk becomes a regression test in `internal/acp`). Record the gate in SPECS §15 in the existing style: date, Zed version, model, the 11 results, and any deviations. Then:
+Fix any failure as its own test-first change in the owning task's package (an ACP client quirk becomes a regression test in `internal/acp`). Record the gate in SPECS §15 in the existing style: date, Zed version, model, the 13 results, and any deviations. Then:
 
 ```bash
 git add docs/specs/SPECS.md
@@ -4394,7 +5696,7 @@ git commit -m "docs(specs): ACP Zed gate evidence"
 
 - [ ] **Step 4: ACP TCK (manual, not CI — settled)**
 
-Clone `agentclientprotocol/acp-tck` outside the repo (it is untrusted third-party code: run it in its own directory, never from inside moca's tree), and point it at `<repo>/bin/moca acp` with a hermetic config (the Task 11 provider pattern, or a real model). Record each verdict. Mandatory-tier checks must pass; a failure on a capability moca does not advertise (fs, terminal, images, client MCP) is N/A. Put the report path and verdicts in the PR description, not in the repo (the TCK is experimental, so there's no CI dependency). Fix real failures test-first in the owning package.
+Clone `agentclientprotocol/acp-tck` outside the repo (it is untrusted third-party code: run it in its own directory, never from inside moca's tree), and point it at `<repo>/bin/moca acp` with a hermetic config (the Task 14 provider pattern, or a real model). Record each verdict. Mandatory-tier checks must pass; a failure on a capability moca does not advertise (fs, terminal, images, client MCP) is N/A. Put the report path and verdicts in the PR description, not in the repo (the TCK is experimental, so there's no CI dependency). Fix real failures test-first in the owning package.
 
 - [ ] **Step 5: Final gates**
 
@@ -4409,7 +5711,7 @@ Expected: all green. If `graphify update` changed `graphify-out/`, commit it (wi
 
 - [ ] **Step 6: Finish the branch**
 
-Use superpowers:finishing-a-development-branch. `main` is PR-only (pre-push hook), so open a PR from `phase/8-acp`. The PR body carries: the acpgate output, the Zed checklist (11 results), the TCK verdicts, and the Task 2 feature-gate outcome (`usage_update` / `messageId` / unstable defs).
+Use superpowers:finishing-a-development-branch. `main` is PR-only (pre-push hook), so open a PR from `phase/8-acp`. The PR body carries: the acpgate output, the Zed checklist (13 results), the TCK verdicts, and the Task 2 feature-gate outcome (`usage_update` / `messageId` / unstable defs).
 
 ---
 
@@ -4445,23 +5747,38 @@ CC = Claude Code plan `docs/superpowers/plans/2026-10-13-acp.md` (with its spec 
 | Topic | Where | Reason |
 |---|---|---|
 | `usage_update` after each model turn | Task 2 (type, schema gate), Task 5 (emit) | settled decision; verified that `TurnEnd` is emitted outside `a.mu`, so `Status()` is safe in `emit` |
-| Saved trust decision honoured | Task 5 (`Options.Trust`), Task 9, Task 10 (`acpTrust`) | CC trusted every workdir, ignoring a "no" the user gave in the TUI. Trust is also per workdir now (one `acp` process serves many folders). |
-| `--approve` flag | Task 10 | symmetry with `--no-approve` and the global flags |
-| No permission timeout, documented | Global Constraints, Task 12 | settled; CC had no timeout but didn't say so |
+| Saved trust decision honoured | Task 5 (`Options.Trust`), Task 9, Task 13 (`acpTrust`) | CC trusted every workdir, ignoring a "no" the user gave in the TUI. Trust is also per workdir now (one `acp` process serves many folders). |
+| `--approve` flag | Task 13 | symmetry with `--no-approve` and the global flags |
+| No permission timeout, documented | Global Constraints, Task 15 | settled; CC had no timeout but didn't say so |
 | Concurrent-write and unknown-notification tests | Task 1 | pins the single-writer invariant under `-race` |
 | Load continuity checks | Task 9 | the follow-up request carries the loaded history, and the response comes after the replay |
-| Hermetic E2E gate over the built binary, with leak scan | Task 11 | catches stdout pollution, exit codes and cross-process load, which in-process tests can't. Written in Go in the `test/shipgate` style instead of HA's Python client and Hermes scratch dir. |
-| ACP TCK (manual) | Task 13 | settled: manual only, results in the PR |
-| v0.5.0-beta bump | Global Constraints, Task 12 | settled; CC had "unreleased" |
-| `graphify update`, PR evidence | Task 13 | house rules |
+| Hermetic E2E gate over the built binary, with leak scan | Task 14 | catches stdout pollution, exit codes and cross-process load, which in-process tests can't. Written in Go in the `test/shipgate` style instead of HA's Python client and Hermes scratch dir. |
+| ACP TCK (manual) | Task 16 | settled: manual only, results in the PR |
+| v0.5.0-beta bump | Global Constraints, Task 15 | settled; CC had "unreleased" |
+| `graphify update`, PR evidence | Task 16 | house rules |
 
 ### New in the merge (neither plan had it)
 
 | Topic | Where | Reason |
 |---|---|---|
 | One `current_mode_update` per `set_mode` | Task 8 (`reportMode`, `muteMode`) | verified: plan → auto runs `SetPlan(false)` (emits `PlanChanged` while the mode still reads "default"), then `SetMode` (`ModeChanged`). CC sent a transient "default"; HA sent nothing for agent-side changes. |
-| Trust-resolver test seeds real directories | Task 10 | verified: `TrustStore` keys are `EvalSymlinks` paths, so seeding a nonexistent dir fails |
-| Gate log scan at debug level, failing on zero files | Task 11 | an empty scan must not pass silently |
+| Trust-resolver test seeds real directories | Task 13 | verified: `TrustStore` keys are `EvalSymlinks` paths, so seeding a nonexistent dir fails |
+| Gate log scan at debug level, failing on zero files | Task 14 | an empty scan must not pass silently |
+
+### Added after the gap analysis (2026-10-13)
+
+These were checked against the pinned `schema-v1.25.0` (`schema/v1/meta.json`, `schema.json`) and the v1 cancellation doc.
+
+| Topic | Where | Notes |
+|---|---|---|
+| Schema path and tag fix | Task 2, Step 1 | upstream moved the files to `schema/v1/` (the old `schema/schema.json` returns 404), and `releases/latest` can be a crate tag (`v1.11.0`) or a v2 alpha. Both plans' download step would have failed or vendored the wrong schema. `meta.json` is now vendored too, and a test checks every method name against it. |
+| `$/cancel_request` + `-32800` | Task 10 | incoming: per-request contexts; a cancelled request still answers (a prompt with `stopReason: cancelled`, others with `-32800`). Outgoing: a cancelled `Call` sends `$/cancel_request`, so `session/cancel` cascades to an unanswered permission prompt. |
+| `-32002` resource not found | Task 10 | unknown session ids (was `-32602`); malformed ids stay `-32602` |
+| `session/close`, `session/resume`, `session/delete` | Task 11 | close = cancel + await + `Agent.Close`; resume = load without replay; delete reuses `session.Delete` (the writer lock refuses live files). An already-open session now also has to match the requested `cwd` on load/resume. |
+| `notice`, `compaction_summary_chunk` + `compaction_update` | Task 12 | client-capability-gated (spec MUST), with fallbacks. moca's summary is sent as one chunk followed by `completed`; replay maps the summary message the same way. |
+| `session_info_update` | Task 12 | title once (the `session/list` rule), `updatedAt` per prompt |
+| `effort` config option, `config_option_update` | Task 12 | effort levels from `ClampEffort` (offered only with ≥ 2); options re-checked after each prompt, e.g. after a `moca login` in a terminal |
+| `msession` import alias | Tasks 9, 11, 12 | a compile bug carried over from the CC plan: `history.go` imported `internal/session` into a package that declares `type session` (verified with `go build`: "already declared through import of package") |
 
 ### Rejected from both
 
