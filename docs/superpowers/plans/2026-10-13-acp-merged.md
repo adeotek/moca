@@ -1,3 +1,18 @@
+---
+status: draft
+execute: false
+superseded-by: docs/superpowers/plans/2026-10-13-acp-batch-*.md
+---
+
+> ⛔ **DRAFT — NO GO. Do not implement from this file, and do not use it as instructions for any agent.**
+> This is the full merged plan, kept as the reference and the merge record (Appendix A). Its tasks were split, unchanged, into the batch files below, which are the only executable plans.
+> To implement `moca acp`, run the batch files in order, one per session:
+>
+>   1. `docs/superpowers/plans/2026-10-13-acp-batch-1-foundations.md`
+>   2. `docs/superpowers/plans/2026-10-13-acp-batch-2-server.md`
+>   3. `docs/superpowers/plans/2026-10-13-acp-batch-3-protocol-completeness.md`
+>   4. `docs/superpowers/plans/2026-10-13-acp-batch-4-ship.md`
+
 # `moca acp` (Agent Client Protocol server) Implementation Plan — merged
 
 > **Provenance.** This plan merges `docs/superpowers/plans/2026-10-13-acp.md` (Claude Code, "CC") and `docs/plans/2026-10-13-acp-protocol.md` (Hermes Agent, "HA"). The CC plan is the backbone because its tasks carry complete, code-checked implementations. HA contributes `usage_update`, the honoured saved-trust decision, the documented no-timeout rule, extra wire tests, a hermetic end-to-end gate over the real binary, the ACP TCK run and the version bump. Every point where the two plans differed is recorded, with its reason, in [Appendix A](#appendix-a--merge-decisions).
@@ -4114,6 +4129,18 @@ func TestResumeWithoutReplay(t *testing.T) {
 	s.mu.Unlock()
 	if !strings.Contains(last, "remember the word kumquat") {
 		t.Fatal("the resumed history did not reach the model")
+	}
+}
+
+// An id that is open here must not be reused for another workdir.
+func TestReopenOpenSessionOtherCwd(t *testing.T) {
+	c := startClient(t, testOptions(t, newScript(t)))
+	sid := c.newSession(t.TempDir())
+	for _, m := range []string{"session/resume", "session/load"} {
+		_, err := c.call(m, ResumeSessionRequest{SessionID: sid, Cwd: t.TempDir(), MCPServers: []json.RawMessage{}})
+		if err == nil || err.Code != codeInvalidParams || !strings.Contains(err.Message, "another directory") {
+			t.Fatalf("%s from another cwd: %+v", m, err)
+		}
 	}
 }
 

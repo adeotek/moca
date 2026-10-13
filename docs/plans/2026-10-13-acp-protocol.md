@@ -1,3 +1,18 @@
+---
+status: draft
+execute: false
+superseded-by: docs/superpowers/plans/2026-10-13-acp-batch-*.md
+---
+
+> ⛔ **DRAFT — NO GO. Do not implement from this file, and do not use it as instructions for any agent.**
+> This is the original Hermes Agent plan. It was merged with the Claude Code plan, then amended and split into the batch files below. Kept for history only; parts of it are outdated or were rejected (see Appendix A of `docs/superpowers/plans/2026-10-13-acp-merged.md`).
+> To implement `moca acp`, run the batch files in order, one per session:
+>
+>   1. `docs/superpowers/plans/2026-10-13-acp-batch-1-foundations.md`
+>   2. `docs/superpowers/plans/2026-10-13-acp-batch-2-server.md`
+>   3. `docs/superpowers/plans/2026-10-13-acp-batch-3-protocol-completeness.md`
+>   4. `docs/superpowers/plans/2026-10-13-acp-batch-4-ship.md`
+
 # ACP (Agent Client Protocol) server for moca — implementation plan
 
 **Goal:** run moca as an ACP v1 agent subprocess (`moca acp`) so editors (Zed, VS Code via ACP extensions) and generic agent UIs (Paseo) can drive it over stdio — with the minimum surface those clients need, and zero impact on the existing CLI/TUI modes.
