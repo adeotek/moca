@@ -7,7 +7,7 @@ Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface 
 
 The eight tools: `read` · `write` · `edit` · `shell` · `search` · `ls` · `web` (search + fetch) · `mcp` (the lazy proxy — servers extend it on your say-so). The eight schemas are frozen by design; everything else is [Non-goals](#non-goals-v1-probably-forever).
 
-**Status: v0.4.0-beta** — a permissions overhaul: three permission modes (`default` / `auto` / `yolo`) with a single `--mode default|auto|yolo|plan` flag, layered `allow/ask/deny` rules with wildcards (user config + a trusted per-project `.moca/config.jsonc`), auto mode (safe actions run, risky ones ask, unsure ones get a classifier's second opinion), Shift+Tab mode cycling, an arrow-key approval picker, `${…}` prompt templates, a role-colored status bar and skills invokable from the `/` picker (tagged `prompt:`/`skill:`); the install scripts gained `--uninstall` / `-Uninstall`, every run writes a bounded diagnostic log, and moca ships `self-knowledge` and `self-configure` built-ins so it can answer questions about itself and manage its own config; plus first-run setup mode, the `web` tool, plan mode, self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
+**Status: v0.5.0-beta** — an ACP server (`moca acp`) so Zed, VS Code ACP extensions and Paseo can drive moca; before that (v0.4.0-beta) a permissions overhaul: three permission modes (`default` / `auto` / `yolo`) with a single `--mode default|auto|yolo|plan` flag, layered `allow/ask/deny` rules with wildcards (user config + a trusted per-project `.moca/config.jsonc`), auto mode (safe actions run, risky ones ask, unsure ones get a classifier's second opinion), Shift+Tab mode cycling, an arrow-key approval picker, `${…}` prompt templates, a role-colored status bar and skills invokable from the `/` picker (tagged `prompt:`/`skill:`); the install scripts gained `--uninstall` / `-Uninstall`, every run writes a bounded diagnostic log, and moca ships `self-knowledge` and `self-configure` built-ins so it can answer questions about itself and manage its own config; plus first-run setup mode, the `web` tool, plan mode, self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
 
 ## Install
 
@@ -119,6 +119,19 @@ No API key and no model list: moca asks the server (`/api/tags`, `/api/show`) wh
 **Set the server's context length.** Ollama's OpenAI-compatible endpoint cannot choose the context window per request, so a window smaller than the conversation silently truncates the prompt. Start the server with a window of at least 16K — `OLLAMA_CONTEXT_LENGTH=32768 ollama serve` — and, if the model's Modelfile does not state `num_ctx`, tell moca the same number with `providers.ollama.models.<id>.contextWindow`. moca warns at startup when it had to guess (assuming 16384) or finds a window too small to work in. If the server is down, moca says so and how to start it, immediately.
 
 **Credentials live in `~/.config/moca/auth.json`** (0600, never committed): `/login` in the TUI — pick a provider, then paste the API key (masked, never echoed) or sign in to a subscription in the browser — or `moca login <provider>` on the CLI (`--api-key` for a key; `echo -n "$KEY" | moca login anthropic` stores silently on a pipe). A stored key is used ahead of any `apiKey` env reference, and `moca logout <provider>` (or the TUI `/logout`) clears it. `moca login openai` opens the browser for consent (SSH/headless: it prints the URL and accepts a pasted code — `--no-browser` forces that mode); tokens are auto-refreshed under a cross-process lock. Set `"auth": "oauth"` for `providers.openai` to use the subscription — after a successful TUI sign-in the wizard offers to flip it for you. The subscription route serves the Responses API only, and model slugs must be available to your ChatGPT account — declare them under `providers.openai.models` when they are not in the built-in catalog.
+
+## Editors (ACP)
+
+`moca acp` speaks the [Agent Client Protocol](https://agentclientprotocol.com) on stdio, so ACP editors can drive moca. It uses your existing config and credentials (`moca login` in a terminal first).
+
+```jsonc
+// Zed — settings.json
+"agent_servers": { "moca": { "command": "moca", "args": ["acp"] } }
+```
+
+VS Code (any ACP client extension) and Paseo take the same command line: `moca acp`. Optional flags apply to every session the editor opens: `--model provider/model`, `--effort <level>`, `--mode default|auto|yolo|plan`, `--approve` / `--no-approve`. By default a folder you already answered in moca's TUI trust prompt keeps that answer; any other folder the editor opens is trusted (project rules, AGENTS.md and project skills/prompts apply).
+
+What you get: streamed replies and thinking, tool calls with diffs, approval prompts, cancel, the permission-mode picker, the model and effort pickers, your prompt templates and skills in the `/` menu, session titles, context-usage and compaction info, warnings as notices (where the editor supports them), and session history: reopen, resume, close and delete past moca sessions of the folder. Not supported: images, editor-provided MCP servers (configure them in moca), and TUI-only commands (`/compact`, `/undo`, …).
 
 ## Debugging / logs
 
@@ -235,7 +248,8 @@ make release        # five cross-compiled binaries in dist/
 | 4 | context manager + compaction + resume | token-triggered compaction, `--continue` — done |
 | 5 | MCP lazy proxy (stdio + streamable HTTP, persisted index, `mcp import`) | real server via proxy, no schemas in prompt, 0 servers at start — done |
 | 6 | rtk + graphify + skills ecosystem compatibility | rtk preferred in real session, pi SKILL.md loads — done |
-| 7 | OAuth providers + upstream graphify PR + v0.1 | ship-gate demo passes (§14), live legs green (2026-10-07) — shipped as `v0.1.1-alpha`; current line `v0.4.0-beta` |
+| 7 | OAuth providers + upstream graphify PR + v0.1 | ship-gate demo passes (§14), live legs green (2026-10-07) — shipped as `v0.1.1-alpha`; current line `v0.5.0-beta` |
+| 8 | ACP server (`moca acp`) | Zed gate + ACP TCK + test/acpgate — done |
 
 ## Docs
 

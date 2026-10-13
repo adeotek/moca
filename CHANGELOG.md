@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.0-beta
+
+### Editors
+
+- **`moca acp` — an Agent Client Protocol server.** Zed, VS Code ACP extensions and agent UIs like Paseo can drive moca: `{"command": "moca", "args": ["acp"]}`. Streamed replies and thinking, tool calls with diffs, approvals (`allow once` / `always` / `deny`), cancel, a permission-mode picker (`default` / `auto` / `yolo` / `plan`), a model picker, prompt templates and skills as `/` commands, session history (`session/list`, `session/load` replaying the whole conversation, `session/resume`, `session/close`, `session/delete`), an effort picker, session titles (`session_info_update`), context/cost via `usage_update`, compaction and warning notices for editors that support them, and request cancellation (`$/cancel_request`). Permission requests never time out (cancel instead). Hand-rolled JSON-RPC, no new dependency; the TUI and `-p` are unchanged. Trust: a folder's saved trust answer is honoured, any other folder is trusted (`--approve` / `--no-approve` override). Editor-supplied MCP servers and images are not supported yet.
+
 ## v0.4.0-beta (2026-10-12)
 
 A permissions overhaul — three permission modes instead of the boolean yolo flag, layered wildcard rules, a trusted per-project permissions file, and an `auto` mode that runs safe actions itself — plus TUI polish around it: a mode cycle on Shift+Tab, an arrow-key approval picker, `${…}` prompt templates, and a contrast-tested status bar. Still one binary, still no framework.
