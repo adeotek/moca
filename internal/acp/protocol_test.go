@@ -74,4 +74,15 @@ func TestProtocolShapesConform(t *testing.T) {
 			List: &struct{}{}, Delete: &struct{}{}, Resume: &struct{}{}, Close: &struct{}{}}},
 		AuthMethods: []AuthMethod{}, AgentInfo: Implementation{Name: "moca", Version: "1"}})
 	conform(t, "ResumeSessionResponse", ResumeSessionResponse{})
+	title := "fix the parser"
+	for _, u := range []any{
+		Notice{SessionUpdate: updNotice, Severity: "warning", Title: "run stopped", Description: "details"},
+		CompactionSummaryChunk{SessionUpdate: updCompactionChunk, CompactionID: "c1", Content: ContentBlock{Type: "text", Text: "summary"}},
+		CompactionUpdate{SessionUpdate: updCompaction, CompactionID: "c1", Status: "completed"},
+		SessionInfoUpdate{SessionUpdate: updSessionInfo, Title: &title, UpdatedAt: "2026-10-13T10:00:00Z"},
+		ConfigOptionUpdate{SessionUpdate: updConfigOptions, ConfigOptions: []ConfigOption{{ID: "model", Name: "Model",
+			Category: "model", Type: "select", CurrentValue: "a/b", Options: []ConfigOptionValue{{Value: "a/b", Name: "a/b"}}}}},
+	} {
+		conform(t, "SessionNotification", SessionNotification{SessionID: "abcd1234", Update: u})
+	}
 }

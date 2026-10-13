@@ -21,14 +21,19 @@ var acpMethods = []string{
 
 // session/update discriminators.
 const (
-	updUserMessage  = "user_message_chunk"
-	updAgentMessage = "agent_message_chunk"
-	updThought      = "agent_thought_chunk"
-	updToolCall     = "tool_call"
-	updToolUpdate   = "tool_call_update"
-	updCurrentMode  = "current_mode_update"
-	updCommands     = "available_commands_update"
-	updUsage        = "usage_update"
+	updUserMessage     = "user_message_chunk"
+	updAgentMessage    = "agent_message_chunk"
+	updThought         = "agent_thought_chunk"
+	updToolCall        = "tool_call"
+	updToolUpdate      = "tool_call_update"
+	updCurrentMode     = "current_mode_update"
+	updCommands        = "available_commands_update"
+	updUsage           = "usage_update"
+	updNotice          = "notice"
+	updCompaction      = "compaction_update"
+	updCompactionChunk = "compaction_summary_chunk"
+	updSessionInfo     = "session_info_update"
+	updConfigOptions   = "config_option_update"
 )
 
 const (
@@ -57,7 +62,53 @@ type Implementation struct {
 }
 
 type InitializeRequest struct {
-	ProtocolVersion int `json:"protocolVersion"`
+	ProtocolVersion    int                `json:"protocolVersion"`
+	ClientCapabilities ClientCapabilities `json:"clientCapabilities"`
+}
+
+// ClientCapabilities: only the session extensions moca reacts to. A field
+// present as {} advertises support; omitted or null does not.
+type ClientCapabilities struct {
+	Session *ClientSessionCapabilities `json:"session,omitempty"`
+}
+
+type ClientSessionCapabilities struct {
+	Notices    *struct{} `json:"notices,omitempty"`
+	Compaction *struct{} `json:"compaction,omitempty"`
+}
+
+// Notice is a live, fire-and-forget message for the user (not history).
+type Notice struct {
+	SessionUpdate string `json:"sessionUpdate"`
+	Severity      string `json:"severity"` // info | warning | error
+	Title         string `json:"title"`
+	Description   string `json:"description,omitempty"`
+}
+
+// CompactionSummaryChunk appends to a compaction's summary; a first-seen id
+// opens an in-progress compaction.
+type CompactionSummaryChunk struct {
+	SessionUpdate string       `json:"sessionUpdate"`
+	CompactionID  string       `json:"compactionId"`
+	Content       ContentBlock `json:"content"`
+}
+
+// CompactionUpdate patches a compaction by id (here: marks it completed).
+type CompactionUpdate struct {
+	SessionUpdate string `json:"sessionUpdate"`
+	CompactionID  string `json:"compactionId"`
+	Status        string `json:"status"`
+}
+
+type SessionInfoUpdate struct {
+	SessionUpdate string  `json:"sessionUpdate"`
+	Title         *string `json:"title,omitempty"`
+	UpdatedAt     string  `json:"updatedAt,omitempty"`
+}
+
+type ConfigOptionUpdate struct {
+	SessionUpdate string         `json:"sessionUpdate"`
+	ConfigOptions []ConfigOption `json:"configOptions"`
 }
 
 type InitializeResponse struct {

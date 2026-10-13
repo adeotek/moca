@@ -31,9 +31,11 @@ func testOptions(t *testing.T, s *scriptServer) Options {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("MOCA_T_KEY", "k")
+	t.Setenv("MOCA_T_OTHER", "")
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`{"model":"fake/m","context":{"maxSteps":40},
 		"providers":{"fake":{"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY",
-		"models":{"m":{"contextWindow":65536},"m2":{"contextWindow":65536}}}}}`, s.srv.URL)))
+		"models":{"m":{"contextWindow":65536},"m2":{"contextWindow":65536}}},
+		"other":{"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_OTHER","models":{"x":{"contextWindow":65536}}}}}`, s.srv.URL, s.srv.URL)))
 	if err != nil {
 		t.Fatal(err)
 	}

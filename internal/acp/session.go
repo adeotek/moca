@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/llm"
+	msession "github.com/adeotek/moca/internal/session"
 	"github.com/adeotek/moca/internal/skills"
 	"github.com/adeotek/moca/internal/tools"
 )
@@ -40,14 +43,16 @@ type session struct {
 	early  []any
 
 	// mu guards the event-mapping state, written from the agent's run goroutine.
-	mu        sync.Mutex
-	msgIDs    map[string]string // update kind → messageId of the current message
-	toolSeq   int
-	toolIDs   map[string]string // provider call id → ACP toolCallId (open calls)
-	curTool   string
-	lastStop  llm.StopReason
-	lastMode  string // the mode id the client was last told
-	modeMuted bool   // set_mode is applying setters: report once at the end
+	mu         sync.Mutex
+	msgIDs     map[string]string // update kind → messageId of the current message
+	toolSeq    int
+	toolIDs    map[string]string // provider call id → ACP toolCallId (open calls)
+	curTool    string
+	lastStop   llm.StopReason
+	lastMode   string // the mode id the client was last told
+	modeMuted  bool   // set_mode is applying setters: report once at the end
+	titled     bool   // session_info_update has carried (or the store already has) a title
+	lastConfig string // JSON of the config options the client last saw
 }
 
 func newSession(srv *Server, cwd string, trusted bool) *session {
@@ -181,8 +186,78 @@ func (s *session) emit(e agent.Event) {
 			s.reportMode()
 		}
 	case agent.Warning:
-		s.send(s.chunk(updThought, "moca: "+e.Text+"\n"))
+		if notices, _ := s.srv.clientSupports(); notices {
+			s.send(Notice{SessionUpdate: updNotice, Severity: "warning", Title: e.Text})
+		} else {
+			s.send(s.chunk(updThought, "moca: "+e.Text+"\n"))
+		}
+	case agent.Retry:
+		if notices, _ := s.srv.clientSupports(); notices {
+			s.send(Notice{SessionUpdate: updNotice, Severity: "info", Title: "Retrying the model request",
+				Description: fmt.Sprintf("attempt %d of %d, waiting %s", e.Notice.Attempt, e.Notice.Max, e.Notice.Wait.Round(100*time.Millisecond))})
+		}
+	case agent.Compacted:
+		// Emitted outside a.mu (compaction.go): History is safe here.
+		if s.agent != nil {
+			s.compacted(summaryText(s.agent.History()), e.TokensBefore, e.TokensAfter)
+		}
 	}
+}
+
+// compacted reports a finished compaction. With the client's compaction
+// extension: one summary chunk (moca's summarizer returns the summary whole;
+// the chunk opens the compaction) and a completed update. Without it: a
+// thought line (before/after <= 0: replay, sizes unknown — see replay).
+func (s *session) compacted(summary string, before, after int) {
+	if _, ok := s.srv.clientSupports(); ok {
+		id := newMessageID()
+		if summary != "" {
+			s.send(CompactionSummaryChunk{SessionUpdate: updCompactionChunk, CompactionID: id,
+				Content: ContentBlock{Type: "text", Text: summary}})
+		}
+		s.send(CompactionUpdate{SessionUpdate: updCompaction, CompactionID: id, Status: "completed"})
+		return
+	}
+	s.send(s.chunk(updThought, fmt.Sprintf("moca: context compacted (%d → %d tokens)\n", before, after)))
+}
+
+// summaryOf strips the compaction summary message's prefix.
+func summaryOf(text string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), msession.SummaryPrefix))
+}
+
+// summaryText is the current compaction summary in msgs (History() puts it
+// first), or "".
+func summaryText(msgs []llm.Message) string {
+	for _, m := range msgs {
+		if m.Role != llm.RoleUser {
+			continue
+		}
+		for _, b := range m.Content {
+			if b.Type == llm.BlockText && strings.HasPrefix(strings.TrimSpace(b.Text), msession.SummaryPrefix) {
+				return summaryOf(b.Text)
+			}
+		}
+	}
+	return ""
+}
+
+// sendInfo updates the client's session metadata after a prompt: the title
+// once (session/list's rule: the first line of the first user message), the
+// update time always.
+func (s *session) sendInfo(text string) {
+	u := SessionInfoUpdate{SessionUpdate: updSessionInfo, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+	s.mu.Lock()
+	if !s.titled {
+		s.titled = true
+		line, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+		if r := []rune(line); len(r) > 80 {
+			line = string(r[:80])
+		}
+		u.Title = &line
+	}
+	s.mu.Unlock()
+	s.send(u)
 }
 
 // ask is the agent's StartOptions.Ask: a session/request_permission

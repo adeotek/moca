@@ -93,6 +93,7 @@ func (srv *Server) reopen(id, cwd string, replay bool) (LoadSessionResponse, err
 		return LoadSessionResponse{}, invalidParams("session %s belongs to another directory (%s)", id, msession.WorkdirOf(path))
 	}
 	s := newSession(srv, cwd, trusted)
+	s.titled = true // a stored session already has its title
 	a, err := agent.Resume(srv.startOptions(cfg, s), path)
 	if err != nil {
 		return LoadSessionResponse{}, &RPCError{Code: codeInternal, Message: err.Error()}
@@ -158,8 +159,12 @@ func (srv *Server) deleteSession(params json.RawMessage) (any, error) {
 // replay streams the whole conversation as the model sees it (after any
 // compaction summary): user and agent text, thinking, and each tool call
 // with its recorded result. ACP clients rebuild their view from it.
-func (s *session) replay() {
-	msgs := s.agent.History()
+func (s *session) replay() { s.replayMessages(s.agent.History()) }
+
+// replayMessages streams msgs (see replay): user and agent text, thinking,
+// tool calls with their results; the compaction summary as a compaction
+// (client extension) or as one summarized-note chunk.
+func (s *session) replayMessages(msgs []llm.Message) {
 	results := map[string]llm.ToolResult{}
 	for _, m := range msgs {
 		for _, b := range m.Content {
@@ -173,7 +178,11 @@ func (s *session) replay() {
 			switch {
 			case b.Type == llm.BlockText && m.Role == llm.RoleUser:
 				if strings.HasPrefix(strings.TrimSpace(b.Text), msession.SummaryPrefix) {
-					s.send(s.chunk(updAgentMessage, "_(earlier conversation was summarized)_\n\n"))
+					if _, ok := s.srv.clientSupports(); ok {
+						s.compacted(summaryOf(b.Text), 0, 0)
+					} else {
+						s.send(s.chunk(updAgentMessage, "_(earlier conversation was summarized)_\n\n"))
+					}
 				} else {
 					s.send(s.chunk(updUserMessage, b.Text))
 				}

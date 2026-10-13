@@ -28,6 +28,8 @@ type Options struct {
 	Trust   func(cwd string) (bool, error)
 	Version string
 	HTTP    *http.Client // tests
+
+	testEmit func(*session) // tests only: runs on a new session once it is ready
 }
 
 // Server maps ACP sessions onto moca agents.
@@ -36,6 +38,8 @@ type Server struct {
 	conn     *Conn
 	mu       sync.Mutex
 	sessions map[string]*session
+	// the client's advertised session extensions (guarded by mu)
+	notices, compaction bool
 }
 
 // Serve speaks ACP on r/w until r ends or ctx is done, then closes every
@@ -112,8 +116,14 @@ func (srv *Server) Notify(ctx context.Context, method string, params json.RawMes
 }
 
 func (srv *Server) initialize(params json.RawMessage) (any, error) {
-	if _, err := decode[InitializeRequest](params); err != nil {
+	req, err := decode[InitializeRequest](params)
+	if err != nil {
 		return nil, err
+	}
+	if sc := req.ClientCapabilities.Session; sc != nil {
+		srv.mu.Lock()
+		srv.notices, srv.compaction = sc.Notices != nil, sc.Compaction != nil
+		srv.mu.Unlock()
 	}
 	return InitializeResponse{
 		ProtocolVersion: ProtocolVersion,
@@ -125,6 +135,14 @@ func (srv *Server) initialize(params json.RawMessage) (any, error) {
 		AuthMethods: []AuthMethod{},
 		AgentInfo:   Implementation{Name: "moca", Title: "moca", Version: srv.opts.Version},
 	}, nil
+}
+
+// clientSupports reports the client's notices and compaction extensions:
+// ACP forbids sending those updates to a client that did not advertise them.
+func (srv *Server) clientSupports() (notices, compaction bool) {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	return srv.notices, srv.compaction
 }
 
 func (srv *Server) add(s *session) {
@@ -219,6 +237,9 @@ func (srv *Server) newSession(params json.RawMessage) (any, error) {
 	s.reloadCommands()
 	return Deferred{Result: NewSessionResponse{SessionID: s.id, Modes: s.modeState(), ConfigOptions: s.configOptions()}, Then: func() {
 		s.markReady()
+		if srv.opts.testEmit != nil {
+			srv.opts.testEmit(s)
+		}
 		s.sendCommands()
 	}}, nil
 }
@@ -241,9 +262,12 @@ func (srv *Server) prompt(ctx context.Context, params json.RawMessage) (any, err
 	if err != nil {
 		return nil, err
 	}
-	out, err := s.agent.Run(runCtx, s.expand(text))
+	expanded := s.expand(text)
+	out, err := s.agent.Run(runCtx, expanded)
 	if s.reloadCommands() {
 		s.sendCommands()
 	}
+	s.sendInfo(expanded)
+	s.reportConfig()
 	return s.stopReason(runCtx, out, err)
 }
