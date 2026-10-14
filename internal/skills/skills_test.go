@@ -47,10 +47,13 @@ func TestExtractBuiltins(t *testing.T) {
 		t.Fatalf("extraction must be idempotent: %q vs %q, %v", dir, again, err)
 	}
 	got, errs := Discover([]Dir{{dir, "builtin"}})
-	if len(errs) != 0 || len(got) != 4 {
+	if len(errs) != 0 || len(got) != 3 {
 		t.Fatalf("%+v %v", got, errs)
 	}
-	if got[0].Name != "create-command" || got[1].Name != "rtk" || got[2].Name != "self-configure" || got[3].Name != "self-knowledge" {
+	// rtk and graphify are seeded standard skills, not built-ins: the
+	// built-in tree (content-hashed, rewritten with every binary) must not
+	// carry them, or a user's override would be shadowed on update.
+	if got[0].Name != "create-command" || got[1].Name != "self-configure" || got[2].Name != "self-knowledge" {
 		t.Fatalf("builtin skill set: %+v", got)
 	}
 	// create-command ships embedded (it used to be seeded into the config
@@ -61,7 +64,7 @@ func TestExtractBuiltins(t *testing.T) {
 	}
 	// The self-* skills carry a description too (they are the answer-the-
 	// user surfaces).
-	for _, s := range got[2:] {
+	for _, s := range got[1:] {
 		if strings.TrimSpace(s.Description) == "" {
 			t.Fatalf("%s frontmatter lost: %+v", s.Name, s)
 		}
@@ -86,26 +89,26 @@ func TestDiscoverReportsSymlinkedDir(t *testing.T) {
 func TestExtractBuiltinsReExtractsOnContentChange(t *testing.T) {
 	data := t.TempDir()
 	mk := func(body string) fstest.MapFS {
-		return fstest.MapFS{"builtin/rtk/SKILL.md": &fstest.MapFile{Data: []byte(body)}}
+		return fstest.MapFS{"builtin/self-configure/SKILL.md": &fstest.MapFile{Data: []byte(body)}}
 	}
-	d1, err := extractBuiltins(mk("---\nname: rtk\ndescription: v1\n---\n"), data)
+	d1, err := extractBuiltins(mk("---\nname: self-configure\ndescription: v1\n---\n"), data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(d1, "rtk", "SKILL.md")); !strings.Contains(string(b), "v1") {
+	if b, _ := os.ReadFile(filepath.Join(d1, "self-configure", "SKILL.md")); !strings.Contains(string(b), "v1") {
 		t.Fatalf("v1 not extracted: %q", b)
 	}
-	d2, err := extractBuiltins(mk("---\nname: rtk\ndescription: v2\n---\n"), data)
+	d2, err := extractBuiltins(mk("---\nname: self-configure\ndescription: v2\n---\n"), data)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if d2 == d1 {
 		t.Fatal("changed content must extract into a new directory")
 	}
-	if b, _ := os.ReadFile(filepath.Join(d2, "rtk", "SKILL.md")); !strings.Contains(string(b), "v2") {
+	if b, _ := os.ReadFile(filepath.Join(d2, "self-configure", "SKILL.md")); !strings.Contains(string(b), "v2") {
 		t.Fatalf("v2 not extracted: %q", b)
 	}
-	if b, _ := os.ReadFile(filepath.Join(d1, "rtk", "SKILL.md")); !strings.Contains(string(b), "v1") {
+	if b, _ := os.ReadFile(filepath.Join(d1, "self-configure", "SKILL.md")); !strings.Contains(string(b), "v1") {
 		t.Fatalf("the previous extraction must stay untouched: %q", b)
 	}
 }

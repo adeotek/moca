@@ -29,25 +29,28 @@ func printUsage(w io.Writer) {
 usage:
   moca                         TUI in the current directory
   moca -p "<prompt>"           one-shot; prompt also accepted on stdin (`+"`"+`-p -`+"`"+`)
-    --model <provider/model>   override config `+"`"+`model`+"`"+` for this session
-    --effort <level>           override effort for this session (off|minimal|low|medium|high|xhigh|max)
     --approve | --no-approve   project trust for this run (-p default: --no-approve)
+    --effort <level>           override effort for this session (off|minimal|low|medium|high|xhigh|max)
+    --config <path>            config file (dev/test)
+    --continue                 latest session in this workdir
     --mode <m>                 permission mode for this run: default | auto | yolo | plan
                                (plan = the plan scope: write an implementation plan to docs/plans/, no other writes)
-  moca --do <plan.md> [-p "<notes>"]  execute an implementation plan step by step, ticking its - [ ] boxes
+    --model <provider/model>   override config `+"`"+`model`+"`"+` for this session
     --resume <id8|last>        resume a session of this directory (last = its newest)
-    --continue                 latest session in this workdir
-    --config <path>            config file (dev/test)
+  moca execute <plan.md> [-p "<notes>"] execute an implementation plan step by step, ticking its - [ ] boxes
   moca login <provider>        sign in (subscription OAuth where permitted) or store an API key
     --api-key                  prompt for an API key instead of the OAuth flow
     --no-browser               headless OAuth: print the URL, read the pasted code from stdin
   moca logout <provider>       clear a stored login or API key
   moca update                  replace the binary with the latest GitHub release package
     --check                    only report whether a newer release exists
+  moca prune                   remove built-in skill extractions left behind by previous versions
+    --dry-run                  only list what would be removed
   moca mcp import              import MCP servers from Claude Code / OpenCode / Pi configs
   moca mcp index               prebuild the persisted MCP discovery index
   moca --version
-  logs: ~/.local/state/moca/logs/<date>-<pid>.log — config log.level (info|debug|off); MOCA_LOG overrides for one run
+
+logs: ~/.local/state/moca/logs/<date>-<pid>.log — config `+"`"+`log.level`+"`"+` (info|debug|off); MOCA_LOG overrides it for one run
 `)
 }
 
@@ -58,7 +61,7 @@ type Options struct {
 	Effort     string
 	Approve    *bool
 	Mode       *string
-	Do         string // plan file to execute (implies a one-shot run)
+	Execute    string // plan file to execute (implies a one-shot run)
 	Resume     string
 	Continue   bool
 	Version    bool
@@ -101,7 +104,6 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 	approve := fs.Bool("approve", false, "trust project resources for this run")
 	noApprove := fs.Bool("no-approve", false, "skip project resources for this run")
 	mode := fs.String("mode", "", "permission mode for this run: default | auto | yolo | plan")
-	fs.StringVar(&o.Do, "do", "", "execute the implementation plan in this file (one-shot; -p adds instructions)")
 	fs.StringVar(&o.Resume, "resume", "", "resume session id8 | last")
 	fs.BoolVar(&o.Continue, "continue", false, "resume latest session in this workdir")
 	fs.BoolVar(&o.Version, "version", false, "print version")
@@ -111,6 +113,22 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 			return o, errHelp
 		}
 		return o, usageError{err}
+	}
+	// `execute <plan.md>`: the plan is positional; flags may follow it.
+	if a := fs.Args(); len(a) > 0 && a[0] == "execute" {
+		if len(a) < 2 || strings.HasPrefix(a[1], "-") {
+			return o, usageError{errors.New("usage: moca execute <plan.md> [-p \"<notes>\"]")}
+		}
+		o.Execute = a[1]
+		if err := fs.Parse(a[2:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return o, errHelp
+			}
+			return o, usageError{err}
+		}
+		if len(fs.Args()) > 0 {
+			return o, usageError{fmt.Errorf("unexpected argument %q", fs.Args()[0])}
+		}
 	}
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "p" {
@@ -145,20 +163,20 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 		}
 		o.Prompt = strings.TrimRight(string(b), "\n")
 	}
-	if o.Do != "" {
+	if o.Execute != "" {
 		if o.Mode != nil && *o.Mode == "plan" {
-			return o, usageError{errors.New("--do and --mode plan are mutually exclusive (plan mode only writes docs/plans/)")}
+			return o, usageError{errors.New("execute and --mode plan are mutually exclusive (plan mode only writes docs/plans/)")}
 		}
 		o.OneShot = true // -p, when given, adds instructions
 	}
-	if o.OneShot && o.Do == "" && strings.TrimSpace(o.Prompt) == "" {
+	if o.OneShot && o.Execute == "" && strings.TrimSpace(o.Prompt) == "" {
 		return o, usageError{errors.New("-p needs a non-empty prompt")}
 	}
 	if o.Resume != "" && o.Continue {
 		return o, usageError{errors.New("--resume and --continue are mutually exclusive")}
 	}
 	o.Sub = fs.Args()
-	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp" || o.Sub[0] == "update") {
+	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp" || o.Sub[0] == "update" || o.Sub[0] == "prune") {
 		return o, usageError{fmt.Errorf("unknown command %q", o.Sub[0])}
 	}
 	return o, nil

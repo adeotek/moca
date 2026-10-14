@@ -11,6 +11,7 @@ import (
 
 	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
 )
 
@@ -185,8 +186,8 @@ func TestUncredentialedModelRefused(t *testing.T) {
 	}
 }
 
-// A stored key alone still says a model is missing: /model is the next step.
-func TestLoginInSetupHintsAtModel(t *testing.T) {
+// A stored key alone starts nothing: the login opens the model picker.
+func TestLoginInSetupOpensModelPicker(t *testing.T) {
 	t.Setenv("MOCA_SETUP_KEY", "k")
 	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
 	if out, _ := simulate(m, m.runLogin("fake")); out != "" {
@@ -197,8 +198,62 @@ func TestLoginInSetupHintsAtModel(t *testing.T) {
 	}
 	m.login.appendKey("k")
 	out, _ := simulate(m, m.loginKeyInput(keyMsg("enter")))
-	if !strings.Contains(out, "stored API key for fake") || !strings.Contains(out, "no model selected yet") {
-		t.Fatalf("login printed %q", out)
+	if !strings.Contains(out, "stored API key for fake") || m.pick == nil {
+		t.Fatalf("login printed %q, picker open: %v", out, m.pick != nil)
+	}
+}
+
+// With a stored credential the setup notice only says the model is missing;
+// without one it is the red no-provider line.
+func TestSetupNoticeFollowsCredential(t *testing.T) {
+	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
+	if n := m.setupNotice(); !strings.Contains(n, "no provider configured") {
+		t.Fatalf("no credential: %q", n)
+	}
+	if err := provider.NewDefaultStore().PutAPIKey("fake", "k"); err != nil {
+		t.Fatal(err)
+	}
+	if n := m.setupNotice(); !strings.Contains(n, "no model selected yet") || strings.Contains(n, "no provider") {
+		t.Fatalf("credential stored: %q", n)
+	}
+}
+
+// "A provider is configured" means what the /model picker means: some
+// provider's credential passes CheckCredential. A key stored for a name moca
+// has no models for does not count, and a key resolved from the environment
+// does even with nothing stored.
+func TestSetupNoticeCountsOnlyUsableProviders(t *testing.T) {
+	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
+	if err := provider.NewDefaultStore().PutAPIKey("nonesuch", "k"); err != nil {
+		t.Fatal(err)
+	}
+	if n := m.setupNotice(); !strings.Contains(n, "no provider configured") {
+		t.Fatalf("a key for an unknown provider is not a configured provider: %q", n)
+	}
+	t.Setenv("MOCA_SETUP_KEY", "k")
+	if n := m.setupNotice(); !strings.Contains(n, "no model selected yet") || strings.Contains(n, "no provider") {
+		t.Fatalf("an env-resolved key makes the provider usable: %q", n)
+	}
+}
+
+// A corrupt auth.json is reported as itself — on the welcome line too —
+// instead of reading as "no provider configured", which would send the user
+// to /login only to hit the same error there.
+func TestSetupNoticeReportsACorruptStore(t *testing.T) {
+	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
+	store := provider.NewDefaultStore()
+	if err := os.MkdirAll(filepath.Dir(store.Path()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.Path(), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	n := m.setupNotice()
+	if !strings.Contains(n, "unreadable") || !strings.Contains(n, store.Path()) || strings.Contains(n, "no provider configured") {
+		t.Fatalf("corrupt store: %q", n)
+	}
+	if out := printed(m.Init()); !strings.Contains(out, "unreadable") {
+		t.Fatalf("the welcome must carry the store error: %q", out)
 	}
 }
 

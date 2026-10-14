@@ -73,18 +73,24 @@ func TestPlanCommandRefusedMidRun(t *testing.T) {
 	}
 }
 
-func TestDoCommand(t *testing.T) {
+func TestExecuteCommand(t *testing.T) {
 	m := newAgentModel(t)
-	if out := simulateAll(m, m.runCommand(Parsed{Kind: KindCommand, Name: "do"})); !strings.Contains(out, "usage: /do") {
+	if out := simulateAll(m, m.runCommand(Parsed{Kind: KindCommand, Name: "execute"})); !strings.Contains(out, "usage: /execute") {
 		t.Fatalf("no path: %q", out)
 	}
 	m.agent.SetPlan(true)
-	if out := simulateAll(m, m.runCommand(Parsed{Kind: KindCommand, Name: "do", Args: "docs/plans/x.md"})); !strings.Contains(out, "plan mode is on") {
+	if out := simulateAll(m, m.runCommand(Parsed{Kind: KindCommand, Name: "execute", Args: "docs/plans/x.md"})); !strings.Contains(out, "plan mode is on") {
 		t.Fatalf("plan mode: %q", out)
 	}
 	m.agent.SetPlan(false)
-	out := simulateAll(m, tuiCmd(t, m, "/do docs/plans/x.md keep it small"))
-	if !strings.Contains(out, "› /do docs/plans/x.md keep it small") {
-		t.Fatalf("/do must start a run: %q", out)
+	out := simulateAll(m, tuiCmd(t, m, "/execute docs/plans/x.md keep it small"))
+	if !strings.Contains(out, "› /execute docs/plans/x.md keep it small") {
+		t.Fatalf("/execute must start a run: %q", out)
+	}
+	// The old names are gone: /implement and /do are no longer built-ins.
+	for _, old := range []string{"implement", "do"} {
+		if p, err := ParseInput("/"+old+" x.md", nil, nil); err == nil && p.Kind == KindCommand {
+			t.Fatalf("/%s must not be a built-in any more: %+v", old, p)
+		}
 	}
 }

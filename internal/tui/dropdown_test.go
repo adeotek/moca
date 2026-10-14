@@ -107,8 +107,9 @@ func TestDropdownKeysCompleteAndSend(t *testing.T) {
 	if m.ta.Value() != "/login " {
 		t.Fatalf("textarea out of sync: %q", m.ta.Value())
 	}
-	// enter on a partial word completes instead of sending.
-	m.input.SetBuffer("/ex")
+	// enter on a partial word completes instead of sending (/exi: /ex is
+	// ambiguous — it also prefixes /execute, which is listed first).
+	m.input.SetBuffer("/exi")
 	m.syncTextarea()
 	m.drop = nil
 	m.Update(key("enter"))

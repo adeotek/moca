@@ -374,7 +374,7 @@ func (m *model) Init() tea.Cmd {
 	// notice takes the greeting's row.
 	welcome := welcomeText()
 	if m.unconfigured() {
-		welcome += "\n" + noProviderNotice()
+		welcome += "\n" + m.setupNotice()
 	}
 	return tea.Batch(m.println(welcome), m.branchCmd(), tea.RequestBackgroundColor, tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return hintCheckMsg{} }))
 }
@@ -410,7 +410,7 @@ func (m *model) startRun(text string) tea.Cmd {
 }
 
 // startRunWith starts a run echoing label as the user line; run is the
-// agent call (Run, or RunPlan for /do).
+// agent call (Run, or RunPlan for /execute).
 func (m *model) startRunWith(label string, run func(context.Context) (agent.Outcome, error)) tea.Cmd {
 	if m.agent == nil {
 		return nil
@@ -788,7 +788,7 @@ func (m *model) submit() tea.Cmd {
 	case KindText, KindPrompt, KindSkill:
 		if m.unconfigured() {
 			// Nothing can run yet; the red notice says how to fix it.
-			return m.printlnNoProvider()
+			return m.printlnSetupNotice()
 		}
 		if m.running {
 			if m.agent != nil {
@@ -899,7 +899,7 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 			return m.runModelSetup(c.Args)
 		}
 		// Everything below needs a session; the red notice says how.
-		return m.printlnNoProvider()
+		return m.printlnSetupNotice()
 	}
 	st := m.agent.Status()
 	switch c.Name {
@@ -986,19 +986,19 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		}
 		m.agent.SetPlan(!m.agent.Plan()) // PlanChanged prints + refreshes
 		return nil
-	case "do":
+	case "execute":
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
 		path, extra, _ := strings.Cut(strings.TrimSpace(c.Args), " ")
 		if path == "" {
-			return m.println("usage: /do <plan.md> [instructions]")
+			return m.println("usage: /execute <plan.md> [instructions]")
 		}
 		if m.agent.Plan() {
-			return m.printlnError("error: plan mode is on (writes are confined to docs/plans/) — /plan to turn it off, then /do")
+			return m.printlnError("error: plan mode is on (writes are confined to docs/plans/) — /plan to turn it off, then /execute")
 		}
 		a := m.agent
-		return m.startRunWith("/do "+strings.TrimSpace(c.Args), func(ctx context.Context) (agent.Outcome, error) {
+		return m.startRunWith("/execute "+strings.TrimSpace(c.Args), func(ctx context.Context) (agent.Outcome, error) {
 			return a.RunPlan(ctx, path, extra)
 		})
 	case "clear":

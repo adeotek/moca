@@ -54,22 +54,32 @@ func TestPromptRTKIsConditional(t *testing.T) {
 	}
 }
 
-func TestFilterSkillsDropsMissingBuiltins(t *testing.T) {
+// rtk and graphify are seeded into the global skills dir, where the old
+// "global skills are never filtered" rule would advertise them on a host
+// without the CLI — the failure the filter exists for. They are dropped by
+// name unless they come from the project (a trusted repo's own file).
+func TestFilterSkillsDropsSeededSkillsWithoutTheirCLI(t *testing.T) {
 	sk := []skills.Skill{
-		{Name: "rtk", Source: "builtin", Path: "/b/rtk/SKILL.md"},
-		{Name: "rtk", Source: "global", Path: "/g/rtk/SKILL.md"}, // the user's own file survives
+		{Name: "graphify", Source: "global", Path: "/g/graphify/SKILL.md"},
 		{Name: "other", Source: "builtin", Path: "/b/other/SKILL.md"},
+		{Name: "other", Source: "global", Path: "/g/other/SKILL.md"},
+		{Name: "rtk", Source: "global", Path: "/g/rtk/SKILL.md"},
+		{Name: "rtk", Source: "project", Path: "/p/rtk/SKILL.md"}, // the repo's own file survives
 	}
 	old := toolOnPath
 	defer func() { toolOnPath = old }()
 	toolOnPath = func(string) bool { return false }
 	got := filterSkills(sk)
-	if len(got) != 2 || got[0].Source != "global" || got[1].Name != "other" {
+	if len(got) != 3 || got[0].Name != "other" || got[1].Name != "other" || got[2].Source != "project" {
 		t.Fatalf("missing tool: %+v", got)
 	}
+	toolOnPath = func(name string) bool { return name == "rtk" } // graphify absent only
+	if got := filterSkills(sk); len(got) != 4 || got[0].Name == "graphify" {
+		t.Fatalf("only graphify is missing: %+v", got)
+	}
 	toolOnPath = func(string) bool { return true }
-	if got := filterSkills(sk); len(got) != 3 {
-		t.Fatalf("installed tool: the builtin must stay: %+v", got)
+	if got := filterSkills(sk); len(got) != 5 {
+		t.Fatalf("installed tools: every skill must stay: %+v", got)
 	}
 }
 
