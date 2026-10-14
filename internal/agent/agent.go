@@ -72,9 +72,9 @@ type Agent struct {
 	cost    float64
 	plan    bool
 	steps   int // steps taken by the current run (run-end log line)
-	// doPlan/doPlanRel: the plan file a RunPlan run executes (abs, display).
-	doPlan, doPlanRel string
-	hard              *savedModel
+	// execPlan/execPlanRel: the plan file a RunPlan run executes (abs, display).
+	execPlan, execPlanRel string
+	hard                  *savedModel
 	// mu guards the fields the TUI reads while a run is in progress from
 	// another goroutine: the steering queue, the transcript mirror, the
 	// usage/cost totals and the estimate anchor (Status/ContextTokens/
@@ -391,7 +391,7 @@ func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
 	// Per-run tool state (plan deliverable, changes awaiting verification,
 	// identical-failure counts): tools/runstate.go.
 	a.opts.Env.BeginRun()
-	nudged, verifyNudged, reserved, doNudged, emptyNudged := false, false, false, false, false
+	nudged, verifyNudged, reserved, execNudged, emptyNudged := false, false, false, false, false
 	if err := a.maybeCompact(ctx); err != nil {
 		return Outcome{}, err
 	}
@@ -465,9 +465,9 @@ func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
 				}
 				continue
 			}
-			if !doNudged {
-				doNudged = true
-				if ok, err := a.nudgeDoPlan(); err != nil {
+			if !execNudged {
+				execNudged = true
+				if ok, err := a.nudgeExecPlan(); err != nil {
 					return Outcome{}, err
 				} else if ok {
 					continue

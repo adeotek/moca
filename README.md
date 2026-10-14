@@ -7,7 +7,7 @@ Inspired by Claude Code, OpenCode and Pi — deliberately ~10% of their surface 
 
 The eight tools: `read` · `write` · `edit` · `shell` · `search` · `ls` · `web` (search + fetch) · `mcp` (the lazy proxy — servers extend it on your say-so). The eight schemas are frozen by design; everything else is [Non-goals](#non-goals-v1-probably-forever).
 
-**Status: v0.5.0-beta** — an ACP server (`moca acp`) so Zed, VS Code ACP extensions and Paseo can drive moca; before that (v0.4.0-beta) a permissions overhaul: three permission modes (`default` / `auto` / `yolo`) with a single `--mode default|auto|yolo|plan` flag, layered `allow/ask/deny` rules with wildcards (user config + a trusted per-project `.moca/config.jsonc`), auto mode (safe actions run, risky ones ask, unsure ones get a classifier's second opinion), Shift+Tab mode cycling, an arrow-key approval picker, `${…}` prompt templates, a role-colored status bar and skills invokable from the `/` picker (tagged `prompt:`/`skill:`); the install scripts gained `--uninstall` / `-Uninstall`, every run writes a bounded diagnostic log, and moca ships `self-knowledge` and `self-configure` built-ins so it can answer questions about itself and manage its own config; plus first-run setup mode, the `web` tool, plan mode, self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
+**Status: v0.5.0-beta** — an ACP server (`moca acp`) so Zed, VS Code ACP extensions and Paseo can drive moca: streamed replies and thinking, tool calls with diffs, approvals, cancel, mode/model/effort pickers, `/` commands, session history, usage and cost (the TUI and `-p` are unchanged). Before that (v0.4.1-beta): `rtk` and `graphify` become seeded standard skills (moca plants them in `~/.config/moca/skills/` on start when they are missing — edit, replace or opt out of them and a later moca leaves them alone) and `moca prune` clears the built-in skill extractions older versions left in the data dir; plan execution is `moca execute <plan.md>` / `/execute` (`--do` and `/do` are gone) and Shift+Tab cycles `default → auto → plan → yolo`. Previously: a permissions overhaul: three permission modes (`default` / `auto` / `yolo`) with a single `--mode default|auto|yolo|plan` flag, layered `allow/ask/deny` rules with wildcards (user config + a trusted per-project `.moca/config.jsonc`), auto mode (safe actions run, risky ones ask, unsure ones get a classifier's second opinion), Shift+Tab mode cycling, an arrow-key approval picker, `${…}` prompt templates, a role-colored status bar and skills invokable from the `/` picker (tagged `prompt:`/`skill:`); the install scripts gained `--uninstall` / `-Uninstall`, every run writes a bounded diagnostic log, and moca ships `self-knowledge` and `self-configure` built-ins so it can answer questions about itself and manage its own config; plus first-run setup mode, the `web` tool, plan mode, self-update, saved `/` commands and an Ollama provider; the §14 ship gate's live legs pass (evidence in SPECS §15).
 
 ## Install
 
@@ -37,6 +37,8 @@ moca update --check   # only report whether a newer release exists
 ```
 
 `moca update` verifies the package against the release's `checksums.txt` when published, then swaps the binary in place (atomic) — your config, credentials and sessions are never touched, and a running session keeps working (the new version starts on the next launch).
+
+Each version extracts its built-in skills to its own directory under `~/.local/share/moca/builtin-skills/` and keeps the older ones, so a moca still running from the previous version is not pulled out from under. Once nothing older is running, `moca prune` removes every one but the current version's (`moca prune --dry-run` lists them first); sessions, snapshots, history and your config are never touched.
 
 ## Uninstall
 
@@ -151,7 +153,7 @@ Every shell command the agent proposes runs through a permission ladder. Three m
 | `auto` | safe actions (reads, builds, tests, confined edits) just run; risky ones (`git push`, installs…) ask every time; commands the tables can't judge get a one-shot classifier opinion — allow or ask |
 | `yolo` | no permission checks |
 
-Pick per run with `moca --mode default|auto|yolo|plan` — `plan` is **plan mode** as a flag value (the plan scope: the run writes `docs/plans/`, nothing else; the v0.4.0-beta dev builds spelled these `--plan`, `--yolo` and `--no-yolo`, which now map to `--mode plan`, `--mode yolo` and `--mode default`) — in the config with `"permissions": { "defaultMode": "auto" }`, or in the TUI with **shift+tab** (`default → auto → yolo → plan`, `/mode` for the same; plan rides only on `default`).
+Pick per run with `moca --mode default|auto|yolo|plan` — `plan` is **plan mode** as a flag value (the plan scope: the run writes `docs/plans/`, nothing else; the v0.4.0-beta dev builds spelled these `--plan`, `--yolo` and `--no-yolo`, which now map to `--mode plan`, `--mode yolo` and `--mode default`) — in the config with `"permissions": { "defaultMode": "auto" }`, or in the TUI with **shift+tab** (`default → auto → plan → yolo`, `/mode` for the same; plan rides only on `default`).
 
 ```jsonc
 // ~/.config/moca/config.jsonc
@@ -187,7 +189,7 @@ Rules are whitespace-separated words with bash-style wildcards: `git push *` (pr
 moca                            # TUI in the current directory
 moca --mode auto -p "fix the failing test"  # one-shot; prompt also on stdin (-p -)
 moca --mode plan -p "add a --json flag"   # write docs/plans/<slug>.md, change nothing else
-moca --do docs/plans/add-json-flag.md # execute it step by step, ticking each - [ ] box
+moca execute docs/plans/add-json-flag.md   # execute it step by step, ticking each - [ ] box
 moca --continue                 # resume the latest session of this directory (or --resume <id8|last>)
 ```
 
@@ -206,21 +208,21 @@ Sessions are append-only files under `~/.local/share/moca/sessions/`, keyed by w
 | `alt+t` | pager on the latest thinking block (the whole reasoning chain) |
 | `alt+p` | paste chips (large pastes collapsed, buffer intact) |
 | `ctrl+r` | search prompt history (type to filter · `enter` uses the match, doesn't send) |
-| `shift+tab` | cycle the permission mode (default → auto → yolo → plan) |
+| `shift+tab` | cycle the permission mode (default → auto → plan → yolo) |
 | `ctrl+t` | cycle the effort level |
 | `@` + path | complete a workdir file (`tab`/`enter` inserts it) |
 | `ctrl+c` ×2 | quit (or `/exit`) |
 | `a` / `↑↓` `enter` / `ctrl+a` / `d` | approval picker: allow once / move+confirm / allow always / deny (arrows+enter only with an empty draft) |
 | `↑`/`↓` · `tab` · `esc` | in the `/` dropdown: pick · complete · dismiss |
 
-**Slash commands**: `/model` · `/effort` · `/mode` · `/hard` · `/yolo` · `/plan` · `/do` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`) and skills (`self-knowledge`, `create-command`, rtk's own — any skill is invokable as `/name`). Typing `/` opens a dropdown of every command, loaded template and skill as you type — templates are tagged `prompt:` and skills `skill:`, in that muted hint region; `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. **`/create-command`** is a built-in skill (nothing is dropped into your config dir): run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands and skills are usable the moment the run that wrote them finishes — no restart. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results. **`/plan <request>`** (or `--mode plan`) turns a run into **plan mode**: the agent reads (shell, web and MCP stay available for investigation under their normal permission rules), writes an implementation plan to `docs/plans/`, and every write outside `docs/plans/*.md` is refused.
+**Slash commands**: `/model` · `/effort` · `/mode` · `/hard` · `/yolo` · `/plan` · `/execute` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`) — plus prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`) and skills (`self-knowledge`, `create-command`, rtk's own — any skill is invokable as `/name`). Typing `/` opens a dropdown of every command, loaded template and skill as you type — templates are tagged `prompt:` and skills `skill:`, in that muted hint region; `↑`/`↓` to pick, `tab` to complete, `enter` on an exact name to run it — and the command echoes into the transcript like your messages before its output. **`/create-command`** is a built-in skill (nothing is dropped into your config dir): run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands and skills are usable the moment the run that wrote them finishes — no restart. `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results. **`/plan <request>`** (or `--mode plan`) turns a run into **plan mode**: the agent reads (shell, web and MCP stay available for investigation under their normal permission rules), writes an implementation plan to `docs/plans/`, and every write outside `docs/plans/*.md` is refused.
 
 ## Extend
 
-- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged, and every discovered skill is invokable from the TUI as `/name` (the `/` picker tags skills `skill:`). moca ships built-in skills: `rtk`, `create-command`, `self-knowledge` (answers questions about moca itself from embedded copies of these docs) and `self-configure` (edits your config, commands and skills when you ask — config writes raise the approval prompt, and `auth.json` stays out of reach). See [docs/specs/external-tools.md](docs/specs/external-tools.md).
+- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged, and every discovered skill is invokable from the TUI as `/name` (the `/` picker tags skills `skill:`). moca ships three built-in skills that update with the binary: `create-command`, `self-knowledge` (answers questions about moca itself from embedded copies of these docs) and `self-configure` (edits your config, commands and skills when you ask — config writes raise the approval prompt, and `auth.json` stays out of reach). It also plants two standard skills, `rtk` and `graphify`, in `~/.config/moca/skills/` on start when they are missing — they are yours from then on: edit or replace them (moca never rewrites an existing one), or keep an empty `~/.config/moca/skills/<name>/` to opt out. A seeded skill is hidden from the model on a host where its CLI is not installed. See [docs/specs/external-tools.md](docs/specs/external-tools.md).
 - **MCP** — `mcp.servers` in the config (stdio + streamable HTTP). Lazy by design: one fixed ~200-token `mcp` proxy tool, server tool lists never enter the prompt, servers start on first use and stop when idle. `moca mcp import` imports Claude Code / OpenCode / Pi server configs; `moca mcp index` prebuilds the discovery index from the CLI.
 - **Project instructions** — `AGENTS.md` / `CLAUDE.md`, loaded only in trusted projects (`--approve`).
-- **External tools** — `rtk` (token-compressed CLI output) is allowlisted and ships a built-in skill teaching its use; `graphify` (codebase knowledge graph) is allowlisted too — its `SKILL.md` loads through the standard skills loader (`graphify install --platform moca` once the upstream PR lands, or copy it into your skills dir; manual copy works identically). See [docs/specs/external-tools.md](docs/specs/external-tools.md).
+- **External tools** — `rtk` (token-compressed CLI output) and `graphify` (codebase knowledge graph) are allowlisted, and a skill teaching each is seeded into your skills dir on start (see Skills above). See [docs/specs/external-tools.md](docs/specs/external-tools.md).
 
 ## Non-goals (v1, probably forever)
 
@@ -229,7 +231,7 @@ subagents · hooks · LSP · image gen · voice · telemetry · binary plugin sy
 ## Development
 
 ```bash
-mise install        # provisions Go 1.27.1 — pinned once, in go.mod
+mise install        # provisions Go 1.27.1 (pinned once, in go.mod) and gopls
 make build          # bin/moca, version-stamped from git describe
 make test           # go test ./... -race -count=1
 make vet            # go vet ./... + gofmt -l . (both must be clean — the CI gate)
@@ -237,19 +239,6 @@ make release        # five cross-compiled binaries in dist/
 ```
 
 `make` falls back to `mise x go -- go` when `go` is not on the PATH; with mise, the same targets run as `mise run build|test|vet|fmt|release|clean`. Two scripted harnesses sit beside the unit suites (both need a model key in the repo `.env`, both build first): the **eval corpus** (`bash test/evals/run.sh -n 3 -l <label>` — seven scenarios with per-run metrics recorded under `test/evals/results/`, baseline in `test/evals/BASELINE.md`) and the **ship gate** (`bash test/shipgate/run.sh` — §14, a real bug behind a failing test fixed end to end; the checker is `//go:build shipgate`, so plain `go test ./...` skips it).
-
-## Phases
-
-| # | Scope | Gate |
-|---|-------|------|
-| 1 | skeleton, 3 protocol adapters, streaming, retries, JSONC config | `-p 'hi'` streams via anthropic, opencode-go, openai; §12 example decodes intact — done |
-| 2 | 7 tools + agent loop + permissions + yolo mode + skills + AGENTS.md + session schema | edit + shell-analysis ladders green, jail enforced, `--no-approve` honoured, `--mode yolo` lifts all checks — done |
-| 3 | TUI shell + slash commands + status bar + steering + pager | full session in TUI, `/model` `/effort` `/hard` (cross-provider), `/undo` — done |
-| 4 | context manager + compaction + resume | token-triggered compaction, `--continue` — done |
-| 5 | MCP lazy proxy (stdio + streamable HTTP, persisted index, `mcp import`) | real server via proxy, no schemas in prompt, 0 servers at start — done |
-| 6 | rtk + graphify + skills ecosystem compatibility | rtk preferred in real session, pi SKILL.md loads — done |
-| 7 | OAuth providers + upstream graphify PR + v0.1 | ship-gate demo passes (§14), live legs green (2026-10-07) — shipped as `v0.1.1-alpha`; current line `v0.5.0-beta` |
-| 8 | ACP server (`moca acp`) | Zed gate + ACP TCK + test/acpgate — done |
 
 ## Docs
 

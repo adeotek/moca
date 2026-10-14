@@ -101,19 +101,22 @@ var toolOnPath = func(name string) bool {
 	return err == nil
 }
 
-// builtinTools maps an embedded builtin skill to the external CLI it
-// instructs; a host without that CLI must not be told to use it (the first
-// live ship-gate run on a host without rtk derailed on `rtk: command not
-// found` and never read the failing test).
-var builtinTools = map[string]string{"rtk": "rtk"}
+// seededTools maps a seeded standard skill (skills.SeedSkills) to the
+// external CLI it instructs; a host without that CLI must not be told to use
+// it (the first live ship-gate run on a host without rtk derailed on `rtk:
+// command not found` and never read the failing test).
+var seededTools = map[string]string{"rtk": "rtk", "graphify": "graphify"}
 
-// filterSkills drops builtin skills whose external tool is not installed.
-// Project/global skills are never filtered: they are the user's own files.
+// filterSkills drops the seeded tool skills whose CLI is not installed. The
+// match is by name and covers the builtin and global sources — the seeds live
+// in the global dir, and a user's own copy of rtk is still about a CLI the
+// shell cannot run. A trusted project's own skill is its repo's file and is
+// never filtered; every other skill is untouched.
 func filterSkills(sk []skills.Skill) []skills.Skill {
 	out := make([]skills.Skill, 0, len(sk))
 	for _, s := range sk {
-		if s.Source == "builtin" {
-			if tool, ok := builtinTools[s.Name]; ok && !toolOnPath(tool) {
+		if s.Source != "project" {
+			if tool, ok := seededTools[s.Name]; ok && !toolOnPath(tool) {
 				continue
 			}
 		}

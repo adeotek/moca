@@ -610,18 +610,42 @@ func TestExitForOAuthSentinels(t *testing.T) {
 	}
 }
 
-func TestParseArgsDo(t *testing.T) {
-	o, err := parseArgs([]string{"--do", "docs/plans/x.md"}, nil)
-	if err != nil || !o.OneShot || o.Do != "docs/plans/x.md" || o.Prompt != "" {
+// `execute` needs its plan path first; a flag-like token, a stray extra
+// argument and the removed --do all fail as usage errors, and -h after the
+// plan still prints the usage (exit 0) like -h anywhere else.
+func TestParseArgsExecuteUsageErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"execute"},
+		{"execute", "--mode", "auto", "x.md"},
+		{"execute", "x.md", "extra"},
+		{"--do", "x.md"},
+	} {
+		_, err := parseArgs(args, nil)
+		var ue usageError
+		if !errors.As(err, &ue) {
+			t.Errorf("%v: want a usage error, got %v", args, err)
+		}
+	}
+	if _, err := parseArgs([]string{"execute", "x.md", "-h"}, nil); !errors.Is(err, errHelp) {
+		t.Fatalf("-h after the plan: want errHelp, got %v", err)
+	}
+	if o, err := parseArgs([]string{"--mode", "auto", "execute", "x.md"}, nil); err != nil || o.Execute != "x.md" || o.Mode == nil || *o.Mode != "auto" {
+		t.Fatalf("flags before execute: %+v %v", o, err)
+	}
+}
+
+func TestParseArgsExecute(t *testing.T) {
+	o, err := parseArgs([]string{"execute", "docs/plans/x.md"}, nil)
+	if err != nil || !o.OneShot || o.Execute != "docs/plans/x.md" || o.Prompt != "" {
 		t.Fatalf("%+v %v", o, err)
 	}
-	if o, err = parseArgs([]string{"--do", "x.md", "-p", "small commits"}, nil); err != nil || o.Prompt != "small commits" {
+	if o, err = parseArgs([]string{"execute", "x.md", "-p", "small commits"}, nil); err != nil || o.Prompt != "small commits" {
 		t.Fatalf("%+v %v", o, err)
 	}
-	if _, err = parseArgs([]string{"--do", "x.md", "--mode", "plan"}, nil); err == nil {
-		t.Fatal("--do with --mode plan must be refused")
+	if _, err = parseArgs([]string{"execute", "x.md", "--mode", "plan"}, nil); err == nil {
+		t.Fatal("execute with --mode plan must be refused")
 	}
-	if oneShotSlug(Options{Do: "docs/plans/add-json.md"}) != session.Slug("do add-json") {
+	if oneShotSlug(Options{Execute: "docs/plans/add-json.md"}) != session.Slug("execute add-json") {
 		t.Fatal("slug")
 	}
 }

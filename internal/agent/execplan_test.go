@@ -37,7 +37,7 @@ func TestRunPlanExecutesAndNudges(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(work, "docs", "plans", "p.md")); strings.Contains(string(b), "- [ ]") {
 		t.Fatalf("plan: %s", b)
 	}
-	if a.doPlan != "" {
+	if a.execPlan != "" {
 		t.Fatal("the plan binding ends with the run")
 	}
 }

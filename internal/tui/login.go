@@ -404,7 +404,7 @@ func (m *model) loginFlipAuth() tea.Cmd {
 		path = config.ConfigFile()
 	}
 	if _, err := config.SetString(path, []string{"providers", p}, "auth", "oauth"); err != nil {
-		return m.printlnError("error: could not update the config: " + err.Error())
+		return tea.Sequence(m.printlnError("error: could not update the config: "+err.Error()), m.setupModelHint())
 	}
 	note := "restart moca to use your subscription"
 	if cfg, err := config.Load(path); err == nil {
@@ -412,7 +412,7 @@ func (m *model) loginFlipAuth() tea.Cmd {
 		m.setupReg = nil // the cached setup registry holds the pre-reload copy
 		note = "a /clear (or a restart) starts the next session on your subscription"
 	}
-	return m.printlnContent(fmt.Sprintf("set providers.%s.auth to \"oauth\" in %s — %s", p, path, note))
+	return tea.Sequence(m.printlnContent(fmt.Sprintf("set providers.%s.auth to \"oauth\" in %s — %s", p, path, note)), m.setupModelHint())
 }
 
 func (m *model) handleLoginDone(msg loginDoneMsg) tea.Cmd {
@@ -439,14 +439,14 @@ func (m *model) handleLoginDone(msg loginDoneMsg) tea.Cmd {
 		line += " as " + msg.email
 	}
 	cmds = append(cmds, m.printlnContent(line))
-	if m.unconfigured() {
-		// The credential alone starts nothing yet — a model is missing.
-		cmds = append(cmds, m.setupModelHint())
-	}
 	if s == nil || m.start.Config.Providers[msg.provider].Auth == "oauth" {
 		m.login = nil
+		// The credential alone starts nothing yet — a model is missing.
+		cmds = append(cmds, m.setupModelHint())
 		return tea.Sequence(cmds...)
 	}
+	// The model picker waits for the answer (loginFlipAuth / "n"): opened now
+	// it would sit behind the confirmation, built from the pre-flip config.
 	s.step = loginConfirmOAuth
 	return tea.Sequence(cmds...)
 }
@@ -537,7 +537,7 @@ func (m *model) loginKey(k tea.KeyPressMsg) tea.Cmd {
 		case "n", "N", "esc", "ctrl+c":
 			p := s.provider
 			m.login = nil
-			return m.printlnMuted(fmt.Sprintf("left providers.%s.auth unchanged — set \"auth\": \"oauth\" to use the subscription", p))
+			return tea.Sequence(m.printlnMuted(fmt.Sprintf("left providers.%s.auth unchanged — set \"auth\": \"oauth\" to use the subscription", p)), m.setupModelHint())
 		}
 		return nil
 	case loginBusy:
