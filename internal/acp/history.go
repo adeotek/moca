@@ -138,11 +138,13 @@ func (srv *Server) deleteSession(params json.RawMessage) (any, error) {
 		return struct{}{}, nil
 	}
 	if s, ok := srv.get(req.SessionID); ok {
-		if _, err := s.idle(func() (any, error) { return nil, nil }); err != nil {
+		// Close in the same runMu section that saw it idle: a prompt arriving
+		// in between would otherwise begin and then be cancelled by shutdown.
+		if _, err := s.idle(func() (any, error) { s.closed = true; return nil, nil }); err != nil {
 			return nil, err // busy: a prompt is running
 		}
 		srv.remove(s.id)
-		s.shutdown()
+		s.agent.Close()
 	}
 	path, err := msession.Find(sessionsDir(), req.SessionID, "")
 	if err != nil {

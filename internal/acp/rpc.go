@@ -103,7 +103,11 @@ func (c *Conn) Serve(ctx context.Context, r io.Reader) error {
 		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 64<<10), 64<<20)
 		for sc.Scan() {
-			lines <- bytes.Clone(sc.Bytes())
+			select {
+			case lines <- bytes.Clone(sc.Bytes()):
+			case <-ctx.Done():
+				return // Serve stopped reading: do not block on lines
+			}
 		}
 		readErr <- sc.Err()
 		close(lines)
