@@ -2,29 +2,23 @@
 
 ## v0.4.1-beta (2026-10-14)
 
-### Added
-
+### CLI
 - **`moca prune [--dry-run]` removes what previous versions left in the data dir.** Each binary version extracts its built-in skills to its own `~/.local/share/moca/builtin-skills/<hash>` directory and the older ones were never cleaned up. `moca prune` removes every entry there except the current version's — older hashes, the legacy version-keyed layout (`0.0.0-dev/`), stray files and crashed `.tmp-*` extractions older than an hour — and prints each path with its size; `--dry-run` only lists them. Run it when no older moca is open (that session's built-in skill reads would fail until it restarts). Like `moca update` it needs no config. Sessions, snapshots, history, trust, logs and everything under the config dir are never touched.
-
-### Changed
-
-- **`rtk` and `graphify` are standard skills now, seeded on start (breaking for the built-in `rtk`).** On start moca writes each to `~/.config/moca/skills/<name>/` when nothing exists at that path, and does nothing when something does, so you can edit, replace or opt out of them (an empty directory counts as existing) and a newer moca never overwrites your copy. `rtk` leaves the built-in set — which is now exactly `create-command`, `self-configure` and `self-knowledge`, still re-extracted whenever the binary changes. `graphify` was never built-in (it needed a manual copy); moca now ships the upstream skill (graphify 0.9.77, `SKILL.md` plus its eight reference files). A seeded skill is still hidden from the model when its CLI is not on `PATH` — and since the skills now live in the global dir, that filter also hides your own global `rtk`/`graphify` skill on such a host (a trusted project's skill of that name is never hidden). Discovery now ignores dot-prefixed directories. A seeding failure (read-only config dir) is a `warning:` and moca starts anyway.
-
 - **Plan execution is `moca execute <plan.md>` and `/execute <plan.md>`.** It replaces `moca --do <plan.md>` and `/do <plan>` (v0.3.0-beta) with no alias — `--do` is now an unknown flag and `/do` an unknown command (or whatever prompt template or skill of that name you have). Behavior is unchanged: the plan is executed step by step, ticking its `- [ ]` boxes, `-p` adds instructions, `--mode plan` is refused. One-shot plan runs name their session `execute-<plan>`. `/execute` is a built-in, so it wins over a prompt template or skill of the same name, and `/ex` now matches both `/execute` and `/exit` — Enter completes the first, so type `/exi` for exit.
+
+### Skills
+- **`rtk` and `graphify` are standard skills now, seeded on start (breaking for the built-in `rtk`).** On start moca writes each to `~/.config/moca/skills/<name>/` when nothing exists at that path, and does nothing when something does, so you can edit, replace or opt out of them (an empty directory counts as existing) and a newer moca never overwrites your copy. `rtk` leaves the built-in set — which is now exactly `create-command`, `self-configure` and `self-knowledge`, still re-extracted whenever the binary changes. `graphify` was never built-in (it needed a manual copy); moca now ships the upstream skill (graphify 0.9.90 — `skill.md` plus the `claude` references bundle, byte-for-byte what `graphify install --platform moca` writes for this skill-only host, minus its `.graphify_version` marker). A seeded skill is still hidden from the model when its CLI is not on `PATH` — and since the skills now live in the global dir, that filter also hides your own global `rtk`/`graphify` skill on such a host (a trusted project's skill of that name is never hidden). Discovery now ignores dot-prefixed directories. A seeding failure (read-only config dir) is a `warning:` and moca starts anyway.
+
+### TUI
 - **Shift+Tab cycles `default → auto → plan → yolo → default`** (it was `default → auto → yolo → plan`), so plan sits before yolo and yolo wraps to `default`. Plan still rides only on the default mode: entering it from auto lands at `default`, and the stop after it turns plan off before entering yolo, so the two are never on together.
-
-### Fixed
-
-- **`/help` aligns its descriptions whatever the names are.** The command column was a fixed 8 characters, so long names pushed their descriptions out of line — a prompt template with a long name, or a skill like `self-knowledge`. Built-ins and templates now share a column sized to the longest name, skills get their own under their heading, a template with no argument hint no longer lands a column right, and the `!cmd` line follows the command column.
+- **`/help` aligns its descriptions whatever the names are.** The command column was a fixed 8 characters, so long names pushed their descriptions out of line — a prompt template with a long name, or a skill like `self-knowledge`. Built-ins and templates now share a column sized to the longest name, skills get their own under their heading, a template with no argument hint no longer lands a column right, the `!cmd` line follows the command column, and the column is measured and padded in display cells so a multi-byte name (`café`, a CJK skill) lines up too.
 - **The first-run notice no longer calls any stored credential a configured provider, or hides a corrupt `auth.json`.** "No provider configured" now means no provider the `/model` picker could use: a key stored for an unknown provider doesn't count, and a key resolved from a provider's `env:` reference does. An `auth.json` that cannot be parsed is shown as that error (with the file and how to reset it) instead of sending you to `/login` to hit it again.
 
 ### Build
-
 - **Windows builds produce `bin/moca.exe`.** `make build` and `mise run build` take the suffix from `go env GOEXE` (it was a bare `bin/moca`), and the mise tasks run under `bash -c` — mise defaults to `cmd.exe` on Windows, which cannot run their POSIX scripts.
 - **`mise install` also installs `gopls`.** It is a `[tools]` entry in `mise.toml` through the `go:` backend (`go:golang.org/x/tools/gopls`, `latest`) — `gopls` is not in mise's registry — built with the Go version `go.mod` pins.
 
 ### Docs
-
 - **The README's `Phases` table is gone.** The implementation history lives in `docs/specs/SPECS.md` §1; the README keeps the status line and the feature docs. The `mise install` lines in the README, `AGENTS.md` and SPECS §2 now mention `gopls`.
 
 ## v0.4.0-beta (2026-10-12)

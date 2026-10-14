@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/adeotek/moca/internal/skills"
 )
 
@@ -183,5 +185,46 @@ func TestHelpTextAlignsDescriptions(t *testing.T) {
 	h := HelpText(prompts, sk)
 	if !strings.Contains(h, "/self-knowledge about moca") {
 		t.Errorf("skills block must be sized to its own longest name:\n%s", h)
+	}
+}
+
+// A multi-byte name must not shift its description off the column: the
+// column is measured and padded in DISPLAY CELLS, so `café` (5 bytes, 4
+// cells), an ASCII name and a double-width one line up. Measuring in runes
+// while %-*s padded by bytes used to push each of them a different distance.
+func TestHelpTextAlignsWideRuneNames(t *testing.T) {
+	sk := []skills.Skill{
+		{Name: "café", Description: "multi-byte name"},
+		{Name: "rtk", Description: "ascii name"},
+		{Name: "日本語", Description: "double-width name"},
+	}
+	h := HelpText(nil, sk)
+	// descCell is the display column the description starts in: the cells
+	// consumed by the name and the padding after it.
+	descCell := func(line string) int {
+		j := strings.Index(line, " ")
+		for j < len(line) && line[j] == ' ' {
+			j++
+		}
+		return lipgloss.Width(line[:j])
+	}
+	got, rows, inSkills := -1, 0, false
+	for _, ln := range strings.Split(h, "\n") {
+		if strings.HasPrefix(ln, "skills (") {
+			inSkills = true
+			continue
+		}
+		if !inSkills || !strings.HasPrefix(ln, "/") {
+			continue
+		}
+		rows++
+		if c := descCell(ln); got == -1 {
+			got = c
+		} else if c != got {
+			t.Errorf("%q: description starts at display cell %d, want %d", ln, c, got)
+		}
+	}
+	if rows != len(sk) {
+		t.Fatalf("listed %d skill rows, want %d:\n%s", rows, len(sk), h)
 	}
 }

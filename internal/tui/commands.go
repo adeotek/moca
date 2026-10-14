@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unicode/utf8"
+
+	"charm.land/lipgloss/v2"
 
 	"github.com/adeotek/moca/internal/skills"
 )
@@ -142,33 +143,39 @@ func HelpText(prompts []skills.Prompt, sk []skills.Skill) string {
 
 	w := 0
 	for _, c := range BuiltinCommands {
-		w = max(w, utf8.RuneCountInString(c))
+		w = max(w, lipgloss.Width(c))
 	}
 	for _, p := range listedPrompts {
-		w = max(w, utf8.RuneCountInString(p.Name))
+		w = max(w, lipgloss.Width(p.Name))
 	}
 
 	var sb strings.Builder
-	row := func(width int, name, desc string) { fmt.Fprintf(&sb, "%-*s %s\n", width+1, "/"+name, desc) }
+	// The column is measured and padded in DISPLAY CELLS (lipgloss.Width):
+	// a %-*s pads by bytes, so measuring in runes and padding in bytes left a
+	// multi-byte name (`café`, a CJK skill) with its description one column
+	// right of the rest. row keeps at least one separating space.
+	row := func(width int, cmd, desc string) {
+		sb.WriteString(cmd + strings.Repeat(" ", max(width+2-lipgloss.Width(cmd), 1)) + desc + "\n")
+	}
 	for _, c := range BuiltinCommands {
-		row(w, c, builtinHelp[c])
+		row(w, "/"+c, builtinHelp[c])
 	}
 	for _, p := range listedPrompts {
 		// Join, don't "%s %s": an empty argument hint would otherwise leave a
 		// double space and push the description a column right of the rest.
-		row(w, p.Name, strings.TrimSpace(p.ArgumentHint+" "+p.Description))
+		row(w, "/"+p.Name, strings.TrimSpace(p.ArgumentHint+" "+p.Description))
 	}
 	if len(listedSkills) > 0 {
 		sw := 0
 		for _, k := range listedSkills {
-			sw = max(sw, utf8.RuneCountInString(k.Name))
+			sw = max(sw, lipgloss.Width(k.Name))
 		}
 		sb.WriteString("skills (invoke with /name — the agent loads and follows them):\n")
 		for _, k := range listedSkills {
-			row(sw, k.Name, k.Description)
+			row(sw, "/"+k.Name, k.Description)
 		}
 	}
-	fmt.Fprintf(&sb, "%-*s run cmd, output goes to the model   !!cmd  run cmd locally only\n", w+1, "!cmd")
+	row(w, "!cmd", "run cmd, output goes to the model   !!cmd  run cmd locally only")
 	sb.WriteString("type / for the command dropdown — ↑/↓ pick · tab completes · enter on an exact name sends\n")
 	sb.WriteString("enter send · shift+enter newline · esc interrupt · shift+tab cycle mode (default/auto/plan/yolo) · ctrl+t cycle effort · ctrl+o pager (latest item) · alt+t read the latest thinking · alt+p paste chips · ctrl+r search history · ctrl+c×2 quit")
 	return sb.String()
