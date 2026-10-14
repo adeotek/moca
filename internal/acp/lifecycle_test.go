@@ -48,6 +48,32 @@ func TestCloseCancelsAndFrees(t *testing.T) {
 	}
 }
 
+// A stored session carries its own model: a config without "model" must not
+// block load/resume — the same rule as the CLI, where the check gates -p and
+// not --resume. (session/new still refuses: it has no stored model.)
+func TestReopenWithoutConfiguredModel(t *testing.T) {
+	work := t.TempDir()
+	s := newScript(t, textTurn("first"), textTurn("second"))
+	o := testOptions(t, s)
+	c := startClient(t, o)
+	sid := c.newSession(work)
+	if stop, err := c.prompt(sid, "hello"); err != nil || stop != stopEndTurn {
+		t.Fatalf("first prompt: %q %+v", stop, err)
+	}
+	c.stop()             // releases the single-writer session lock
+	o2 := o              // same data dir (testOptions re-isolates XDG_DATA_HOME per call)
+	o2.Config.Model = "" // no configured model: the session's own model wins
+	c2 := startClient(t, o2)
+	for _, m := range []string{"session/resume", "session/load"} {
+		if _, err := c2.call(m, ResumeSessionRequest{SessionID: sid, Cwd: work, MCPServers: []json.RawMessage{}}); err != nil {
+			t.Fatalf("%s without a configured model: %+v", m, err)
+		}
+	}
+	if stop, err := c2.prompt(sid, "again"); err != nil || stop != stopEndTurn {
+		t.Fatalf("prompt after reopen: %q %+v", stop, err)
+	}
+}
+
 func TestResumeWithoutReplay(t *testing.T) {
 	work := t.TempDir()
 	s := newScript(t, textTurn("first"))

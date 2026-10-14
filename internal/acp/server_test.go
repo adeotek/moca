@@ -53,6 +53,28 @@ func TestNewSessionWithoutModel(t *testing.T) {
 	}
 }
 
+// A model whose provider has no credential must not open a session that
+// fails on every prompt (the TUI refuses the same switch): -32000, naming
+// the fix. Resume/load keep their own check (agent.Resume, stored model).
+func TestNewSessionWithoutCredential(t *testing.T) {
+	o := testOptions(t, newScript(t))
+	o.Config.Model = "other/x" // MOCA_T_OTHER is empty: no env key, no stored login
+	c := startClient(t, o)
+	_, err := c.call("session/new", NewSessionRequest{Cwd: t.TempDir()})
+	if err == nil || err.Code != codeAuthRequired || !strings.Contains(err.Message, "moca login other") {
+		t.Fatalf("%+v", err)
+	}
+	// An unknown model (a config typo) is refused the same way: it is not a
+	// catalog model, so no session can serve it.
+	o2 := testOptions(t, newScript(t))
+	o2.Config.Model = "fake/nope"
+	c2 := startClient(t, o2)
+	_, err = c2.call("session/new", NewSessionRequest{Cwd: t.TempDir()})
+	if err == nil || err.Code != codeAuthRequired || !strings.Contains(err.Message, "not in the catalog") {
+		t.Fatalf("unknown model: %+v", err)
+	}
+}
+
 func TestPromptStreamsTextAndEndsTurn(t *testing.T) {
 	c := startClient(t, testOptions(t, newScript(t, textTurn("Hello there."))))
 	sid := c.newSession(t.TempDir())

@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.5.0-beta
+## v0.5.0-beta (2026-10-14)
 
 ### Editors
 

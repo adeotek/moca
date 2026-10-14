@@ -81,7 +81,7 @@ func (srv *Server) reopen(id, cwd string, replay bool) (LoadSessionResponse, err
 		}
 		return r.(LoadSessionResponse), nil
 	}
-	cfg, trusted, err := srv.sessionConfig(cwd)
+	cfg, trusted, err := srv.sessionConfig(cwd, false)
 	if err != nil {
 		return LoadSessionResponse{}, err
 	}

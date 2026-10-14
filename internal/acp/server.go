@@ -13,6 +13,7 @@ import (
 
 	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/provider"
 )
 
 // Options configures Serve; cmd/moca fills it from the config and flags.
@@ -173,8 +174,11 @@ func (srv *Server) lookup(id string) (*session, error) {
 
 // sessionConfig validates cwd and returns the config for a session there
 // (the --model override, and the project file when the workdir is trusted)
-// plus the trust decision.
-func (srv *Server) sessionConfig(cwd string) (config.Config, bool, error) {
+// plus the trust decision. requireModel gates the "no model configured"
+// error: a new session needs one, while a stored session (load/resume) uses
+// the model recorded in its header — a config without "model" must not block
+// it (the same rule as the CLI, where the check gates -p, not --resume).
+func (srv *Server) sessionConfig(cwd string, requireModel bool) (config.Config, bool, error) {
 	cfg := srv.opts.Config
 	if !filepath.IsAbs(cwd) {
 		return cfg, false, invalidParams("cwd must be an absolute path, got %q", cwd)
@@ -185,7 +189,7 @@ func (srv *Server) sessionConfig(cwd string) (config.Config, bool, error) {
 	if srv.opts.Model != "" {
 		cfg.Model = srv.opts.Model
 	}
-	if cfg.Model == "" {
+	if requireModel && cfg.Model == "" {
 		return cfg, false, &RPCError{Code: codeAuthRequired, Message: fmt.Sprintf(
 			"no model configured: run `moca login <provider>` in a terminal, then set \"model\" in %s (or pass --model to `moca acp`)", srv.opts.ConfigPath)}
 	}
@@ -207,6 +211,22 @@ func (srv *Server) sessionConfig(cwd string) (config.Config, bool, error) {
 	return cfg, trusted, nil
 }
 
+// checkModel rejects a session whose configured model is unknown or whose
+// provider has no usable credential, before anything starts: the editor gets
+// ACP's "authentication required" carrying moca's fix, instead of a session
+// whose every prompt fails. A stored session uses its own model, which
+// agent.Resume checks.
+func (srv *Server) checkModel(cfg config.Config) error {
+	reg, err := provider.NewRegistry(cfg, srv.opts.HTTP, nil)
+	if err != nil {
+		return &RPCError{Code: codeAuthRequired, Message: err.Error()}
+	}
+	if err := reg.CheckCredential(cfg.Model); err != nil {
+		return &RPCError{Code: codeAuthRequired, Message: err.Error()}
+	}
+	return nil
+}
+
 func (srv *Server) startOptions(cfg config.Config, s *session) agent.StartOptions {
 	mode, plan := config.ResolveMode(srv.opts.Mode, cfg)
 	return agent.StartOptions{Config: cfg, Workdir: s.cwd, Model: srv.opts.Model, Effort: srv.opts.Effort,
@@ -219,12 +239,15 @@ func (srv *Server) newSession(params json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, trusted, err := srv.sessionConfig(req.Cwd)
+	cfg, trusted, err := srv.sessionConfig(req.Cwd, true)
 	if err != nil {
 		return nil, err
 	}
 	if len(req.MCPServers) > 0 {
 		slog.Debug("acp: client MCP servers ignored", "count", len(req.MCPServers))
+	}
+	if err := srv.checkModel(cfg); err != nil {
+		return nil, err
 	}
 	s := newSession(srv, req.Cwd, trusted)
 	a, err := agent.Start(srv.startOptions(cfg, s))
