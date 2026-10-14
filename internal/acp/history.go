@@ -133,7 +133,9 @@ func (srv *Server) deleteSession(params json.RawMessage) (any, error) {
 		return nil, err
 	}
 	if !id8.MatchString(req.SessionID) {
-		return nil, invalidParams("sessionId must be a moca session id (8 hex chars), got %q", req.SessionID)
+		// Not a moca id (and "last" must never reach Find): nothing to delete.
+		slog.Debug("acp session delete: not a moca session id")
+		return struct{}{}, nil
 	}
 	if s, ok := srv.get(req.SessionID); ok {
 		if _, err := s.idle(func() (any, error) { return nil, nil }); err != nil {
@@ -144,7 +146,10 @@ func (srv *Server) deleteSession(params json.RawMessage) (any, error) {
 	}
 	path, err := msession.Find(sessionsDir(), req.SessionID, "")
 	if err != nil {
-		return nil, notFound("%v", err)
+		// The id is well-formed, so Find failed on "no such session":
+		// deleting an absent session succeeds silently (spec, SHOULD).
+		slog.Debug("acp session delete: already absent", "session", req.SessionID)
+		return struct{}{}, nil
 	}
 	if err := msession.Delete(path); err != nil {
 		if errors.Is(err, msession.ErrInUse) {

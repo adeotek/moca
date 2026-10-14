@@ -116,11 +116,26 @@ func TestDeleteSession(t *testing.T) {
 	if len(l.Sessions) != 0 {
 		t.Fatalf("deleted session still listed: %+v", l)
 	}
-	if _, err := c.call("session/delete", DeleteSessionRequest{SessionID: sid}); err == nil || err.Code != codeResourceNotFound {
-		t.Fatalf("second delete: %+v", err)
+	// Deleting an already-deleted or never-created id succeeds silently
+	// (session-delete spec, SHOULD; ACP TCK ACP-DELETE-002).
+	for _, id := range []string{sid, "deadbeef"} {
+		if _, err := c.call("session/delete", DeleteSessionRequest{SessionID: id}); err != nil {
+			t.Fatalf("delete of unknown %s: %+v", id, err)
+		}
 	}
-	if _, err := c.call("session/delete", DeleteSessionRequest{SessionID: "last"}); err == nil || err.Code != codeInvalidParams {
-		t.Fatalf("delete last: %+v", err)
+	// A non-id8 id names no moca session: silent success, and "last" must
+	// never reach session.Find (it would resolve to the newest session).
+	keep := c.newSession(work)
+	c.prompt(keep, "hello")
+	for _, id := range []string{"last", "tck-never-created-session"} {
+		if _, err := c.call("session/delete", DeleteSessionRequest{SessionID: id}); err != nil {
+			t.Fatalf("delete %q: %+v", id, err)
+		}
+	}
+	res, _ = c.call("session/list", ListSessionsRequest{Cwd: work})
+	json.Unmarshal(res, &l)
+	if len(l.Sessions) != 1 || l.Sessions[0].SessionID != keep {
+		t.Fatalf("delete of a non-id must not remove %s: %+v", keep, l)
 	}
 }
 
