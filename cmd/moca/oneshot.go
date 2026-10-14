@@ -140,8 +140,8 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 	}
 	defer a.Close()
 	var out agent.Outcome
-	if o.Do != "" {
-		out, err = a.RunPlan(ctx, o.Do, o.Prompt)
+	if o.Execute != "" {
+		out, err = a.RunPlan(ctx, o.Execute, o.Prompt)
 	} else {
 		out, err = a.Run(ctx, o.Prompt)
 	}
@@ -168,10 +168,10 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 	return exitOK
 }
 
-// oneShotSlug names the session file: the prompt, or for --do the plan.
+// oneShotSlug names the session file: the prompt, or for execute the plan.
 func oneShotSlug(o Options) string {
-	if o.Do != "" {
-		return session.Slug("do " + strings.TrimSuffix(filepath.Base(o.Do), filepath.Ext(o.Do)))
+	if o.Execute != "" {
+		return session.Slug("execute " + strings.TrimSuffix(filepath.Base(o.Execute), filepath.Ext(o.Execute)))
 	}
 	return session.Slug(o.Prompt)
 }

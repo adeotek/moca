@@ -25,6 +25,7 @@ Changing how this moca installation behaves, at the user's request.
 
 ## Installation
 - `moca update --check` reports whether a newer release exists (safe, read-only). The user runs `moca update` themselves to install it. Install/uninstall paths are in the readme reference.
+- `moca prune --dry-run` lists the older built-in skill extractions that previous versions left in the data dir (safe, read-only). The user runs `moca prune` themselves to delete them, when no older moca is open; it never touches sessions, config or your skills.
 
 ## When it takes effect
 - A new prompt or skill is usable as soon as this run ends (`/` picker reloads; `/help` lists them) — no restart.

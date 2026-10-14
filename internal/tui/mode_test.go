@@ -9,16 +9,16 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// nextMode is the shift+tab cycle: default → auto → yolo → plan → default.
+// nextMode is the shift+tab cycle: default → auto → plan → yolo → default.
 // Plan rides only on default (the agent keeps plan out of auto/yolo), so
 // the plan stop toggles the plan flag (the mode lands at default through
-// SetPlan's rule) and the stop after plan wraps around.
+// SetPlan's rule), the stop after plan is yolo, and yolo wraps to default.
 func TestNextMode(t *testing.T) {
 	type st struct {
 		m    agent.PermMode
 		plan bool
 	}
-	seq := []st{{agent.ModeDefault, false}, {agent.ModeAuto, false}, {agent.ModeYolo, false}, {agent.ModeDefault, true}, {agent.ModeDefault, false}}
+	seq := []st{{agent.ModeDefault, false}, {agent.ModeAuto, false}, {agent.ModeDefault, true}, {agent.ModeYolo, false}, {agent.ModeDefault, false}}
 	for i := 0; i+1 < len(seq); i++ {
 		if m, p := nextMode(seq[i].m, seq[i].plan); m != seq[i+1].m || p != seq[i+1].plan {
 			t.Errorf("from %+v → %v/%v, want %+v", seq[i], m, p, seq[i+1])
@@ -36,24 +36,25 @@ func TestShiftTabCyclesMode(t *testing.T) {
 		t.Fatalf("shift+tab → auto, got %v", m.agent.Mode())
 	}
 	// shift+tab must not touch effort any more (and it walks the mode, so
-	// the next stop is yolo from here).
+	// the next stop is plan from here).
 	start := m.agent.Status().Effort
 	m.Update(keyMsg("shift+tab"))
 	if got := m.agent.Status().Effort; got != start {
 		t.Fatalf("shift+tab must not cycle effort: %v → %v", start, got)
 	}
-	if m.agent.Mode() != agent.ModeYolo || m.agent.Plan() {
-		t.Fatalf("auto → yolo, got %v plan=%v", m.agent.Mode(), m.agent.Plan())
-	}
-	// Continue the walk on real keys: yolo → plan (the mode lands at
-	// default — plan rides only on default) → default.
-	m.Update(keyMsg("shift+tab"))
+	// auto → plan: the mode lands at default — plan rides only on default.
 	if m.agent.Mode() != agent.ModeDefault || !m.agent.Plan() {
-		t.Fatalf("yolo → plan (mode default), got %v plan=%v", m.agent.Mode(), m.agent.Plan())
+		t.Fatalf("auto → plan (mode default), got %v plan=%v", m.agent.Mode(), m.agent.Plan())
+	}
+	// Continue the walk on real keys: plan → yolo (plan drops first, so the
+	// two never hold together) → default.
+	m.Update(keyMsg("shift+tab"))
+	if m.agent.Mode() != agent.ModeYolo || m.agent.Plan() {
+		t.Fatalf("plan → yolo, got %v plan=%v", m.agent.Mode(), m.agent.Plan())
 	}
 	m.Update(keyMsg("shift+tab"))
 	if m.agent.Mode() != agent.ModeDefault || m.agent.Plan() {
-		t.Fatalf("plan → default, got %v plan=%v", m.agent.Mode(), m.agent.Plan())
+		t.Fatalf("yolo → default, got %v plan=%v", m.agent.Mode(), m.agent.Plan())
 	}
 }
 

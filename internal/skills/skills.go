@@ -28,6 +28,11 @@ func Discover(dirs []Dir) ([]Skill, []error) {
 			continue
 		}
 		for _, e := range ents {
+			// Hidden entries are never skills; SeedSkills stages its
+			// half-written trees in `.seed-*`.
+			if strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
 			if e.Type()&fs.ModeSymlink != 0 {
 				errs = append(errs, fmt.Errorf("%s: symlinked skill directory skipped (bodies load through the read jail; move the skill in or copy it)",
 					filepath.Join(d.Path, e.Name())))

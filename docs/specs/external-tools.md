@@ -9,8 +9,9 @@ ships as a skill.
 ## rtk
 
 `rtk` (token-compressed CLI proxy) is in the default allowlist and ships a
-built-in skill (`internal/skills/builtin/rtk/`) teaching the model to prefer
-`rtk <cmd>` variants.
+seeded standard skill (`internal/skills/seed/rtk/`, planted in
+`~/.config/moca/skills/rtk/` on start when missing — see below) teaching the
+model to prefer `rtk <cmd>` variants.
 
 The shell analyser unwraps rtk so it cannot launder a non-allowlisted
 command:
@@ -45,7 +46,13 @@ quoting model or option tables; the Unix analyser stays the reference.
 
 ## graphify
 
-`graphify` (codebase knowledge graph) is in the default allowlist.
+`graphify` (codebase knowledge graph) is in the default allowlist, and its
+skill is seeded like rtk's: on start moca plants the bundled copy (graphify
+0.9.90: `SKILL.md` + `references/*.md`, the `claude` bundle the moca platform
+entry reuses — Apache-2.0 OR MIT) in `~/.config/moca/skills/graphify/` when
+nothing exists at that path. An existing skill — yours, or an empty directory
+kept as an opt-out — is never touched, and moca never refreshes it, so to
+pick up a newer graphify skill replace it with one of the routes below.
 
     graphify install --platform moca
 
@@ -67,6 +74,18 @@ writes `~/.pi/agent/skills/graphify/`, `--platform opencode` writes
 `~/.config/opencode/skills/graphify/`). With the skill in place, questions
 about a repo that has `graphify-out/graph.json` can be answered with
 `graphify query "…"`.
+
+## Seeded skills
+
+`rtk` and `graphify` are standard skills that moca creates, not built-ins: on
+start, for each one, if nothing exists at `~/.config/moca/skills/<name>`
+moca writes the bundled copy there, otherwise it does nothing — so edits and
+overrides survive every update. (The built-ins — `create-command`,
+`self-configure`, `self-knowledge` — are the opposite: re-extracted for each
+binary version, see SPECS §12.) Deleting a seeded skill brings it back on the
+next start; keep an empty `~/.config/moca/skills/<name>/` to opt out. A
+seeded skill is left out of the system prompt on a host where its CLI is not
+on `PATH`.
 
 ## Skills and prompts from other tools
 

@@ -409,3 +409,30 @@ func TestMigrateLegacyStore(t *testing.T) {
 		t.Fatal("the new store exists: the legacy file must be left alone")
 	}
 }
+
+// Validate passes for a missing, empty or populated store and fails — naming
+// the file and how to reset it — for one that cannot be parsed, so a caller
+// can tell a corrupt store from an empty one.
+func TestStoreValidate(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "auth.json")
+	s := NewStore(p)
+	if err := s.Validate(); err != nil {
+		t.Fatalf("a missing file is fine: %v", err)
+	}
+	if err := s.PutAPIKey("openai", "k"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put("openai", Token{Access: "a", Expiry: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Validate(); err != nil {
+		t.Fatalf("a populated store is fine: %v", err)
+	}
+	if err := os.WriteFile(p, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := s.Validate()
+	if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "unreadable") {
+		t.Fatalf("a corrupt store must fail naming the file: %v", err)
+	}
+}

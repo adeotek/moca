@@ -33,7 +33,7 @@ func skillNames(sk []skills.Skill) []string {
 
 // TestStartedAgentExposesFilteredSkills: a started agent carries the
 // discovered skill list (the TUI's picker and /help read it) — and the
-// built-in rtk skill is listed only when its CLI is on PATH.
+// seeded rtk skill is listed only when its CLI is on PATH.
 func TestStartedAgentExposesFilteredSkills(t *testing.T) {
 	defer func(orig func(string) bool) { toolOnPath = orig }(toolOnPath)
 
@@ -105,4 +105,85 @@ func TestProjectSkillsNeedTrustAndReloadSkillsPicksUpNewDirs(t *testing.T) {
 		t.Fatalf("a global skill added after start must reload: %v", skillNames(tr.Skills()))
 	}
 	tr.Session().Close()
+}
+
+// TestStartSeedsStandardSkills: a fresh config dir gets rtk and graphify as
+// ordinary global skills (editable, overridable), while the built-ins stay
+// built-in.
+func TestStartSeedsStandardSkills(t *testing.T) {
+	defer func(orig func(string) bool) { toolOnPath = orig }(toolOnPath)
+	toolOnPath = func(string) bool { return true }
+
+	a, _, _ := startTestWith(t, newScript(t), "", "")
+	defer a.Session().Close()
+	globalDir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "moca", "skills")
+	bySource := map[string]string{}
+	for _, s := range a.Skills() {
+		bySource[s.Name] = s.Source
+	}
+	for _, n := range []string{"rtk", "graphify"} {
+		if bySource[n] != "global" {
+			t.Errorf("%s: source %q, want global — %v", n, bySource[n], bySource)
+		}
+		if _, err := os.Stat(filepath.Join(globalDir, n, "SKILL.md")); err != nil {
+			t.Errorf("%s was not seeded: %v", n, err)
+		}
+	}
+	for _, n := range []string{"create-command", "self-configure", "self-knowledge"} {
+		if bySource[n] != "builtin" {
+			t.Errorf("%s: source %q, want builtin — %v", n, bySource[n], bySource)
+		}
+		if _, err := os.Stat(filepath.Join(globalDir, n)); err == nil {
+			t.Errorf("built-in %s must not be seeded into the config dir", n)
+		}
+	}
+}
+
+// TestStartKeepsUserOverrides: a skill the user already has — customised, or
+// an empty directory kept as an opt-out — wins over the seed.
+func TestStartKeepsUserOverrides(t *testing.T) {
+	defer func(orig func(string) bool) { toolOnPath = orig }(toolOnPath)
+	toolOnPath = func(string) bool { return true }
+
+	var globalDir string
+	a, _, _ := startWith(t, newScript(t), 40, "", "", func(*StartOptions) {
+		globalDir = filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "moca", "skills")
+		writeSkillFile(t, globalDir, "rtk", "my own rtk")
+		if err := os.MkdirAll(filepath.Join(globalDir, "graphify"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	})
+	defer a.Session().Close()
+	for _, s := range a.Skills() {
+		switch s.Name {
+		case "rtk":
+			if s.Description != "my own rtk" {
+				t.Errorf("the user's rtk was replaced: %+v", s)
+			}
+		case "graphify":
+			t.Errorf("an empty graphify dir is an opt-out, yet graphify is listed: %+v", s)
+		}
+	}
+	if ents, _ := os.ReadDir(filepath.Join(globalDir, "graphify")); len(ents) != 0 {
+		t.Errorf("the opt-out directory was filled: %v", ents)
+	}
+}
+
+// TestStartSurvivesSeedingFailure: moca must still start when the config
+// dir cannot be written (read-only home, a file in the way) — the failure
+// is a Warning, not a StartError.
+func TestStartSurvivesSeedingFailure(t *testing.T) {
+	a, _, evs := startWith(t, newScript(t), 40, "", "", func(*StartOptions) {
+		moca := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "moca")
+		if err := os.MkdirAll(moca, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(moca, "skills"), []byte("in the way"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	defer a.Session().Close()
+	if !hasWarning(evs, "seed") {
+		t.Fatalf("expected a seeding warning, got %v", *evs)
+	}
 }

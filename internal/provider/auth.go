@@ -195,6 +195,14 @@ func (s *Store) GetAPIKey(p string) (string, bool, error) {
 	return k, ok && k != "", nil
 }
 
+// Validate reports an auth.json that exists but cannot be read or parsed; a
+// missing file is fine (nothing is stored yet). The error says how to reset
+// the file. A plain read, no lock.
+func (s *Store) Validate() error {
+	_, err := s.read()
+	return err
+}
+
 func (s *Store) Put(p string, t Token) error {
 	return s.withLock(context.Background(), func() error {
 		f, err := s.read()

@@ -181,10 +181,16 @@ func TestLoginOAuthFlowAndAuthFlip(t *testing.T) {
 	if m.login == nil || m.login.step != loginConfirmOAuth {
 		t.Fatalf("flip prompt not open: %+v", m.login)
 	}
+	if m.pick != nil {
+		t.Fatal("the setup model picker must wait for the flip answer")
+	}
 	// y flips the provider's auth mode; a later /clear picks the reload up.
 	_, cmd = m.Update(key("y"))
 	if m.login != nil {
 		t.Fatal("wizard must close after the flip")
+	}
+	if m.pick == nil {
+		t.Fatal("the setup model picker must open once the flip is answered")
 	}
 	if out := drained(m, cmd); !strings.Contains(out, "set providers.openai.auth to \"oauth\"") {
 		t.Fatalf("scrollback %q", out)
@@ -216,6 +222,9 @@ func TestLoginOAuthDeclinedFlipAndCancel(t *testing.T) {
 	_, cmd = m.Update(key("n"))
 	if m.login != nil {
 		t.Fatal("wizard must close on n")
+	}
+	if m.pick == nil {
+		t.Fatal("the setup model picker must open once the flip is declined")
 	}
 	if out := drained(m, cmd); !strings.Contains(out, "unchanged") {
 		t.Fatalf("scrollback %q", out)

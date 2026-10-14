@@ -11,11 +11,14 @@ GORUN := $(shell command -v go >/dev/null 2>&1 && echo go || echo "mise x go -- 
 GOFMT := $(shell command -v gofmt >/dev/null 2>&1 && echo gofmt || echo "mise x go -- gofmt")
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 LDFLAGS := -s -w -X github.com/adeotek/moca/internal/config.Version=$(VERSION)
+# Recursive (`=`), not `:=`: only `build` expands it, so test/vet/clean/release
+# do not each spawn `go env` (a `mise x` round-trip when go is not on PATH).
+EXE = $(shell $(GORUN) env GOEXE)
 
 .PHONY: build test vet fmt release clean
 
 build:
-	$(GORUN) build -trimpath -ldflags "$(LDFLAGS)" -o bin/moca ./cmd/moca
+	$(GORUN) build -trimpath -ldflags "$(LDFLAGS)" -o bin/moca$(EXE) ./cmd/moca
 
 test:
 	$(GORUN) test ./... -race -count=1
