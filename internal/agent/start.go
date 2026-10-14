@@ -92,6 +92,12 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 		return nil, &StartError{err}
 	}
 	globalSkills := filepath.Join(config.ConfigDir(), "skills")
+	// rtk and graphify are standard skills: planted here when missing and
+	// never touched again, so the user's edits/overrides win. A config dir
+	// that cannot be written must not stop moca — warn and carry on.
+	if _, err := skills.SeedSkills(globalSkills); err != nil && emit != nil {
+		emit(Warning{Text: fmt.Sprintf("could not seed the standard skills (rtk, graphify) into %s: %v", globalSkills, err)})
+	}
 	promptsDir := config.PromptsDir()
 	// readOnly: the prompt templates are readable (the agent may update a
 	// command it is shown), the global skills dir (self-configure may add a

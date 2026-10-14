@@ -55,6 +55,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.Sub[0] == "update" {
 			return runUpdate(ctx, o, stdout, stderr)
 		}
+		// `prune` is cleanup of the data dir: like `update`, it must work
+		// when the config is what is broken.
+		if o.Sub[0] == "prune" {
+			return runPrune(o, stdout, stderr)
+		}
 		// mcp/login/logout subcommands need config but no model.
 		path := o.ConfigPath
 		if path == "" {
