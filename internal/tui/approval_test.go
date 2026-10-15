@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/tools"
 )
 
@@ -65,9 +68,44 @@ func TestApprovalPickerAlwaysPersists(t *testing.T) {
 	if !strings.Contains(printed(cmd), "always allowing") {
 		t.Fatalf("confirmation line: %q", printed(cmd))
 	}
-	if b, _ := os.ReadFile(m.opts.ConfigPath); !strings.Contains(string(b), `"python3"`) {
+	if b, _ := os.ReadFile(config.ProjectConfigFile(m.start.Workdir)); !strings.Contains(string(b), `"python3"`) {
 		t.Fatalf("picker enter must persist like ctrl+a: %s", b)
 	}
+}
+
+// The options are shown ONCE (rev 28): the question line carries no inline
+// shortcut list any more — the picker rows below it are the only place the
+// choices appear.
+func TestApprovalShowsItsOptionsOnce(t *testing.T) {
+	for _, q := range []tools.Question{
+		{Kind: "shell", Subject: "python3", CanAlways: true},
+		{Kind: "shell", Subject: "rm -rf x"}, // asks every time: no always row
+		{Kind: "write", Subject: "/home/u/.config/moca/prompts/x.md"},
+	} {
+		panel := approvalPanel(&approvalState{approvalMsg: approvalMsg{q: q}}, 100, 6)
+		flat := ansi.Strip(panel)
+		if got := strings.Count(flat, "Allow once"); got != 1 {
+			t.Errorf("%s: %d 'Allow once' rows:\n%s", q.Subject, got, flat)
+		}
+		if got := strings.Count(flat, "Deny"); got != 1 {
+			t.Errorf("%s: %d 'Deny' rows:\n%s", q.Subject, got, flat)
+		}
+		if got := strings.Count(flat, "Allow always"); got != btoi(q.CanAlways) {
+			t.Errorf("%s: %d 'Allow always' rows (CanAlways=%v):\n%s", q.Subject, got, q.CanAlways, flat)
+		}
+		for _, stale := range []string{"[a] once", "[ctrl+a]", "[d] deny"} {
+			if strings.Contains(flat, stale) {
+				t.Errorf("%s: the question line still repeats the options (%q):\n%s", q.Subject, stale, flat)
+			}
+		}
+	}
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func TestApprovalPickerNoAlwaysRow(t *testing.T) {
