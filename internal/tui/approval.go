@@ -191,6 +191,12 @@ func (m *model) answerApproval(ans tools.Answer) tea.Cmd {
 		if !ok || server == "" || tool == "" {
 			return nil
 		}
+		// The user-layer copy too: an untrusted workdir's restart never
+		// merges the project layer, and the approve lists unite when it does.
+		if s, ok := m.start.Config.MCP.Servers[server]; ok {
+			s.Approve = append(slices.Clone(s.Approve), tool)
+			m.start.Config.MCP.Servers[server] = s
+		}
 		pl := m.projectLayer()
 		s := pl.MCP.Servers[server]
 		s.Approve = append(slices.Clone(s.Approve), tool)

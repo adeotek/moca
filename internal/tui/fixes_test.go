@@ -391,6 +391,11 @@ func TestAllowAlwaysMCPPersists(t *testing.T) {
 	if s := m.start.Config.Project.MCP.Servers["ctx7"]; len(s.Approve) != 1 || s.Approve[0] != "create_issue" {
 		t.Fatalf("/clear copy must learn it: %+v", s)
 	}
+	// An untrusted workdir's restart never merges the project layer, so the
+	// user-layer copy learns it too (the merge unites the two lists).
+	if s := m.start.Config.MCP.Servers["ctx7"]; len(s.Approve) != 1 || s.Approve[0] != "create_issue" {
+		t.Fatalf("user-layer /clear copy must learn it: %+v", s)
+	}
 	merged, warns := mcp.MergeProject(m.start.Workdir, m.opts.ConfigPath, config.ProjectConfigFile(m.start.Workdir), m.start.Config.MCP.Servers, m.start.Config.Project.MCP)
 	if len(warns) != 0 {
 		t.Fatalf("warnings: %v", warns)

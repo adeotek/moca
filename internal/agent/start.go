@@ -160,14 +160,14 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 		}
 		merged, warns := mcp.MergeProject(jailRoot, userSrc, config.ProjectConfigFile(jailRoot), cfg.MCP.Servers, projMCP)
 		cfg.MCP.Servers = merged
-		if projMCP.IdleTimeout > 0 {
-			cfg.MCP.IdleTimeout = projMCP.IdleTimeout
-		}
 		for _, w := range warns {
 			if emit != nil {
 				emit(Warning{Text: w})
 			}
 		}
+	}
+	if o.Trusted && projMCP.IdleTimeout > 0 {
+		cfg.MCP.IdleTimeout = projMCP.IdleTimeout
 	}
 	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail, spillDir: spillDir, skills: sk, skillDirs: skillDirs}, nil
 }

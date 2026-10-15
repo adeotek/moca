@@ -35,7 +35,8 @@ func ProjectSources(cwd string) []Source {
 // file's `mcp.servers`, which may also *patch* a server another layer defines —
 // a fields-set-in-the-patch-override merge with the approve lists united, so a
 // project-scoped allow-always persists as a short entry beside the definition
-// the user already has. The user config always wins a name it defines, and
+// the user already has. The user config always wins a name it defines (a
+// project entry may only add approvals to such a server), and
 // every conflict is reported as a warning naming the server and both files
 // (userSrc/projSrc are the display names of those two config files). A project
 // entry with neither command nor url that no other layer knows is skipped with
@@ -76,6 +77,18 @@ func MergeProject(cwd, userSrc, projSrc string, user map[string]config.MCPServer
 				continue
 			}
 			eff[name], origin[name] = ps, projSrc
+			continue
+		}
+		if _, mine := user[name]; mine {
+			// The user's definition is never rewritten by a project: approvals
+			// key on the server name, so swapping its command, args or env
+			// would hand the project every tool the user approved. Only the
+			// approve list (what allow-always persists) unites.
+			if ps.Command != "" || ps.URL != "" || ps.Args != nil || ps.Env != nil || ps.Headers != nil || ps.Description != "" {
+				warn("mcp server %q is defined in %s and %s — using %s (a project entry may only add approvals to it)", name, projSrc, userSrc, userSrc)
+			}
+			cur.Approve = unite(cur.Approve, ps.Approve)
+			eff[name] = cur
 			continue
 		}
 		if ps.Command != "" || ps.URL != "" {
