@@ -124,3 +124,35 @@ func TestLoadUnknownSessionNotFound(t *testing.T) {
 		t.Fatalf("%+v", err)
 	}
 }
+
+// §9.5 `session/load`: the whole conversation is replayed, thinking blocks and
+// each tool call's content (a diff for write/edit) included.
+func TestLoadReplaysThinkingAndDiffs(t *testing.T) {
+	work := t.TempDir()
+	s := newScript(t,
+		`data: {"choices":[{"delta":{"reasoning_content":"thinking hard"},"finish_reason":""}]}`+"\n\ndata: [DONE]\n\n",
+		toolTurn([2]string{"write", `{"path":"n.txt","content":"x"}`}),
+		textTurn("done"),
+	)
+	o := testOptions(t, s)
+	c := startClient(t, o)
+	sid := c.newSession(work)
+	if stop, err := c.prompt(sid, "write n.txt"); err != nil || stop != stopEndTurn {
+		t.Fatalf("prompt: %q %+v", stop, err)
+	}
+	c.stop() // the first process releases the single-writer session lock
+	c2 := startClient(t, o)
+	if _, err := c2.call("session/load", LoadSessionRequest{SessionID: sid, Cwd: work, MCPServers: []json.RawMessage{}}); err != nil {
+		t.Fatalf("session/load: %+v", err)
+	}
+	if len(c2.updatesOf(updThought)) == 0 {
+		t.Fatal("thinking blocks are not replayed")
+	}
+	ends := c2.updatesOf(updToolUpdate)
+	if len(ends) != 1 || ends[0]["status"] != statusCompleted {
+		t.Fatalf("tool replay %v", ends)
+	}
+	if b := mustJSON(ends[0]); !strings.Contains(b, "n.txt") || !strings.Contains(b, `"newText":"x"`) {
+		t.Fatalf("the replayed write call lost its diff: %s", b)
+	}
+}

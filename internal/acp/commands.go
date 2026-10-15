@@ -106,18 +106,28 @@ func buildCommands(prompts []skills.Prompt, sk []skills.Skill) []AvailableComman
 
 // reloadCommands re-reads templates and skills; it reports whether the
 // advertised list changed. Called only from the prompt handler (after
-// begin) and before the session is published.
+// begin) and before the session is published. It holds cmdMu: the agent's
+// skill list and the command list are shared with a response's follow-up on
+// another goroutine.
 func (s *session) reloadCommands() bool {
+	s.cmdMu.Lock()
+	defer s.cmdMu.Unlock()
 	s.agent.ReloadSkills()
-	s.prompts = skills.LoadPrompts(promptDirs(s.cwd, s.trusted))
-	cmds := buildCommands(s.prompts, s.agent.Skills())
+	prompts := skills.LoadPrompts(promptDirs(s.cwd, s.trusted))
+	cmds := buildCommands(prompts, s.agent.Skills())
 	changed := !reflect.DeepEqual(cmds, s.commands)
-	s.commands = cmds
+	s.prompts, s.commands = prompts, cmds
 	return changed
 }
 
+// sendCommands advertises the current command list. The list is taken under
+// cmdMu and sent outside it — reloadCommands replaces the slice, never
+// mutates it, so the value stays valid for the write.
 func (s *session) sendCommands() {
-	s.send(AvailableCommandsUpdate{SessionUpdate: updCommands, AvailableCommands: s.commands})
+	s.cmdMu.Lock()
+	cmds := s.commands
+	s.cmdMu.Unlock()
+	s.send(AvailableCommandsUpdate{SessionUpdate: updCommands, AvailableCommands: cmds})
 }
 
 // expand applies a leading /name the TUI's way: a template expands, a skill
@@ -135,12 +145,15 @@ func (s *session) expand(text string) string {
 	if i := strings.IndexFunc(name, unicode.IsSpace); i >= 0 {
 		name, args = name[:i], strings.TrimSpace(name[i:])
 	}
-	for _, p := range s.prompts {
+	s.cmdMu.Lock()
+	prompts, sk := s.prompts, s.agent.Skills()
+	s.cmdMu.Unlock()
+	for _, p := range prompts {
 		if p.Name == name {
 			return skills.ExpandPrompt(p.Body, args)
 		}
 	}
-	for _, k := range s.agent.Skills() {
+	for _, k := range sk {
 		if k.Name == name {
 			return skills.SkillMessage(k, args)
 		}

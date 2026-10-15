@@ -49,7 +49,7 @@ func TestProtocolShapesConform(t *testing.T) {
 			Update: ContentChunk{SessionUpdate: kind, Content: ContentBlock{Type: "text", Text: "hi"}, MessageID: newMessageID()}})
 	}
 	conform(t, "SessionNotification", SessionNotification{SessionID: "abcd1234", Update: ToolCall{
-		SessionUpdate: updToolCall, ToolCallID: "1-call_0", Title: "read a.go", Kind: "read", Status: statusInProgress,
+		SessionUpdate: updToolCall, ToolCallID: "1-call_0", Name: "read", Title: "read a.go", Kind: "read", Status: statusInProgress,
 		RawInput: []byte(`{"path":"a.go"}`), Locations: []ToolCallLocation{{Path: "/w/a.go"}}}})
 	conform(t, "SessionNotification", SessionNotification{SessionID: "abcd1234", Update: ToolCall{
 		SessionUpdate: updToolUpdate, ToolCallID: "1-call_0", Status: statusCompleted,

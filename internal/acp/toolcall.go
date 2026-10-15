@@ -97,10 +97,12 @@ func absPath(cwd, p string) string {
 	return filepath.Join(cwd, p)
 }
 
-// startUpdate announces a tool call (status in_progress).
+// startUpdate announces a tool call (status in_progress). The tool's
+// programmatic name rides this first report only — ACP: agents SHOULD include
+// it when available and SHOULD NOT change it later (updates omit it).
 func startUpdate(id, cwd string, call llm.ToolCall) ToolCall {
 	in, ok := parseInput(call.Input)
-	u := ToolCall{SessionUpdate: updToolCall, ToolCallID: id, Title: toolTitle(call.Name, in, ok),
+	u := ToolCall{SessionUpdate: updToolCall, ToolCallID: id, Name: call.Name, Title: toolTitle(call.Name, in, ok),
 		Kind: toolKind(call.Name), Status: statusInProgress}
 	if ok {
 		u.RawInput = call.Input

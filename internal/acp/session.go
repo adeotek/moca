@@ -42,6 +42,12 @@ type session struct {
 	ready  bool
 	early  []any
 
+	// cmdMu guards the command state (prompts, commands and the agent's skill
+	// list): it is reloaded between runs, and a client may send its next
+	// request the moment it has a response — the response's follow-up
+	// (sendCommands) and a prompt handler's reload run concurrently then.
+	cmdMu sync.Mutex
+
 	// mu guards the event-mapping state, written from the agent's run goroutine.
 	mu         sync.Mutex
 	msgIDs     map[string]string // update kind → messageId of the current message

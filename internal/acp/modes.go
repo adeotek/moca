@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/llm"
@@ -58,10 +59,14 @@ func (s *session) muteMode(on bool) {
 	s.mu.Unlock()
 }
 
-// buildConfigOptions offers the models whose credential is available (the
-// current one always) as the "model" select, plus the effort select when
-// the model has levels to pick.
+// buildConfigOptions offers the modes, the models whose credential is
+// available (the current one always) and the effort select when the model has
+// levels to pick. ACP's transition rule: an agent that offers mode-like
+// configuration sends both APIs — clients that support config options use them
+// and ignore `modes` — so the two carry the same state (session/set_mode
+// reports the option too).
 func (s *session) buildConfigOptions() []ConfigOption {
+	opts := []ConfigOption{s.modeOption()}
 	cur := s.agent.Model().Qualified()
 	var vals []ConfigOptionValue
 	for _, m := range s.agent.Models() {
@@ -73,11 +78,59 @@ func (s *session) buildConfigOptions() []ConfigOption {
 	if !slices.ContainsFunc(vals, func(v ConfigOptionValue) bool { return v.Value == cur }) {
 		vals = append([]ConfigOptionValue{{Value: cur, Name: cur}}, vals...)
 	}
-	opts := []ConfigOption{{ID: "model", Name: "Model", Category: "model", Type: "select", CurrentValue: cur, Options: vals}}
+	opts = append(opts, ConfigOption{ID: "model", Name: "Model", Category: "model", Type: "select", CurrentValue: cur, Options: vals})
 	if e := effortOption(s.agent.Model(), s.agent.Effort()); e != nil {
 		opts = append(opts, *e)
 	}
 	return opts
+}
+
+// modeOption is the "mode" config option: the permission modes and the plan
+// scope, the same four ids the modes API advertises.
+func (s *session) modeOption() ConfigOption {
+	o := ConfigOption{ID: "mode", Name: "Mode", Category: "mode", Type: "select",
+		Description: "How moca asks before acting", CurrentValue: s.modeID()}
+	for _, m := range sessionModes {
+		o.Options = append(o.Options, ConfigOptionValue{Value: m.ID, Name: m.Name, Description: m.Description})
+	}
+	return o
+}
+
+func modeByID(id string) (SessionMode, bool) {
+	for _, m := range sessionModes {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return SessionMode{}, false
+}
+
+func modeIDs() string {
+	ids := make([]string, 0, len(sessionModes))
+	for _, m := range sessionModes {
+		ids = append(ids, m.ID)
+	}
+	return strings.Join(ids, ", ")
+}
+
+// applyModeID switches the session's mode: session/set_mode and the "mode"
+// config option share it. Plan is the plan scope riding on default; any other
+// id clears it. The agent's own events are muted — the caller reports once.
+func (s *session) applyModeID(id string) error {
+	if _, ok := modeByID(id); !ok {
+		return fmt.Errorf("mode %q is not one of %s", id, modeIDs())
+	}
+	s.muteMode(true)
+	if id == "plan" {
+		s.agent.SetPlan(true)
+	} else {
+		if s.agent.Plan() {
+			s.agent.SetPlan(false)
+		}
+		s.agent.SetMode(agent.PermMode(id))
+	}
+	s.muteMode(false)
+	return nil
 }
 
 // configOptions builds the options for a response and records them as what
@@ -141,21 +194,15 @@ func (srv *Server) setMode(params json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !slices.ContainsFunc(sessionModes, func(m SessionMode) bool { return m.ID == req.ModeID }) {
+	if _, ok := modeByID(req.ModeID); !ok {
 		return nil, invalidParams("unknown mode %q", req.ModeID)
 	}
 	return s.idle(func() (any, error) {
-		s.muteMode(true)
-		if req.ModeID == "plan" {
-			s.agent.SetPlan(true)
-		} else {
-			if s.agent.Plan() {
-				s.agent.SetPlan(false)
-			}
-			s.agent.SetMode(agent.PermMode(req.ModeID))
+		if err := s.applyModeID(req.ModeID); err != nil {
+			return nil, invalidParams("%v", err)
 		}
-		s.muteMode(false)
 		s.reportMode()
+		s.reportConfig() // the "mode" config option carries the same state
 		return struct{}{}, nil
 	})
 }
@@ -174,7 +221,11 @@ func (srv *Server) setConfigOption(params json.RawMessage) (any, error) {
 		return nil, invalidParams("%s value must be a string", req.ConfigID)
 	}
 	var apply func() error
+	var after func() // reported once the change landed, still idle
 	switch req.ConfigID {
+	case "mode":
+		apply = func() error { return s.applyModeID(value) }
+		after = s.reportMode // the modes API carries the same state
 	case "model":
 		apply = func() error { return s.agent.SetModel(value, "") }
 	case "effort":
@@ -191,6 +242,9 @@ func (srv *Server) setConfigOption(params json.RawMessage) (any, error) {
 	return s.idle(func() (any, error) {
 		if err := apply(); err != nil {
 			return nil, invalidParams("%v", err)
+		}
+		if after != nil {
+			after()
 		}
 		return SetConfigOptionResponse{ConfigOptions: s.configOptions()}, nil
 	})

@@ -269,6 +269,7 @@ type ContentChunk struct {
 type ToolCall struct {
 	SessionUpdate string             `json:"sessionUpdate,omitempty"`
 	ToolCallID    string             `json:"toolCallId"`
+	Name          string             `json:"name,omitempty"` // programmatic tool name, first report only
 	Title         string             `json:"title,omitempty"`
 	Kind          string             `json:"kind,omitempty"`
 	Status        string             `json:"status,omitempty"`
@@ -337,6 +338,7 @@ type SessionMode struct {
 type ConfigOption struct {
 	ID           string              `json:"id"`
 	Name         string              `json:"name"`
+	Description  string              `json:"description,omitempty"`
 	Category     string              `json:"category,omitempty"`
 	Type         string              `json:"type"`
 	CurrentValue string              `json:"currentValue"`
@@ -344,8 +346,9 @@ type ConfigOption struct {
 }
 
 type ConfigOptionValue struct {
-	Value string `json:"value"`
-	Name  string `json:"name"`
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 type RequestPermissionRequest struct {

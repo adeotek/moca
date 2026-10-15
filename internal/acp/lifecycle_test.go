@@ -180,3 +180,30 @@ func TestDeleteRunningSessionRefused(t *testing.T) {
 		t.Fatalf("delete mid-prompt: %+v", e)
 	}
 }
+
+// An editor can try to reload a session whose turn is still running: the agent
+// cannot be replayed mid-run, so load answers "busy" (like a second prompt)
+// and works again once the turn ended.
+func TestLoadOpenSessionWhileRunningIsBusy(t *testing.T) {
+	s, work := rmScript(t)
+	c := startClient(t, testOptions(t, s))
+	sid := c.newSession(work)
+	got := make(chan *RPCError, 1)
+	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse {
+		_, err := c.call("session/load", LoadSessionRequest{SessionID: sid, Cwd: work})
+		got <- err
+		return selected(optAllowOnce)
+	}
+	if stop, err := c.prompt(sid, "delete x"); err != nil || stop != stopEndTurn {
+		t.Fatalf("prompt %q %+v", stop, err)
+	}
+	if err := <-got; err == nil || err.Code != codeInvalidRequest {
+		t.Fatalf("load mid-run: %+v", err)
+	}
+	if _, err := c.call("session/load", LoadSessionRequest{SessionID: sid, Cwd: work}); err != nil {
+		t.Fatalf("load after the run: %+v", err)
+	}
+	if n := len(c.updatesOf(updUserMessage)); n == 0 {
+		t.Fatal("the replay after the run is empty")
+	}
+}

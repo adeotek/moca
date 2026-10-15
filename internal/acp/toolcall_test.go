@@ -35,6 +35,9 @@ func TestStartUpdateTable(t *testing.T) {
 		if u.SessionUpdate != updToolCall || u.Status != statusInProgress || u.Title != c.title || u.Kind != c.kind {
 			t.Errorf("%s %s: got %+v", c.name, c.input, u)
 		}
+		if u.Name != c.name {
+			t.Errorf("%s: tool name %q, want %q", c.name, u.Name, c.name)
+		}
 		if c.loc == "" && len(u.Locations) != 0 || c.loc != "" && (len(u.Locations) != 1 || u.Locations[0].Path != c.loc) {
 			t.Errorf("%s: locations %+v, want %q", c.name, u.Locations, c.loc)
 		}
