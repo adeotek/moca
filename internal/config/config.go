@@ -81,9 +81,11 @@ type Config struct {
 	TUI       TUIConfig                 `json:"tui"`
 	Yolo      bool                      `json:"yolo"` // legacy: all permission checks off by default (§7.5); see Mode
 	// Permissions holds the user-level mode and rules. Project is the trusted
-	// project file's block (set by cmd after the trust decision, never decoded).
-	Permissions PermissionsConfig  `json:"permissions"`
-	Project     *PermissionsConfig `json:"-"`
+	// project file's content (set by cmd after the trust decision, never
+	// decoded): its permissions block joins the rule layers, its mcp block
+	// joins the MCP servers (§4, §10.5).
+	Permissions PermissionsConfig `json:"permissions"`
+	Project     *ProjectConfig    `json:"-"`
 }
 
 // PermissionsConfig is the permissions block of the user config and, with
@@ -145,8 +147,8 @@ func ResolveMode(flag string, c Config) (string, bool) {
 		return "default", true
 	case flag != "":
 		return flag, false
-	case c.Project != nil && c.Project.DefaultMode != "":
-		return c.Project.DefaultMode, false
+	case c.Project.Mode() != "":
+		return c.Project.Mode(), false
 	}
 	return c.Mode(), false
 }

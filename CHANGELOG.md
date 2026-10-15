@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.5.1-beta (2026-10-15)
+
+Project-scoped MCP servers, project-scoped approvals, an approval panel that shows its options once, and shifted symbols that reach the input intact.
+
+### MCP
+
+- **Project-level MCP servers.** A trusted workdir can now configure servers the way your global config does — an `mcp` block in `.moca/config.jsonc` (`servers.<name>` with the same shape: `command` or `url`, `args`/`env`/`headers`/`description`/`approve`; a `command`/`url`-less entry *patches* a server another layer defines, which is how a project-scoped approval persists) — and moca also reads the project's own Claude Code / OpenCode / Pi files: `.mcp.json`, `opencode.json` / `opencode.jsonc`, `.pi/mcp.json` (whole-value `${VAR}` env/header references become `env:VAR`, resolved when the server starts). Precedence: your config wins a name it defines, then the project config file, then the ecosystem files (which a project entry patches or overrides). **Every duplicate is reported** as a warning naming the server and both files, as are the skips (legacy SSE, disabled, an entry that defines nothing and has nothing to patch). Project servers are still lazy — nothing starts until a tool call needs it — and they apply only while the workdir is trusted, which the trust prompt now says (`.mcp.json`, `opencode.json[c]` and `.pi/mcp.json` also count as project resources, so a repo that carries one gets the prompt).
+- **`mcp.servers.<name>.approve` in a project file may list tools but never `"*"`** — a cloned repository cannot hand the agent every tool of a server it also controls.
+
+### Permissions
+
+- **`allow always` is saved per project.** The approval answer (ctrl+a or the picker's *Allow always*) for a shell command is now written as a `permissions.allow` rule into the workdir's `.moca/config.jsonc` — not into your global `shell.allow` — and an MCP approval likewise lands in that file's `mcp.servers.<name>.approve`. One project's answers no longer follow you into every other directory. The running session learns the answer as before, and an untrusted workdir is told the truth: the file is written and the rule applies from the first trusted session there (nothing persists at all when there is no workdir).
+
+### TUI
+
+- **The approval panel lists its options once.** The question line used to repeat them (`allow `x`?  [a] once  [ctrl+a] always  [d] deny`) above the picker that already showed them; it is now just the question (`allow `x`?`, or `allow `x` (asks every time)?` when there is no always option).
+- **Shifted symbols work in the input again.** With the kitty keyboard protocol enabled the terminal reports the *unshifted* codepoint plus a shift modifier unless the program asks for alternate keys — so `shift+/` arrived as `/`, `shift+1` as `1`, and so on. moca now asks for alternate keys alongside "all keys as escape codes" (`CSI >13u`), which is also what keeps `shift+enter` working; `alt+enter` / `ctrl+j` remain the fallbacks.
+- **The trust prompt names project MCP configs**: `Trust project resources in <dir>? (.moca/, AGENTS.md/CLAUDE.md, project MCP configs — they can steer the agent and start MCP servers) [y/N]`.
+
 ## v0.5.0-beta (2026-10-14)
 
 ### Editors
