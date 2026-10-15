@@ -41,12 +41,15 @@ func (s *approvalState) options() []approvalOption {
 // the whole command opens in the pager (ctrl+o).
 const approvalDetailRows = 6
 
+// approvalPrompt is the question line above the picker rows. The rows carry
+// the shortcuts, so the line never repeats them (rev 28: the options used to
+// be listed twice — horizontally here and as the picker below).
 func approvalPrompt(q tools.Question) string {
 	subject := Sanitize(q.Subject)
 	if q.CanAlways {
-		return fmt.Sprintf("allow `%s`?  [a] once  [ctrl+a] always  [d] deny", subject)
+		return fmt.Sprintf("allow `%s`?", subject)
 	}
-	return fmt.Sprintf("allow `%s` (asks every time)?  [a] once  [d] deny", subject)
+	return fmt.Sprintf("allow `%s` (asks every time)?", subject)
 }
 
 // approvalPanel renders the question, the picker rows and the command it is
@@ -143,8 +146,16 @@ func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 // answerApproval is the single confirm path for every approval answer: the
-// reply channel, the drop of the state and (for allow-always) the persist to
-// the config file. ctrl+a and the picker's enter cannot drift apart.
+// reply channel, the drop of the state and (for allow-always) the persist of
+// the decision. ctrl+a and the picker's enter cannot drift apart.
+//
+// Permanent approvals are project-scoped (rev 28): they are saved in the
+// workdir's `.moca/config.jsonc` — `permissions.allow` for a command,
+// `mcp.servers.<server>.approve` for an MCP tool — never in the user config,
+// so what one project needs does not follow the user into every other
+// directory. A workdir that is not trusted cannot have project resources
+// applied, so the note says that too (the running session honours the answer
+// either way).
 func (m *model) answerApproval(ans tools.Answer) tea.Cmd {
 	q, reply := m.approval.q, m.approval.reply
 	m.approval = nil
@@ -152,35 +163,63 @@ func (m *model) answerApproval(ans tools.Answer) tea.Cmd {
 	if ans != tools.AllowAlways {
 		return nil
 	}
-	path := m.opts.ConfigPath
+	path := m.projectPath()
 	if path == "" {
-		path = config.ConfigFile()
+		// No workdir to save into (a bare test model): the session keeps it.
+		return m.printlnContent(fmt.Sprintf("always allowing %s (this session only)", Sanitize(q.Subject)))
+	}
+	caveat := ""
+	if !m.start.Trusted {
+		caveat = " — project rules apply once this workdir is trusted"
 	}
 	switch q.Kind {
 	case "shell":
-		// The running session (and a /clear restart) honours it now; the file
-		// makes it permanent.
+		// Both in-memory copies, so a /clear restart honours it too (the
+		// running session learned it with the answer).
+		pl := m.projectLayer()
 		m.start.Config.Shell.Allow = append(slices.Clone(m.start.Config.Shell.Allow), q.Subject)
-		if err := config.AppendString(path, []string{"shell", "allow"}, q.Subject, config.DefaultShellAllow); err != nil {
+		pl.Permissions.Allow = append(pl.Permissions.Allow, q.Subject)
+		if err := config.AppendString(path, []string{"permissions", "allow"}, q.Subject, nil); err != nil {
 			return m.printlnError("error: allow-always not saved: " + err.Error())
 		}
-		return m.printlnContent(fmt.Sprintf("always allowing %q (saved to %s)", q.Subject, path))
+		return m.printlnContent(fmt.Sprintf("always allowing %q (saved to %s%s)", q.Subject, path, caveat))
 	case "mcp":
 		// Subject is server/tool. The running session already learned it
-		// from the AllowAlways answer; the config makes it survive /clear
-		// and the next start.
+		// from the AllowAlways answer; the project layer (in memory for
+		// /clear, on disk for the next start) makes it permanent.
 		server, tool, ok := strings.Cut(q.Subject, "/")
 		if !ok || server == "" || tool == "" {
 			return nil
 		}
-		if s, ok := m.start.Config.MCP.Servers[server]; ok {
-			s.Approve = append(slices.Clone(s.Approve), tool)
-			m.start.Config.MCP.Servers[server] = s
+		pl := m.projectLayer()
+		s := pl.MCP.Servers[server]
+		s.Approve = append(slices.Clone(s.Approve), tool)
+		if pl.MCP.Servers == nil {
+			pl.MCP.Servers = map[string]config.MCPServer{}
 		}
+		pl.MCP.Servers[server] = s
 		if err := config.AppendString(path, []string{"mcp", "servers", server, "approve"}, tool, nil); err != nil {
 			return m.printlnError("error: allow-always not saved: " + err.Error())
 		}
-		return m.printlnContent(fmt.Sprintf("always allowing %s (saved to %s)", q.Subject, path))
+		return m.printlnContent(fmt.Sprintf("always allowing %s (saved to %s%s)", q.Subject, path, caveat))
 	}
 	return nil
+}
+
+// projectPath is the workdir's project config file ("" without a workdir).
+func (m *model) projectPath() string {
+	if m.start.Workdir == "" {
+		return ""
+	}
+	return config.ProjectConfigFile(m.start.Workdir)
+}
+
+// projectLayer is the in-memory project config a /clear restart re-runs Start
+// with; created on demand so an approval survives the restart even when the
+// workdir had no project file yet.
+func (m *model) projectLayer() *config.ProjectConfig {
+	if m.start.Config.Project == nil {
+		m.start.Config.Project = &config.ProjectConfig{}
+	}
+	return m.start.Config.Project
 }

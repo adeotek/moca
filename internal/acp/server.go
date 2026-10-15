@@ -231,7 +231,7 @@ func (srv *Server) startOptions(cfg config.Config, s *session) agent.StartOption
 	mode, plan := config.ResolveMode(srv.opts.Mode, cfg)
 	return agent.StartOptions{Config: cfg, Workdir: s.cwd, Model: srv.opts.Model, Effort: srv.opts.Effort,
 		Trusted: s.trusted, Mode: agent.PermMode(mode), Plan: plan, Ask: s.ask, Emit: s.emit,
-		HTTP: srv.opts.HTTP, Slug: "acp"}
+		HTTP: srv.opts.HTTP, Slug: "acp", ConfigPath: srv.opts.ConfigPath}
 }
 
 func (srv *Server) newSession(params json.RawMessage) (any, error) {

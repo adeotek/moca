@@ -43,6 +43,9 @@ type StartOptions struct {
 	Emit    func(Event)
 	HTTP    *http.Client
 	Slug    string
+	// ConfigPath is the user config file this run loaded (warnings name it);
+	// "" means config.ConfigFile().
+	ConfigPath string
 }
 
 // setup is what Start and Resume need before a session exists: the config
@@ -140,6 +143,32 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 		}
 	}
 	sk = filterSkills(sk)
+	// A trusted project's MCP servers join the user layer (§10.5): the project
+	// config file's `mcp.servers` (cmd loaded it with the trust decision) plus
+	// the ecosystem's project-level files (`.mcp.json`, `opencode.json[c]`,
+	// `.pi/mcp.json`) — a cloned repo's servers start only for a workdir the
+	// user chose to trust. Conflicts and skips warn with the server name and
+	// the files involved.
+	var projMCP config.MCPConfig
+	if cfg.Project != nil {
+		projMCP = cfg.Project.MCP
+	}
+	if o.Trusted && (len(mcp.ProjectSources(jailRoot)) > 0 || len(projMCP.Servers) > 0) {
+		userSrc := o.ConfigPath
+		if userSrc == "" {
+			userSrc = config.ConfigFile()
+		}
+		merged, warns := mcp.MergeProject(jailRoot, userSrc, config.ProjectConfigFile(jailRoot), cfg.MCP.Servers, projMCP)
+		cfg.MCP.Servers = merged
+		if projMCP.IdleTimeout > 0 {
+			cfg.MCP.IdleTimeout = projMCP.IdleTimeout
+		}
+		for _, w := range warns {
+			if emit != nil {
+				emit(Warning{Text: w})
+			}
+		}
+	}
 	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail, spillDir: spillDir, skills: sk, skillDirs: skillDirs}, nil
 }
 
@@ -239,7 +268,7 @@ func (o StartOptions) mode() PermMode {
 func rules(cfg config.Config, trusted bool) (*permissions.Rules, error) {
 	var layers []permissions.RuleSet
 	if trusted && cfg.Project != nil {
-		p := cfg.Project
+		p := cfg.Project.Permissions
 		proj, err := permissions.ParseRuleSet("project", p.Allow, p.Ask, p.Deny)
 		if err != nil {
 			return nil, err

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/mcp"
 	"github.com/adeotek/moca/internal/tools"
 )
 
@@ -96,7 +99,7 @@ func TestAllowAlwaysRequiresCtrl(t *testing.T) {
 	if !strings.Contains(m.input.Buffer(), "A") {
 		t.Fatalf("the A belongs to the draft: %q", m.input.Buffer())
 	}
-	if b, _ := os.ReadFile(m.opts.ConfigPath); strings.Contains(string(b), "python3") {
+	if _, err := os.Stat(config.ProjectConfigFile(m.start.Workdir)); err == nil {
 		t.Fatal("a typed A must not persist allow-always")
 	}
 	_, cmd := m.Update(key("ctrl+a"))
@@ -106,7 +109,7 @@ func TestAllowAlwaysRequiresCtrl(t *testing.T) {
 	if !strings.Contains(printed(cmd), "always allowing") {
 		t.Fatalf("confirmation line: %q", printed(cmd))
 	}
-	if b, _ := os.ReadFile(m.opts.ConfigPath); !strings.Contains(string(b), `"python3"`) {
+	if b, _ := os.ReadFile(config.ProjectConfigFile(m.start.Workdir)); !strings.Contains(string(b), `"python3"`) {
 		t.Fatalf("ctrl+a must persist: %s", b)
 	}
 }
@@ -296,6 +299,9 @@ func TestRunDoneReturnsSteeringToEditor(t *testing.T) {
 	}
 }
 
+// Permanent approvals are project-scoped (rev 28): the shell's allow-always
+// lands in the workdir's .moca/config.jsonc as a permissions.allow rule, and
+// the user config stays untouched.
 func TestAllowAlwaysPersists(t *testing.T) {
 	m := newAgentModel(t)
 	reply := make(chan tools.Answer, 1)
@@ -304,15 +310,28 @@ func TestAllowAlwaysPersists(t *testing.T) {
 	if got := <-reply; got != tools.AllowAlways {
 		t.Fatal(got)
 	}
-	if b, _ := os.ReadFile(m.opts.ConfigPath); !strings.Contains(string(b), `"python3"`) {
-		t.Fatalf("config %s", b)
-	}
-	if !strings.Contains(printed(cmd), "always allowing") {
+	proj := config.ProjectConfigFile(m.start.Workdir)
+	if !strings.Contains(printed(cmd), "always allowing") || !strings.Contains(printed(cmd), proj) {
 		t.Fatalf("confirmation line: %q", printed(cmd))
 	}
 	ack(m)
+	// The written file is a valid project config, and the user config is not
+	// the target any more.
+	p, err := config.LoadProject(m.start.Workdir)
+	if err != nil {
+		t.Fatalf("written project file must parse (%v)", err)
+	}
+	if p == nil || !slices.Contains(p.Permissions.Allow, "python3") {
+		t.Fatalf("project allow list: %+v", p)
+	}
+	if b, _ := os.ReadFile(m.opts.ConfigPath); strings.Contains(string(b), "python3") {
+		t.Fatalf("the user config must stay untouched: %s", b)
+	}
 	// A failing write is reported, but the command is still allowed.
-	m.opts.ConfigPath = t.TempDir() // a directory: unwritable as a file
+	m.start.Workdir = filepath.Join(t.TempDir(), "file") // a path whose .moca/ cannot be created
+	if err := os.WriteFile(m.start.Workdir, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "node", CanAlways: true}, reply: reply})
 	_, cmd = m.Update(key("ctrl+a"))
 	if got := <-reply; got != tools.AllowAlways || !strings.Contains(printed(cmd), "not saved") {
@@ -320,36 +339,64 @@ func TestAllowAlwaysPersists(t *testing.T) {
 	}
 }
 
+// An untrusted workdir cannot have project rules applied: the note says so,
+// because the saved rule only bites once the workdir is trusted.
+func TestAllowAlwaysNotesAnUntrustedWorkdir(t *testing.T) {
+	m := newAgentModel(t)
+	if m.start.Trusted {
+		t.Fatal("precondition: the helper's workdir is untrusted")
+	}
+	reply := make(chan tools.Answer, 1)
+	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, reply: reply})
+	_, cmd := m.Update(key("ctrl+a"))
+	if got := <-reply; got != tools.AllowAlways {
+		t.Fatal(got)
+	}
+	out := printed(cmd)
+	if !strings.Contains(out, "once this workdir is trusted") {
+		t.Fatalf("untrusted note missing: %q", out)
+	}
+	// The in-session copies still learn it (a /clear restart honours it even
+	// though the file's rules apply only to a trusted workdir).
+	if !slices.Contains(m.start.Config.Shell.Allow, "python3") || !slices.Contains(m.start.Config.Project.Permissions.Allow, "python3") {
+		t.Fatalf("in-memory copies: %+v %+v", m.start.Config.Shell.Allow, m.start.Config.Project.Permissions.Allow)
+	}
+}
+
+// The MCP allow-always lands in the project file too: the server it names may
+// be the user's own definition, so the entry is a patch — approve only — that
+// the project layer merges back over it (§10.5).
 func TestAllowAlwaysMCPPersists(t *testing.T) {
 	m := newAgentModel(t)
 	m.start.Config.MCP.Servers = map[string]config.MCPServer{"ctx7": {URL: "https://x"}}
-	// A config that parses on its own (the fake provider and the server
-	// definition included), so the result can be validated rather than just
-	// string-matched.
-	if err := os.WriteFile(m.opts.ConfigPath, []byte(`{"model":"fake/m","mcp":{"servers":{"ctx7":{"url":"https://x"}}},`+
-		`"providers":{"fake":{"baseUrl":"http://127.0.0.1:1","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY"}}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	reply := make(chan tools.Answer, 1)
 	m.Update(approvalMsg{q: tools.Question{Kind: "mcp", Subject: "ctx7/create_issue", Detail: `{"title":"x"}`, CanAlways: true}, reply: reply})
 	_, cmd := m.Update(key("ctrl+a"))
 	if got := <-reply; got != tools.AllowAlways {
 		t.Fatal(got)
 	}
-	b, _ := os.ReadFile(m.opts.ConfigPath)
-	c, err := config.Parse(b)
+	b, _ := os.ReadFile(config.ProjectConfigFile(m.start.Workdir))
+	p, err := config.LoadProject(m.start.Workdir)
 	if err != nil {
-		t.Fatalf("written config must stay valid (%v):\n%s", err, b)
+		t.Fatalf("written project file must stay valid (%v):\n%s", err, b)
 	}
-	if s := c.MCP.Servers["ctx7"]; len(s.Approve) != 1 || s.Approve[0] != "create_issue" {
-		t.Fatalf("approve list: %+v", s)
+	if s := p.MCP.Servers["ctx7"]; len(s.Approve) != 1 || s.Approve[0] != "create_issue" || s.Command != "" || s.URL != "" {
+		t.Fatalf("project patch entry: %+v", s)
 	}
 	if !strings.Contains(printed(cmd), "always allowing") {
 		t.Fatalf("confirmation line: %q", printed(cmd))
 	}
-	// /clear restarts from m.start.Config: the new session must keep it too.
-	if s := m.start.Config.MCP.Servers["ctx7"]; len(s.Approve) != 1 || s.Approve[0] != "create_issue" {
+	// /clear restarts from m.start.Config: the project layer must carry it,
+	// and Start merges it back over the user's server definition.
+	if s := m.start.Config.Project.MCP.Servers["ctx7"]; len(s.Approve) != 1 || s.Approve[0] != "create_issue" {
 		t.Fatalf("/clear copy must learn it: %+v", s)
+	}
+	merged, warns := mcp.MergeProject(m.start.Workdir, m.opts.ConfigPath, config.ProjectConfigFile(m.start.Workdir), m.start.Config.MCP.Servers, m.start.Config.Project.MCP)
+	if len(warns) != 0 {
+		t.Fatalf("warnings: %v", warns)
+	}
+	if s := merged["ctx7"]; s.URL != "https://x" || len(s.Approve) != 1 {
+		t.Fatalf("merged server: %+v", s)
 	}
 }
 
