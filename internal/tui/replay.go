@@ -36,13 +36,11 @@ func isUserTurn(msg llm.Message) bool {
 	return false
 }
 
-const summaryPrefix = "[Summary of earlier conversation]"
-
 // replay prints the last `turns` user turns of msgs.
 func (m *model) replay(msgs []llm.Message, turns int) tea.Cmd {
 	var starts []int
 	for i, msg := range msgs {
-		if isUserTurn(msg) && !strings.HasPrefix(strings.TrimSpace(llm.TextOf(msg)), summaryPrefix) {
+		if isUserTurn(msg) && !strings.HasPrefix(strings.TrimSpace(llm.TextOf(msg)), session.SummaryPrefix) {
 			starts = append(starts, i)
 		}
 	}
@@ -67,7 +65,7 @@ func (m *model) replay(msgs []llm.Message, turns int) tea.Cmd {
 				continue // tool results: shown with their calls
 			}
 			text := strings.TrimSpace(llm.TextOf(msg))
-			if strings.HasPrefix(text, summaryPrefix) {
+			if strings.HasPrefix(text, session.SummaryPrefix) {
 				cmds = append(cmds, m.printlnMuted("⋯ earlier conversation was summarized"))
 				continue
 			}

@@ -90,3 +90,13 @@ func TestSplitArgs(t *testing.T) {
 		t.Fatalf("SplitArgs = %q, want %q", got, want)
 	}
 }
+
+func TestSkillMessage(t *testing.T) {
+	s := Skill{Name: "deploy", Path: "/x/deploy/SKILL.md"}
+	if got := SkillMessage(s, ""); got != "Load and follow the deploy skill (/x/deploy/SKILL.md)." {
+		t.Errorf("no args: %q", got)
+	}
+	if got := SkillMessage(s, "staging"); got != "Load and follow the deploy skill (/x/deploy/SKILL.md) for this request: staging" {
+		t.Errorf("args: %q", got)
+	}
+}
