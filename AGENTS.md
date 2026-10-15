@@ -26,6 +26,7 @@ mise run <task>                             # the make targets, as mise tasks
 - Single package/test: `go test ./internal/agent -run TestName -race -count=1`.
 - **Eval corpus** (rev 21; not in CI, same `.env` key, a build first): `make build && bash test/evals/run.sh -n 3 -l <label>` — seven scenarios, metrics per run in the gitignored `test/evals/results/`; compare labels with `go run ./test/evals/evalstats -summary <file>`. `bash test/evals/run.sh --selftest` checks the checkers (no model). Harness or prompt changes should show their delta against `test/evals/BASELINE.md`.
 - **Ship gate** (not in CI, needs repo `.env` with `OPENCODE_GO_KEY`, and a build first): `make build && bash test/shipgate/run.sh`. The checker is `//go:build shipgate`, so plain `go test ./...` skips it. Several `internal/tools` tests are `//go:build !windows`.
+- **ACP gate** (not in CI, a build first; hermetic — no key, no network): `make build && bash test/acpgate/run.sh` — drives the built `moca acp` over stdio against a scripted provider: a text turn, an approval, cancel, stdin-EOF exit 0 with an empty stderr, a second-process replay, close, delete, and an API-key leak scan. The checker is `//go:build acpgate`, so plain `go test ./...` skips it.
 
 ## Layout & dependency rules
 
