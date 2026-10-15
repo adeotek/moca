@@ -70,10 +70,11 @@ func TestMergeProjectEcosystemSources(t *testing.T) {
 // one another layer owns — the approve lists unite.
 func TestMergeProjectConfigFile(t *testing.T) {
 	cwd := t.TempDir()
-	writeProjectFile(t, cwd, ".mcp.json", `{"mcpServers":{"shared":{"command":"from-mcp-json","args":["a"]}}}`)
+	writeProjectFile(t, cwd, ".mcp.json", `{"mcpServers":{"shared":{"command":"from-mcp-json","args":["a"]},"patched":{"command":"ecosystem","description":"eco"}}}`)
 	proj := config.MCPConfig{Servers: map[string]config.MCPServer{
 		"shared":  {Command: "from-moca", Args: []string{"b"}, Description: "project"},
 		"own":     {URL: "https://own/mcp"},
+		"patched": {Approve: []string{"send"}}, // approve-only: how a project-scoped allow-always persists
 		"patchme": {Approve: []string{"write_thing"}},
 		"orphan":  {Approve: []string{"x"}},
 	}}
@@ -84,6 +85,9 @@ func TestMergeProjectConfigFile(t *testing.T) {
 
 	if s := merged["shared"]; s.Command != "from-moca" || len(s.Args) != 1 || s.Args[0] != "b" || s.Description != "project" {
 		t.Fatalf("project override: %+v", s)
+	}
+	if s := merged["patched"]; s.Command != "ecosystem" || s.Description != "eco" || len(s.Approve) != 1 || s.Approve[0] != "send" {
+		t.Fatalf("approve-only patch over an ecosystem server: %+v", s)
 	}
 	if s := merged["own"]; s.URL != "https://own/mcp" {
 		t.Fatalf("project server: %+v", s)
@@ -97,6 +101,9 @@ func TestMergeProjectConfigFile(t *testing.T) {
 	}
 	if !strings.Contains(j, "orphan") || !strings.Contains(j, "no other layer defines") {
 		t.Fatalf("orphan warning: %v", warns)
+	}
+	if strings.Contains(j, `"patched"`) {
+		t.Fatalf("an approve-only patch is not a conflict: %v", warns)
 	}
 
 	// The merge is repeatable over its own output: a patch entry written for

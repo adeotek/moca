@@ -131,7 +131,7 @@ No API key and no model list: moca asks the server (`/api/tags`, `/api/show`) wh
 "agent_servers": { "moca": { "command": "moca", "args": ["acp"] } }
 ```
 
-VS Code (any ACP client extension) and Paseo take the same command line: `moca acp`. Optional flags apply to every session the editor opens: `--model provider/model`, `--effort <level>`, `--mode default|auto|yolo|plan`, `--approve` / `--no-approve`. By default a folder you already answered in moca's TUI trust prompt keeps that answer; any other folder the editor opens is trusted (project rules, AGENTS.md and project skills/prompts apply).
+VS Code (any ACP client extension) and Paseo take the same command line: `moca acp`. Optional flags apply to every session the editor opens: `--model provider/model`, `--effort <level>`, `--mode default|auto|yolo|plan`, `--approve` / `--no-approve`. By default a folder you already answered in moca's TUI trust prompt keeps that answer; any other folder the editor opens is trusted (project rules, AGENTS.md, project skills/prompts and project MCP servers apply).
 
 What you get: streamed replies and thinking, tool calls with diffs, approval prompts, cancel, the permission-mode picker, the model and effort pickers, your prompt templates and skills in the `/` menu, session titles, context-usage and compaction info, warnings as notices (where the editor supports them), and session history: reopen, resume, close and delete past moca sessions of the folder. Not supported: images, editor-provided MCP servers (configure them in moca), and TUI-only commands (`/compact`, `/undo`, …).
 
@@ -169,12 +169,19 @@ Pick per run with `moca --mode default|auto|yolo|plan` — `plan` is **plan mode
 
 // <project>/.moca/config.jsonc — applies only when the workdir is trusted
 // (moca asks once on first open). Holds a permissions object and an mcp block,
-// and never yolo, a "*" allow rule or auto.model: a cloned repository cannot
-// switch off your checks or pick what model bills its classifier.
+// and never yolo, a "*" allow rule, a "*" MCP approval or auto.model: a cloned
+// repository cannot switch off your checks or pick what model bills its
+// classifier.
 {
   "permissions": {
     "allow": ["docker compose *"],
     "deny":  ["terraform apply *"]
+  },
+  "mcp": {
+    "servers": {
+      "docs":   { "command": "npx", "args": ["-y", "docs-mcp"] }, // a server of this project's own
+      "github": { "approve": ["create_issue"] }                   // an approval patch on a server your own config defines
+    }
   }
 }
 ```

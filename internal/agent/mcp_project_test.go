@@ -111,6 +111,40 @@ func TestProjectMCPServersNeedTrust(t *testing.T) {
 	}
 }
 
+// A trusted project's mcp.idleTimeout applies even when the project configures
+// no server of its own (§4); an untrusted workdir's never does — the TUI keeps
+// a project layer in memory there (allow-always writes one), so the trust guard
+// is what keeps it out. Mutation: drop the `o.Trusted &&` in prepare and the
+// second case below fails.
+func TestProjectMCPIdleTimeout(t *testing.T) {
+	start := func(trusted bool) int {
+		t.Helper()
+		s := newScript(t, textTurn("ok"))
+		t.Setenv("XDG_DATA_HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		t.Setenv("MOCA_T_KEY", "k")
+		cfg, err := config.Parse([]byte(fmt.Sprintf(`{"model":"fake/m",
+			"providers":{"fake":{"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":65536}}}}}`,
+			s.srv.URL)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Project = &config.ProjectConfig{MCP: config.MCPConfig{IdleTimeout: 45}}
+		a, err := Start(StartOptions{Config: cfg, Workdir: t.TempDir(), Trusted: trusted, Slug: "t", HTTP: s.srv.Client()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { a.Close() })
+		return a.opts.Config.MCP.IdleTimeout
+	}
+	if got := start(true); got != 45 {
+		t.Fatalf("a trusted project's idleTimeout = %d, want 45", got)
+	}
+	if got := start(false); got != 600 { // config.Parse's default
+		t.Fatalf("an untrusted workdir's project idleTimeout leaked: %d, want the user default 600", got)
+	}
+}
+
 func warnings(evs []Event) string {
 	var sb strings.Builder
 	for _, e := range evs {
