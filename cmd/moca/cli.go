@@ -48,6 +48,10 @@ usage:
     --dry-run                  only list what would be removed
   moca mcp import              import MCP servers from Claude Code / OpenCode / Pi configs
   moca mcp index               prebuild the persisted MCP discovery index
+  moca acp                     serve the Agent Client Protocol on stdio (Zed, VS Code, Paseo, …)
+    --model / --effort / --mode   as above, for every session the editor opens
+    --approve / --no-approve   trust / do not trust project resources (default: the
+                               saved decision for the folder, else trusted)
   moca --version
 
 logs: ~/.local/state/moca/logs/<date>-<pid>.log — config `+"`"+`log.level`+"`"+` (info|debug|off); MOCA_LOG overrides it for one run
@@ -81,17 +85,11 @@ var cliModes = []string{"default", "auto", "yolo", "plan"}
 // mode. A configured auto/yolo under --mode plan yields to plan (default),
 // so it never counts as yolo for the trust decision.
 func (o Options) ResolveMode(cfg config.Config) (string, bool) {
+	flag := ""
 	if o.Mode != nil {
-		if *o.Mode == "plan" {
-			return "default", true
-		}
-		return *o.Mode, false
+		flag = *o.Mode
 	}
-	base := cfg.Mode()
-	if cfg.Project != nil && cfg.Project.DefaultMode != "" {
-		base = cfg.Project.DefaultMode
-	}
-	return base, false
+	return config.ResolveMode(flag, cfg)
 }
 
 func parseArgs(args []string, stdin io.Reader) (Options, error) {
@@ -176,7 +174,7 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 		return o, usageError{errors.New("--resume and --continue are mutually exclusive")}
 	}
 	o.Sub = fs.Args()
-	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp" || o.Sub[0] == "update" || o.Sub[0] == "prune") {
+	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp" || o.Sub[0] == "update" || o.Sub[0] == "acp" || o.Sub[0] == "prune") {
 		return o, usageError{fmt.Errorf("unknown command %q", o.Sub[0])}
 	}
 	return o, nil

@@ -135,6 +135,22 @@ func (c Config) Mode() string {
 	return "default"
 }
 
+// ResolveMode resolves a run's permission mode and plan scope (§3): an
+// explicit flag value wins — "plan" is the plan scope at the default mode —
+// else a trusted project file's defaultMode, else the config's mode.
+// Shared by the CLI front ends and the ACP server.
+func ResolveMode(flag string, c Config) (string, bool) {
+	switch {
+	case flag == "plan":
+		return "default", true
+	case flag != "":
+		return flag, false
+	case c.Project != nil && c.Project.DefaultMode != "":
+		return c.Project.DefaultMode, false
+	}
+	return c.Mode(), false
+}
+
 // ClassifierOn reports whether auto mode consults the classifier (default on).
 func (a AutoConfig) ClassifierOn() bool { return a.Classifier == nil || *a.Classifier }
 

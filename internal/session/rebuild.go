@@ -30,6 +30,10 @@ func ElidedIDs(entries []Entry) map[string]bool {
 	return ids
 }
 
+// SummaryPrefix opens the user message that carries a compaction summary;
+// front ends recognize it when replaying history.
+const SummaryPrefix = "[Summary of earlier conversation]"
+
 // Messages rebuilds request messages: the latest compaction summary (if any),
 // then entries from its firstKeptEntryId onward (§8). Without a compaction
 // the whole transcript is used, unchanged.
@@ -50,7 +54,7 @@ func Messages(entries []Entry) []llm.Message {
 			// history as if the summary did not exist.
 			start = idx
 		}
-		appendUser(&out, llm.ContentBlock{Type: llm.BlockText, Text: "[Summary of earlier conversation]\n" + c.Summary})
+		appendUser(&out, llm.ContentBlock{Type: llm.BlockText, Text: SummaryPrefix + "\n" + c.Summary})
 	}
 	assistantIdx := map[string]int{}
 	elided := ElidedIDs(entries)
