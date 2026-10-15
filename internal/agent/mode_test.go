@@ -111,7 +111,7 @@ func TestSetPlanKeepsMode(t *testing.T) {
 func TestProjectRulesReachTheShell(t *testing.T) {
 	a, _, _ := startTest(t, newScript(t), 40, func(o *StartOptions) {
 		o.Trusted = true
-		o.Config.Project = &config.PermissionsConfig{Deny: []string{"git push *"}}
+		o.Config.Project = &config.ProjectConfig{Permissions: config.PermissionsConfig{Deny: []string{"git push *"}}}
 	})
 	if _, _, _, err := a.opts.Env.Commands.Check("git push x"); err == nil {
 		t.Fatal("project deny ignored")

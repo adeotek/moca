@@ -53,7 +53,7 @@ func TestResolveMode(t *testing.T) {
 // Project receipts: a trusted project file's defaultMode joins in — but
 // only when no flag overrode it, and plan still rides on default.
 func TestResolveModeProjectReceipts(t *testing.T) {
-	proj := &config.PermissionsConfig{DefaultMode: "auto"}
+	proj := &config.ProjectConfig{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}
 	if mode, plan := (Options{}).ResolveMode(config.Config{}); mode != "default" || plan {
 		t.Errorf("no project: (%q, %v)", mode, plan)
 	}
@@ -119,11 +119,39 @@ func TestPlanNeverResolvesWider(t *testing.T) {
 		{Yolo: true},
 		{Permissions: config.PermissionsConfig{DefaultMode: "yolo"}},
 		{Permissions: config.PermissionsConfig{DefaultMode: "auto"}},
-		{Project: &config.PermissionsConfig{DefaultMode: "auto"}},
+		{Project: &config.ProjectConfig{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}},
 	} {
 		mode, plan := (Options{Mode: ptr("plan")}).ResolveMode(cfg)
 		if mode != "default" || !plan {
 			t.Fatalf("--mode plan over %+v → (%q, %v), want (default, true)", cfg.Permissions, mode, plan)
+		}
+	}
+}
+
+// A workdir needs a trust decision when it holds project resources: moca's
+// own project dir/instructions and the ecosystem MCP configs a trusted
+// project may load servers from (§4, §10.5).
+func TestProjectResourcesTriggerTheTrustPrompt(t *testing.T) {
+	if hasProjectResources(t.TempDir()) {
+		t.Fatal("an empty dir needs no trust decision")
+	}
+	for _, name := range projectResourceNames {
+		dir := t.TempDir()
+		p := filepath.Join(dir, name)
+		if name == ".moca" { // the project dir itself
+			if err := os.MkdirAll(p, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte("{}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !hasProjectResources(dir) {
+			t.Errorf("%s must need a trust decision", name)
 		}
 	}
 }

@@ -26,19 +26,21 @@ type EnvVar struct {
 // DiscoverSources lists the existing Claude Code / OpenCode / Pi MCP config
 // files. Pi paths come from pi-mcp-adapter's documented file layout: the
 // shared user-global files and Pi's own (all the Claude-compatible
-// `mcpServers` shape).
+// `mcpServers` shape). The project-scoped files (cwd) come first after the
+// user-global Claude file, so a project's own server wins a name conflict.
 func DiscoverSources(home, cwd string) []Source {
 	cands := []Source{
 		{"claude-code", filepath.Join(home, ".claude.json")},
-		{"claude-code", filepath.Join(cwd, ".mcp.json")},
-		{"opencode", filepath.Join(home, ".config", "opencode", "opencode.json")},
-		{"opencode", filepath.Join(home, ".config", "opencode", "opencode.jsonc")},
-		{"pi", filepath.Join(home, ".config", "mcp", "mcp.json")},
-		{"pi", filepath.Join(home, ".agents", "mcp.json")},
-		{"pi", filepath.Join(home, ".agents", "mcp", "mcp.json")},
-		{"pi", filepath.Join(home, ".pi", "agent", "mcp.json")},
-		{"pi", filepath.Join(cwd, ".pi", "mcp.json")},
 	}
+	cands = append(cands, ProjectSources(cwd)...)
+	cands = append(cands,
+		Source{"opencode", filepath.Join(home, ".config", "opencode", "opencode.json")},
+		Source{"opencode", filepath.Join(home, ".config", "opencode", "opencode.jsonc")},
+		Source{"pi", filepath.Join(home, ".config", "mcp", "mcp.json")},
+		Source{"pi", filepath.Join(home, ".agents", "mcp.json")},
+		Source{"pi", filepath.Join(home, ".agents", "mcp", "mcp.json")},
+		Source{"pi", filepath.Join(home, ".pi", "agent", "mcp.json")},
+	)
 	var out []Source
 	for _, c := range cands {
 		if _, err := os.Stat(c.Path); err == nil {
@@ -49,14 +51,15 @@ func DiscoverSources(home, cwd string) []Source {
 }
 
 type claudeServer struct {
-	Type     string            `json:"type"`
-	Command  string            `json:"command"`
-	Args     []string          `json:"args"`
-	Env      map[string]string `json:"env"`
-	URL      string            `json:"url"`
-	Headers  map[string]string `json:"headers"`
-	Enabled  *bool             `json:"enabled"`  // pi: enabled:false → disabled
-	Disabled *bool             `json:"disabled"` // adapter override
+	Type        string            `json:"type"`
+	Command     string            `json:"command"`
+	Args        []string          `json:"args"`
+	Env         map[string]string `json:"env"`
+	URL         string            `json:"url"`
+	Headers     map[string]string `json:"headers"`
+	Description string            `json:"description"` // moca/pi: the prompt roster line
+	Enabled     *bool             `json:"enabled"`     // pi: enabled:false → disabled
+	Disabled    *bool             `json:"disabled"`    // adapter override
 }
 
 type opencodeServer struct {
@@ -65,6 +68,7 @@ type opencodeServer struct {
 	Environment map[string]string `json:"environment"`
 	URL         string            `json:"url"`
 	Headers     map[string]string `json:"headers"`
+	Description string            `json:"description"`
 	Enabled     *bool             `json:"enabled"`
 }
 
@@ -93,9 +97,9 @@ func ParseSource(src Source, cwd string) (map[string]config.MCPServer, []string,
 			case (s.Enabled != nil && !*s.Enabled) || (s.Disabled != nil && *s.Disabled):
 				notes = append(notes, fmt.Sprintf("skipped %s (%s): disabled", n, src.Tool))
 			case s.URL != "":
-				out[n] = config.MCPServer{URL: s.URL, Headers: s.Headers}
+				out[n] = config.MCPServer{URL: s.URL, Headers: s.Headers, Description: s.Description}
 			case s.Command != "":
-				out[n] = config.MCPServer{Command: s.Command, Args: s.Args, Env: s.Env}
+				out[n] = config.MCPServer{Command: s.Command, Args: s.Args, Env: s.Env, Description: s.Description}
 			}
 		}
 	}
@@ -128,9 +132,9 @@ func ParseSource(src Source, cwd string) (map[string]config.MCPServer, []string,
 			}
 			switch {
 			case s.Type == "remote":
-				out[n] = config.MCPServer{URL: s.URL, Headers: s.Headers}
+				out[n] = config.MCPServer{URL: s.URL, Headers: s.Headers, Description: s.Description}
 			case len(s.Command) > 0:
-				out[n] = config.MCPServer{Command: s.Command[0], Args: s.Command[1:], Env: s.Environment}
+				out[n] = config.MCPServer{Command: s.Command[0], Args: s.Command[1:], Env: s.Environment, Description: s.Description}
 			}
 		}
 	}
@@ -185,12 +189,39 @@ func envName(server, key string) string {
 		strings.Trim(nonAlnum.ReplaceAllString(strings.ToUpper(key), "_"), "_")
 }
 
+// envRefs replaces whole-value `${VAR}`/`$VAR` references in a server's
+// env/headers with moca's `env:VAR` form (resolved when the server starts, so
+// the secret stays in the environment). The ecosystem source files use that
+// convention; moca's own config files do not need it. Non-reference values are
+// left exactly as they are — the runtime path never rewrites what a user's
+// project file holds, and the import path layers its secret rejection on top.
+func envRefs(s config.MCPServer) config.MCPServer {
+	rewrite := func(m map[string]string) map[string]string {
+		if m == nil {
+			return nil
+		}
+		out := map[string]string{}
+		for k, v := range m {
+			if !strings.HasPrefix(v, "env:") && varRef.MatchString(v) {
+				out[k] = "env:" + varRef.FindStringSubmatch(v)[1]
+				continue
+			}
+			out[k] = v
+		}
+		return out
+	}
+	s.Env = rewrite(s.Env)
+	s.Headers = rewrite(s.Headers)
+	return s
+}
+
 // RewriteSecrets replaces credential-looking env/header values with env:
 // references; secrets are never copied literally. `${VAR}`/`$VAR` whole-value references
 // become env:VAR (nothing to export); a secret-looking key or value becomes
 // env:MOCA_MCP_<SERVER>_<KEY> and is reported for export.
 func RewriteSecrets(server string, s config.MCPServer) (config.MCPServer, []EnvVar) {
 	var vars []EnvVar
+	s = envRefs(s)
 	rewrite := func(field string, m map[string]string) map[string]string {
 		if m == nil {
 			return nil
@@ -200,8 +231,6 @@ func RewriteSecrets(server string, s config.MCPServer) (config.MCPServer, []EnvV
 			switch {
 			case strings.HasPrefix(v, "env:"):
 				out[k] = v
-			case varRef.MatchString(v):
-				out[k] = "env:" + varRef.FindStringSubmatch(v)[1]
 			case secretKey.MatchString(k) || secretValue.MatchString(v) || embeddedSecret(v):
 				name := envName(server, k)
 				out[k] = "env:" + name

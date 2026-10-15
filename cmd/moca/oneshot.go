@@ -124,7 +124,7 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 	}
 	var a *agent.Agent
 	so := agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model,
-		Trusted: trusted, Mode: agent.PermMode(mode), Plan: plan, Emit: emit, Slug: oneShotSlug(o)}
+		Trusted: trusted, Mode: agent.PermMode(mode), Plan: plan, Emit: emit, Slug: oneShotSlug(o), ConfigPath: o.ConfigPath}
 	if resumePath != "" {
 		a, err = agent.Resume(so, resumePath)
 	} else {

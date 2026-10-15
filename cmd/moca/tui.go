@@ -15,8 +15,21 @@ import (
 	"github.com/adeotek/moca/internal/tui"
 )
 
+// projectResourceNames are the project-level files that make a workdir need a
+// trust decision: moca's own project dir/instructions plus the ecosystem MCP
+// configs a trusted project may load servers from (§4, §10.5).
+var projectResourceNames = []string{
+	".moca",
+	"AGENTS.md",
+	"CLAUDE.md",
+	".mcp.json",
+	"opencode.json",
+	"opencode.jsonc",
+	filepath.Join(".pi", "mcp.json"),
+}
+
 func hasProjectResources(dir string) bool {
-	for _, n := range []string{".moca", "AGENTS.md", "CLAUDE.md"} {
+	for _, n := range projectResourceNames {
 		if _, err := os.Stat(filepath.Join(dir, n)); err == nil {
 			return true
 		}
@@ -102,7 +115,7 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 	pdirs = append(pdirs, skills.Dir{Path: promptsDir, Source: "global"})
 	home, _ := os.UserHomeDir()
 	err = tui.Run(ctx, tui.AppOptions{
-		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Mode: agent.PermMode(mode), Plan: plan, Slug: "tui"},
+		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Mode: agent.PermMode(mode), Plan: plan, Slug: "tui", ConfigPath: cfgPath},
 		ConfigPath: cfgPath, Prompts: skills.LoadPrompts(pdirs), PromptDirs: pdirs, Home: home,
 		ResumePath:  resumePath,
 		HintsPath:   filepath.Join(config.DataDir(), "hints.json"),

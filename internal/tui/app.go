@@ -1470,8 +1470,13 @@ func (m *model) View() tea.View {
 	// caret it pins the renderer's remembered cursor row inside the frame
 	// after every render (see padForShrink).
 	v.Cursor = cur
-	// Ask for full key disambiguation so shift+enter is distinguishable.
-	v.KeyboardEnhancements = tea.KeyboardEnhancements{ReportAllKeysAsEscapeCodes: true}
+	// Ask for full key disambiguation so shift+enter is distinguishable, and
+	// for alternate keys: with all keys reported as escape codes the terminal
+	// sends the *unshifted* codepoint with a shift modifier, and only the
+	// alternate-key form carries what the user actually typed (shift+/ is
+	// Text "/" without it — a terminal is free to send the shifted codepoint
+	// only when this flag is set; it must be present whenever shift is).
+	v.KeyboardEnhancements = tea.KeyboardEnhancements{ReportAllKeysAsEscapeCodes: true, ReportAlternateKeys: true}
 	// Focus reports tell us when to notify (see notify).
 	v.ReportFocus = true
 	return v

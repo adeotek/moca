@@ -278,7 +278,7 @@ func TestPermissionsValidation(t *testing.T) {
 
 func TestResolveMode(t *testing.T) {
 	base := Config{}
-	proj := Config{Project: &PermissionsConfig{DefaultMode: "auto"}}
+	proj := Config{Project: &ProjectConfig{Permissions: PermissionsConfig{DefaultMode: "auto"}}}
 	cases := []struct {
 		flag string
 		cfg  Config
