@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.5.2-beta (2026-10-16)
+## v0.6.0 (2026-10-16)
 
 The models behind the zen tier became thinking-only mid-October; the glm effort maps now match the live-verified acceptance, and the agent gains a progress nudge plus working-style rules from the TB2 bench review (2026-10-16). The scrollback bands are darker, the trust prompt lists its resources on a second line, the TUI's colors are configurable — one built-in palette with user and project layers — and the permission mode a session starts in can be pinned per user or per trusted project.
 
@@ -15,9 +15,10 @@ The models behind the zen tier became thinking-only mid-October; the glm effort 
 
 ### TUI
 
-- **The scrollback bands are near-black.** Submitted (`›`) messages print on `#141618` (it was slate `#3d434c`) and streamed assistant responses on `#091215` (it was deep blue `#213b49`); fenced code inside a response moves to `#0c222b` (it was `#16303d`).
+- **The scrollback bands are near-black.** Submitted (`›`) messages print on `#1c1f21` (it was slate `#3d434c`) and streamed assistant responses on `#0a1619` (it was deep blue `#213b49`); fenced code inside a response moves to `#0c1f27` (it was `#16303d`).
+- **The `Default` badge mutes** to a quiet gray `#8d8f91` (was `#c9d1d9`) — Auto, Plan and Yolo keep their tier-1 colors, so the states that need attention still pop.
 - **The trust prompt puts its resource list on a second line**: `Trust project resources in <dir>? [y/N]`, with `(.moca/, AGENTS.md/CLAUDE.md, project MCP configs - they can steer the agent and start MCP servers)` on the second line.
-- **Every TUI color is configurable.** A `tui.theme` block takes `both`, `dark` and `light` groups of color roles; `dark` and `light` follow the terminal's reported background, `both` fills whichever applies, and a variant's own key wins over `both`. A value is a `#rrggbb` hex or an ANSI color number 0-255; an unknown role or a malformed color is a config error. The built-in palette — unchanged, so nothing moves until you set a color — now lives in a single file (`internal/tui/theme.go`).
+- **Every TUI color is configurable.** A `tui.theme` block takes `both`, `dark` and `light` groups of color roles; `dark` and `light` follow the terminal's reported background, `both` fills whichever applies, and a variant's own key wins over `both`. A value is a `#rrggbb` hex or an ANSI color number 0-255; an unknown role or a malformed color is a config error. The built-in palette now lives in a single file (`internal/tui/theme.go`) and ships the values these release notes describe — nothing moves unless you set a color.
 - **Colors can be set per project.** A trusted workdir's `.moca/config.jsonc` accepts a `tui.theme` block too and overrides the user's per color; `tui.notify` stays user-only.
 
 ### Permissions
