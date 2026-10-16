@@ -132,14 +132,14 @@ func TestRunDoneClearsTransient(t *testing.T) {
 // (an approved interpreter runs the heredoc below its first line), and the
 // overflow is counted.
 func TestApprovalPromptSanitized(t *testing.T) {
-	got := approvalPanel(&approvalState{approvalMsg: approvalMsg{q: tools.Question{Subject: "seq", Detail: "seq 'x\x1b[2Jy'\nsecond line"}}}, 80, 6)
+	got := approvalPanel(&approvalState{approvalMsg: approvalMsg{q: tools.Question{Subject: "seq", Detail: "seq 'x\x1b[2Jy'\nsecond line"}}}, 80, 6, DefaultTheme(), true)
 	if strings.Contains(got, "\x1b[2J") {
 		t.Fatalf("unescaped control byte in prompt: %q", got)
 	}
 	if !strings.Contains(got, "^[[2J") || !strings.Contains(got, "second line") {
 		t.Fatalf("every detail line is shown, sanitized: %q", got)
 	}
-	long := approvalPanel(&approvalState{approvalMsg: approvalMsg{q: tools.Question{Subject: "python3", Detail: "python3 - <<'EOF'\na\nb\nc\nd\ne\nf\nEOF"}}}, 80, 4)
+	long := approvalPanel(&approvalState{approvalMsg: approvalMsg{q: tools.Question{Subject: "python3", Detail: "python3 - <<'EOF'\na\nb\nc\nd\ne\nf\nEOF"}}}, 80, 4, DefaultTheme(), true)
 	if !strings.Contains(long, "a") || strings.Contains(long, "│ d") || !strings.Contains(long, "+5 lines") {
 		t.Fatalf("overflow must be capped and counted: %q", long)
 	}
@@ -147,7 +147,7 @@ func TestApprovalPromptSanitized(t *testing.T) {
 
 // The scrollback opens with the title + version and the greeting.
 func TestWelcomeLines(t *testing.T) {
-	w := welcomeText()
+	w := (&model{th: DefaultTheme(), darkBG: true}).welcomeText()
 	for _, want := range []string{"moca", config.Version, "How can I help you today?"} {
 		if !strings.Contains(w, want) {
 			t.Fatalf("welcome %q missing %q", w, want)

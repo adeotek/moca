@@ -22,13 +22,13 @@ type pagerModel struct {
 	cur    int    // 0-based current match
 }
 
-func newPager(it Item, w, h int) *pagerModel {
+func newPager(it Item, w, h int, accent string) *pagerModel {
 	vp := viewport.New(viewport.WithWidth(w), viewport.WithHeight(max(3, h-1)))
 	// Reasoning and tool output are long prose lines: wrap them instead of
 	// cutting them off at the right edge.
 	vp.SoftWrap = true
 	vp.HighlightStyle = lipgloss.NewStyle().Reverse(true)
-	vp.SelectedHighlightStyle = lipgloss.NewStyle().Reverse(true).Bold(true).Foreground(lipgloss.Color("#d97706"))
+	vp.SelectedHighlightStyle = lipgloss.NewStyle().Reverse(true).Bold(true).Foreground(lipgloss.Color(accent))
 	vp.SetContent(it.Body)
 	return &pagerModel{vp: vp, title: it.Line, body: it.Body}
 }

@@ -30,7 +30,7 @@ func TestLoadProject(t *testing.T) {
 	}
 	for src, want := range map[string]string{
 		`{"model":"x/y"}`:                                 "unknown field",
-		`{"permissions":{"defaultMode":"yolo"}}`:          "yolo",
+		`{"permissions":{"defaultMode":"turbo"}}`:         "defaultMode",
 		`{"permissions":{"allow":["*"]}}`:                 `"*"`,
 		`{"permissions":{"allow":["**"]}}`:                "matches every command",
 		`{"permissions":{"allow":["* *"]}}`:               "matches every command",
@@ -49,6 +49,16 @@ func TestLoadProject(t *testing.T) {
 		`{"mcp":{"servers":{"x":{"url":"https://b","approve":[" "]}}}}`:     "empty tool name",
 		`{"mcp":{"servers":{"x":{"command":"npx","env":{"K":"env:V"}}}}}`:   "",
 		`{"permissions":{"allow":["make *"]},"mcp":{"idleTimeout":120}}`:    "",
+		// The project layer's startup modes: `default`, `auto` and `plan` are
+		// valid (plan resolves to the plan scope); `yolo` is capped off — a
+		// cloned repository cannot start permission-free sessions.
+		`{"permissions":{"defaultMode":"plan"}}`: "",
+		`{"permissions":{"defaultMode":"yolo"}}`: "cannot set defaultMode",
+		// The TUI block is user-only (colors and notify alike): a cloned
+		// repository must not be able to recolor the permission badge or hide
+		// the transcript, and a leftover block is an error, never ignored.
+		`{"tui":{"theme":{"dark":{"userBg":"#101010"}}}}`: "unknown field",
+		`{"tui":{"notify":"bell"}}`:                       "unknown field",
 	} {
 		write(src)
 		_, err := LoadProject(wd)
@@ -64,6 +74,20 @@ func TestLoadProject(t *testing.T) {
 		if _, err := LoadProject(wd); err != nil {
 			t.Errorf("%s: %v", ok, err)
 		}
+	}
+	// Receipts: the project's startup mode survives to the caller (it wins
+	// over the user layer at model build, §4).
+	write(`{"permissions":{"defaultMode":"plan"}}`)
+	p2, err := LoadProject(wd)
+	if err != nil {
+		t.Fatalf("project mode receipt: %v", err)
+	}
+	if p2.Mode() != "plan" {
+		t.Fatalf("project mode lost: %q", p2.Mode())
+	}
+	write(`{"tui":{"theme":{"both":{"accent":"3"}}}}`)
+	if _, err := LoadProject(wd); err == nil || !strings.Contains(err.Error(), ProjectConfigFile(wd)) {
+		t.Fatalf("a project tui block must fail naming the file: %v", err)
 	}
 }
 

@@ -40,9 +40,8 @@ func startLog(cfg config.Config, cfgPath string, o Options, stderr io.Writer) (f
 	if o.OneShot {
 		mode = "oneshot"
 	}
-	_, plan := o.ResolveMode(cfg)
 	slog.Info("start", "version", config.Version, "os", runtime.GOOS, "arch", runtime.GOARCH,
-		"mode", mode, "plan", plan, "config", cfgPath, "level", strings.ToLower(strings.TrimSpace(name)))
+		"mode", mode, "config", cfgPath, "level", strings.ToLower(strings.TrimSpace(name)))
 	slog.Debug("config", "model", cfg.Model, "providers", slices.Sorted(maps.Keys(cfg.Providers)),
 		"mcp", slices.Sorted(maps.Keys(cfg.MCP.Servers)), "web", cfg.Web.Search.Provider)
 	return func() { c.Close() }, nil
