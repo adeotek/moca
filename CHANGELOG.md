@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.5.2-beta (2026-10-16)
 
 The models behind the zen tier became thinking-only mid-October; the glm effort maps now match the live-verified acceptance, and the agent gains a progress nudge plus working-style rules from the TB2 bench review (2026-10-16).
 
