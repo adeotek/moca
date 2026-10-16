@@ -104,12 +104,12 @@ func TestYoloBadgeNeverPlanBlue(t *testing.T) {
 }
 
 // The model field shares the plan blue exactly (Ben, 2026-10-12) — pinned
-// per theme so a future palette edit cannot silently split them.
+// per variant on the theme itself, the one place both colors live.
 func TestModelRendersPlanBlue(t *testing.T) {
 	for _, dark := range []bool{true, false} {
-		p := DefaultTheme().statusPalette(dark)
-		if p.fg[roleModel] != p.plan {
-			t.Errorf("dark=%v: model %s != plan blue %s", dark, p.fg[roleModel], p.plan)
+		c := DefaultTheme().colors(dark)
+		if c.StatusModel != c.BadgePlan {
+			t.Errorf("dark=%v: model %s != plan blue %s", dark, c.StatusModel, c.BadgePlan)
 		}
 	}
 }

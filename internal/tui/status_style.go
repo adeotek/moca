@@ -4,8 +4,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-
-	"github.com/adeotek/moca/internal/agent"
 )
 
 // palette is the importance-ranked status-bar color table for one theme
@@ -14,12 +12,10 @@ import (
 // contrast-tested in status_style_test.go); separators are decorative and
 // recede below tier-4 text; higher tiers render bold.
 type palette struct {
-	fg    map[role]string           // per-role text color (#rrggbb)
-	badge map[agent.PermMode]string // mode-badge colors: Default/Auto/Yolo
-	plan  string                    // the Plan badge (a default run under the plan scope)
-	warn  lipgloss.Style            // percent at ≥ 70% of the window
-	hot   lipgloss.Style            // percent at/past the auto-compact trigger (bold)
-	sep   lipgloss.Style            // " · " separators (structure, not content)
+	fg   map[role]string // per-role text color (#rrggbb)
+	warn lipgloss.Style  // percent at ≥ 70% of the window
+	hot  lipgloss.Style  // percent at/past the auto-compact trigger (bold)
+	sep  lipgloss.Style  // " · " separators (structure, not content)
 }
 
 // statusPalette builds the table from the Theme (theme.go): every content role
@@ -43,12 +39,6 @@ func (t Theme) statusPalette(dark bool) palette {
 			roleMuted:  c.StatusMuted,
 			roleSep:    c.StatusSep,
 		},
-		badge: map[agent.PermMode]string{
-			agent.ModeDefault: c.StatusMode,
-			agent.ModeAuto:    c.BadgeAuto,
-			agent.ModeYolo:    c.BadgeYolo,
-		},
-		plan: c.BadgePlan,
 		warn: lipgloss.NewStyle().Foreground(lipgloss.Color(c.PctWarn)),
 		hot:  lipgloss.NewStyle().Foreground(lipgloss.Color(c.PctHot)).Bold(true),
 		sep:  lipgloss.NewStyle().Foreground(lipgloss.Color(c.StatusSep)),
