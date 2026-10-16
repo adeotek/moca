@@ -118,9 +118,9 @@ func (m *model) pickerPanel() string {
 		if p.confirmPrompt != nil && p.cursor >= 0 && p.cursor < len(p.items) {
 			q = p.confirmPrompt(p.items[p.cursor].key)
 		}
-		b.WriteString(warnFg.Render("? ") + Sanitize(q) + "\n")
+		b.WriteString(m.th.warningStyle(m.darkBG).Render("? ") + Sanitize(q) + "\n")
 	} else {
-		b.WriteString(warnFg.Render("? ") + Sanitize(p.title) + "\n")
+		b.WriteString(m.th.warningStyle(m.darkBG).Render("? ") + Sanitize(p.title) + "\n")
 	}
 	for i := start; i < end; i++ {
 		b.WriteString(choiceRow(i == p.cursor, p.items[i].label) + "\n")

@@ -10,7 +10,7 @@ import (
 
 func plainMD(s string, width int) string {
 	var st mdState
-	return ansi.Strip(renderMarkdown(&st, s, width, true))
+	return ansi.Strip(renderMarkdown(DefaultTheme(), &st, s, width, true))
 }
 
 func TestMarkdownBlocks(t *testing.T) {
@@ -37,7 +37,7 @@ func TestMarkdownBlocks(t *testing.T) {
 
 func TestMarkdownFence(t *testing.T) {
 	var st mdState
-	got := ansi.Strip(renderMarkdown(&st, "before\n```go\nfunc main() {\n\treturn   1\n}\n```\nafter **b**", 0, true))
+	got := ansi.Strip(renderMarkdown(DefaultTheme(), &st, "before\n```go\nfunc main() {\n\treturn   1\n}\n```\nafter **b**", 0, true))
 	want := " before\n ─ go\n func main() {\n     return   1\n }\n \n after b"
 	if got != want {
 		t.Fatalf("got\n%q\nwant\n%q", got, want)
@@ -47,14 +47,14 @@ func TestMarkdownFence(t *testing.T) {
 	}
 	// State carries across calls (streamed lines arrive in batches); markdown
 	// markers inside code stay literal.
-	renderMarkdown(&st, "```", 0, true)
+	renderMarkdown(DefaultTheme(), &st, "```", 0, true)
 	if !st.inFence {
 		t.Fatal("opener sets the state")
 	}
 	if got := plainMD("x", 0); got != " x" {
 		t.Fatal(got)
 	}
-	if got := ansi.Strip(renderMarkdown(&st, "**not bold** `x`", 0, true)); !strings.Contains(got, "**not bold** `x`") {
+	if got := ansi.Strip(renderMarkdown(DefaultTheme(), &st, "**not bold** `x`", 0, true)); !strings.Contains(got, "**not bold** `x`") {
 		t.Fatalf("inside a fence markers are literal: %q", got)
 	}
 }
@@ -63,10 +63,10 @@ func TestMarkdownFence(t *testing.T) {
 // dark #0c222b, light #b6cdee.
 func TestMarkdownCodeBandPalette(t *testing.T) {
 	var st mdState
-	if out := renderMarkdown(&st, "```\nx\n```", 0, true); !strings.Contains(out, "48;2;12;34;43") {
+	if out := renderMarkdown(DefaultTheme(), &st, "```\nx\n```", 0, true); !strings.Contains(out, "48;2;12;34;43") {
 		t.Fatalf("dark code band palette changed: %q", out)
 	}
-	if out := renderMarkdown(&st, "```\nx\n```", 0, false); !strings.Contains(out, "48;2;182;205;238") {
+	if out := renderMarkdown(DefaultTheme(), &st, "```\nx\n```", 0, false); !strings.Contains(out, "48;2;182;205;238") {
 		t.Fatalf("light code band palette changed: %q", out)
 	}
 }
@@ -75,7 +75,7 @@ func TestMarkdownCodeBandPalette(t *testing.T) {
 // width (never word-wrapped), prose is word-wrapped.
 func TestMarkdownWidthAndWrap(t *testing.T) {
 	var st mdState
-	out := renderMarkdown(&st, "aaa bbb ccc ddd eee fff ggg\n```\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx yy\n```", 20, true)
+	out := renderMarkdown(DefaultTheme(), &st, "aaa bbb ccc ddd eee fff ggg\n```\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx yy\n```", 20, true)
 	for _, r := range strings.Split(out, "\n") {
 		if w := lipgloss.Width(r); w != 20 {
 			t.Fatalf("row %q is %d cells", ansi.Strip(r), w)
@@ -94,7 +94,7 @@ func TestMarkdownWidthAndWrap(t *testing.T) {
 // leaves a toggle open (rows are rendered independently).
 func TestMarkdownSpanAcrossWrap(t *testing.T) {
 	var st mdState
-	out := renderMarkdown(&st, "**aaa bbb ccc ddd** tail", 10, true)
+	out := renderMarkdown(DefaultTheme(), &st, "**aaa bbb ccc ddd** tail", 10, true)
 	for _, r := range strings.Split(out, "\n") {
 		if strings.Count(r, sgrBoldOn) > strings.Count(r, sgrBoldOff) {
 			t.Fatalf("row leaves bold open: %q", r)
@@ -113,7 +113,7 @@ func TestMarkdownSpanAcrossWrap(t *testing.T) {
 // Model text cannot inject its own escapes: only ours survive.
 func TestMarkdownSanitizes(t *testing.T) {
 	var st mdState
-	out := renderMarkdown(&st, "x\x1b[2Jy `\x1b[31mz`", 0, true)
+	out := renderMarkdown(DefaultTheme(), &st, "x\x1b[2Jy `\x1b[31mz`", 0, true)
 	if strings.Contains(out, "\x1b[2J") || strings.Contains(out, "\x1b[31m") {
 		t.Fatalf("raw escape reached the terminal: %q", out)
 	}

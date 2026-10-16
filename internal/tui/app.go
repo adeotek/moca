@@ -41,6 +41,10 @@ type AppOptions struct {
 	// ResumePath opens this session file (--resume/--continue) instead of
 	// starting a new one.
 	ResumePath string
+	// Theme is the resolved color theme (§3.5): DefaultTheme with the user
+	// config's tui.theme applied, then a trusted project's (which wins).
+	// Zero = the built-in palette (theme.go).
+	Theme Theme
 }
 
 type hintCheckMsg struct{}
@@ -156,6 +160,11 @@ type model struct {
 	// gives ASCII). Scrollback text bypasses the renderer's downsampling, so
 	// flush applies it (see downsample).
 	profile colorprofile.Profile
+	// th is the resolved color theme (§3.5): DefaultTheme with the user
+	// config's tui.theme applied, then a trusted project's (which wins) —
+	// cmd resolves it before Run; a zero value falls back to the built-in
+	// palette (theme.go).
+	th Theme
 	// blurred: the terminal reports it lost focus (tea.BlurMsg) — notifications
 	// fire only then.
 	blurred bool
@@ -247,15 +256,9 @@ type settleMsg struct{}
 
 var (
 	dim = lipgloss.NewStyle().Faint(true)
-	red = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-	// planFg is the plan-mode badge/notice color (blue).
-	planFg = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true)
-	// orange marks the product name in the welcome line. One shade serves
-	// both light and dark terminals: the welcome prints before the terminal
-	// reports its background, and #d97706 keeps ≥3:1 contrast on white and
-	// 4.4+ on the common dark backgrounds.
-	orange = lipgloss.NewStyle().Foreground(lipgloss.Color("#d97706")).Bold(true)
-	bold   = lipgloss.NewStyle().Bold(true)
+	// dim and bold are attributes, not colors — every color comes from the
+	// model's theme (theme.go, §3.5).
+	bold = lipgloss.NewStyle().Bold(true)
 )
 
 func newModel(o AppOptions, a *agent.Agent) *model {
@@ -270,15 +273,16 @@ func newModel(o AppOptions, a *agent.Agent) *model {
 	// MaxHeight logical lines exist (MaxHeight then only sizes the viewport).
 	// The default cursor-line highlight (a black band) is dropped. The cursor
 	// is the terminal's own (see View).
+	th := resolvedTheme(o.Theme)
 	ta.DynamicHeight, ta.MinHeight, ta.MaxHeight, ta.MaxContentHeight = true, 1, 8, 10000
 	ta.SetVirtualCursor(false)
 	st := textarea.DefaultStyles(true)
 	st.Focused.CursorLine = lipgloss.NewStyle()
-	st.Focused.Placeholder = mutedFg
-	st.Blurred.Placeholder = mutedFg
+	st.Focused.Placeholder = th.mutedStyle(true)
+	st.Blurred.Placeholder = th.mutedStyle(true)
 	ta.SetStyles(st)
 	ta.Focus()
-	m := &model{opts: o, start: o.Start, agent: a, input: NewInput(), ta: ta, now: time.Now, darkBG: true, profile: colorprofile.TrueColor}
+	m := &model{opts: o, start: o.Start, agent: a, input: NewInput(), ta: ta, now: time.Now, darkBG: true, profile: colorprofile.TrueColor, th: th}
 	m.input.LoadHistory(loadHistory(o.HistoryPath, o.Start.Workdir))
 	m.refreshStatus()
 	return m
@@ -372,7 +376,7 @@ func (m *model) Init() tea.Cmd {
 	// landing while the first frame is still being drawn loses a line — the
 	// renderer's erase counts a frame that has not rendered yet and the
 	// notice takes the greeting's row.
-	welcome := welcomeText()
+	welcome := m.welcomeText()
 	if m.unconfigured() {
 		welcome += "\n" + m.setupNotice()
 	}
@@ -380,10 +384,11 @@ func (m *model) Init() tea.Cmd {
 }
 
 // welcomeText opens the scrollback of a session: title + version, then the
-// greeting. The product name renders in orange (readable on light and dark
-// backgrounds alike — the welcome prints before the background is known).
-func welcomeText() string {
-	return orange.Render("moca") + " " + dim.Render(config.Version) + "\n" + "How can I help you today?"
+// greeting. The product name renders in the accent color (one default shade
+// serves light and dark alike — the welcome prints before the background is
+// known, so the dark variant applies).
+func (m *model) welcomeText() string {
+	return m.th.accentStyle(m.darkBG).Render("moca") + " " + dim.Render(config.Version) + "\n" + "How can I help you today?"
 }
 
 // commitLive moves every completed line out of the live buffer and returns
@@ -767,7 +772,7 @@ func (m *model) ctrlC() tea.Cmd {
 }
 
 func (m *model) openPager(it Item) {
-	m.pager = newPager(it, max(20, m.width), max(6, m.height))
+	m.pager = newPager(it, max(20, m.width), max(6, m.height), m.th.colors(m.darkBG).Accent)
 }
 
 // submit classifies and dispatches the input line (enter).
@@ -1296,7 +1301,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.refreshStatus()
 		item := m.printItem(it.Line, e.Result.IsError)
 		if e.Call.Name == "edit" && !e.Result.IsError {
-			if prev := diffPreview(e.Result.Detail, m.width, diffPreviewRows); prev != "" {
+			if prev := diffPreview(m.th, m.darkBG, e.Result.Detail, m.width, diffPreviewRows); prev != "" {
 				return tea.Sequence(item, m.emit(prev))
 			}
 		}
@@ -1341,13 +1346,13 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.refreshStatus()
 		line, isRed := modeNotice(e.Mode, e.Plan)
 		if isRed {
-			return m.println(red.Render(line))
+			return m.println(m.th.errorStyle(m.darkBG).Bold(true).Render(line))
 		}
 		return m.printlnMuted(line)
 	case agent.PlanChanged:
 		m.refreshStatus()
 		if e.On {
-			return m.println(planFg.Render("plan mode on: runs write an implementation plan to docs/plans/ — every other write is refused (shell/mcp/web inspect as usual)"))
+			return m.println(m.th.planStyle(m.darkBG).Render("plan mode on: runs write an implementation plan to docs/plans/ — every other write is refused (shell/mcp/web inspect as usual)"))
 		}
 		return m.println("plan mode off")
 	}
@@ -1442,7 +1447,7 @@ func (m *model) View() tea.View {
 			// The picker rows sit above the command lines.
 			rows = min(rows, max(1, m.height-inputChrome-4-len(m.approval.options())))
 		}
-		sb.WriteString(approvalPanel(m.approval, max(20, m.width), rows) + "\n")
+		sb.WriteString(approvalPanel(m.approval, max(20, m.width), rows, m.th, m.darkBG) + "\n")
 	} else if m.busy() {
 		sb.WriteString(m.activityLine() + "\n")
 	} else if d := m.dropdown(); d != nil {
@@ -1613,8 +1618,8 @@ func (m *model) statusLine() string {
 	if len(badges) > 0 {
 		l2 = append(badges, l2...)
 	}
-	return styleLine(l1, m.darkBG, pressureOK) + "\n" +
-		styleLine(l2, m.darkBG, m.status.pressure())
+	return m.th.styleLine(l1, m.darkBG, pressureOK) + "\n" +
+		m.th.styleLine(l2, m.darkBG, m.status.pressure())
 }
 
 // badgeText is the plain badge text for one status-bar badge: a single
@@ -1715,7 +1720,7 @@ func (m *model) exitLine() string {
 		return ""
 	}
 	id := m.agent.Session().ID8()
-	return mutedFg.Render(fmt.Sprintf("session %s · resume with: moca --resume %s", id, id))
+	return m.th.mutedStyle(m.darkBG).Render(fmt.Sprintf("session %s · resume with: moca --resume %s", id, id))
 }
 
 // runResult maps Program.Run's error to the caller's: a clean quit is nil;

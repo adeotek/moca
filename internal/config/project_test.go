@@ -30,7 +30,7 @@ func TestLoadProject(t *testing.T) {
 	}
 	for src, want := range map[string]string{
 		`{"model":"x/y"}`:                                 "unknown field",
-		`{"permissions":{"defaultMode":"yolo"}}`:          "yolo",
+		`{"permissions":{"defaultMode":"turbo"}}`:         "defaultMode",
 		`{"permissions":{"allow":["*"]}}`:                 `"*"`,
 		`{"permissions":{"allow":["**"]}}`:                "matches every command",
 		`{"permissions":{"allow":["* *"]}}`:               "matches every command",
@@ -49,6 +49,17 @@ func TestLoadProject(t *testing.T) {
 		`{"mcp":{"servers":{"x":{"url":"https://b","approve":[" "]}}}}`:     "empty tool name",
 		`{"mcp":{"servers":{"x":{"command":"npx","env":{"K":"env:V"}}}}}`:   "",
 		`{"permissions":{"allow":["make *"]},"mcp":{"idleTimeout":120}}`:    "",
+		// The project layer's startup modes: `default`, `auto` and `plan` are
+		// valid (plan resolves to the plan scope); `yolo` is capped off — a
+		// cloned repository cannot start permission-free sessions.
+		`{"permissions":{"defaultMode":"plan"}}`: "",
+		`{"permissions":{"defaultMode":"yolo"}}`: "cannot set defaultMode",
+		// The project theme layer: colors only; notify stays user-only, an
+		// unknown role or a malformed color is a config error.
+		`{"tui":{"theme":{"dark":{"userBg":"#101010"},"both":{"muted":"8"}}}}`: "",
+		`{"tui":{"notify":"bell"}}`:                    "unknown field",
+		`{"tui":{"theme":{"dark":{"bogus":"#0000"}}}}`: "unknown field",
+		`{"tui":{"theme":{"dark":{"userBg":"#123"}}}}`: "userBg",
 	} {
 		write(src)
 		_, err := LoadProject(wd)
@@ -64,6 +75,17 @@ func TestLoadProject(t *testing.T) {
 		if _, err := LoadProject(wd); err != nil {
 			t.Errorf("%s: %v", ok, err)
 		}
+	}
+	// Receipts: the project's startup mode and theme layer survive to the
+	// caller (the user layer is overridden by them at model build, §4).
+	write(`{"permissions":{"defaultMode":"plan"},"tui":{"theme":{"dark":{"userBg":"#101010"},"both":{"muted":"8","accent":"#ff8800"}}}}`)
+	p2, err := LoadProject(wd)
+	if err != nil {
+		t.Fatalf("project theme receipt: %v", err)
+	}
+	if p2.Mode() != "plan" || p2.TUI.Theme.Dark.UserBg != "#101010" ||
+		p2.TUI.Theme.Both.Muted != "8" || p2.TUI.Theme.Both.Accent != "#ff8800" {
+		t.Fatalf("project layer lost: %+v", p2.TUI)
 	}
 }
 

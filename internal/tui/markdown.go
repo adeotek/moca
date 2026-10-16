@@ -29,18 +29,8 @@ const (
 	sgrFgOff   = "\x1b[39m"
 )
 
-// codeFg / code band colors: dark and light variants like the other bands.
-var (
-	codeFgDark, codeFgLight = "\x1b[38;2;242;197;124m", "\x1b[38;2;122;62;0m"
-	codeBgDark, codeBgLight = lipgloss.Color("#0c222b"), lipgloss.Color("#b6cdee")
-)
-
-func codeBandStyle(dark bool) lipgloss.Style {
-	if dark {
-		return lipgloss.NewStyle().Background(codeBgDark).Foreground(respFgDark)
-	}
-	return lipgloss.NewStyle().Background(codeBgLight).Foreground(respFgLight)
-}
+// The inline-code foreground and the code band's colors live in theme.go
+// (§3.5.1): codeBandStyle/codeFg are Theme methods; this file renders.
 
 // mdState is what carries from one response line to the next.
 type mdState struct{ inFence bool }
@@ -63,12 +53,9 @@ func fenceLang(line string) (lang string, ok bool) {
 	return "", false
 }
 
-// renderInline styles `code` and **bold** spans in one sanitized line.
-func renderInline(s string, dark bool) string {
-	fg := codeFgDark
-	if !dark {
-		fg = codeFgLight
-	}
+// renderInline styles `code` and **bold** spans in one sanitized line; fg is
+// the raw SGR sequence of the inline-code foreground (Theme.codeFg).
+func renderInline(s, fg string) string {
 	var sb strings.Builder
 	for i := 0; i < len(s); {
 		switch {
@@ -80,7 +67,7 @@ func renderInline(s string, dark bool) string {
 			}
 		case strings.HasPrefix(s[i:], "**"):
 			if j := strings.Index(s[i+2:], "**"); j > 0 {
-				sb.WriteString(sgrBoldOn + renderInline(s[i+2:i+2+j], dark) + sgrBoldOff)
+				sb.WriteString(sgrBoldOn + renderInline(s[i+2:i+2+j], fg) + sgrBoldOff)
 				i += j + 4
 				continue
 			}
@@ -95,8 +82,9 @@ func renderInline(s string, dark bool) string {
 // full-width bands of the response style, switching to the code style inside
 // fences. st carries the fence state across calls; width ≤ 0 means no wrap
 // and no fill. Like styleBlock it sanitizes first and expands tabs.
-func renderMarkdown(st *mdState, s string, width int, dark bool) string {
-	resp, code := respMsgStyle(dark), codeBandStyle(dark)
+func renderMarkdown(t Theme, st *mdState, s string, width int, dark bool) string {
+	resp, code := t.respMsgStyle(dark), t.codeBandStyle(dark)
+	fg := t.codeFg(dark)
 	s = strings.ReplaceAll(Sanitize(s), "\t", strings.Repeat(" ", tabWidth))
 	var out []string
 	band := func(style lipgloss.Style, rows []string) {
@@ -142,7 +130,7 @@ func renderMarkdown(st *mdState, s string, width int, dark bool) string {
 		case quoteRe.MatchString(l):
 			l = "│ " + quoteRe.FindStringSubmatch(l)[1]
 		}
-		l = renderInline(l, dark)
+		l = renderInline(l, fg)
 		if bold {
 			l = sgrBoldOn + l + sgrBoldOff
 		}

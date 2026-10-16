@@ -56,14 +56,14 @@ func approvalPrompt(q tools.Question) string {
 // about. The whole command is shown up to rows lines — the subject alone can
 // hide what runs (an approved `python3` executes the heredoc under it) — each
 // clamped to the width; the rest is counted and opens in the pager.
-func approvalPanel(s *approvalState, width, rows int) string {
+func approvalPanel(s *approvalState, width, rows int, th Theme, dark bool) string {
 	q := s.q
 	var b strings.Builder
-	b.WriteString(warnFg.Render("? ") + approvalPrompt(q))
+	b.WriteString(th.warningStyle(dark).Render("? ") + approvalPrompt(q))
 	for i, o := range s.options() {
 		line := "  " + o.label
 		if i == s.sel {
-			line = warnFg.Render("❯ ") + bold.Render(o.label)
+			line = th.warningStyle(dark).Render("❯ ") + bold.Render(o.label)
 		} else {
 			line = dim.Render(line)
 		}

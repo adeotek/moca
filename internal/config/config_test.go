@@ -277,14 +277,27 @@ func TestPermissionsBlock(t *testing.T) {
 
 func TestPermissionsValidation(t *testing.T) {
 	bad := map[string]string{
-		`{"permissions":{"defaultMode":"plan"}}`:             "defaultMode",
+		`{"permissions":{"defaultMode":"turbo"}}`:            "defaultMode",
 		`{"permissions":{"allow":[""]}}`:                     "empty",
 		`{"yolo":true,"permissions":{"defaultMode":"auto"}}`: "yolo",
+		`{"yolo":true,"permissions":{"defaultMode":"plan"}}`: "yolo",
 		`{"permissions":{"bogus":1}}`:                        "unknown field",
 	}
 	for src, want := range bad {
 		if _, err := Parse([]byte(src)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want %q", src, err, want)
+		}
+	}
+	// Every PermModes value is a valid startup mode — plan included (the plan
+	// scope at the default mode) and yolo (the permission-free mode).
+	for _, m := range PermModes {
+		c, err := Parse([]byte(`{"permissions":{"defaultMode":"` + m + `"}}`))
+		if err != nil {
+			t.Errorf("defaultMode %q must be valid: %v", m, err)
+			continue
+		}
+		if c.Mode() != m {
+			t.Errorf("defaultMode %q resolved to %q", m, c.Mode())
 		}
 	}
 	if c, _ := Parse([]byte(`{"yolo":true}`)); c.Mode() != "yolo" {
@@ -295,9 +308,43 @@ func TestPermissionsValidation(t *testing.T) {
 	}
 }
 
+// TestThemeValidation: tui.theme accepts #rrggbb and ANSI numbers 0-255 per
+// variant (light/dark/both); anything else is a config error naming the key,
+// and an unknown role is an unknown field (strict decode, §4).
+func TestThemeValidation(t *testing.T) {
+	good := []string{
+		`{"tui":{"theme":{"dark":{"userBg":"#141618","accent":"3","statusCwd":"#67E8F9"}}}}`,
+		`{"tui":{"theme":{"light":{"respBg":"#c9ddfb"},"both":{"muted":"8","error":"#ff0000"}}}}`,
+		`{"tui":{"theme":{"dark":{"pctHot":"255"}}}}`,
+	}
+	for _, src := range good {
+		if _, err := Parse([]byte(src)); err != nil {
+			t.Errorf("%s: %v", src, err)
+		}
+	}
+	bad := map[string]string{
+		`{"tui":{"theme":{"dark":{"userBg":"#123"}}}}`:    "userBg",
+		`{"tui":{"theme":{"dark":{"userBg":"#12345g"}}}}`: "userBg",
+		`{"tui":{"theme":{"both":{"accent":"256"}}}}`:     "accent",
+		`{"tui":{"theme":{"light":{"statusCwd":"-1"}}}}`:  "statusCwd",
+		`{"tui":{"theme":{"dark":{"bogus":"#000000"}}}}`:  "unknown field",
+		`{"tui":{"theme":{"dark":{"userBg":"red"}}}}`:     "userBg",
+	}
+	for src, want := range bad {
+		if _, err := Parse([]byte(src)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", src, err, want)
+		}
+	}
+}
+
 func TestResolveMode(t *testing.T) {
 	base := Config{}
 	proj := Config{Project: &ProjectConfig{Permissions: PermissionsConfig{DefaultMode: "auto"}}}
+	planCfg := Config{Permissions: PermissionsConfig{DefaultMode: "plan"}}
+	planProj := Config{Permissions: PermissionsConfig{DefaultMode: "auto"},
+		Project: &ProjectConfig{Permissions: PermissionsConfig{DefaultMode: "plan"}}}
+	projBeatsUserPlan := Config{Permissions: PermissionsConfig{DefaultMode: "plan"},
+		Project: &ProjectConfig{Permissions: PermissionsConfig{DefaultMode: "auto"}}}
 	cases := []struct {
 		flag string
 		cfg  Config
@@ -308,6 +355,12 @@ func TestResolveMode(t *testing.T) {
 		{"", proj, "auto", false},
 		{"yolo", proj, "yolo", false},
 		{"plan", proj, "default", true},
+		// A configured plan (either layer) is the plan scope: never yolo for
+		// the trust decision; the project layer still wins over the user's.
+		{"", planCfg, "default", true},
+		{"", planProj, "default", true},
+		{"", projBeatsUserPlan, "auto", false},
+		{"default", planProj, "default", false},
 	}
 	for _, c := range cases {
 		m, p := ResolveMode(c.flag, c.cfg)

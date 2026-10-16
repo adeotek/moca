@@ -36,16 +36,16 @@ func (m *model) unconfigured() bool { return m.agent == nil }
 // unconfigured, so the way out of the state is always one keystroke away.
 func (m *model) setupNotice() string {
 	if err := provider.NewDefaultStore().Validate(); err != nil {
-		return red.Render("error: " + err.Error())
+		return m.th.errorStyle(m.darkBG).Bold(true).Render("error: " + err.Error())
 	}
 	reg, err := m.setupRegistry()
 	if err != nil {
-		return red.Render("error: " + err.Error())
+		return m.th.errorStyle(m.darkBG).Bold(true).Render("error: " + err.Error())
 	}
 	if anyProviderUsable(reg) {
-		return mutedFg.Render("no model selected yet — /model picks one and starts the session")
+		return m.th.mutedStyle(m.darkBG).Render("no model selected yet — /model picks one and starts the session")
 	}
-	return red.Render("no provider configured") + " — run /login first (store an API key or sign in), then /model picks a model"
+	return m.th.errorStyle(m.darkBG).Bold(true).Render("no provider configured") + " — run /login first (store an API key or sign in), then /model picks a model"
 }
 
 // anyProviderUsable is the /model picker's own test — CheckCredential, no

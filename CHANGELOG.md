@@ -2,7 +2,7 @@
 
 ## v0.5.2-beta (2026-10-16)
 
-The models behind the zen tier became thinking-only mid-October; the glm effort maps now match the live-verified acceptance, and the agent gains a progress nudge plus working-style rules from the TB2 bench review (2026-10-16). The scrollback bands are darker and the trust prompt lists its resources on a second line.
+The models behind the zen tier became thinking-only mid-October; the glm effort maps now match the live-verified acceptance, and the agent gains a progress nudge plus working-style rules from the TB2 bench review (2026-10-16). The scrollback bands are darker, the trust prompt lists its resources on a second line, the TUI's colors are configurable — one built-in palette with user and project layers — and the permission mode a session starts in can be pinned per user or per trusted project.
 
 ### Providers
 
@@ -17,6 +17,12 @@ The models behind the zen tier became thinking-only mid-October; the glm effort 
 
 - **The scrollback bands are near-black.** Submitted (`›`) messages print on `#141618` (it was slate `#3d434c`) and streamed assistant responses on `#091215` (it was deep blue `#213b49`); fenced code inside a response moves to `#0c222b` (it was `#16303d`).
 - **The trust prompt puts its resource list on a second line**: `Trust project resources in <dir>? [y/N]`, with `(.moca/, AGENTS.md/CLAUDE.md, project MCP configs - they can steer the agent and start MCP servers)` on the second line.
+- **Every TUI color is configurable.** A `tui.theme` block takes `both`, `dark` and `light` groups of color roles; `dark` and `light` follow the terminal's reported background, `both` fills whichever applies, and a variant's own key wins over `both`. A value is a `#rrggbb` hex or an ANSI color number 0-255; an unknown role or a malformed color is a config error. The built-in palette — unchanged, so nothing moves until you set a color — now lives in a single file (`internal/tui/theme.go`).
+- **Colors can be set per project.** A trusted workdir's `.moca/config.jsonc` accepts a `tui.theme` block too and overrides the user's per color; `tui.notify` stays user-only.
+
+### Permissions
+
+- **The startup mode is configurable per user and per project.** `permissions.defaultMode` now accepts `plan` too (`default | auto | plan | yolo`), and a trusted project's `.moca/config.jsonc` may pin its startup mode — `default | auto | plan`, winning over the user's, but never `yolo` (a cloned repository cannot start permission-free sessions; a folder only contributes after you answer its trust prompt). `plan` starts the plan scope: a `default` run that writes an implementation plan to `docs/plans/` and nothing else. `moca execute` ignores a configured plan default — executing a plan is explicitly plan-exiting.
 
 ## v0.5.1-beta (2026-10-15)
 

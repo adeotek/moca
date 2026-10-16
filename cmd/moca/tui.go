@@ -74,6 +74,17 @@ func modeWithoutProject(o Options, cfg config.Config) string {
 	return mode
 }
 
+// themeFor resolves the run's TUI theme (§3.5): the built-in palette, the
+// user config's `tui.theme` overrides, then a trusted project's (the project
+// layer wins, §4). Colors only — nothing else in the TUI reads config.
+func themeFor(cfg config.Config) tui.Theme {
+	th := tui.DefaultTheme().WithOverrides(cfg.TUI.Theme)
+	if cfg.Project != nil {
+		th = th.WithOverrides(cfg.Project.TUI.Theme)
+	}
+	return th
+}
+
 // runTUI opens the interactive TUI (§11); prompt templates come from the
 // project dir only when trusted, then the global config dir.
 func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, stderr io.Writer) int {
@@ -120,6 +131,7 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 		ResumePath:  resumePath,
 		HintsPath:   filepath.Join(config.DataDir(), "hints.json"),
 		HistoryPath: filepath.Join(config.DataDir(), "history.jsonl"),
+		Theme:       themeFor(cfg),
 	})
 	if err != nil {
 		if ctx.Err() == nil { // SIGINT/SIGTERM: no message, just 130
