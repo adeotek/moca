@@ -3,20 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>moca · TUI color lab</title>
+<title>moca · TUI theme builder</title>
 <style>
   :root{
     /* Palette (camelCase keys mirror the Go style sources). Overwritten by JS. */
     --termBg:#000000; --termFg:#e6edf3; --accent:#d97706;
-    --userBg:#3d434c; --userFg:#edf0f4;
-    --respBg:#213b49; --respFg:#e9f1fc;
-    --codeBg:#16303d; --codeFg:#f2c57c;
+    --userBg:#1c1f21; --userFg:#edf0f4;
+    --respBg:#0a1619; --respFg:#e9f1fc;
+    --codeBg:#0c1f27; --codeFg:#f2c57c;
     --mutedFg:#96a0a4; --errFg:#f85149; --warnFg:#d29922;
     --addFg:#3fb950; --delFg:#f85149; --planFg:#58a6ff;
-    --mode:#c9d1d9; --model:#60a5fa; --effort:#c4b5fd; --pct:#e6edf3;
+    --mode:#8d8f91; --model:#60a5fa; --effort:#c4b5fd; --pct:#e6edf3;
     --hint:#f87171; --cwd:#67e8f9; --branch:#f0abfc; --cost:#fbbf24;
     --smuted:#9aa4ab; --sep:#5b636b;
-    --badgeDefault:#c9d1d9; --badgeAuto:#4ade80; --badgeYolo:#f87171; --badgePlan:#60a5fa;
+    --badgeAuto:#4ade80; --badgeYolo:#f87171; --badgePlan:#60a5fa;
     --pressureWarn:#facc15; --pressureHot:#f87171;
 
     --dim-opacity:.55;
@@ -145,13 +145,22 @@
   }
   .export .actions{display:flex; gap:8px; margin-top:9px}
   .hint{color:var(--panel-muted); font-size:11.5px; margin-top:14px; line-height:1.6}
+
+  /* config snippet section */
+  .cfg-p{font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size:12.5px; color:var(--panel-muted); line-height:1.65; margin:0 0 10px}
+  .cfg-p code, .cfg-notes code{color:var(--panel-fg); background:#11141a; border:1px solid var(--panel-line); border-radius:4px; padding:0 4px; font-family:var(--mono); font-size:11.5px}
+  pre.cfg{background:#11141a; border:1px solid var(--panel-line); border-radius:8px; padding:10px 12px; margin:0; overflow:auto; max-height:360px; font:11.5px/1.55 var(--mono); color:var(--panel-fg)}
+  .cfg-empty{color:var(--panel-muted); font-size:12px; margin:0}
+  .cfg-toggle{display:flex; gap:7px; align-items:center; color:var(--panel-muted); font-size:12px; margin-top:10px; cursor:pointer}
+  .cfg-notes{margin:12px 0 0; padding-left:18px; color:var(--panel-muted); font-size:12px; line-height:1.7}
+  .cfg-actions{display:flex; gap:8px; margin-top:10px}
 </style>
 </head>
 <body>
 
 <header class="top">
-  <h1>moca · TUI color lab</h1>
-  <span class="sub">live mock of the terminal UI — tune every themed color, then export a palette</span>
+  <h1>moca · TUI theme builder</h1>
+  <span class="sub">live mock of the terminal UI — tune every themed color, then grab the config snippet or export a palette</span>
   <span class="spacer"></span>
   <div class="seg" id="baseSeg">
     <button data-base="dark" class="active">Dark</button>
@@ -165,7 +174,7 @@
     <!-- ===================== terminal mock ===================== -->
     <div class="term" id="term">
       <div class="sb">
-        <div class="row"><span class="bold" style="color:var(--accent)">moca</span> <span class="dim">v0.5.2-beta</span></div>
+        <div class="row"><span class="bold" style="color:var(--accent)">moca</span> <span class="dim">v0.6.0</span></div>
         <div class="row">How can I help you today?</div>
         <div class="row"> </div>
 
@@ -224,7 +233,7 @@
 
       <div class="status">
         <div class="sline">
-          <span style="color:var(--smuted)">v0.5.2-beta</span><span class="sep"> · </span><span style="color:var(--cwd)">~/projects/moca</span><span class="sep"> · </span><span style="color:var(--branch)">main*</span>
+          <span style="color:var(--smuted)">v0.6.0</span><span class="sep"> · </span><span style="color:var(--cwd)">~/projects/moca</span><span class="sep"> · </span><span style="color:var(--branch)">main*</span>
         </div>
         <div class="sline">
           <span class="bold" style="color:var(--badgeAuto)">Auto</span><span class="sep"> · </span><span class="bold" style="color:var(--model)">gpt-5.3-codex</span><span class="sep"> · </span><span style="color:var(--effort)">high</span><span class="sep"> · </span><span style="color:var(--smuted)">ctx 400k</span><span class="sep"> · </span><span style="color:var(--pct)">12%</span><span class="sep"> · </span><span style="color:var(--smuted)">34k/5.1k</span><span class="sep"> · </span><span style="color:var(--cost)">$0.42</span>
@@ -237,7 +246,7 @@
       <h2>Badge &amp; pressure variants</h2>
       <div class="body">
         <div class="badgesrow">
-          <span class="bold" style="color:var(--badgeDefault)">Default</span>
+          <span class="bold" style="color:var(--mode)">Default</span>
           <span class="bold" style="color:var(--badgeAuto)">Auto</span>
           <span class="bold" style="color:var(--badgeYolo)">Yolo</span>
           <span class="bold" style="color:var(--badgePlan)">Plan</span>
@@ -251,10 +260,48 @@
     </div>
 
     <div class="hint">
-      Sources of the colors above — status roles &amp; badges: <code>internal/tui/status_style.go</code> (<code>statusPalette</code>, <code>badgeStyle</code>);
-      bands &amp; muted/err/warn: <code>internal/tui/message_style.go</code>; markdown &amp; code: <code>internal/tui/markdown.go</code>;
-      diff add/del &amp; ANSI slots: <code>internal/tui/diff.go</code>; welcome accent + ANSI plan: <code>internal/tui/app.go</code>.
-      Status/scrollback colors are contract-tested for WCAG contrast in <code>status_style_test.go</code>.
+      Every color above comes from one place in the code: <code>internal/tui/theme.go</code> (<code>DefaultTheme</code>) —
+      the built-in palette, overlaid by a <code>tui.theme</code> block from the user config and a trusted project's
+      <code>.moca/config.jsonc</code> (the project wins per field). Status-role colors are contract-tested for WCAG
+      contrast in <code>status_style_test.go</code>.
+    </div>
+
+    <!-- ===================== add to config ===================== -->
+    <div class="panel">
+      <h2>Add to your config</h2>
+      <div class="body">
+        <p class="cfg-p">
+          The colors set above map one-to-one onto moca's <code>tui.theme</code> roles (§3.5 · §4).
+          Paste the block below into your user config, <code>~/.config/moca/config.jsonc</code>, merging it into the
+          existing <code>"tui"</code> key — or into <code>.moca/config.jsonc</code> inside a trusted project, which
+          wins per field (<code>moca</code> asks once on first open). A key you leave out keeps its built-in default.
+        </p>
+        <pre class="cfg" id="cfgOut"></pre>
+        <p class="cfg-empty" id="cfgEmpty" hidden>
+          No changes from the built-in palette yet — tweak a color above (or switch on the full-palette toggle)
+          and the snippet appears here.
+        </p>
+        <label class="cfg-toggle">
+          <input type="checkbox" id="cfgAll">
+          include the unchanged defaults — the full palette, both variants
+        </label>
+        <div class="cfg-actions">
+          <button class="btn" id="cfgCopyBtn">Copy config</button>
+        </div>
+        <ul class="cfg-notes">
+          <li><code>dark</code>/<code>light</code> follow the terminal's reported background; <code>both</code> fills
+              whichever applies and loses to the variant's own key — handy for one color shared by both.</li>
+          <li><code>error</code>, <code>warning</code>, <code>plan</code>, <code>diffAdd</code> and <code>diffDel</code>
+              default to ANSI slots (<code>"1"</code>/<code>"3"</code>/<code>"4"</code>/<code>"2"</code>/<code>"1"</code>),
+              not hexes; the preview shows representative colors. An untouched role keeps its slot — only a retuned
+              one appears as a hex.</li>
+          <li>The terminal background and its default text are your terminal's, not moca's — they are not themable
+              (dim rendering is an attribute, not a color, too).</li>
+          <li>The <b>Default</b> badge shares <code>statusMode</code> with the mode segment — one role, one color.</li>
+          <li>Values are <code>#rrggbb</code> hexes or ANSI color numbers (<code>"1"</code> … <code>"255"</code>);
+              an unknown role or malformed value is a config error naming the key.</li>
+        </ul>
+      </div>
     </div>
   </section>
 
@@ -262,15 +309,15 @@
   <aside class="controls" id="controls">
     <div class="head">
       <div class="t">Colors</div>
-      <div class="n">every value maps to one CSS variable; changes apply live</div>
+      <div class="n">every value maps to one config role; changes apply live here, in the export below and in the snippet at the bottom</div>
     </div>
     <div id="fields"></div>
 
     <div class="export">
-      <div class="gtitle" style="margin-bottom:8px">Export theme <span class="gnote" id="exportName">dark</span></div>
+      <div class="gtitle" style="margin-bottom:8px">Export theme — full palette <span class="gnote" id="exportName">dark</span></div>
       <textarea id="exportOut" spellcheck="false" readonly></textarea>
       <div class="actions">
-        <button class="btn" id="copyBtn">Copy JSON</button>
+        <button class="btn" id="copyBtn">Copy theme</button>
         <button class="btn" id="exportBtn">Refresh</button>
       </div>
     </div>
@@ -283,15 +330,15 @@
 const PALETTES = {
   dark: {
     termBg:"#000000", termFg:"#e6edf3", accent:"#d97706",
-    userBg:"#141618", userFg:"#edf0f4",
-    respBg:"#091215", respFg:"#e9f1fc",
-    codeBg:"#0c222b", codeFg:"#f2c57c",
+    userBg:"#1c1f21", userFg:"#edf0f4",
+    respBg:"#0a1619", respFg:"#e9f1fc",
+    codeBg:"#0c1f27", codeFg:"#f2c57c",
     mutedFg:"#96a0a4", errFg:"#f85149", warnFg:"#d29922",
     addFg:"#3fb950", delFg:"#f85149", planFg:"#58a6ff",
-    mode:"#c9d1d9", model:"#60a5fa", effort:"#c4b5fd", pct:"#e6edf3",
+    mode:"#8d8f91", model:"#60a5fa", effort:"#c4b5fd", pct:"#e6edf3",
     hint:"#f87171", cwd:"#67e8f9", branch:"#f0abfc", cost:"#fbbf24",
     smuted:"#9aa4ab", sep:"#5b636b",
-    badgeDefault:"#c9d1d9", badgeAuto:"#4ade80", badgeYolo:"#f87171", badgePlan:"#60a5fa",
+    badgeAuto:"#4ade80", badgeYolo:"#f87171", badgePlan:"#60a5fa",
     pressureWarn:"#facc15", pressureHot:"#f87171"
   },
   light: {
@@ -304,55 +351,57 @@ const PALETTES = {
     mode:"#3b434b", model:"#1d4ed8", effort:"#6d28d9", pct:"#1f2328",
     hint:"#b91c1c", cwd:"#0e7490", branch:"#a21caf", cost:"#b45309",
     smuted:"#57606a", sep:"#9ea7b0",
-    badgeDefault:"#3b434b", badgeAuto:"#15803d", badgeYolo:"#b91c1c", badgePlan:"#1d4ed8",
+    badgeAuto:"#15803d", badgeYolo:"#b91c1c", badgePlan:"#1d4ed8",
     pressureWarn:"#a16207", pressureHot:"#b91c1c"
   }
 };
 
-// Grouped field definitions. The note names the Go source that owns the color.
+// Grouped field definitions. The note names the code area the color lands in;
+// `role` is the config.ThemeColors key it maps to (null = not themable); for
+// roles whose built-in default is an ANSI slot (theme.go), `ansi` carries that
+// slot so an untouched field keeps it instead of pinning the previewed hex.
 const GROUPS = [
-  { title:"Terminal & welcome", note:"app.go", fields:[
-    {k:"termBg", label:"Terminal background"},
-    {k:"termFg", label:"Terminal default text"},
-    {k:"accent", label:"Welcome accent “moca”"},
+  { title:"Terminal & welcome", note:"page chrome · app.go", fields:[
+    {k:"termBg", label:"Terminal background — not themable", role:null},
+    {k:"termFg", label:"Terminal default text — not themable", role:null},
+    {k:"accent", label:"Welcome accent “moca”", role:"accent"},
   ]},
   { title:"Message bands", note:"message_style.go", fields:[
-    {k:"userBg", label:"User band background"},
-    {k:"userFg", label:"User band foreground"},
-    {k:"respBg", label:"Response band background"},
-    {k:"respFg", label:"Response band foreground"},
+    {k:"userBg", label:"User band background", role:"userBg"},
+    {k:"userFg", label:"User band foreground", role:"userFg"},
+    {k:"respBg", label:"Response band background", role:"respBg"},
+    {k:"respFg", label:"Response band foreground", role:"respFg"},
   ]},
   { title:"Markdown & code", note:"markdown.go", fields:[
-    {k:"codeBg", label:"Code fence background"},
-    {k:"codeFg", label:"Inline `code` foreground"},
+    {k:"codeBg", label:"Code fence background", role:"codeBg"},
+    {k:"codeFg", label:"Inline `code` foreground", role:"codeFg"},
   ]},
   { title:"Item & notice lines", note:"message_style.go · diff.go", fields:[
-    {k:"mutedFg", label:"Muted (items / thinking / notice)"},
-    {k:"errFg", label:"Error (ANSI 1)"},
-    {k:"warnFg", label:"Warning (ANSI 3)"},
-    {k:"addFg", label:"Diff add (ANSI 2)"},
-    {k:"delFg", label:"Diff del (ANSI 1)"},
-    {k:"planFg", label:"Plan notice (ANSI 4)"},
+    {k:"mutedFg", label:"Muted (items / thinking / notice)", role:"muted"},
+    {k:"errFg", label:"Error (ANSI 1)", role:"error", ansi:"1"},
+    {k:"warnFg", label:"Warning (ANSI 3)", role:"warning", ansi:"3"},
+    {k:"addFg", label:"Diff add (ANSI 2)", role:"diffAdd", ansi:"2"},
+    {k:"delFg", label:"Diff del (ANSI 1)", role:"diffDel", ansi:"1"},
+    {k:"planFg", label:"Plan notice (ANSI 4)", role:"plan", ansi:"4"},
   ]},
   { title:"Status bar — roles", note:"status_style.go", fields:[
-    {k:"mode", label:"Mode (roleMode)"},
-    {k:"model", label:"Model (roleModel)"},
-    {k:"effort", label:"Effort (roleEffort)"},
-    {k:"pct", label:"Context % (rolePct)"},
-    {k:"hint", label:"/compact hint (roleHint)"},
-    {k:"cwd", label:"Cwd (roleCwd)"},
-    {k:"branch", label:"Branch (roleBranch)"},
-    {k:"cost", label:"Cost (roleCost)"},
-    {k:"smuted", label:"Muted (roleMuted)"},
-    {k:"sep", label:"Separator (roleSep)"},
+    {k:"mode", label:"Mode (roleMode) — also the Default badge", role:"statusMode"},
+    {k:"model", label:"Model (roleModel)", role:"statusModel"},
+    {k:"effort", label:"Effort (roleEffort)", role:"statusEffort"},
+    {k:"pct", label:"Context % (rolePct)", role:"statusPct"},
+    {k:"hint", label:"/compact hint (roleHint)", role:"statusHint"},
+    {k:"cwd", label:"Cwd (roleCwd)", role:"statusCwd"},
+    {k:"branch", label:"Branch (roleBranch)", role:"statusBranch"},
+    {k:"cost", label:"Cost (roleCost)", role:"statusCost"},
+    {k:"smuted", label:"Muted (roleMuted)", role:"statusMuted"},
+    {k:"sep", label:"Separator (roleSep)", role:"statusSep"},
   ]},
   { title:"Badges & pressure", note:"status_style.go", fields:[
-    {k:"badgeDefault", label:"Default badge"},
-    {k:"badgeAuto", label:"Auto badge"},
-    {k:"badgeYolo", label:"Yolo badge"},
-    {k:"badgePlan", label:"Plan badge"},
-    {k:"pressureWarn", label:"% warn (≥ 70%)"},
-    {k:"pressureHot", label:"% hot (trigger, bold)"},
+    {k:"badgeAuto", label:"Auto badge", role:"badgeAuto"},
+    {k:"badgeYolo", label:"Yolo badge", role:"badgeYolo"},
+    {k:"badgePlan", label:"Plan badge", role:"badgePlan"},
+    {k:"pressureWarn", label:"% warn (≥ 70%)", role:"pctWarn"},
+    {k:"pressureHot", label:"% hot (trigger, bold)", role:"pctHot"},
   ]},
 ];
 
@@ -421,6 +470,7 @@ function buildControls(){
       color.addEventListener("input", () => {
         setColor(f.k, color.value);
         hex.value = color.value;
+        hex.setCustomValidity("");
       });
       hex.addEventListener("input", () => {
         const v = hex.value.trim();
@@ -468,16 +518,69 @@ function syncInputs(){
 }
 
 // ---------------------------------------------------------------- export
+// The snippet is real moca config (§4): a `tui.theme` block whose keys are the
+// config.ThemeColors roles. Mock-only keys (termBg/termFg) are skipped, and a
+// role whose built-in default is an ANSI slot (error/warning/plan/diff*) keeps
+// its slot number while it sits at the previewed default — so pasting a full
+// export never silently repins a slot to a fixed hex.
 const exportOut = document.getElementById("exportOut");
+const cfgOut = document.getElementById("cfgOut");
+const cfgEmpty = document.getElementById("cfgEmpty");
+const cfgAll = document.getElementById("cfgAll");
 
-function themeJSON(){
-  const colors = {};
-  for(const g of GROUPS){
-    for(const f of g.fields){ colors[f.k] = state[f.k]; }
+const SNIPPET_ROLES = [];
+for(const g of GROUPS){ for(const f of g.fields){ if(f.role){ SNIPPET_ROLES.push(f); } } }
+
+function variantEntries(variant, changedOnly){
+  const st = variant === base ? state : loadState(variant);
+  const def = PALETTES[variant];
+  const out = [];
+  for(const f of SNIPPET_ROLES){
+    const val = st[f.k];
+    if(typeof val !== "string"){ continue; }
+    const isDefault = normalizeHex(val) === normalizeHex(def[f.k]);
+    if(changedOnly && isDefault){ continue; }
+    out.push([f.role, isDefault && f.ansi ? f.ansi : normalizeHex(val)]);
   }
-  return JSON.stringify({ name: "moca " + base, base: base, colors: colors }, null, 2);
+  return out;
 }
-function refreshExport(){ exportOut.value = themeJSON(); }
+
+function configSnippet(which, changedOnly){
+  const order = which === "both" ? ["dark", "light"] : [which];
+  const variants = [];
+  for(const v of order){
+    const colors = variantEntries(v, changedOnly);
+    if(colors.length){ variants.push([v, colors]); }
+  }
+  if(!variants.length){ return ""; }
+  const lines = [
+    "// moca TUI colors — the `tui.theme` block (§3.5, §4).",
+    "// Paste into ~/.config/moca/config.jsonc (merge into the existing \"tui\" key),",
+    "// or .moca/config.jsonc in a trusted project — the project wins per field.",
+    "// Values: a #rrggbb hex or an ANSI color number (\"1\", \"208\"); a key you",
+    "// leave out keeps its built-in default.",
+    "{",
+    "  \"tui\": {",
+    "    \"theme\": {"
+  ];
+  variants.forEach(([v, colors], vi) => {
+    lines.push("      \"" + v + "\": {");
+    colors.forEach(([role, val], i) => {
+      lines.push("        \"" + role + "\": \"" + val + "\"" + (i < colors.length - 1 ? "," : ""));
+    });
+    lines.push("      }" + (vi < variants.length - 1 ? "," : ""));
+  });
+  lines.push("    }", "  }", "}");
+  return lines.join("\n");
+}
+
+function refreshExport(){
+  exportOut.value = configSnippet(base, false);
+  const snippet = configSnippet("both", !cfgAll.checked);
+  cfgOut.textContent = snippet;
+  cfgOut.hidden = snippet === "";
+  cfgEmpty.hidden = snippet !== "";
+}
 
 // ---------------------------------------------------------------- wiring
 function switchBase(b){
@@ -505,17 +608,24 @@ document.getElementById("resetBtn").addEventListener("click", () => {
   refreshExport();
 });
 
-document.getElementById("copyBtn").addEventListener("click", async (e) => {
-  try{
-    await navigator.clipboard.writeText(exportOut.value);
-    const old = e.target.textContent;
-    e.target.textContent = "Copied ✓";
-    setTimeout(() => { e.target.textContent = old; }, 1200);
-  }catch(err){
-    exportOut.select(); document.execCommand && document.execCommand("copy");
-  }
+function bindCopy(btn, getText, fallback){
+  btn.addEventListener("click", async (e) => {
+    try{
+      await navigator.clipboard.writeText(getText());
+      const old = e.target.textContent;
+      e.target.textContent = "Copied ✓";
+      setTimeout(() => { e.target.textContent = old; }, 1200);
+    }catch(err){
+      if(fallback){ fallback(); } else { e.target.textContent = "Copy failed"; }
+    }
+  });
+}
+bindCopy(document.getElementById("copyBtn"), () => exportOut.value, () => {
+  exportOut.select(); document.execCommand && document.execCommand("copy");
 });
+bindCopy(document.getElementById("cfgCopyBtn"), () => cfgOut.textContent);
 document.getElementById("exportBtn").addEventListener("click", refreshExport);
+document.getElementById("cfgAll").addEventListener("change", refreshExport);
 
 // ---------------------------------------------------------------- boot
 buildControls();
