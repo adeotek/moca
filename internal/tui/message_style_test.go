@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/adeotek/moca/internal/agent"
+	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/tools"
 )
@@ -221,5 +222,29 @@ func TestBackgroundColorMsgSwitchesVariant(t *testing.T) {
 	m.Update(tea.BackgroundColorMsg{Color: color.RGBA{A: 255}})
 	if !m.darkBG {
 		t.Fatal("a dark background must select the dark variants")
+	}
+}
+
+// The placeholder is styled per background variant and restyled on every
+// background report — a light.muted override reaches it (Review Focus 5).
+func TestPlaceholderFollowsBackground(t *testing.T) {
+	m := newTestModel()
+	m.th = DefaultTheme().WithOverrides(config.ThemeConfig{
+		Dark:  config.ThemeColors{Muted: "#101010"},
+		Light: config.ThemeColors{Muted: "#123456"},
+	})
+	for _, c := range []struct {
+		bg   color.Color
+		want string
+	}{
+		{color.RGBA{R: 255, G: 255, B: 255, A: 255}, "#123456"},
+		{color.RGBA{A: 255}, "#101010"},
+	} {
+		m.Update(tea.BackgroundColorMsg{Color: c.bg})
+		st := m.ta.Styles()
+		if st.Focused.Placeholder.GetForeground() != lipgloss.Color(c.want) ||
+			st.Blurred.Placeholder.GetForeground() != lipgloss.Color(c.want) {
+			t.Errorf("bg %v: placeholder fg %v, want %s", c.bg, st.Focused.Placeholder.GetForeground(), c.want)
+		}
 	}
 }

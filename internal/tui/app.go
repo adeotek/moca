@@ -274,16 +274,24 @@ func newModel(o AppOptions, a *agent.Agent) *model {
 	th := resolvedTheme(o.Theme)
 	ta.DynamicHeight, ta.MinHeight, ta.MaxHeight, ta.MaxContentHeight = true, 1, 8, 10000
 	ta.SetVirtualCursor(false)
-	st := textarea.DefaultStyles(true)
-	st.Focused.CursorLine = lipgloss.NewStyle()
-	st.Focused.Placeholder = th.mutedStyle(true)
-	st.Blurred.Placeholder = th.mutedStyle(true)
-	ta.SetStyles(st)
 	ta.Focus()
 	m := &model{opts: o, start: o.Start, agent: a, input: NewInput(), ta: ta, now: time.Now, darkBG: true, profile: colorprofile.TrueColor, th: th}
+	m.styleInput()
 	m.input.LoadHistory(loadHistory(o.HistoryPath, o.Start.Workdir))
 	m.refreshStatus()
 	return m
+}
+
+// styleInput applies the theme's input styles for the current background
+// variant: the default cursor-line band is dropped and the placeholder is
+// muted text. newModel calls it once; every background report calls it again
+// (the textarea keeps its styles, so a variant change must be pushed in).
+func (m *model) styleInput() {
+	st := textarea.DefaultStyles(true)
+	st.Focused.CursorLine = lipgloss.NewStyle()
+	st.Focused.Placeholder = m.th.mutedStyle(m.darkBG)
+	st.Blurred.Placeholder = m.th.mutedStyle(m.darkBG)
+	m.ta.SetStyles(st)
 }
 
 func (m *model) syncTextarea() { m.ta.SetValue(m.input.Buffer()) }
@@ -382,9 +390,9 @@ func (m *model) Init() tea.Cmd {
 }
 
 // welcomeText opens the scrollback of a session: title + version, then the
-// greeting. The product name renders in the accent color (one default shade
-// serves light and dark alike — the welcome prints before the background is
-// known, so the dark variant applies).
+// greeting. It prints before the terminal reports its background, so the
+// product name always takes the dark variant's accent — a `both.accent`
+// override reaches it, a `light.accent` one cannot (scrollback is immutable).
 func (m *model) welcomeText() string {
 	return m.th.accentStyle(m.darkBG).Render("moca") + " " + dim.Render(config.Version) + "\n" + "How can I help you today?"
 }
@@ -502,6 +510,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.BackgroundColorMsg:
 		m.darkBG = msg.IsDark()
+		m.styleInput()
 		return m, nil
 	case hintCheckMsg:
 		if m.kbdEnhanced {
