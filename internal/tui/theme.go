@@ -7,10 +7,9 @@ package tui
 // file cannot carry colors, §4). cmd/moca resolves the theme before the
 // model exists and passes it in through AppOptions.
 //
-// Colors field names mirror config.ThemeColors one-to-one (a test pins the
-// two lists); values are #rrggbb hexes or ANSI color numbers ("1", "208"),
-// the same forms config validates. The dark and light palettes exist because
-// moca picks a variant from the terminal's reported background
+// Colors is config.ThemeColors; values are #rrggbb hexes or ANSI color numbers
+// ("1", "208"), the same forms config validates. The dark and light palettes
+// exist because moca picks a variant from the terminal's reported background
 // (tea.BackgroundColorMsg); dark is the default until it arrives.
 
 import (
@@ -24,46 +23,17 @@ import (
 	"github.com/adeotek/moca/internal/config"
 )
 
-// Colors is one variant's full palette: the scrollback bands and notice
-// colors plus the status bar's role table.
-type Colors struct {
-	// Scrollback bands and notices (message_style.go, markdown.go).
-	UserBg  string
-	UserFg  string
-	RespBg  string
-	RespFg  string
-	CodeBg  string
-	CodeFg  string
-	Muted   string // thinking/tool/notice lines
-	Error   string // error: lines
-	Warning string // warning: lines, `?` prompts
-	Accent  string // welcome product name, pager selection
-	Plan    string // plan-mode notice
-	DiffAdd string // edit-diff added lines
-	DiffDel string // edit-diff removed lines
-	// Status bar (status_style.go). StatusMode also colors the Default badge.
-	StatusMode   string
-	StatusModel  string
-	StatusEffort string
-	StatusPct    string
-	StatusHint   string
-	StatusCwd    string
-	StatusBranch string
-	StatusCost   string
-	StatusMuted  string
-	StatusSep    string
-	BadgeAuto    string
-	BadgePlan    string
-	BadgeYolo    string
-	PctWarn      string // context percent ≥ 70% of the window
-	PctHot       string // percent at/past the auto-compaction trigger
-}
+// Colors is one variant's full palette — the config type itself, so a role
+// is declared once (config.ThemeColors) and every field needs a built-in
+// default here (TestDefaultThemeComplete). Empty means "unset" in a config
+// block and never occurs in a resolved Theme.
+type Colors = config.ThemeColors
 
 // Theme is the dark and light palettes.
 type Theme struct{ Dark, Light Colors }
 
-// DefaultTheme is the built-in palette (the pre-theme package colors, moved
-// here verbatim).
+// DefaultTheme is the built-in palette (v0.6.0: the dark bands, code band and
+// Default badge were retuned — see CHANGELOG).
 func DefaultTheme() Theme {
 	return Theme{
 		Dark: Colors{
@@ -106,32 +76,19 @@ func (t Theme) WithOverrides(o config.ThemeConfig) Theme {
 	return t
 }
 
-// overlayColors applies one variant's overrides (variant-specific first,
-// then `both`) field-by-field, matched by field name.
-func overlayColors(c Colors, variant, both config.ThemeColors) Colors {
-	ov, bo := stringsByName(variant), stringsByName(both)
-	rv := reflect.ValueOf(&c).Elem()
-	rt := rv.Type()
-	for i := range rt.NumField() {
-		if s := ov[rt.Field(i).Name]; s != "" {
-			rv.Field(i).SetString(s)
-		} else if s := bo[rt.Field(i).Name]; s != "" {
-			rv.Field(i).SetString(s)
+// overlayColors applies one variant's overrides field by field: the
+// variant's own value wins, then `both`; empty keeps the current value.
+func overlayColors(c, variant, both Colors) Colors {
+	cv := reflect.ValueOf(&c).Elem()
+	vv, bv := reflect.ValueOf(variant), reflect.ValueOf(both)
+	for i := range cv.NumField() {
+		if s := vv.Field(i).String(); s != "" {
+			cv.Field(i).SetString(s)
+		} else if s := bv.Field(i).String(); s != "" {
+			cv.Field(i).SetString(s)
 		}
 	}
 	return c
-}
-
-// stringsByName flattens a config colors block to a name → value map (the
-// field names match Colors' by contract; a test pins that).
-func stringsByName(v config.ThemeColors) map[string]string {
-	rv := reflect.ValueOf(v)
-	rt := rv.Type()
-	m := make(map[string]string, rt.NumField())
-	for i := range rt.NumField() {
-		m[rt.Field(i).Name] = rv.Field(i).String()
-	}
-	return m
 }
 
 // colors picks the variant's palette.

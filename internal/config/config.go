@@ -261,8 +261,8 @@ type TUIConfig struct {
 // background; a `both` sub-object applies to whichever variant the terminal
 // reports and is the common case for a color that reads well on either. A
 // key's precedence is per-key and per-variant: `light`/`dark` for the reported
-// theme, else `both`, else the built-in default. The project file's theme
-// layer wins over the user's the same way (§4).
+// theme, else `both`, else the built-in default. The block is user-only: a
+// project file cannot carry colors (§4).
 type ThemeConfig struct {
 	Light ThemeColors `json:"light"`
 	Dark  ThemeColors `json:"dark"`
@@ -270,9 +270,9 @@ type ThemeConfig struct {
 }
 
 // ThemeColors is one variant's color overrides — every field a #rrggbb hex or
-// an ANSI color number ("1", "208", …), empty = keep the default. The field
-// set mirrors internal/tui's palette (theme.go); a test pins the two lists
-// together.
+// an ANSI color number ("1", "208", …), empty = keep the default.
+// internal/tui uses this type as its palette (tui.Colors); every field needs a
+// built-in default in tui.DefaultTheme (TestDefaultThemeComplete).
 type ThemeColors struct {
 	// Scrollback bands (message_style.go).
 	UserBg  string `json:"userBg,omitempty"`
@@ -288,7 +288,7 @@ type ThemeColors struct {
 	Plan    string `json:"plan,omitempty"`    // plan-mode notice
 	DiffAdd string `json:"diffAdd,omitempty"` // edit-diff added lines
 	DiffDel string `json:"diffDel,omitempty"` // edit-diff removed lines
-	// Status-bar roles (status_style.go): a hex (or SGR name) per segment.
+	// Status-bar roles (status_style.go): a #rrggbb hex or ANSI number per segment.
 	// statusMode also colors the default-mode badge.
 	StatusMode   string `json:"statusMode,omitempty"`
 	StatusModel  string `json:"statusModel,omitempty"`
@@ -315,7 +315,7 @@ var NotifyModes = []string{"osc9", "bell", "off"}
 // bare ANSI numbers are the short form).
 var themeHexRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
-// validateTheme checks a tui.theme block — both config layers use it. Every
+// validateTheme checks the user config's tui.theme block. Every
 // non-empty value must be a #rrggbb hex or an ANSI color number (0-255);
 // empty keeps the built-in default (internal/tui/theme.go).
 func validateTheme(key string, t ThemeConfig) error {

@@ -22,8 +22,7 @@ type palette struct {
 	sep   lipgloss.Style            // " · " separators (structure, not content)
 }
 
-// statusPalette builds the table from the Theme (theme.go; the built-in
-// values match the plan's original table verbatim): every content role
+// statusPalette builds the table from the Theme (theme.go): every content role
 // reaches WCAG ≥ 4.5:1 against the reference backgrounds
 // (#0d1117/#1e1e1e dark, #ffffff/#f6f8fa light — contrast-tested in
 // status_style_test.go); separators are decorative and recede below tier-4

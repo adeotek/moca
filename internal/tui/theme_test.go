@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,33 +9,25 @@ import (
 	"github.com/adeotek/moca/internal/config"
 )
 
-// TestThemeFieldsMirrorConfig pins the tui.Colors ↔ config.ThemeColors field
-// lists together: a role added on one side without the other would either
-// decode a config key that never applies or leave a color unconfigurable.
-func TestThemeFieldsMirrorConfig(t *testing.T) {
-	names := func(v any) map[string]bool {
-		rv := reflect.ValueOf(v)
-		rt := rv.Type()
-		out := make(map[string]bool, rt.NumField())
+// TestDefaultThemeComplete: every role has a built-in default in both
+// variants, and the defaults pass the config's own color validation — a role
+// added to config.ThemeColors without a default would render as no color.
+func TestDefaultThemeComplete(t *testing.T) {
+	d := DefaultTheme()
+	for name, c := range map[string]Colors{"dark": d.Dark, "light": d.Light} {
+		rv, rt := reflect.ValueOf(c), reflect.TypeOf(c)
 		for i := range rt.NumField() {
-			f := rt.Field(i)
-			if f.Type.Kind() != reflect.String {
-				t.Fatalf("%s field %s must be a string", rt.Name(), f.Name)
+			if rv.Field(i).String() == "" {
+				t.Errorf("%s.%s has no built-in default", name, rt.Field(i).Name)
 			}
-			out[f.Name] = true
-		}
-		return out
-	}
-	tc, tw := names(config.ThemeColors{}), names(Colors{})
-	for n := range tc {
-		if !tw[n] {
-			t.Errorf("config.ThemeColors.%s has no tui.Colors counterpart", n)
 		}
 	}
-	for n := range tw {
-		if !tc[n] {
-			t.Errorf("tui.Colors.%s is not configurable (no config.ThemeColors field)", n)
-		}
+	b, err := json.Marshal(map[string]any{"tui": map[string]any{"theme": map[string]any{"dark": d.Dark, "light": d.Light}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Parse(b); err != nil {
+		t.Fatalf("built-in defaults fail config validation: %v", err)
 	}
 }
 
