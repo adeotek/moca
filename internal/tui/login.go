@@ -574,7 +574,7 @@ func (m *model) loginKey(k tea.KeyPressMsg) tea.Cmd {
 func (m *model) loginPanel() string {
 	s := m.login
 	var b strings.Builder
-	q := func(text string) { b.WriteString(m.th.warningStyle(m.darkBG).Render("? ") + Sanitize(text) + "\n") }
+	q := func(text string) { b.WriteString(m.th.promptMark(m.darkBG) + Sanitize(text) + "\n") }
 	switch s.step {
 	case loginPickProvider:
 		q("store a credential for which provider?  (↑/↓ · enter · esc cancels)")

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/adeotek/moca/internal/config"
 )
 
@@ -119,6 +121,21 @@ func TestFGSSRRejectsOutOfRange(t *testing.T) {
 	for _, c := range []string{"-1", "-9", "256", "red", "#12345", ""} {
 		if got := fgSGR(c); got != sgrFgOff {
 			t.Errorf("fgSGR(%q) = %q, want the default-fg reset", c, got)
+		}
+	}
+}
+
+// alertStyle is the bold error color (the old package-level `red`);
+// promptMark is the warning-colored "? " that opens every question line.
+func TestAlertAndPromptMark(t *testing.T) {
+	th := DefaultTheme()
+	for _, dark := range []bool{true, false} {
+		a := th.alertStyle(dark)
+		if !a.GetBold() || a.GetForeground() != lipgloss.Color(th.colors(dark).Error) {
+			t.Errorf("dark=%v: alertStyle must be bold %s", dark, th.colors(dark).Error)
+		}
+		if got, want := th.promptMark(dark), th.warningStyle(dark).Render("? "); got != want {
+			t.Errorf("dark=%v: promptMark %q, want %q", dark, got, want)
 		}
 	}
 }

@@ -173,6 +173,13 @@ func (t Theme) warningStyle(dark bool) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(t.colors(dark).Warning))
 }
 
+// alertStyle is the bold error style of setup notices and red mode notices.
+func (t Theme) alertStyle(dark bool) lipgloss.Style { return t.errorStyle(dark).Bold(true) }
+
+// promptMark is the warning-colored "? " that opens every question line
+// (approval, login, picker).
+func (t Theme) promptMark(dark bool) string { return t.warningStyle(dark).Render("? ") }
+
 // accentStyle marks the product name in the welcome line and the pager
 // selection; bold at both sites.
 func (t Theme) accentStyle(dark bool) lipgloss.Style {

@@ -252,10 +252,10 @@ type padGuard struct {
 // padding rows (see padForShrink).
 type settleMsg struct{}
 
+// dim and bold are attributes, not colors — every color comes from the
+// model's theme (theme.go, §3.5).
 var (
-	dim = lipgloss.NewStyle().Faint(true)
-	// dim and bold are attributes, not colors — every color comes from the
-	// model's theme (theme.go, §3.5).
+	dim  = lipgloss.NewStyle().Faint(true)
 	bold = lipgloss.NewStyle().Bold(true)
 )
 
@@ -1353,7 +1353,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		m.refreshStatus()
 		line, isRed := modeNotice(e.Mode, e.Plan)
 		if isRed {
-			return m.println(m.th.errorStyle(m.darkBG).Bold(true).Render(line))
+			return m.println(m.th.alertStyle(m.darkBG).Render(line))
 		}
 		return m.printlnMuted(line)
 	case agent.PlanChanged:

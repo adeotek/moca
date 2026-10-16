@@ -59,7 +59,7 @@ func approvalPrompt(q tools.Question) string {
 func approvalPanel(s *approvalState, width, rows int, th Theme, dark bool) string {
 	q := s.q
 	var b strings.Builder
-	b.WriteString(th.warningStyle(dark).Render("? ") + approvalPrompt(q))
+	b.WriteString(th.promptMark(dark) + approvalPrompt(q))
 	for i, o := range s.options() {
 		line := "  " + o.label
 		if i == s.sel {
