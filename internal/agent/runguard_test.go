@@ -15,6 +15,52 @@ func hasWarning(evs *[]Event, sub string) bool {
 	return false
 }
 
+// TestProgressNudge: a run that has taken progressNudgeAt tool batches
+// without creating or editing a file gets exactly one persisted nudge to
+// start acting (§14; the TB2 review found runs burning their whole budget
+// on reconnaissance).
+func TestProgressNudge(t *testing.T) {
+	var turns []string
+	for range progressNudgeAt {
+		turns = append(turns, toolTurn([2]string{"ls", `{}`}))
+	}
+	turns = append(turns, textTurn("nothing to change here"))
+	s := newScript(t, turns...)
+	a, _, _ := startTest(t, s, 40)
+	out, err := a.Run(context.Background(), "investigate")
+	if err != nil || out.Text != "nothing to change here" || s.bodyCount() != progressNudgeAt+1 {
+		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
+	}
+	if last := lastMessageJSON(t, s, progressNudgeAt); !strings.Contains(last, "without creating or editing") {
+		t.Fatalf("nudge missing from the request after the recon budget: %s", last)
+	}
+}
+
+// TestProgressNudgeSkippedAfterAChange: once a file has been created or
+// edited, however read-heavy the rest of the run is, the nudge stays away.
+func TestProgressNudgeSkippedAfterAChange(t *testing.T) {
+	turns := []string{
+		toolTurn([2]string{"write", `{"path":"a.go","content":"package a\n"}`},
+			[2]string{"shell", `{"command":"test -e a.go"}`}),
+	}
+	for range progressNudgeAt - 1 {
+		turns = append(turns, toolTurn([2]string{"ls", `{}`}))
+	}
+	turns = append(turns, textTurn("done"))
+	s := newScript(t, turns...)
+	a, _, _ := startTest(t, s, 40)
+	a.opts.Env.Commands = allowAll{}
+	out, err := a.Run(context.Background(), "x")
+	if err != nil || out.Text != "done" || s.bodyCount() != progressNudgeAt+1 {
+		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
+	}
+	for i := 0; i < s.bodyCount(); i++ {
+		if strings.Contains(lastMessageJSON(t, s, i), "without creating or editing") {
+			t.Fatalf("progress nudge must not fire after a change (request %d)", i)
+		}
+	}
+}
+
 // TestVerifyNudge: a run that changed a code file and ends without a
 // verifying shell command since gets exactly one persisted nudge (C1).
 func TestVerifyNudge(t *testing.T) {

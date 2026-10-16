@@ -27,6 +27,20 @@ const wrapUpText = "You have reached the step limit for this run. Do not call to
 // emptyNudge answers a turn with neither text nor tool calls.
 const emptyNudge = "Your last reply was empty. Continue the task where you left off, or give your final answer."
 
+// progressNudgeAt is the tool-batch count after which a run that has not yet
+// created or edited a file gets one persisted nudge (§14): the 2026-10-16 TB2
+// review found a run spending its entire step budget reading dependency
+// internals and never acting — orientation must time-box itself.
+const progressNudgeAt = 12
+
+// progressNudge is that nudge's text: act on what is known, or name the
+// concrete blocker (or why no file needs to change).
+func progressNudge() string {
+	return fmt.Sprintf("You have taken %d tool steps without creating or editing a file. "+
+		"Start implementing what the task asks for with what you already know; keep investigating only where a concrete unknown blocks you — "+
+		"or state in one line why no file needs to change.", progressNudgeAt)
+}
+
 // stuckText is the wrap-up of a run stopped for repeating a failing call.
 const stuckText = "This run is stopped: the same tool call failed with the same result several times. Do not call tools. " +
 	"Explain to the user what you were trying to do, what is blocking you, and what they could do about it."
@@ -391,7 +405,7 @@ func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
 	// Per-run tool state (plan deliverable, changes awaiting verification,
 	// identical-failure counts): tools/runstate.go.
 	a.opts.Env.BeginRun()
-	nudged, verifyNudged, reserved, execNudged, emptyNudged := false, false, false, false, false
+	nudged, verifyNudged, reserved, execNudged, emptyNudged, progressNudged := false, false, false, false, false, false
 	if err := a.maybeCompact(ctx); err != nil {
 		return Outcome{}, err
 	}
@@ -410,6 +424,14 @@ func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
 			// must still land its deliverable (§14).
 			reserved = true
 			if err := a.nudge("plan_reserve", planReserveText); err != nil {
+				return Outcome{}, err
+			}
+		}
+		if !a.plan && !progressNudged && !a.opts.Env.Edited && step == progressNudgeAt {
+			// One bounded nudge (§14): a run must not spend its whole budget
+			// investigating without acting — say what blocks you instead.
+			progressNudged = true
+			if err := a.nudge("progress", progressNudge()); err != nil {
 				return Outcome{}, err
 			}
 		}
