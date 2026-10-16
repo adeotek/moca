@@ -87,7 +87,7 @@ Both scripts remove the `moca` found on `PATH` (or the one in `--dir <path>` / `
 
 **First run** — with no `"model"` configured, `moca` opens the TUI with a red notice instead of stopping: `/login` stores an API key or signs in, then `/model` picks a model and starts the session (your choice is saved here as `"model"`). `-p` still needs a model up front.
 
-Optional TUI knob: `"tui": { "notify": "osc9" }` (`osc9` · `bell` · `off`) — a desktop notification (or bell) when a run longer than 30 s ends or an approval is waiting, only while the terminal is unfocused.
+Optional TUI knobs: `"tui": { "notify": "osc9" }` (`osc9` · `bell` · `off`) — a desktop notification (or bell) when a run longer than 30 s ends or an approval is waiting, only while the terminal is unfocused — and `"tui": { "theme": { … } }` — every color the TUI draws, per role: `both`, `dark` and `light` groups (`dark`/`light` follow the terminal’s reported background, `both` fills whichever applies and loses to the variant’s own key), each value a `#rrggbb` hex or an ANSI color number `0`–`255`; an unset role keeps the built-in palette (`internal/tui/theme.go`), and the block is user-only — a project’s `.moca/config.jsonc` cannot carry colors. Tune it in [docs/tui-theme-builder.html](docs/tui-theme-builder.html), a live mock that emits the block.
 
 Web search is keyless by default; to switch engines or lift tavily's rate limit: `"web": { "search": { "provider": "tavily", "apiKey": "env:TAVILY_API_KEY" } }` — `tavily` (default) or `exa` (a key is required). Fetching pages needs no config.
 
@@ -252,4 +252,4 @@ make release        # five cross-compiled binaries in dist/
 
 ## Docs
 
-[`docs/specs/SPECS.md`](docs/specs/SPECS.md) — the single source of truth for design, specs, features and constraints · [`docs/specs/external-tools.md`](docs/specs/external-tools.md) — rtk, graphify, skills, prompts.
+[`docs/specs/SPECS.md`](docs/specs/SPECS.md) — the single source of truth for design, specs, features and constraints · [`docs/specs/external-tools.md`](docs/specs/external-tools.md) — rtk, graphify, skills, prompts. · [`docs/tui-theme-builder.html`](docs/tui-theme-builder.html) — live TUI theme builder (emits a `tui.theme` block).
