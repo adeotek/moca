@@ -32,7 +32,7 @@ const (
 // codeFg / code band colors: dark and light variants like the other bands.
 var (
 	codeFgDark, codeFgLight = "\x1b[38;2;242;197;124m", "\x1b[38;2;122;62;0m"
-	codeBgDark, codeBgLight = lipgloss.Color("#16303d"), lipgloss.Color("#b6cdee")
+	codeBgDark, codeBgLight = lipgloss.Color("#0c222b"), lipgloss.Color("#b6cdee")
 )
 
 func codeBandStyle(dark bool) lipgloss.Style {

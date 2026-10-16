@@ -7,15 +7,15 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Scrollback message backgrounds (§11): submitted messages (slate) and
-// assistant responses (steel blue) are printed on distinct full-row
+// Scrollback message backgrounds (§3.5): submitted messages (near-black) and
+// assistant responses (near-black blue) are printed on distinct full-row
 // background colors; thinking, tool and notice lines stay plain. Light and
 // dark pairs — dark is the default until the terminal reports its background
 // (tea.BackgroundColorMsg).
 var (
-	userBgDark, userFgDark   = lipgloss.Color("#3d434c"), lipgloss.Color("#edf0f4")
+	userBgDark, userFgDark   = lipgloss.Color("#141618"), lipgloss.Color("#edf0f4")
 	userBgLight, userFgLight = lipgloss.Color("#dfe3e8"), lipgloss.Color("#1c2026")
-	respBgDark, respFgDark   = lipgloss.Color("#213b49"), lipgloss.Color("#e9f1fc")
+	respBgDark, respFgDark   = lipgloss.Color("#091215"), lipgloss.Color("#e9f1fc")
 	respBgLight, respFgLight = lipgloss.Color("#c9ddfb"), lipgloss.Color("#17304d")
 	// mutedFg styles tool-usage, thinking and notice lines (no background).
 	mutedFg = lipgloss.NewStyle().Foreground(lipgloss.Color("#96a0a4"))

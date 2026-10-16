@@ -2,7 +2,7 @@
 
 ## v0.5.2-beta (2026-10-16)
 
-The models behind the zen tier became thinking-only mid-October; the glm effort maps now match the live-verified acceptance, and the agent gains a progress nudge plus working-style rules from the TB2 bench review (2026-10-16).
+The models behind the zen tier became thinking-only mid-October; the glm effort maps now match the live-verified acceptance, and the agent gains a progress nudge plus working-style rules from the TB2 bench review (2026-10-16). The scrollback bands are darker and the trust prompt lists its resources on a second line.
 
 ### Providers
 
@@ -12,6 +12,11 @@ The models behind the zen tier became thinking-only mid-October; the glm effort 
 
 - **Progress nudge.** A non-plan run that has taken `context.progressNudgeAt` tool batches (default 12; `0` disables the nudge) without creating or editing a file gets one persisted nudge to start acting on what it already knows — or to name the blocking unknown, or why no file needs to change (§14).
 - **Working-style prompt.** Time-boxed orientation (dependencies' internals only when a concrete behavior blocks you), falsifiable verification (a check that never reaches the changed code, or validates output against its own reconstruction, proves nothing), no fabricated data (lost or unobtainable data is reported, never rebuilt and presented as fact), and: copy stateful files before probing them — opening a SQLite DB checkpoints it and can delete its WAL.
+
+### TUI
+
+- **The scrollback bands are near-black.** Submitted (`›`) messages print on `#141618` (it was slate `#3d434c`) and streamed assistant responses on `#091215` (it was deep blue `#213b49`); fenced code inside a response moves to `#0c222b` (it was `#16303d`).
+- **The trust prompt puts its resource list on a second line**: `Trust project resources in <dir>? [y/N]`, with `(.moca/, AGENTS.md/CLAUDE.md, project MCP configs - they can steer the agent and start MCP servers)` on the second line.
 
 ## v0.5.1-beta (2026-10-15)
 

@@ -23,7 +23,8 @@ func TestScrollbackMessageBackgrounds(t *testing.T) {
 	ack(m)
 	resp := printed(m.printlnResponse("answer"))
 	ack(m)
-	if !strings.Contains(user, "48;2;61;67;76") || !strings.Contains(resp, "48;2;33;59;73") {
+	// #141618 / #091215
+	if !strings.Contains(user, "48;2;20;22;24") || !strings.Contains(resp, "48;2;9;18;21") {
 		t.Fatalf("palette changed: %q / %q", user, resp)
 	}
 	if user == resp {
