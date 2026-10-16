@@ -119,9 +119,9 @@ func fgSGR(color string) string {
 			return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", v>>16&0xff, v>>8&0xff, v&0xff)
 		}
 	}
-	if n, err := strconv.Atoi(color); err == nil {
+	if n, err := strconv.Atoi(color); err == nil && n >= 0 {
 		switch {
-		case n >= 0 && n < 8:
+		case n < 8:
 			return fmt.Sprintf("\x1b[%dm", 30+n)
 		case n < 16:
 			return fmt.Sprintf("\x1b[%dm", 90+n-8)

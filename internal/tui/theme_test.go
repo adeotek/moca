@@ -112,3 +112,13 @@ func TestFGSSR(t *testing.T) {
 		}
 	}
 }
+
+// fgSGR falls back to the default foreground for anything outside the
+// validated forms — never a malformed SGR (a negative used to emit \x1b[81m).
+func TestFGSSRRejectsOutOfRange(t *testing.T) {
+	for _, c := range []string{"-1", "-9", "256", "red", "#12345", ""} {
+		if got := fgSGR(c); got != sgrFgOff {
+			t.Errorf("fgSGR(%q) = %q, want the default-fg reset", c, got)
+		}
+	}
+}
