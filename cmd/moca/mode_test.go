@@ -66,6 +66,54 @@ func TestResolveModeProjectReceipts(t *testing.T) {
 	if mode, plan := (Options{Mode: ptr("plan")}).ResolveMode(config.Config{Project: proj}); mode != "default" || !plan {
 		t.Errorf("--mode plan over project auto: (%q, %v), want (default, true)", mode, plan)
 	}
+	// The project layer may set `default`, `auto` or `plan` (a project `yolo`
+	// is capped off by LoadProject, §4); plan resolves to the plan scope
+	// (default + plan), never yolo for trust.
+	if mode, plan := (Options{}).ResolveMode(config.Config{Project: &config.ProjectConfig{Permissions: config.PermissionsConfig{DefaultMode: "plan"}}}); mode != "default" || !plan {
+		t.Errorf("project plan: (%q, %v), want (default, true)", mode, plan)
+	}
+	// The user layer's configured plan applies when the project is silent,
+	// and the project still beats it.
+	if mode, plan := (Options{}).ResolveMode(config.Config{Permissions: config.PermissionsConfig{DefaultMode: "plan"}}); mode != "default" || !plan {
+		t.Errorf("user plan: (%q, %v), want (default, true)", mode, plan)
+	}
+	beats := config.Config{Permissions: config.PermissionsConfig{DefaultMode: "plan"},
+		Project: &config.ProjectConfig{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}}
+	if mode, plan := (Options{}).ResolveMode(beats); mode != "auto" || plan {
+		t.Errorf("project auto over user plan: (%q, %v), want (auto, false)", mode, plan)
+	}
+}
+
+// A configured plan default (user or project) must not confine `moca
+// execute`: executing a plan is explicitly plan-exiting — the execution
+// writes code, not a plan.
+func TestExecuteIgnoresConfiguredPlan(t *testing.T) {
+	perm := func(m string) config.PermissionsConfig { return config.PermissionsConfig{DefaultMode: m} }
+	for _, c := range []struct {
+		cfg  config.Config
+		want string
+	}{
+		{config.Config{Permissions: perm("plan")}, "default"},
+		{config.Config{Project: &config.ProjectConfig{Permissions: perm("plan")}}, "default"},
+		// Two layers: the project's plan is skipped, the user's auto decides.
+		{config.Config{Permissions: perm("auto"), Project: &config.ProjectConfig{Permissions: perm("plan")}}, "auto"},
+	} {
+		o, err := parseArgs([]string{"execute", "docs/plans/x.md"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode, plan := o.ResolveMode(c.cfg); mode != c.want || plan {
+			t.Errorf("execute under %+v: (%q, %v), want (%q, false)", c.cfg.Permissions, mode, plan, c.want)
+		}
+	}
+	// An explicit flag is never skipped (Review Focus 2).
+	o, err := parseArgs([]string{"--mode", "auto", "execute", "docs/plans/x.md"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode, plan := o.ResolveMode(config.Config{Project: &config.ProjectConfig{Permissions: perm("plan")}}); mode != "auto" || plan {
+		t.Errorf("execute --mode auto over project plan: (%q, %v), want (auto, false)", mode, plan)
+	}
 }
 
 func ptr(s string) *string { return &s }

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/adeotek/moca/internal/agent"
+	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/tools"
 )
@@ -23,13 +24,14 @@ func TestScrollbackMessageBackgrounds(t *testing.T) {
 	ack(m)
 	resp := printed(m.printlnResponse("answer"))
 	ack(m)
-	if !strings.Contains(user, "48;2;61;67;76") || !strings.Contains(resp, "48;2;33;59;73") {
+	// #1c1f21 / #0a1619
+	if !strings.Contains(user, "48;2;28;31;33") || !strings.Contains(resp, "48;2;10;22;25") {
 		t.Fatalf("palette changed: %q / %q", user, resp)
 	}
 	if user == resp {
 		t.Fatal("user and response backgrounds must differ")
 	}
-	if got, want := printed(m.printlnUser("x")), styleBlock(userMsgStyle(true), "x", m.width); !strings.Contains(got, want) {
+	if got, want := printed(m.printlnUser("x")), styleBlock(DefaultTheme().userMsgStyle(true), "x", m.width); !strings.Contains(got, want) {
 		t.Fatalf("user style plumbing: %q want %q", got, want)
 	}
 	ack(m)
@@ -56,7 +58,7 @@ func TestUserMessageStartsWithBlankLine(t *testing.T) {
 func TestCommandEchoesAsUserMessage(t *testing.T) {
 	m := newAgentModel(t)
 	out := drained(m, tuiCmd(t, m, "/help"))
-	band := styleBlock(userMsgStyle(true), "› /help", m.width)
+	band := styleBlock(DefaultTheme().userMsgStyle(true), "› /help", m.width)
 	iBand := strings.Index(out, band)
 	if iBand < 0 {
 		t.Fatalf("no user-message band for the command:\n%q", out)
@@ -72,7 +74,7 @@ func TestCommandEchoesAsUserMessage(t *testing.T) {
 	// A refused command echoes too, before the refusal.
 	m.running = true
 	out = drained(m, tuiCmd(t, m, "/clear"))
-	if !strings.Contains(out, styleBlock(userMsgStyle(true), "› /clear", m.width)) {
+	if !strings.Contains(out, styleBlock(DefaultTheme().userMsgStyle(true), "› /clear", m.width)) {
 		t.Fatalf("refused command must echo:\n%q", out)
 	}
 	if !strings.Contains(out, "finish or interrupt the run first") {
@@ -111,13 +113,13 @@ func TestMessageBackgroundsCoverTheFullRow(t *testing.T) {
 	m := newTestModel()
 	long := strings.Repeat("word ", 60)
 	for _, in := range []string{"a\n\nb", long, strings.Repeat("x", m.width*2+5)} {
-		for _, l := range strings.Split(styleBlock(respMsgStyle(true), in, m.width), "\n") {
+		for _, l := range strings.Split(styleBlock(DefaultTheme().respMsgStyle(true), in, m.width), "\n") {
 			if w := lipgloss.Width(l); w != m.width {
 				t.Fatalf("row is %d cells, want %d: %q", w, m.width, ansi.Strip(l))
 			}
 		}
 	}
-	rows := strings.Split(ansi.Strip(styleBlock(respMsgStyle(true), long, m.width)), "\n")
+	rows := strings.Split(ansi.Strip(styleBlock(DefaultTheme().respMsgStyle(true), long, m.width)), "\n")
 	if len(rows) < 3 || !strings.HasPrefix(rows[1], " word") {
 		t.Fatalf("wrapped rows must keep the left padding: %q", rows)
 	}
@@ -128,7 +130,7 @@ func TestMessageBackgroundsCoverTheFullRow(t *testing.T) {
 func TestStyleBlockExpandsTabs(t *testing.T) {
 	m := newTestModel()
 	in := "func main() {\n\tif x {\n\t\treturn\n\t}\n}"
-	rows := strings.Split(styleBlock(respMsgStyle(true), in, m.width), "\n")
+	rows := strings.Split(styleBlock(DefaultTheme().respMsgStyle(true), in, m.width), "\n")
 	if len(rows) != 5 {
 		t.Fatalf("%d rows, want 5", len(rows))
 	}
@@ -144,7 +146,7 @@ func TestStyleBlockExpandsTabs(t *testing.T) {
 
 // With no size yet (before the first WindowSizeMsg) nothing wraps or fills.
 func TestStyleBlockWithoutWidth(t *testing.T) {
-	got := ansi.Strip(styleBlock(respMsgStyle(true), strings.Repeat("x", 300), 0))
+	got := ansi.Strip(styleBlock(DefaultTheme().respMsgStyle(true), strings.Repeat("x", 300), 0))
 	if got != " "+strings.Repeat("x", 300) {
 		t.Fatalf("unexpected wrap/fill: %d cells", lipgloss.Width(got))
 	}
@@ -160,7 +162,7 @@ func TestResponseCommitUsesBackground(t *testing.T) {
 	if want := printed(m.printlnResponse("line")); got != want {
 		t.Fatalf("commit %q want %q", got, want)
 	}
-	if v := m.View().Content; !strings.Contains(v, styleBlock(respMsgStyle(true), "par", m.width)) {
+	if v := m.View().Content; !strings.Contains(v, styleBlock(DefaultTheme().respMsgStyle(true), "par", m.width)) {
 		t.Fatalf("live partial line lacks the response band: %q", v)
 	}
 }
@@ -220,5 +222,29 @@ func TestBackgroundColorMsgSwitchesVariant(t *testing.T) {
 	m.Update(tea.BackgroundColorMsg{Color: color.RGBA{A: 255}})
 	if !m.darkBG {
 		t.Fatal("a dark background must select the dark variants")
+	}
+}
+
+// The placeholder is styled per background variant and restyled on every
+// background report — a light.muted override reaches it (Review Focus 5).
+func TestPlaceholderFollowsBackground(t *testing.T) {
+	m := newTestModel()
+	m.th = DefaultTheme().WithOverrides(config.ThemeConfig{
+		Dark:  config.ThemeColors{Muted: "#101010"},
+		Light: config.ThemeColors{Muted: "#123456"},
+	})
+	for _, c := range []struct {
+		bg   color.Color
+		want string
+	}{
+		{color.RGBA{R: 255, G: 255, B: 255, A: 255}, "#123456"},
+		{color.RGBA{A: 255}, "#101010"},
+	} {
+		m.Update(tea.BackgroundColorMsg{Color: c.bg})
+		st := m.ta.Styles()
+		if st.Focused.Placeholder.GetForeground() != lipgloss.Color(c.want) ||
+			st.Blurred.Placeholder.GetForeground() != lipgloss.Color(c.want) {
+			t.Errorf("bg %v: placeholder fg %v, want %s", c.bg, st.Focused.Placeholder.GetForeground(), c.want)
+		}
 	}
 }

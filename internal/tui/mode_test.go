@@ -243,7 +243,7 @@ func TestStatusAlwaysShowsMode(t *testing.T) {
 	// AUTO badge keeps its green (palette) style — the one new badge style;
 	// Task 10 moved the color to the theme palette (green in either).
 	m.agent.SetMode(agent.ModeAuto)
-	if !strings.Contains(secondLineOf(m.statusLine()), autoBadgeStyle(true).Render("Auto")) {
+	if !strings.Contains(secondLineOf(m.statusLine()), m.th.autoBadgeStyle(true).Render("Auto")) {
 		t.Fatal("AUTO badge must be green")
 	}
 	m.agent.SetPlan(true)

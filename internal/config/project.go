@@ -14,8 +14,9 @@ import (
 
 // ProjectConfigFile is the per-project config file (SPECS §4). It is read only
 // for a trusted workdir (cmd decides) and may hold a permissions object and an
-// mcp block: a cloned repository must not be able to point providers, keys or
-// the classifier model anywhere.
+// mcp block — nothing else: a cloned repository must not be able to point
+// providers, keys or the classifier model anywhere, nor recolor the TUI (the
+// permission badge must never be hidden; `tui` is user-only).
 func ProjectConfigFile(workdir string) string {
 	return filepath.Join(workdir, ".moca", "config.jsonc")
 }
@@ -23,7 +24,7 @@ func ProjectConfigFile(workdir string) string {
 // ProjectConfig is a trusted project file's content (SPECS §4): the same
 // `permissions` block as the user config, plus an `mcp` block whose servers
 // extend the user layer's (§10.5) — a project-scoped server, or a project's
-// approval of one the user configured.
+// approval of one the user configured. The `tui` block is user-only.
 type ProjectConfig struct {
 	Permissions PermissionsConfig `json:"permissions"`
 	MCP         MCPConfig         `json:"mcp"`

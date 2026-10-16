@@ -82,7 +82,7 @@ func TestApprovalShowsItsOptionsOnce(t *testing.T) {
 		{Kind: "shell", Subject: "rm -rf x"}, // asks every time: no always row
 		{Kind: "write", Subject: "/home/u/.config/moca/prompts/x.md"},
 	} {
-		panel := approvalPanel(&approvalState{approvalMsg: approvalMsg{q: q}}, 100, 6)
+		panel := approvalPanel(&approvalState{approvalMsg: approvalMsg{q: q}}, 100, 6, DefaultTheme(), true)
 		flat := ansi.Strip(panel)
 		if got := strings.Count(flat, "Allow once"); got != 1 {
 			t.Errorf("%s: %d 'Allow once' rows:\n%s", q.Subject, got, flat)

@@ -13,7 +13,7 @@ import (
 func TestStatusPaletteContrast(t *testing.T) {
 	bgs := map[bool][]string{true: {"#0d1117", "#1e1e1e"}, false: {"#ffffff", "#f6f8fa"}}
 	for dark, list := range bgs {
-		p := statusPalette(dark)
+		p := DefaultTheme().statusPalette(dark)
 		for r, hex := range p.fg {
 			if r == roleSep {
 				continue // decorative: exempt from the 4.5:1 bar, must recede
@@ -84,7 +84,7 @@ func TestStyledStatusSameTextAsPlain(t *testing.T) {
 				{text: "25%", role: rolePct, drop: 0}, {text: "/compact", role: roleHint, drop: 2},
 			}
 			plain := plainLine(segs)
-			if got := ansi.Strip(styleLine(segs, dark, p)); got != plain {
+			if got := ansi.Strip(DefaultTheme().styleLine(segs, dark, p)); got != plain {
 				t.Fatalf("dark=%v pressure=%d: %q != %q", dark, p, got, plain)
 			}
 		}
@@ -96,7 +96,7 @@ func TestYoloBadgeNeverPlanBlue(t *testing.T) {
 	// (or auto) badge style must not turn it blue (state layer normalizes
 	// plan to its own badge; this is the style-layer mirror — pin #f87171's
 	// RGB against the plan blue #60a5fa).
-	st := badgeStyle(agent.ModeYolo, true, true)
+	st := DefaultTheme().badgeStyle(agent.ModeYolo, true, true)
 	got := st.Render("Yolo")
 	if exp := lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).Bold(true).Render("Yolo"); got != exp {
 		t.Errorf("yolo badge with plan=true = %q, want the red style %q", got, exp)
@@ -104,12 +104,12 @@ func TestYoloBadgeNeverPlanBlue(t *testing.T) {
 }
 
 // The model field shares the plan blue exactly (Ben, 2026-10-12) — pinned
-// per theme so a future palette edit cannot silently split them.
+// per variant on the theme itself, the one place both colors live.
 func TestModelRendersPlanBlue(t *testing.T) {
 	for _, dark := range []bool{true, false} {
-		p := statusPalette(dark)
-		if p.fg[roleModel] != p.plan {
-			t.Errorf("dark=%v: model %s != plan blue %s", dark, p.fg[roleModel], p.plan)
+		c := DefaultTheme().colors(dark)
+		if c.StatusModel != c.BadgePlan {
+			t.Errorf("dark=%v: model %s != plan blue %s", dark, c.StatusModel, c.BadgePlan)
 		}
 	}
 }

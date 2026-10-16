@@ -60,7 +60,7 @@ func setupModel(t *testing.T, apiKey string) (*model, string) {
 func TestSetupNoticeRidesTheWelcome(t *testing.T) {
 	m, _ := setupModel(t, "env:MOCA_SETUP_KEY")
 	out := printed(m.Init())
-	if !strings.Contains(out, "How can I help you today?") || !strings.Contains(out, red.Render("no provider configured")) {
+	if !strings.Contains(out, "How can I help you today?") || !strings.Contains(out, m.th.errorStyle(m.darkBG).Bold(true).Render("no provider configured")) {
 		t.Fatalf("startup printed %q", out)
 	}
 }

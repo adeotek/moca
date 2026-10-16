@@ -93,11 +93,11 @@ func TestStatusPercentColored(t *testing.T) {
 	m.status.Window, m.status.Trigger, m.status.Used = 100_000, 90_000, 95_000
 	// The hot/warn percent segment is styled with its palette color; the
 	// visible text stays exactly what the plain spec says.
-	if got := m.statusLine(); !strings.Contains(got, statusPalette(m.darkBG).hot.Bold(true).Render("95%")) {
+	if got := m.statusLine(); !strings.Contains(got, m.th.statusPalette(m.darkBG).hot.Bold(true).Render("95%")) {
 		t.Fatalf("hot percent not hot-styled: %q", got)
 	}
 	m.status.Used = 75_000
-	if got := m.statusLine(); !strings.Contains(got, statusPalette(m.darkBG).warn.Render("75%")) {
+	if got := m.statusLine(); !strings.Contains(got, m.th.statusPalette(m.darkBG).warn.Render("75%")) {
 		t.Fatalf("warm percent not warm-styled: %q", got)
 	}
 }

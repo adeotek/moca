@@ -6,11 +6,13 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/adeotek/moca/internal/config"
 )
 
 func plainMD(s string, width int) string {
 	var st mdState
-	return ansi.Strip(renderMarkdown(&st, s, width, true))
+	return ansi.Strip(renderMarkdown(DefaultTheme(), &st, s, width, true))
 }
 
 func TestMarkdownBlocks(t *testing.T) {
@@ -37,7 +39,7 @@ func TestMarkdownBlocks(t *testing.T) {
 
 func TestMarkdownFence(t *testing.T) {
 	var st mdState
-	got := ansi.Strip(renderMarkdown(&st, "before\n```go\nfunc main() {\n\treturn   1\n}\n```\nafter **b**", 0, true))
+	got := ansi.Strip(renderMarkdown(DefaultTheme(), &st, "before\n```go\nfunc main() {\n\treturn   1\n}\n```\nafter **b**", 0, true))
 	want := " before\n ─ go\n func main() {\n     return   1\n }\n \n after b"
 	if got != want {
 		t.Fatalf("got\n%q\nwant\n%q", got, want)
@@ -47,15 +49,27 @@ func TestMarkdownFence(t *testing.T) {
 	}
 	// State carries across calls (streamed lines arrive in batches); markdown
 	// markers inside code stay literal.
-	renderMarkdown(&st, "```", 0, true)
+	renderMarkdown(DefaultTheme(), &st, "```", 0, true)
 	if !st.inFence {
 		t.Fatal("opener sets the state")
 	}
 	if got := plainMD("x", 0); got != " x" {
 		t.Fatal(got)
 	}
-	if got := ansi.Strip(renderMarkdown(&st, "**not bold** `x`", 0, true)); !strings.Contains(got, "**not bold** `x`") {
+	if got := ansi.Strip(renderMarkdown(DefaultTheme(), &st, "**not bold** `x`", 0, true)); !strings.Contains(got, "**not bold** `x`") {
 		t.Fatalf("inside a fence markers are literal: %q", got)
+	}
+}
+
+// The fenced-code band keeps its own palette (pinned, both variants):
+// dark #0c1f27, light #b6cdee.
+func TestMarkdownCodeBandPalette(t *testing.T) {
+	var st mdState
+	if out := renderMarkdown(DefaultTheme(), &st, "```\nx\n```", 0, true); !strings.Contains(out, "48;2;12;31;39") {
+		t.Fatalf("dark code band palette changed: %q", out)
+	}
+	if out := renderMarkdown(DefaultTheme(), &st, "```\nx\n```", 0, false); !strings.Contains(out, "48;2;182;205;238") {
+		t.Fatalf("light code band palette changed: %q", out)
 	}
 }
 
@@ -63,7 +77,7 @@ func TestMarkdownFence(t *testing.T) {
 // width (never word-wrapped), prose is word-wrapped.
 func TestMarkdownWidthAndWrap(t *testing.T) {
 	var st mdState
-	out := renderMarkdown(&st, "aaa bbb ccc ddd eee fff ggg\n```\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx yy\n```", 20, true)
+	out := renderMarkdown(DefaultTheme(), &st, "aaa bbb ccc ddd eee fff ggg\n```\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx yy\n```", 20, true)
 	for _, r := range strings.Split(out, "\n") {
 		if w := lipgloss.Width(r); w != 20 {
 			t.Fatalf("row %q is %d cells", ansi.Strip(r), w)
@@ -82,7 +96,7 @@ func TestMarkdownWidthAndWrap(t *testing.T) {
 // leaves a toggle open (rows are rendered independently).
 func TestMarkdownSpanAcrossWrap(t *testing.T) {
 	var st mdState
-	out := renderMarkdown(&st, "**aaa bbb ccc ddd** tail", 10, true)
+	out := renderMarkdown(DefaultTheme(), &st, "**aaa bbb ccc ddd** tail", 10, true)
 	for _, r := range strings.Split(out, "\n") {
 		if strings.Count(r, sgrBoldOn) > strings.Count(r, sgrBoldOff) {
 			t.Fatalf("row leaves bold open: %q", r)
@@ -101,7 +115,7 @@ func TestMarkdownSpanAcrossWrap(t *testing.T) {
 // Model text cannot inject its own escapes: only ours survive.
 func TestMarkdownSanitizes(t *testing.T) {
 	var st mdState
-	out := renderMarkdown(&st, "x\x1b[2Jy `\x1b[31mz`", 0, true)
+	out := renderMarkdown(DefaultTheme(), &st, "x\x1b[2Jy `\x1b[31mz`", 0, true)
 	if strings.Contains(out, "\x1b[2J") || strings.Contains(out, "\x1b[31m") {
 		t.Fatalf("raw escape reached the terminal: %q", out)
 	}
@@ -137,5 +151,35 @@ func TestFenceSurvivesCommitLive(t *testing.T) {
 	m.handleAgent(agentEvent("y := 2\n```\n"))
 	if m.md.inFence {
 		t.Fatal("fence closed by the second batch")
+	}
+}
+
+// A code span closes back to the band's foreground, not the terminal default:
+// respFg is configurable, so "after" must stay in respFg (Review Focus 3, 4).
+func TestInlineCodeRestoresBandFg(t *testing.T) {
+	for _, c := range []struct{ respFg, sgr, in string }{
+		{"#00ff00", "\x1b[38;2;0;255;0m", "before `code` after"},
+		{"2", "\x1b[32m", "before `code` after"},
+		{"#00ff00", "\x1b[38;2;0;255;0m", "# head `code` after"},
+	} {
+		th := DefaultTheme().WithOverrides(config.ThemeConfig{Both: config.ThemeColors{RespFg: c.respFg}})
+		var st mdState
+		out := renderMarkdown(th, &st, c.in, 80, true)
+		if !strings.Contains(out, "code"+c.sgr+" after") {
+			t.Errorf("%q with respFg %s: band fg not restored after the span: %q", c.in, c.respFg, out)
+		}
+		if strings.Contains(out, "code"+sgrFgOff) {
+			t.Errorf("%q: span closes to the terminal default fg: %q", c.in, out)
+		}
+	}
+}
+
+// The wrap reset is rewritten to the band's foreground too.
+func TestWrappedCodeSpanRestoresBandFg(t *testing.T) {
+	th := DefaultTheme().WithOverrides(config.ThemeConfig{Both: config.ThemeColors{RespFg: "#00ff00"}})
+	var st mdState
+	out := renderMarkdown(th, &st, "`aaaa bbbb cccc dddd eeee`", 12, true)
+	if !strings.Contains(out, sgrBoldOff+"\x1b[38;2;0;255;0m") {
+		t.Fatalf("wrap reset not rewritten to the band fg: %q", out)
 	}
 }

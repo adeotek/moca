@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"reflect"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -91,7 +94,7 @@ type Config struct {
 // PermissionsConfig is the permissions block of the user config and, with
 // fewer allowed keys, of a project .moca/config.jsonc.
 type PermissionsConfig struct {
-	DefaultMode string     `json:"defaultMode,omitempty"` // "default" | "auto" | "yolo"
+	DefaultMode string     `json:"defaultMode,omitempty"` // "default" | "auto" | "plan" | "yolo"
 	Allow       []string   `json:"allow,omitempty"`
 	Ask         []string   `json:"ask,omitempty"`
 	Deny        []string   `json:"deny,omitempty"`
@@ -104,8 +107,10 @@ type AutoConfig struct {
 	Model      string `json:"model,omitempty"`      // default: config `model`
 }
 
-// PermModes are the valid permission modes.
-var PermModes = []string{"default", "auto", "yolo"}
+// PermModes are the valid permission modes — the `--mode` flag's values and
+// permissions.defaultMode in both config layers (§3, §4). "plan" is the plan
+// scope: wherever a mode is consumed it resolves to (default, plan=true).
+var PermModes = []string{"default", "auto", "yolo", "plan"}
 
 func (p PermissionsConfig) validate(key string) error {
 	if p.DefaultMode != "" && !slices.Contains(PermModes, p.DefaultMode) {
@@ -125,8 +130,11 @@ func (p PermissionsConfig) validate(key string) error {
 }
 
 // Mode is the user-level default permission mode (§11): permissions.defaultMode,
-// else the legacy yolo flag, else "default". CLI flags and a trusted project
-// file are applied on top by cmd.
+// else the legacy yolo flag, else "default". A configured "plan" is the plan
+// scope — ResolveMode maps any "plan" to (default, plan=true). CLI flags and
+// a trusted project file are applied on top by cmd. It may return "plan",
+// which is not an agent.PermMode — resolve through ResolveMode/
+// ResolveExecuteMode, never cast.
 func (c Config) Mode() string {
 	switch {
 	case c.Permissions.DefaultMode != "":
@@ -139,18 +147,36 @@ func (c Config) Mode() string {
 
 // ResolveMode resolves a run's permission mode and plan scope (§3): an
 // explicit flag value wins — "plan" is the plan scope at the default mode —
-// else a trusted project file's defaultMode, else the config's mode.
-// Shared by the CLI front ends and the ACP server.
+// else a trusted project file's defaultMode (the project layer wins over the
+// user's), else the config's mode. A configured or flagged "plan" always
+// resolves to (default, plan=true), so it never counts as yolo for the trust
+// decision either. Shared by the CLI front ends and the ACP server.
 func ResolveMode(flag string, c Config) (string, bool) {
-	switch {
-	case flag == "plan":
-		return "default", true
-	case flag != "":
-		return flag, false
-	case c.Project.Mode() != "":
-		return c.Project.Mode(), false
+	return resolveMode(flag, c, false)
+}
+
+// ResolveExecuteMode is ResolveMode for `moca execute` (§3): executing a plan
+// is plan-exiting, so a configured layer whose mode is "plan" is skipped and
+// the next layer decides — a project plan over a user auto runs at auto. The
+// flag cannot be "plan" here (parseArgs rejects execute + --mode plan).
+func ResolveExecuteMode(flag string, c Config) string {
+	mode, _ := resolveMode(flag, c, true)
+	return mode
+}
+
+// resolveMode walks flag → trusted project → user; skipPlan drops a layer
+// whose value is "plan". A "plan" that decides is the plan scope.
+func resolveMode(flag string, c Config, skipPlan bool) (string, bool) {
+	for _, mode := range []string{flag, c.Project.Mode(), c.Mode()} {
+		if mode == "" || skipPlan && mode == "plan" {
+			continue
+		}
+		if mode == "plan" {
+			return "default", true
+		}
+		return mode, false
 	}
-	return c.Mode(), false
+	return "default", false
 }
 
 // ClassifierOn reports whether auto mode consults the classifier (default on).
@@ -225,10 +251,109 @@ type TUIConfig struct {
 	// while the terminal is unfocused: "osc9" (desktop notification escape),
 	// "bell", or "off".
 	Notify string `json:"notify"`
+	// Theme overrides scrollback/status colors. Every field is optional; an
+	// empty value keeps the built-in default (internal/tui/theme.go).
+	Theme ThemeConfig `json:"theme"`
+}
+
+// ThemeConfig overrides the TUI's colors (§3.5, §4). Both `light` and `dark`
+// sub-objects exist because moca picks a variant from the terminal's reported
+// background; a `both` sub-object applies to whichever variant the terminal
+// reports and is the common case for a color that reads well on either. A
+// key's precedence is per-key and per-variant: `light`/`dark` for the reported
+// theme, else `both`, else the built-in default. The block is user-only: a
+// project file cannot carry colors (§4).
+type ThemeConfig struct {
+	Light ThemeColors `json:"light"`
+	Dark  ThemeColors `json:"dark"`
+	Both  ThemeColors `json:"both"`
+}
+
+// ThemeColors is one variant's color overrides — every field a #rrggbb hex or
+// an ANSI color number ("1", "208", …), empty = keep the default.
+// internal/tui uses this type as its palette (tui.Colors); every field needs a
+// built-in default in tui.DefaultTheme (TestDefaultThemeComplete).
+type ThemeColors struct {
+	// Scrollback bands (message_style.go).
+	UserBg  string `json:"userBg,omitempty"`
+	UserFg  string `json:"userFg,omitempty"`
+	RespBg  string `json:"respBg,omitempty"`
+	RespFg  string `json:"respFg,omitempty"`
+	CodeBg  string `json:"codeBg,omitempty"`
+	CodeFg  string `json:"codeFg,omitempty"`
+	Muted   string `json:"muted,omitempty"`   // thinking/tool/notice lines
+	Error   string `json:"error,omitempty"`   // error: lines
+	Warning string `json:"warning,omitempty"` // warning: lines, `?` prompts
+	Accent  string `json:"accent,omitempty"`  // welcome product name, pager selection
+	Plan    string `json:"plan,omitempty"`    // plan-mode notice
+	DiffAdd string `json:"diffAdd,omitempty"` // edit-diff added lines
+	DiffDel string `json:"diffDel,omitempty"` // edit-diff removed lines
+	// Status-bar roles (status_style.go): a #rrggbb hex or ANSI number per segment.
+	// statusMode also colors the default-mode badge.
+	StatusMode   string `json:"statusMode,omitempty"`
+	StatusModel  string `json:"statusModel,omitempty"`
+	StatusEffort string `json:"statusEffort,omitempty"`
+	StatusPct    string `json:"statusPct,omitempty"`
+	StatusHint   string `json:"statusHint,omitempty"`
+	StatusCwd    string `json:"statusCwd,omitempty"`
+	StatusBranch string `json:"statusBranch,omitempty"`
+	StatusCost   string `json:"statusCost,omitempty"`
+	StatusMuted  string `json:"statusMuted,omitempty"`
+	StatusSep    string `json:"statusSep,omitempty"`
+	// Mode badges + context-pressure colors.
+	BadgeAuto string `json:"badgeAuto,omitempty"`
+	BadgePlan string `json:"badgePlan,omitempty"`
+	BadgeYolo string `json:"badgeYolo,omitempty"`
+	PctWarn   string `json:"pctWarn,omitempty"` // context percent ≥ 70%
+	PctHot    string `json:"pctHot,omitempty"`  // at/past the compact trigger
 }
 
 // NotifyModes are the valid tui.notify values.
 var NotifyModes = []string{"osc9", "bell", "off"}
+
+// themeHexRe matches a #rrggbb color (the form the built-in defaults use;
+// bare ANSI numbers are the short form).
+var themeHexRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// validateTheme checks the user config's tui.theme block. Every
+// non-empty value must be a #rrggbb hex or an ANSI color number (0-255);
+// empty keeps the built-in default (internal/tui/theme.go).
+func validateTheme(key string, t ThemeConfig) error {
+	for _, v := range []struct {
+		name string
+		c    ThemeColors
+	}{{"light", t.Light}, {"dark", t.Dark}, {"both", t.Both}} {
+		if err := validateThemeColors(key+"."+v.name, v.c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateThemeColors walks ThemeColors' fields, so adding a role cannot
+// silently skip validation (the json tag is the key users write).
+func validateThemeColors(key string, c ThemeColors) error {
+	rv := reflect.ValueOf(c)
+	rt := rv.Type()
+	for i := range rt.NumField() {
+		name := strings.TrimSuffix(rt.Field(i).Tag.Get("json"), ",omitempty")
+		if err := validateColor(key+"."+name, rv.Field(i).String()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateColor accepts a #rrggbb hex or an ANSI color number 0-255.
+func validateColor(key, v string) error {
+	if v == "" || themeHexRe.MatchString(v) {
+		return nil
+	}
+	if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 255 {
+		return nil
+	}
+	return fmt.Errorf("%s: %q must be a #rrggbb color or an ANSI color number 0-255", key, v)
+}
 
 type ContextConfig struct {
 	ReserveTokens    int `json:"reserveTokens"`
@@ -456,6 +581,9 @@ func (c Config) Validate() error {
 	}
 	if !slices.Contains(NotifyModes, c.TUI.Notify) {
 		return fmt.Errorf("tui.notify %q unknown (want %s)", c.TUI.Notify, strings.Join(NotifyModes, "|"))
+	}
+	if err := validateTheme("tui.theme", c.TUI.Theme); err != nil {
+		return err
 	}
 	if c.Snapshot.RetentionDays != nil && *c.Snapshot.RetentionDays < 0 {
 		return fmt.Errorf("snapshot.retentionDays must be >= 0")

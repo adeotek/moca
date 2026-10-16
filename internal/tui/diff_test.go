@@ -14,20 +14,20 @@ import (
 const sampleDiff = "--- a.go\n+++ a.go\n@@ -1,4 +1,4 @@\n ctx\n-old one\n-old two\n+new one\n+new\x1b[2J two\n ctx2\n"
 
 func TestDiffPreview(t *testing.T) {
-	got := ansi.Strip(diffPreview(sampleDiff, 80, 8))
+	got := ansi.Strip(diffPreview(DefaultTheme(), true, sampleDiff, 80, 8))
 	want := "    -old one\n    -old two\n    +new one\n    +new^[[2J two"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
-	capped := ansi.Strip(diffPreview(sampleDiff, 80, 3))
+	capped := ansi.Strip(diffPreview(DefaultTheme(), true, sampleDiff, 80, 3))
 	if !strings.Contains(capped, "… 2 more changed lines · ctrl+o") || strings.Count(capped, "\n") != 2 {
 		t.Fatalf("overflow: %q", capped)
 	}
 	// Inside a hunk, "----" is a removed "---" line, not a file header.
-	if got := ansi.Strip(diffPreview("--- a.md\n+++ a.md\n@@ -1,1 +0,0 @@\n----\n", 80, 8)); got != "    ----" {
+	if got := ansi.Strip(diffPreview(DefaultTheme(), true, "--- a.md\n+++ a.md\n@@ -1,1 +0,0 @@\n----\n", 80, 8)); got != "    ----" {
 		t.Fatalf("removed --- line: %q", got)
 	}
-	if diffPreview("--- a\n+++ a\n", 80, 8) != "" || diffPreview("", 80, 8) != "" {
+	if diffPreview(DefaultTheme(), true, "--- a\n+++ a\n", 80, 8) != "" || diffPreview(DefaultTheme(), true, "", 80, 8) != "" {
 		t.Fatal("no changes, no preview")
 	}
 }
