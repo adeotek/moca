@@ -261,8 +261,8 @@
 
     <div class="hint">
       Every color above comes from one place in the code: <code>internal/tui/theme.go</code> (<code>DefaultTheme</code>) —
-      the built-in palette, overlaid by a <code>tui.theme</code> block from the user config and a trusted project's
-      <code>.moca/config.jsonc</code> (the project wins per field). Status-role colors are contract-tested for WCAG
+      the built-in palette, overlaid by a <code>tui.theme</code> block from the user config (user-only — a project
+      file cannot carry colors). Status-role colors are contract-tested for WCAG
       contrast in <code>status_style_test.go</code>.
     </div>
 
@@ -273,8 +273,7 @@
         <p class="cfg-p">
           The colors set above map one-to-one onto moca's <code>tui.theme</code> roles (§3.5 · §4).
           Paste the block below into your user config, <code>~/.config/moca/config.jsonc</code>, merging it into the
-          existing <code>"tui"</code> key — or into <code>.moca/config.jsonc</code> inside a trusted project, which
-          wins per field (<code>moca</code> asks once on first open). A key you leave out keeps its built-in default.
+          existing <code>"tui"</code> key. A key you leave out keeps its built-in default.
         </p>
         <pre class="cfg" id="cfgOut"></pre>
         <p class="cfg-empty" id="cfgEmpty" hidden>
@@ -374,7 +373,7 @@ const GROUPS = [
   ]},
   { title:"Markdown & code", note:"markdown.go", fields:[
     {k:"codeBg", label:"Code fence background", role:"codeBg"},
-    {k:"codeFg", label:"Inline `code` foreground", role:"codeFg"},
+    {k:"codeFg", label:"Inline `code` foreground (fenced text uses respFg)", role:"codeFg"},
   ]},
   { title:"Item & notice lines", note:"message_style.go · diff.go", fields:[
     {k:"mutedFg", label:"Muted (items / thinking / notice)", role:"muted"},
@@ -556,7 +555,7 @@ function configSnippet(which, changedOnly){
   const lines = [
     "// moca TUI colors — the `tui.theme` block (§3.5, §4).",
     "// Paste into ~/.config/moca/config.jsonc (merge into the existing \"tui\" key),",
-    "// or .moca/config.jsonc in a trusted project — the project wins per field.",
+    "// (user config only — a project's .moca/config.jsonc cannot set colors).",
     "// Values: a #rrggbb hex or an ANSI color number (\"1\", \"208\"); a key you",
     "// leave out keeps its built-in default.",
     "{",
@@ -580,6 +579,7 @@ function refreshExport(){
   cfgOut.textContent = snippet;
   cfgOut.hidden = snippet === "";
   cfgEmpty.hidden = snippet !== "";
+  document.getElementById("cfgCopyBtn").hidden = snippet === "";
 }
 
 // ---------------------------------------------------------------- wiring
@@ -608,22 +608,39 @@ document.getElementById("resetBtn").addEventListener("click", () => {
   refreshExport();
 });
 
+// bindCopy wires a copy button: the original label is captured once, every
+// click restarts one shared timer, an empty snippet is never "copied", and a
+// failure resets like a success does.
 function bindCopy(btn, getText, fallback){
-  btn.addEventListener("click", async (e) => {
+  const label = btn.textContent;
+  let timer = 0;
+  const flash = (text) => {
+    clearTimeout(timer);
+    btn.textContent = text;
+    timer = setTimeout(() => { btn.textContent = label; }, 1200);
+  };
+  btn.addEventListener("click", async () => {
+    const text = getText();
+    if(!text){ flash("Nothing to copy"); return; }
     try{
-      await navigator.clipboard.writeText(getText());
-      const old = e.target.textContent;
-      e.target.textContent = "Copied ✓";
-      setTimeout(() => { e.target.textContent = old; }, 1200);
+      await navigator.clipboard.writeText(text);
+      flash("Copied ✓");
     }catch(err){
-      if(fallback){ fallback(); } else { e.target.textContent = "Copy failed"; }
+      try{ fallback(); flash("Copied ✓"); }catch(err2){ flash("Copy failed"); }
     }
   });
 }
-bindCopy(document.getElementById("copyBtn"), () => exportOut.value, () => {
-  exportOut.select(); document.execCommand && document.execCommand("copy");
-});
-bindCopy(document.getElementById("cfgCopyBtn"), () => cfgOut.textContent);
+// execCopy selects node's contents and runs the legacy copy command; it
+// throws when the browser refuses, so bindCopy reports the failure.
+function execCopy(select){
+  select();
+  if(!(document.execCommand && document.execCommand("copy"))){ throw new Error("copy refused"); }
+}
+bindCopy(document.getElementById("copyBtn"), () => exportOut.value, () => execCopy(() => exportOut.select()));
+bindCopy(document.getElementById("cfgCopyBtn"), () => cfgOut.textContent, () => execCopy(() => {
+  const r = document.createRange(); r.selectNodeContents(cfgOut);
+  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+}));
 document.getElementById("exportBtn").addEventListener("click", refreshExport);
 document.getElementById("cfgAll").addEventListener("change", refreshExport);
 
