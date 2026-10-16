@@ -146,16 +146,21 @@ func TestCompletionsHistoryToolInputSanitized(t *testing.T) {
 }
 
 func TestCompletionsEffortOffIsExplicit(t *testing.T) {
-	// glm/kimi: omitting reasoning_effort leaves server-side thinking on, so
-	// `off` must put an explicit value on the wire.
-	m := Model{ID: "glm", ThinkingMode: "openai", ThinkingLevelMap: glmThinking}
+	// kimi: omitting reasoning_effort leaves server-side thinking on, so
+	// `off` must put an explicit value on the wire. The glm variants became
+	// thinking-only on 2026-10-16 — `off` is not in their maps (there is
+	// nothing to send; the effort clamps to low/minimal upstream).
+	m := Model{ID: "kimi", ThinkingMode: "openai", ThinkingLevelMap: kimiThinking}
 	a := &completionsAdapter{m: m}
-	b := a.body(llm.Request{Model: "glm", Effort: llm.EffortOff})
-	if v, _ := b["reasoning_effort"].(string); v == "" {
-		t.Fatalf("effort off sent no reasoning_effort: %v", b)
+	b := a.body(llm.Request{Model: "kimi", Effort: llm.EffortOff})
+	if v, _ := b["reasoning_effort"].(string); v != "none" {
+		t.Fatalf("effort off sent %v, want none: %v", v, b)
 	}
-	if v := a.body(llm.Request{Model: "glm", Effort: llm.EffortHigh})["reasoning_effort"]; v != "high" {
+	if v := a.body(llm.Request{Model: "kimi", Effort: llm.EffortHigh})["reasoning_effort"]; v != "high" {
 		t.Fatalf("high → %v", v)
+	}
+	if v := a.body(llm.Request{Model: "glm", Effort: llm.EffortLow})["reasoning_effort"]; v != "low" {
+		t.Fatalf("glm low → %v", v)
 	}
 }
 
