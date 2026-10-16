@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5.2-beta (2026-10-16)
+
+The models behind the zen tier became thinking-only mid-October; the glm effort maps now match the live-verified acceptance, and the agent gains a progress nudge plus working-style rules from the TB2 bench review (2026-10-16).
+
+### Providers
+
+- **glm effort maps re-verified live.** `glm-5.3-flash` accepts only `low|high|max` — thinking cannot be disabled (`none` → `[1210] … cannot be disabled; please use low, high, or max`) — so moca's default `medium` now clamps to `low` instead of being sent as-is (which started 400-ing mid-rollout and killed runs mid-task); `glm-5.3` accepts `minimal|low|medium|high|max`; `kimi-k3` still disables through `none` and got its own map. Pinned by `TestGLMEffortMapsMatchTheThinkingOnlyServingVariants`.
+
+### Agent
+
+- **Progress nudge.** A non-plan run that has taken `context.progressNudgeAt` tool batches (default 12; `0` disables the nudge) without creating or editing a file gets one persisted nudge to start acting on what it already knows — or to name the blocking unknown, or why no file needs to change (§14).
+- **Working-style prompt.** Time-boxed orientation (dependencies' internals only when a concrete behavior blocks you), falsifiable verification (a check that never reaches the changed code, or validates output against its own reconstruction, proves nothing), no fabricated data (lost or unobtainable data is reported, never rebuilt and presented as fact), and: copy stateful files before probing them — opening a SQLite DB checkpoints it and can delete its WAL.
+
 ## v0.5.1-beta (2026-10-15)
 
 Project-scoped MCP servers, project-scoped approvals, an approval panel that shows its options once, and shifted symbols that reach the input intact.

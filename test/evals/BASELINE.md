@@ -30,6 +30,14 @@ Re-run after any harness or prompt change and compare: `go run ./test/evals/eval
 | final | vague | 6 | 3/6 | 70813 ± 55799 | 13.8 ± 7.9 | 0.0457 | 141627 | 0 |
 | final | web | 3 | 3/3 | 32894 ± 8769 | 3.7 ± 0.5 | 0.0101 | 32894 | 0 |
 | **final** | **∑ all** | 24 | **20/24** | **49146 ± 37023** | **10.0 ± 5.9** | 0.1250 | **58975** | **0** |
+| v0.5.2 | bugfix | 3 | 2/3 | 150136 ± 154708 | 19.7 ± 15.1 | 0.0229 | 225204 | 2 |
+| v0.5.2 | feature | 3 | 3/3 | 35179 ± 9231 | 8.3 ± 2.1 | 0.0073 | 35179 | 0 |
+| v0.5.2 | largefile | 3 | 3/3 | 78044 ± 9956 | 9.7 ± 0.9 | 0.0131 | 78044 | 0 |
+| v0.5.2 | plan | 3 | 3/3 | 19515 ± 1785 | 4.7 ± 0.5 | 0.0068 | 19515 | 0 |
+| v0.5.2 | refactor | 3 | 2/3 | 41229 ± 25101 | 8.0 ± 4.3 | 0.0100 | 61844 | 0 |
+| v0.5.2 | vague | 3 | 1/3 | 35541 ± 15864 | 7.7 ± 2.5 | 0.0113 | 106624 | 0 |
+| v0.5.2 | web | 3 | 3/3 | 22749 ± 9071 | 3.0 ± 0.0 | 0.0083 | 22749 | 0 |
+| **v0.5.2** | **∑ all** | 21 | **17/21** | **54628 ± 73608** | **8.7 ± 7.8** | 0.0796 | **67481** | **2** |
 
 Per run: tool errors 1.96 → 1.29; shell calls 3.0 → 2.3; cache-read share of input 49% → 46%.
 
@@ -52,6 +60,32 @@ Per run: tool errors 1.96 → 1.29; shell calls 3.0 → 2.3; cache-read share of
   revisit: a larger web cap, or a note that the head usually suffices).
 - **Noise**: 3 runs per scenario on a cheap model — single runs swing a scenario by ±50 %. Trust the ∑
   rows and the variance figures; re-run a scenario with `-n 6` before acting on one cell.
+
+## v0.5.2-beta delta (2026-10-16 hardening pass)
+
+Recorded 2026-10-16 with the same config/model (`opencode-go/glm-5.3-flash`), `-n 3 -j 4`, label
+`v0.5.2` (21 runs — three per scenario; the rev-21 table's `vague` rows used 6). The change set:
+the working-style prompt (time-boxed recon, falsifiable verification, no fabricated data, copy
+stateful files before probing), the 12-batch progress nudge, and the glm flash effort fix.
+
+- **Overall 17/21 (81 %) vs 20/24 (83 %)** — same rate within noise. Steps per run 10.0 → 8.7
+  (−13 %), tokens per run +11 % (49146 → 54628), tokens per solved task 58975 → 67481 (+14 %),
+  cost per run $0.0052 → $0.0038.
+- **The floor moved in the runs where the model behaves**: `feature` 8.3 steps (was 8.3),
+  `plan` 4.7 (was 7.7, −39 %), `refactor` 8.0 (was 14.7, −46 %), `largefile` 9.7 (was 9.3),
+  `web` 3.0 (was 3.7). The three failures are not nudge-shaped:
+  - `vague#1`/`vague#2` — the rev-21 failure mode repeats verbatim (`accepted invalid input:
+    -to f -- -300`): the model's own domain validation is wrong, no amount of prompt fixes that
+    (rev-21 `final` got 3/6; one run here passed in 11 steps).
+  - `bugfix#2` — 41 steps, 9 edits, then the repeated-failure stop (exit 3): the run *acted* early,
+    so the progress nudge correctly never fired; it thrashed on edits that did not fix `TestLimit`.
+  - `refactor#3` — died after 2 steps on a mid-stream `[rate_limit_error] upstream model is
+    overloaded` (exit 1, $0.0011): endpoint noise, not code (the TB2 record documents the same
+    drift). 1 of 21 runs.
+- **Caveat — this is not a clean A/B of the prompt**: the same pass changed `glm-5.3-flash`'s
+  effective effort (its serving variant stopped accepting `medium`, so sessions now run at `low`
+  — the session headers in `results/v0.5.2.jsonl` runs show `"effort": "low"`). Re-run with an
+  explicit `--effort` (or on a quiet endpoint) before attributing a delta to the prompt alone.
 
 ## Found by the evals (fixed in rev 21)
 
