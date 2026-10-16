@@ -53,21 +53,22 @@ func fenceLang(line string) (lang string, ok bool) {
 	return "", false
 }
 
-// renderInline styles `code` and **bold** spans in one sanitized line; fg is
-// the raw SGR sequence of the inline-code foreground (Theme.codeFg).
-func renderInline(s, fg string) string {
+// renderInline styles `code` and **bold** spans in one sanitized line; codeFg
+// opens a code span and bandFg closes it (raw SGR: Theme.codeFg/respFg), so
+// the text after a span keeps the band's own foreground.
+func renderInline(s, codeFg, bandFg string) string {
 	var sb strings.Builder
 	for i := 0; i < len(s); {
 		switch {
 		case s[i] == '`':
 			if j := strings.IndexByte(s[i+1:], '`'); j > 0 {
-				sb.WriteString(fg + s[i+1:i+1+j] + sgrFgOff)
+				sb.WriteString(codeFg + s[i+1:i+1+j] + bandFg)
 				i += j + 2
 				continue
 			}
 		case strings.HasPrefix(s[i:], "**"):
 			if j := strings.Index(s[i+2:], "**"); j > 0 {
-				sb.WriteString(sgrBoldOn + renderInline(s[i+2:i+2+j], fg) + sgrBoldOff)
+				sb.WriteString(sgrBoldOn + renderInline(s[i+2:i+2+j], codeFg, bandFg) + sgrBoldOff)
 				i += j + 4
 				continue
 			}
@@ -84,7 +85,7 @@ func renderInline(s, fg string) string {
 // and no fill. Like styleBlock it sanitizes first and expands tabs.
 func renderMarkdown(t Theme, st *mdState, s string, width int, dark bool) string {
 	resp, code := t.respMsgStyle(dark), t.codeBandStyle(dark)
-	fg := t.codeFg(dark)
+	codeFg, bandFg := t.codeFg(dark), t.respFg(dark)
 	s = strings.ReplaceAll(Sanitize(s), "\t", strings.Repeat(" ", tabWidth))
 	var out []string
 	band := func(style lipgloss.Style, rows []string) {
@@ -130,7 +131,7 @@ func renderMarkdown(t Theme, st *mdState, s string, width int, dark bool) string
 		case quoteRe.MatchString(l):
 			l = "│ " + quoteRe.FindStringSubmatch(l)[1]
 		}
-		l = renderInline(l, fg)
+		l = renderInline(l, codeFg, bandFg)
 		if bold {
 			l = sgrBoldOn + l + sgrBoldOff
 		}
@@ -138,8 +139,9 @@ func renderMarkdown(t Theme, st *mdState, s string, width int, dark bool) string
 			l = lipgloss.Wrap(l, width-2, "")
 			// Wrap closes a span at the break with a full reset, which would
 			// also drop the band's background for the padding that follows.
-			// Only our toggles can be open, so close exactly those.
-			l = strings.NewReplacer("\x1b[m", sgrBoldOff+sgrFgOff, "\x1b[0m", sgrBoldOff+sgrFgOff).Replace(l)
+			// Only our toggles can be open, so close exactly those — back to
+			// the band's foreground.
+			l = strings.NewReplacer("\x1b[m", sgrBoldOff+bandFg, "\x1b[0m", sgrBoldOff+bandFg).Replace(l)
 		}
 		band(resp, strings.Split(l, "\n"))
 	}

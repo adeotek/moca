@@ -157,6 +157,10 @@ func (t Theme) codeBandStyle(dark bool) lipgloss.Style {
 // codeFg is the raw SGR of the inline-code foreground.
 func (t Theme) codeFg(dark bool) string { return fgSGR(t.colors(dark).CodeFg) }
 
+// respFg is the raw SGR of the response band's foreground — what an inline
+// code span or a wrap reset closes back to (never the terminal default).
+func (t Theme) respFg(dark bool) string { return fgSGR(t.colors(dark).RespFg) }
+
 func (t Theme) mutedStyle(dark bool) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(t.colors(dark).Muted))
 }

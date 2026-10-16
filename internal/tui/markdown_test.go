@@ -6,6 +6,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/adeotek/moca/internal/config"
 )
 
 func plainMD(s string, width int) string {
@@ -149,5 +151,35 @@ func TestFenceSurvivesCommitLive(t *testing.T) {
 	m.handleAgent(agentEvent("y := 2\n```\n"))
 	if m.md.inFence {
 		t.Fatal("fence closed by the second batch")
+	}
+}
+
+// A code span closes back to the band's foreground, not the terminal default:
+// respFg is configurable, so "after" must stay in respFg (Review Focus 3, 4).
+func TestInlineCodeRestoresBandFg(t *testing.T) {
+	for _, c := range []struct{ respFg, sgr, in string }{
+		{"#00ff00", "\x1b[38;2;0;255;0m", "before `code` after"},
+		{"2", "\x1b[32m", "before `code` after"},
+		{"#00ff00", "\x1b[38;2;0;255;0m", "# head `code` after"},
+	} {
+		th := DefaultTheme().WithOverrides(config.ThemeConfig{Both: config.ThemeColors{RespFg: c.respFg}})
+		var st mdState
+		out := renderMarkdown(th, &st, c.in, 80, true)
+		if !strings.Contains(out, "code"+c.sgr+" after") {
+			t.Errorf("%q with respFg %s: band fg not restored after the span: %q", c.in, c.respFg, out)
+		}
+		if strings.Contains(out, "code"+sgrFgOff) {
+			t.Errorf("%q: span closes to the terminal default fg: %q", c.in, out)
+		}
+	}
+}
+
+// The wrap reset is rewritten to the band's foreground too.
+func TestWrappedCodeSpanRestoresBandFg(t *testing.T) {
+	th := DefaultTheme().WithOverrides(config.ThemeConfig{Both: config.ThemeColors{RespFg: "#00ff00"}})
+	var st mdState
+	out := renderMarkdown(th, &st, "`aaaa bbbb cccc dddd eeee`", 12, true)
+	if !strings.Contains(out, sgrBoldOff+"\x1b[38;2;0;255;0m") {
+		t.Fatalf("wrap reset not rewritten to the band fg: %q", out)
 	}
 }
