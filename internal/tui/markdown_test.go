@@ -60,10 +60,10 @@ func TestMarkdownFence(t *testing.T) {
 }
 
 // The fenced-code band keeps its own palette (pinned, both variants):
-// dark #0c222b, light #b6cdee.
+// dark #0c1f27, light #b6cdee.
 func TestMarkdownCodeBandPalette(t *testing.T) {
 	var st mdState
-	if out := renderMarkdown(DefaultTheme(), &st, "```\nx\n```", 0, true); !strings.Contains(out, "48;2;12;34;43") {
+	if out := renderMarkdown(DefaultTheme(), &st, "```\nx\n```", 0, true); !strings.Contains(out, "48;2;12;31;39") {
 		t.Fatalf("dark code band palette changed: %q", out)
 	}
 	if out := renderMarkdown(DefaultTheme(), &st, "```\nx\n```", 0, false); !strings.Contains(out, "48;2;182;205;238") {

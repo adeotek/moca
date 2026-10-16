@@ -68,13 +68,13 @@ type Theme struct{ Dark, Light Colors }
 func DefaultTheme() Theme {
 	return Theme{
 		Dark: Colors{
-			UserBg: "#141618", UserFg: "#edf0f4",
-			RespBg: "#091215", RespFg: "#e9f1fc",
-			CodeBg: "#0c222b", CodeFg: "#f2c57c",
+			UserBg: "#1c1f21", UserFg: "#edf0f4",
+			RespBg: "#0a1619", RespFg: "#e9f1fc",
+			CodeBg: "#0c1f27", CodeFg: "#f2c57c",
 			Muted: "#96a0a4", Error: "1", Warning: "3",
 			Accent: "#d97706", Plan: "4",
 			DiffAdd: "2", DiffDel: "1",
-			StatusMode: "#c9d1d9", StatusModel: "#60a5fa", StatusEffort: "#c4b5fd",
+			StatusMode: "#8d8f91", StatusModel: "#60a5fa", StatusEffort: "#c4b5fd",
 			StatusPct: "#e6edf3", StatusHint: "#f87171", StatusCwd: "#67e8f9",
 			StatusBranch: "#f0abfc", StatusCost: "#fbbf24", StatusMuted: "#9aa4ab",
 			StatusSep: "#5b636b",
