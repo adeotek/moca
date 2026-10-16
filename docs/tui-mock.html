@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>moca · TUI color lab</title>
+<style>
+  :root{
+    /* Palette (camelCase keys mirror the Go style sources). Overwritten by JS. */
+    --termBg:#000000; --termFg:#e6edf3; --accent:#d97706;
+    --userBg:#3d434c; --userFg:#edf0f4;
+    --respBg:#213b49; --respFg:#e9f1fc;
+    --codeBg:#16303d; --codeFg:#f2c57c;
+    --mutedFg:#96a0a4; --errFg:#f85149; --warnFg:#d29922;
+    --addFg:#3fb950; --delFg:#f85149; --planFg:#58a6ff;
+    --mode:#c9d1d9; --model:#60a5fa; --effort:#c4b5fd; --pct:#e6edf3;
+    --hint:#f87171; --cwd:#67e8f9; --branch:#f0abfc; --cost:#fbbf24;
+    --smuted:#9aa4ab; --sep:#5b636b;
+    --badgeDefault:#c9d1d9; --badgeAuto:#4ade80; --badgeYolo:#f87171; --badgePlan:#60a5fa;
+    --pressureWarn:#facc15; --pressureHot:#f87171;
+
+    --dim-opacity:.55;
+    --page-bg:#16181d;
+    --panel-bg:#1c1f26;
+    --panel-line:#2c313b;
+    --panel-fg:#c9d1d9;
+    --panel-muted:#8b949e;
+    --mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--page-bg); color:var(--panel-fg);
+    font:14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding:20px;
+  }
+
+  header.top{
+    display:flex; flex-wrap:wrap; align-items:center; gap:12px 16px;
+    max-width:1400px; margin:0 auto 16px;
+  }
+  header.top h1{font-size:17px; margin:0; letter-spacing:.2px; font-weight:650}
+  header.top .sub{color:var(--panel-muted); font-size:12.5px}
+  header.top .spacer{flex:1}
+
+  .seg{display:inline-flex; border:1px solid var(--panel-line); border-radius:8px; overflow:hidden}
+  .seg button{
+    background:transparent; color:var(--panel-muted); border:0; padding:7px 14px;
+    font:600 12.5px/1 var(--mono); cursor:pointer;
+  }
+  .seg button.active{background:#2b3240; color:#fff}
+  .btn{
+    background:#242a34; color:var(--panel-fg); border:1px solid var(--panel-line);
+    border-radius:8px; padding:7px 13px; font:600 12.5px/1 var(--mono); cursor:pointer;
+  }
+  .btn:hover{background:#2b3240}
+
+  main{
+    max-width:1400px; margin:0 auto;
+    display:grid; grid-template-columns:minmax(0,1fr) 400px; gap:20px; align-items:start;
+  }
+  @media (max-width:1040px){ main{grid-template-columns:1fr} }
+
+  .stage{min-width:0}
+  .term{
+    background:var(--termBg); color:var(--termFg);
+    font-family:var(--mono); font-size:13.5px; line-height:1.5;
+    border-radius:10px; padding:10px 0; overflow:hidden;
+    border:1px solid rgba(255,255,255,.06);
+    box-shadow:0 18px 50px -18px rgba(0,0,0,.8), inset 0 0 0 1px rgba(255,255,255,.02);
+  }
+  .row{white-space:pre-wrap; word-break:break-word; padding:0 14px}
+  .band{padding:0} /* full-row background; inner .row carries side padding */
+  .band .row{padding:0 14px}
+  .code{overflow-x:auto}
+  .code .row{white-space:pre; padding:0 14px}
+  .bold{font-weight:700}
+  .dim{opacity:var(--dim-opacity)}
+  .ic{color:var(--codeFg)}
+  .h{font-weight:700}
+  .muted{color:var(--mutedFg)}
+  .mark-err{color:var(--errFg)}
+  .diff-indent{white-space:pre}
+  .add{color:var(--addFg)}
+  .del{color:var(--delFg)}
+  .user-lead{font-weight:700}
+  .sep{color:var(--sep)}
+  .cursor{
+    display:inline-block; width:.6em; height:1.05em; vertical-align:-2px;
+    background:var(--termFg); animation:blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink{50%{opacity:0}}
+
+  .rule{height:1px; background:var(--termFg); opacity:.3; margin:2px 0}
+
+  .status{font-family:var(--mono); font-size:13.5px; line-height:1.5}
+  /* normal (not pre-wrap): the markup puts each line's first span on the row
+     after the opening tag, and pre-wrap would keep that newline+indent as a
+     blank leading row and a right shift. */
+  .sline{white-space:normal; padding:0 14px}
+
+  .panel{
+    background:var(--panel-bg); border:1px solid var(--panel-line); border-radius:10px;
+    overflow:hidden; margin-top:16px;
+  }
+  .panel h2{font-size:12px; text-transform:uppercase; letter-spacing:.09em; color:var(--panel-muted); margin:0; padding:11px 14px; border-bottom:1px solid var(--panel-line)}
+  .panel .body{padding:12px 14px; font-family:var(--mono); font-size:13px; line-height:1.7}
+  .badgesrow{display:flex; flex-wrap:wrap; gap:6px 18px; align-items:baseline}
+
+  aside.controls{
+    background:var(--panel-bg); border:1px solid var(--panel-line); border-radius:10px;
+    max-height:calc(100vh - 40px); overflow:auto; position:sticky; top:20px;
+  }
+  .controls .head{
+    position:sticky; top:0; background:var(--panel-bg); border-bottom:1px solid var(--panel-line);
+    padding:12px 14px; z-index:2;
+  }
+  .controls .head .t{font-weight:650; font-size:13.5px}
+  .controls .head .n{color:var(--panel-muted); font-size:11.5px; margin-top:2px}
+  .controls .head .actions{display:flex; gap:8px; margin-top:10px}
+
+  .group{border-bottom:1px solid var(--panel-line); padding:12px 14px}
+  .group:last-child{border-bottom:0}
+  .group .gtitle{font-weight:600; font-size:12.5px; display:flex; justify-content:space-between; align-items:baseline; gap:8px}
+  .group .gnote{color:var(--panel-muted); font-size:10.5px; font-family:var(--mono); white-space:nowrap}
+  .field{display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; margin-top:9px}
+  .field label{font-size:12px; color:var(--panel-fg)}
+  .field .pick{display:flex; align-items:center; gap:6px}
+  .field input[type=color]{
+    width:30px; height:24px; padding:0; border:1px solid var(--panel-line);
+    border-radius:6px; background:transparent; cursor:pointer;
+  }
+  .field input.hex{
+    width:82px; background:#11141a; color:var(--panel-fg); border:1px solid var(--panel-line);
+    border-radius:6px; padding:5px 7px; font:500 11.5px/1 var(--mono); text-transform:lowercase;
+  }
+  .field input.hex:invalid{border-color:var(--errFg); color:var(--errFg)}
+
+  .export{padding:12px 14px; border-top:1px solid var(--panel-line)}
+  .export textarea{
+    width:100%; height:120px; resize:vertical; background:#11141a; color:var(--panel-fg);
+    border:1px solid var(--panel-line); border-radius:8px; padding:9px;
+    font:11.5px/1.55 var(--mono);
+  }
+  .export .actions{display:flex; gap:8px; margin-top:9px}
+  .hint{color:var(--panel-muted); font-size:11.5px; margin-top:14px; line-height:1.6}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>moca · TUI color lab</h1>
+  <span class="sub">live mock of the terminal UI — tune every themed color, then export a palette</span>
+  <span class="spacer"></span>
+  <div class="seg" id="baseSeg">
+    <button data-base="dark" class="active">Dark</button>
+    <button data-base="light">Light</button>
+  </div>
+  <button class="btn" id="resetBtn">Reset</button>
+</header>
+
+<main>
+  <section class="stage">
+    <!-- ===================== terminal mock ===================== -->
+    <div class="term" id="term">
+      <div class="sb">
+        <div class="row"><span class="bold" style="color:var(--accent)">moca</span> <span class="dim">v0.5.2-beta</span></div>
+        <div class="row">How can I help you today?</div>
+        <div class="row"> </div>
+
+        <div class="band" style="background:var(--userBg);color:var(--userFg)">
+          <div class="row"><span class="user-lead">› </span>add a bounded retry to the fetch helper, then run <span class="bold">go test ./…</span></div>
+        </div>
+
+        <div class="row muted">⋯ #1 thinking 4 lines · 2s</div>
+        <div class="row muted">▸ #2 read internal/http/client.go</div>
+        <div class="row muted">▸ #3 edit internal/http/client.go</div>
+        <div class="row"><span class="diff-indent">    </span><span class="del">- return do(ctx, url)</span></div>
+        <div class="row"><span class="diff-indent">    </span><span class="add">+ return retry.Do(ctx, retry.Attempts(4), func() ([]byte, error) {</span></div>
+        <div class="row"><span class="diff-indent">    </span><span class="add">+         return do(ctx, url)</span></div>
+        <div class="row muted dim"><span class="diff-indent">    </span>… 3 more changed lines · ctrl+o for the full diff</div>
+
+        <div class="row"> </div>
+        <div class="row"><span class="mark-err">✗</span> <span class="muted">#4 shell go test ./…</span></div>
+        <div class="row" style="color:var(--warnFg)">⚠ context at 72% — auto-compaction fires at 78%</div>
+        <div class="row" style="color:var(--errFg)">error: tests failed (2 failures) — see the pager (ctrl+o)</div>
+        <div class="row"> </div>
+
+        <div class="row muted">⋯ #5 thinking 4 lines · 2s</div>
+        <div class="row muted">▸ #6 read internal/http/client.go</div>
+        <div class="band" style="background:var(--respBg);color:var(--respFg)">
+          <div class="row h">Add a bounded retry wrapper around <span class="ic">fetchJSON</span></div>
+          <div class="row"> </div>
+          <div class="row">• keep the existing signature and behaviour</div>
+          <div class="row">• 4 attempts, backoff 200ms → 1.6s</div>
+          <div class="row">• retry only on <span class="ic">5xx</span> and network errors</div>
+          <div class="row"> </div>
+          <div class="row">Existing callers keep working; <span class="bold">no API change</span>.</div>
+        </div>
+
+        <div class="code" style="background:var(--codeBg);color:var(--respFg)">
+          <div class="row">─ go</div>
+          <div class="row">func fetchJSON(ctx context.Context, url string) ([]byte, error) {</div>
+          <div class="row">        return retry.Do(ctx, retry.Attempts(4), func() ([]byte, error) {</div>
+          <div class="row">                return do(ctx, url)</div>
+          <div class="row">        })</div>
+          <div class="row">}</div>
+          <div class="row">─</div>
+        </div>
+
+        <div class="band" style="background:var(--respBg);color:var(--respFg)">
+          <div class="row"> </div>
+          <div class="row h">Work done and CI status is <span class="ic">green</span></div>
+        </div>
+
+        <div class="row"> </div>
+        <div class="row dim">⠋ shell go test ./…  12s · ↓1.2k tok · esc to interrupt</div>
+      </div>
+
+      <div class="rule"></div>
+      <div class="row"><span class="cursor"></span><span class="dim">Message moca…  (/help for commands)</span></div>
+      <div class="rule"></div>
+
+      <div class="status">
+        <div class="sline">
+          <span style="color:var(--smuted)">v0.5.2-beta</span><span class="sep"> · </span><span style="color:var(--cwd)">~/projects/moca</span><span class="sep"> · </span><span style="color:var(--branch)">main*</span>
+        </div>
+        <div class="sline">
+          <span class="bold" style="color:var(--badgeAuto)">Auto</span><span class="sep"> · </span><span class="bold" style="color:var(--model)">gpt-5.3-codex</span><span class="sep"> · </span><span style="color:var(--effort)">high</span><span class="sep"> · </span><span style="color:var(--smuted)">ctx 400k</span><span class="sep"> · </span><span style="color:var(--pct)">12%</span><span class="sep"> · </span><span style="color:var(--smuted)">34k/5.1k</span><span class="sep"> · </span><span style="color:var(--cost)">$0.42</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== variants ===================== -->
+    <div class="panel">
+      <h2>Badge &amp; pressure variants</h2>
+      <div class="body">
+        <div class="badgesrow">
+          <span class="bold" style="color:var(--badgeDefault)">Default</span>
+          <span class="bold" style="color:var(--badgeAuto)">Auto</span>
+          <span class="bold" style="color:var(--badgeYolo)">Yolo</span>
+          <span class="bold" style="color:var(--badgePlan)">Plan</span>
+        </div>
+        <div class="badgesrow" style="margin-top:8px">
+          <span style="color:var(--pct)">12%</span>
+          <span style="color:var(--pressureWarn)">72%</span>
+          <span class="bold" style="color:var(--pressureHot)">95% <span style="color:var(--hint)">/compact</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="hint">
+      Sources of the colors above — status roles &amp; badges: <code>internal/tui/status_style.go</code> (<code>statusPalette</code>, <code>badgeStyle</code>);
+      bands &amp; muted/err/warn: <code>internal/tui/message_style.go</code>; markdown &amp; code: <code>internal/tui/markdown.go</code>;
+      diff add/del &amp; ANSI slots: <code>internal/tui/diff.go</code>; welcome accent + ANSI plan: <code>internal/tui/app.go</code>.
+      Status/scrollback colors are contract-tested for WCAG contrast in <code>status_style_test.go</code>.
+    </div>
+  </section>
+
+  <!-- ===================== controls ===================== -->
+  <aside class="controls" id="controls">
+    <div class="head">
+      <div class="t">Colors</div>
+      <div class="n">every value maps to one CSS variable; changes apply live</div>
+    </div>
+    <div id="fields"></div>
+
+    <div class="export">
+      <div class="gtitle" style="margin-bottom:8px">Export theme <span class="gnote" id="exportName">dark</span></div>
+      <textarea id="exportOut" spellcheck="false" readonly></textarea>
+      <div class="actions">
+        <button class="btn" id="copyBtn">Copy JSON</button>
+        <button class="btn" id="exportBtn">Refresh</button>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<script>
+// ---------------------------------------------------------------- palettes
+// Defaults inlined from the Go style tables (dark = startup default).
+const PALETTES = {
+  dark: {
+    termBg:"#000000", termFg:"#e6edf3", accent:"#d97706",
+    userBg:"#141618", userFg:"#edf0f4",
+    respBg:"#091215", respFg:"#e9f1fc",
+    codeBg:"#0c222b", codeFg:"#f2c57c",
+    mutedFg:"#96a0a4", errFg:"#f85149", warnFg:"#d29922",
+    addFg:"#3fb950", delFg:"#f85149", planFg:"#58a6ff",
+    mode:"#c9d1d9", model:"#60a5fa", effort:"#c4b5fd", pct:"#e6edf3",
+    hint:"#f87171", cwd:"#67e8f9", branch:"#f0abfc", cost:"#fbbf24",
+    smuted:"#9aa4ab", sep:"#5b636b",
+    badgeDefault:"#c9d1d9", badgeAuto:"#4ade80", badgeYolo:"#f87171", badgePlan:"#60a5fa",
+    pressureWarn:"#facc15", pressureHot:"#f87171"
+  },
+  light: {
+    termBg:"#ffffff", termFg:"#1f2328", accent:"#d97706",
+    userBg:"#dfe3e8", userFg:"#1c2026",
+    respBg:"#c9ddfb", respFg:"#17304d",
+    codeBg:"#b6cdee", codeFg:"#7a3e00",
+    mutedFg:"#96a0a4", errFg:"#cf222e", warnFg:"#9a6700",
+    addFg:"#1a7f37", delFg:"#cf222e", planFg:"#0969da",
+    mode:"#3b434b", model:"#1d4ed8", effort:"#6d28d9", pct:"#1f2328",
+    hint:"#b91c1c", cwd:"#0e7490", branch:"#a21caf", cost:"#b45309",
+    smuted:"#57606a", sep:"#9ea7b0",
+    badgeDefault:"#3b434b", badgeAuto:"#15803d", badgeYolo:"#b91c1c", badgePlan:"#1d4ed8",
+    pressureWarn:"#a16207", pressureHot:"#b91c1c"
+  }
+};
+
+// Grouped field definitions. The note names the Go source that owns the color.
+const GROUPS = [
+  { title:"Terminal & welcome", note:"app.go", fields:[
+    {k:"termBg", label:"Terminal background"},
+    {k:"termFg", label:"Terminal default text"},
+    {k:"accent", label:"Welcome accent “moca”"},
+  ]},
+  { title:"Message bands", note:"message_style.go", fields:[
+    {k:"userBg", label:"User band background"},
+    {k:"userFg", label:"User band foreground"},
+    {k:"respBg", label:"Response band background"},
+    {k:"respFg", label:"Response band foreground"},
+  ]},
+  { title:"Markdown & code", note:"markdown.go", fields:[
+    {k:"codeBg", label:"Code fence background"},
+    {k:"codeFg", label:"Inline `code` foreground"},
+  ]},
+  { title:"Item & notice lines", note:"message_style.go · diff.go", fields:[
+    {k:"mutedFg", label:"Muted (items / thinking / notice)"},
+    {k:"errFg", label:"Error (ANSI 1)"},
+    {k:"warnFg", label:"Warning (ANSI 3)"},
+    {k:"addFg", label:"Diff add (ANSI 2)"},
+    {k:"delFg", label:"Diff del (ANSI 1)"},
+    {k:"planFg", label:"Plan notice (ANSI 4)"},
+  ]},
+  { title:"Status bar — roles", note:"status_style.go", fields:[
+    {k:"mode", label:"Mode (roleMode)"},
+    {k:"model", label:"Model (roleModel)"},
+    {k:"effort", label:"Effort (roleEffort)"},
+    {k:"pct", label:"Context % (rolePct)"},
+    {k:"hint", label:"/compact hint (roleHint)"},
+    {k:"cwd", label:"Cwd (roleCwd)"},
+    {k:"branch", label:"Branch (roleBranch)"},
+    {k:"cost", label:"Cost (roleCost)"},
+    {k:"smuted", label:"Muted (roleMuted)"},
+    {k:"sep", label:"Separator (roleSep)"},
+  ]},
+  { title:"Badges & pressure", note:"status_style.go", fields:[
+    {k:"badgeDefault", label:"Default badge"},
+    {k:"badgeAuto", label:"Auto badge"},
+    {k:"badgeYolo", label:"Yolo badge"},
+    {k:"badgePlan", label:"Plan badge"},
+    {k:"pressureWarn", label:"% warn (≥ 70%)"},
+    {k:"pressureHot", label:"% hot (trigger, bold)"},
+  ]},
+];
+
+// ---------------------------------------------------------------- state
+const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+let base = "dark";
+let state = {};
+
+function storageKey(b){ return "moca-mock-state-" + b; }
+
+function loadState(b){
+  const def = Object.assign({}, PALETTES[b]);
+  try{
+    const raw = localStorage.getItem(storageKey(b));
+    if(raw){
+      const saved = JSON.parse(raw);
+      for(const k in def){ if(typeof saved[k] === "string") def[k] = saved[k]; }
+    }
+  }catch(e){ /* ignore */ }
+  return def;
+}
+function saveState(){
+  try{ localStorage.setItem(storageKey(base), JSON.stringify(state)); }catch(e){}
+}
+
+function apply(){
+  const root = document.documentElement.style;
+  for(const k in state){ root.setProperty("--" + k, state[k]); }
+}
+
+// ---------------------------------------------------------------- controls
+const fieldsEl = document.getElementById("fields");
+const inputs = {}; // key -> {color, hex}
+
+function buildControls(){
+  for(const g of GROUPS){
+    const box = document.createElement("div");
+    box.className = "group";
+    const head = document.createElement("div");
+    head.className = "gtitle";
+    head.innerHTML = "<span></span><span class=\"gnote\"></span>";
+    head.children[0].textContent = g.title;
+    head.children[1].textContent = g.note;
+    box.appendChild(head);
+
+    for(const f of g.fields){
+      const row = document.createElement("div");
+      row.className = "field";
+      const label = document.createElement("label");
+      label.textContent = f.label;
+      const pick = document.createElement("div");
+      pick.className = "pick";
+
+      const color = document.createElement("input");
+      color.type = "color";
+      color.dataset.key = f.k;
+      color.title = f.k;
+
+      const hex = document.createElement("input");
+      hex.type = "text";
+      hex.className = "hex";
+      hex.spellcheck = false;
+      hex.dataset.key = f.k;
+      hex.maxLength = 7;
+
+      color.addEventListener("input", () => {
+        setColor(f.k, color.value);
+        hex.value = color.value;
+      });
+      hex.addEventListener("input", () => {
+        const v = hex.value.trim();
+        if(HEX_RE.test(v)){
+          const norm = normalizeHex(v);
+          setColor(f.k, norm);
+          color.value = norm;
+          hex.setCustomValidity("");
+        } else {
+          hex.setCustomValidity("bad hex");
+        }
+      });
+
+      pick.appendChild(color);
+      pick.appendChild(hex);
+      row.appendChild(label);
+      row.appendChild(pick);
+      box.appendChild(row);
+      inputs[f.k] = {color, hex};
+    }
+    fieldsEl.appendChild(box);
+  }
+}
+
+function normalizeHex(v){
+  v = v.toLowerCase();
+  if(v.length === 4){ return "#" + v[1]+v[1] + v[2]+v[2] + v[3]+v[3]; }
+  return v;
+}
+
+function setColor(k, v){
+  state[k] = v;
+  document.documentElement.style.setProperty("--" + k, v);
+  saveState();
+  refreshExport();
+}
+
+function syncInputs(){
+  for(const k in inputs){
+    const v = state[k] || "#000000";
+    inputs[k].color.value = v;
+    inputs[k].hex.value = v;
+    inputs[k].hex.setCustomValidity("");
+  }
+}
+
+// ---------------------------------------------------------------- export
+const exportOut = document.getElementById("exportOut");
+
+function themeJSON(){
+  const colors = {};
+  for(const g of GROUPS){
+    for(const f of g.fields){ colors[f.k] = state[f.k]; }
+  }
+  return JSON.stringify({ name: "moca " + base, base: base, colors: colors }, null, 2);
+}
+function refreshExport(){ exportOut.value = themeJSON(); }
+
+// ---------------------------------------------------------------- wiring
+function switchBase(b){
+  base = b;
+  for(const btn of document.querySelectorAll("#baseSeg button")){
+    btn.classList.toggle("active", btn.dataset.base === b);
+  }
+  state = loadState(b);
+  apply();
+  syncInputs();
+  document.getElementById("exportName").textContent = b;
+  refreshExport();
+}
+
+document.getElementById("baseSeg").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-base]");
+  if(btn) switchBase(btn.dataset.base);
+});
+
+document.getElementById("resetBtn").addEventListener("click", () => {
+  state = Object.assign({}, PALETTES[base]);
+  saveState();
+  apply();
+  syncInputs();
+  refreshExport();
+});
+
+document.getElementById("copyBtn").addEventListener("click", async (e) => {
+  try{
+    await navigator.clipboard.writeText(exportOut.value);
+    const old = e.target.textContent;
+    e.target.textContent = "Copied ✓";
+    setTimeout(() => { e.target.textContent = old; }, 1200);
+  }catch(err){
+    exportOut.select(); document.execCommand && document.execCommand("copy");
+  }
+});
+document.getElementById("exportBtn").addEventListener("click", refreshExport);
+
+// ---------------------------------------------------------------- boot
+buildControls();
+switchBase("dark");
+</script>
+</body>
+</html>
