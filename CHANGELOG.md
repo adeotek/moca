@@ -2,7 +2,7 @@
 
 ## v0.6.0 (2026-10-16)
 
-The models behind the zen tier became thinking-only mid-October; the glm effort maps now match the live-verified acceptance, and the agent gains a progress nudge plus working-style rules from the TB2 bench review (2026-10-16). The scrollback bands are darker, the trust prompt lists its resources on a second line, the TUI's colors are configurable — one built-in palette with user and project layers — and the permission mode a session starts in can be pinned per user or per trusted project.
+The models behind the zen tier became thinking-only mid-October; the glm effort maps now match the live-verified acceptance, and the agent gains a progress nudge plus working-style rules from the TB2 bench review (2026-10-16). The scrollback bands are darker, the trust prompt lists its resources on a second line, the TUI's colors are configurable — one built-in palette, overridable from your user config — and the permission mode a session starts in can be pinned per user or per trusted project.
 
 ### Providers
 
