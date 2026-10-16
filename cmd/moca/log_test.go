@@ -168,3 +168,18 @@ func TestLogNeverTouchesRealState(t *testing.T) {
 		t.Fatalf("XDG_STATE_HOME=%q", s)
 	}
 }
+
+// The start line is written before a trusted project file loads, so it must
+// not claim a plan state; the resolved mode is logged once it is final.
+func TestLogModeAfterResolution(t *testing.T) {
+	_, _, state := logRunCfg(t, `"permissions":{"defaultMode":"plan"},`, "hi")
+	log := readLog(t, state)
+	if !strings.Contains(log, "msg=mode mode=default plan=true") {
+		t.Fatalf("resolved mode line missing:\n%s", log)
+	}
+	for _, l := range strings.Split(log, "\n") {
+		if strings.Contains(l, "msg=start") && strings.Contains(l, "plan=") {
+			t.Fatalf("start line reports plan before the project layer loads: %s", l)
+		}
+	}
+}

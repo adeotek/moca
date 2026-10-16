@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -114,6 +115,7 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 		cfg.Project = p
 	}
 	mode, plan := o.ResolveMode(cfg)
+	slog.Info("mode", "mode", mode, "plan", plan) // final: after the project layer (§13.5)
 	var pdirs []skills.Dir
 	if trusted {
 		pdirs = append(pdirs, skills.Dir{Path: filepath.Join(wd, ".moca", "prompts"), Source: "project"})

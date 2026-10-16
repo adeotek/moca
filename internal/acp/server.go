@@ -229,6 +229,7 @@ func (srv *Server) checkModel(cfg config.Config) error {
 
 func (srv *Server) startOptions(cfg config.Config, s *session) agent.StartOptions {
 	mode, plan := config.ResolveMode(srv.opts.Mode, cfg)
+	slog.Info("mode", "mode", mode, "plan", plan) // final: after the project layer (§13.5)
 	return agent.StartOptions{Config: cfg, Workdir: s.cwd, Model: srv.opts.Model, Effort: srv.opts.Effort,
 		Trusted: s.trusted, Mode: agent.PermMode(mode), Plan: plan, Ask: s.ask, Emit: s.emit,
 		HTTP: srv.opts.HTTP, Slug: "acp", ConfigPath: srv.opts.ConfigPath}

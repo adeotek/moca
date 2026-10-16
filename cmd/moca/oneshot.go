@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,6 +114,7 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		cfg.Project = p
 	}
 	mode, plan := o.ResolveMode(cfg)
+	slog.Info("mode", "mode", mode, "plan", plan) // final: after the project layer (§13.5)
 	switch mode {
 	case "yolo":
 		fmt.Fprintln(stderr, "yolo mode: all permission checks are off")
