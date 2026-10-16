@@ -13,7 +13,7 @@ Changing how this moca installation behaves, at the user's request.
 
 ## How
 - `read` the file first — `edit` requires it. Use exact replacements: JSONC comments must survive the edit.
-- The config decode is strict: unknown keys are rejected; `apiKey` must be an `env:VAR` reference, never a literal; `permissions.defaultMode` is `default|auto|yolo` (not `plan` — plan is a run flag).
+- The config decode is strict: unknown keys are rejected; `apiKey` must be an `env:VAR` reference, never a literal; `permissions.defaultMode` is `default|auto|plan|yolo` (`plan` starts the plan scope); a project's `.moca/config.jsonc` may hold only `permissions` (startup mode `default|auto|plan`, never `yolo`) and `mcp` — `tui` (theme, notify) is user-config only.
 
 ## Verify
 - Re-read the file after writing.

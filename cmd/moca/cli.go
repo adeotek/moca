@@ -75,19 +75,26 @@ type Options struct {
 
 type usageError struct{ error }
 
-// cliModes are the --mode values: the three permission modes plus plan —
-// the plan scope, which rides on default (the agent enforces the pairing).
-var cliModes = []string{"default", "auto", "yolo", "plan"}
+// cliModes are the --mode values — the permission modes plus plan (the plan
+// scope, which rides on default; the agent enforces the pairing). The set is
+// config.PermModes: the flag and both config layers' defaultMode accept the
+// same four values (§3, §4).
+var cliModes = slices.Clone(config.PermModes)
 
 // ResolveMode resolves the run's permission mode and plan scope (§3): an
 // explicit --mode wins — plan maps to the plan scope at the default mode —
-// else a trusted project file's defaultMode, else the config's resolved
-// mode. A configured auto/yolo under --mode plan yields to plan (default),
-// so it never counts as yolo for the trust decision.
+// else a trusted project file's defaultMode (the project layer wins over the
+// user's), else the config's resolved mode. A configured auto/yolo under
+// --mode plan yields to plan (default), so it never counts as yolo for the
+// trust decision. `moca execute` is explicitly plan-exiting: a configured plan
+// layer is skipped and the next layer decides (config.ResolveExecuteMode).
 func (o Options) ResolveMode(cfg config.Config) (string, bool) {
 	flag := ""
 	if o.Mode != nil {
 		flag = *o.Mode
+	}
+	if o.Execute != "" {
+		return config.ResolveExecuteMode(flag, cfg), false
 	}
 	return config.ResolveMode(flag, cfg)
 }

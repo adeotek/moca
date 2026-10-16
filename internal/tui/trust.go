@@ -36,7 +36,7 @@ func (m *trustModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *trustModel) View() tea.View {
-	return tea.NewView(fmt.Sprintf("Trust project resources in %s? (.moca/, AGENTS.md/CLAUDE.md, project MCP configs — they can steer the agent and start MCP servers) [y/N] ", Sanitize(m.dir)))
+	return tea.NewView(fmt.Sprintf("Trust project resources in %s? [y/N]\n(.moca/, AGENTS.md/CLAUDE.md, project MCP configs - they can steer the agent and start MCP servers)", Sanitize(m.dir)))
 }
 
 // result maps the finished prompt to the decision; a cancel is reported as

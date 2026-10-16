@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -74,6 +75,13 @@ func modeWithoutProject(o Options, cfg config.Config) string {
 	return mode
 }
 
+// themeFor resolves the run's TUI theme (§3.5): the built-in palette with the
+// user config's `tui.theme` overrides. The project file carries no colors
+// (§4) — a cloned repository must not recolor the permission badge.
+func themeFor(cfg config.Config) tui.Theme {
+	return tui.DefaultTheme().WithOverrides(cfg.TUI.Theme)
+}
+
 // runTUI opens the interactive TUI (§11); prompt templates come from the
 // project dir only when trusted, then the global config dir.
 func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, stderr io.Writer) int {
@@ -107,6 +115,7 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 		cfg.Project = p
 	}
 	mode, plan := o.ResolveMode(cfg)
+	slog.Info("mode", "mode", mode, "plan", plan) // final: after the project layer (§13.5)
 	var pdirs []skills.Dir
 	if trusted {
 		pdirs = append(pdirs, skills.Dir{Path: filepath.Join(wd, ".moca", "prompts"), Source: "project"})
@@ -120,6 +129,7 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 		ResumePath:  resumePath,
 		HintsPath:   filepath.Join(config.DataDir(), "hints.json"),
 		HistoryPath: filepath.Join(config.DataDir(), "history.jsonl"),
+		Theme:       themeFor(cfg),
 	})
 	if err != nil {
 		if ctx.Err() == nil { // SIGINT/SIGTERM: no message, just 130

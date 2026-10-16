@@ -405,6 +405,23 @@ func TestAllowAlwaysMCPPersists(t *testing.T) {
 	}
 }
 
+// The trust prompt asks the question on its own line and lists the resources
+// it covers on a second — a long workdir path must not push the detail away.
+func TestTrustPromptShowsResourcesOnASecondLine(t *testing.T) {
+	v := (&trustModel{dir: "/work"}).View().Content
+	lines := strings.Split(v, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("%d lines, want 2: %q", len(lines), v)
+	}
+	if lines[0] != "Trust project resources in /work? [y/N]" {
+		t.Fatalf("question line: %q", lines[0])
+	}
+	want := "(.moca/, AGENTS.md/CLAUDE.md, project MCP configs - they can steer the agent and start MCP servers)"
+	if lines[1] != want {
+		t.Fatalf("detail line: %q", lines[1])
+	}
+}
+
 func TestTrustPromptCancel(t *testing.T) {
 	for _, k := range []string{"ctrl+c", "esc"} {
 		m := &trustModel{dir: "/x"}
