@@ -54,12 +54,11 @@ func TestLoadProject(t *testing.T) {
 		// cloned repository cannot start permission-free sessions.
 		`{"permissions":{"defaultMode":"plan"}}`: "",
 		`{"permissions":{"defaultMode":"yolo"}}`: "cannot set defaultMode",
-		// The project theme layer: colors only; notify stays user-only, an
-		// unknown role or a malformed color is a config error.
-		`{"tui":{"theme":{"dark":{"userBg":"#101010"},"both":{"muted":"8"}}}}`: "",
-		`{"tui":{"notify":"bell"}}`:                    "unknown field",
-		`{"tui":{"theme":{"dark":{"bogus":"#0000"}}}}`: "unknown field",
-		`{"tui":{"theme":{"dark":{"userBg":"#123"}}}}`: "userBg",
+		// The TUI block is user-only (colors and notify alike): a cloned
+		// repository must not be able to recolor the permission badge or hide
+		// the transcript, and a leftover block is an error, never ignored.
+		`{"tui":{"theme":{"dark":{"userBg":"#101010"}}}}`: "unknown field",
+		`{"tui":{"notify":"bell"}}`:                       "unknown field",
 	} {
 		write(src)
 		_, err := LoadProject(wd)
@@ -76,16 +75,19 @@ func TestLoadProject(t *testing.T) {
 			t.Errorf("%s: %v", ok, err)
 		}
 	}
-	// Receipts: the project's startup mode and theme layer survive to the
-	// caller (the user layer is overridden by them at model build, §4).
-	write(`{"permissions":{"defaultMode":"plan"},"tui":{"theme":{"dark":{"userBg":"#101010"},"both":{"muted":"8","accent":"#ff8800"}}}}`)
+	// Receipts: the project's startup mode survives to the caller (it wins
+	// over the user layer at model build, §4).
+	write(`{"permissions":{"defaultMode":"plan"}}`)
 	p2, err := LoadProject(wd)
 	if err != nil {
-		t.Fatalf("project theme receipt: %v", err)
+		t.Fatalf("project mode receipt: %v", err)
 	}
-	if p2.Mode() != "plan" || p2.TUI.Theme.Dark.UserBg != "#101010" ||
-		p2.TUI.Theme.Both.Muted != "8" || p2.TUI.Theme.Both.Accent != "#ff8800" {
-		t.Fatalf("project layer lost: %+v", p2.TUI)
+	if p2.Mode() != "plan" {
+		t.Fatalf("project mode lost: %q", p2.Mode())
+	}
+	write(`{"tui":{"theme":{"both":{"accent":"3"}}}}`)
+	if _, err := LoadProject(wd); err == nil || !strings.Contains(err.Error(), ProjectConfigFile(wd)) {
+		t.Fatalf("a project tui block must fail naming the file: %v", err)
 	}
 }
 

@@ -14,27 +14,20 @@ import (
 
 // ProjectConfigFile is the per-project config file (SPECS §4). It is read only
 // for a trusted workdir (cmd decides) and may hold a permissions object and an
-// mcp block: a cloned repository must not be able to point providers, keys or
-// the classifier model anywhere.
+// mcp block — nothing else: a cloned repository must not be able to point
+// providers, keys or the classifier model anywhere, nor recolor the TUI (the
+// permission badge must never be hidden; `tui` is user-only).
 func ProjectConfigFile(workdir string) string {
 	return filepath.Join(workdir, ".moca", "config.jsonc")
 }
 
 // ProjectConfig is a trusted project file's content (SPECS §4): the same
 // `permissions` block as the user config, plus an `mcp` block whose servers
-// extend the user layer's (§10.5) and a `tui.theme` block whose colors
-// override the user's — a project-scoped server, a project's approval of one
-// the user configured, or a project palette.
+// extend the user layer's (§10.5) — a project-scoped server, or a project's
+// approval of one the user configured. The `tui` block is user-only.
 type ProjectConfig struct {
 	Permissions PermissionsConfig `json:"permissions"`
 	MCP         MCPConfig         `json:"mcp"`
-	TUI         ProjectTUIConfig  `json:"tui"`
-}
-
-// ProjectTUIConfig is the project TUI layer — theme colors only. `notify` is
-// a user-only setting (a project must not silence a user's notifications).
-type ProjectTUIConfig struct {
-	Theme ThemeConfig `json:"theme"`
 }
 
 // Mode is the project layer's default permission mode ("" when unset).
@@ -77,9 +70,6 @@ func LoadProject(workdir string) (*ProjectConfig, error) {
 	}
 	if p.Auto.Model != "" {
 		return nil, fmt.Errorf("%s: permissions.auto.model is a user setting, not a project one", path)
-	}
-	if err := validateTheme("tui.theme", f.TUI.Theme); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	if err := f.validateMCP(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)

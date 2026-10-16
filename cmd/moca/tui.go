@@ -74,15 +74,11 @@ func modeWithoutProject(o Options, cfg config.Config) string {
 	return mode
 }
 
-// themeFor resolves the run's TUI theme (§3.5): the built-in palette, the
-// user config's `tui.theme` overrides, then a trusted project's (the project
-// layer wins, §4). Colors only — nothing else in the TUI reads config.
+// themeFor resolves the run's TUI theme (§3.5): the built-in palette with the
+// user config's `tui.theme` overrides. The project file carries no colors
+// (§4) — a cloned repository must not recolor the permission badge.
 func themeFor(cfg config.Config) tui.Theme {
-	th := tui.DefaultTheme().WithOverrides(cfg.TUI.Theme)
-	if cfg.Project != nil {
-		th = th.WithOverrides(cfg.Project.TUI.Theme)
-	}
-	return th
+	return tui.DefaultTheme().WithOverrides(cfg.TUI.Theme)
 }
 
 // runTUI opens the interactive TUI (§11); prompt templates come from the

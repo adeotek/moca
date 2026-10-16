@@ -42,8 +42,7 @@ type AppOptions struct {
 	// starting a new one.
 	ResumePath string
 	// Theme is the resolved color theme (§3.5): DefaultTheme with the user
-	// config's tui.theme applied, then a trusted project's (which wins).
-	// Zero = the built-in palette (theme.go).
+	// config's tui.theme applied. Zero = the built-in palette (theme.go).
 	Theme Theme
 }
 
@@ -161,9 +160,8 @@ type model struct {
 	// flush applies it (see downsample).
 	profile colorprofile.Profile
 	// th is the resolved color theme (§3.5): DefaultTheme with the user
-	// config's tui.theme applied, then a trusted project's (which wins) —
-	// cmd resolves it before Run; a zero value falls back to the built-in
-	// palette (theme.go).
+	// config's tui.theme applied — cmd resolves it before Run; a zero value
+	// falls back to the built-in palette (theme.go).
 	th Theme
 	// blurred: the terminal reports it lost focus (tea.BlurMsg) — notifications
 	// fire only then.

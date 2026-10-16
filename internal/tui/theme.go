@@ -1,12 +1,11 @@
 package tui
 
-// theme.go is the ONE place the TUI's colors live (§3.5, §4): every
-// scrollback band, notice and status-bar role reads its color from a Theme
-// value. DefaultTheme is the built-in palette; config files overlay
-// non-empty fields via WithOverrides — the user config's `tui.theme` first,
-// then a trusted project's `.moca/config.jsonc` `tui.theme`, which wins
-// (§4). cmd/moca resolves the theme before the model exists and passes it
-// in through AppOptions.
+// theme.go is the ONE place the TUI's colors live (§3.5): every scrollback
+// band, notice and status-bar role reads its color from a Theme value.
+// DefaultTheme is the built-in palette; the user config's `tui.theme`
+// overlays its non-empty fields via WithOverrides (user-only — a project
+// file cannot carry colors, §4). cmd/moca resolves the theme before the
+// model exists and passes it in through AppOptions.
 //
 // Colors field names mirror config.ThemeColors one-to-one (a test pins the
 // two lists); values are #rrggbb hexes or ANSI color numbers ("1", "208"),
@@ -100,9 +99,7 @@ func DefaultTheme() Theme {
 
 // WithOverrides overlays a config theme block (config.ThemeConfig) onto the
 // palette: per variant and per field, the variant's block wins, then the
-// variant-agnostic `both` block; empty fields keep the current value. cmd
-// applies the user layer first and a trusted project's second, so the
-// project layer wins where it sets a key (§4).
+// variant-agnostic `both` block; empty fields keep the current value.
 func (t Theme) WithOverrides(o config.ThemeConfig) Theme {
 	t.Dark = overlayColors(t.Dark, o.Dark, o.Both)
 	t.Light = overlayColors(t.Light, o.Light, o.Both)

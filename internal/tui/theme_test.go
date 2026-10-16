@@ -40,8 +40,7 @@ func TestThemeFieldsMirrorConfig(t *testing.T) {
 
 // TestThemeOverridesPrecedence: per variant, the variant's block wins over
 // `both`; empty fields keep the current value; the other variant is
-// untouched — and cmd's layer order (user first, a trusted project second,
-// §4) makes the project win per field.
+// untouched; a second overlay wins per field where it sets a key.
 func TestThemeOverridesPrecedence(t *testing.T) {
 	user := config.ThemeConfig{
 		Dark: config.ThemeColors{UserBg: "#010203", Accent: "9"},
@@ -60,19 +59,19 @@ func TestThemeOverridesPrecedence(t *testing.T) {
 	if th.Light.Accent != DefaultTheme().Light.Accent {
 		t.Fatalf("light accent must keep its default: %q", th.Light.Accent)
 	}
-	proj := config.ThemeConfig{
+	second := config.ThemeConfig{
 		Dark: config.ThemeColors{UserBg: "#040506"},
 		Both: config.ThemeColors{Accent: "3"},
 	}
-	th = th.WithOverrides(proj)
+	th = th.WithOverrides(second)
 	if th.Dark.UserBg != "#040506" {
-		t.Fatalf("project must win over the user: %q", th.Dark.UserBg)
+		t.Fatalf("second overlay must win: %q", th.Dark.UserBg)
 	}
 	if th.Dark.Accent != "3" || th.Light.Accent != "3" {
-		t.Fatalf("project both: %q / %q", th.Dark.Accent, th.Light.Accent)
+		t.Fatalf("second overlay both: %q / %q", th.Dark.Accent, th.Light.Accent)
 	}
 	if th.Dark.Muted != "8" {
-		t.Fatalf("user both must survive where the project is silent: %q", th.Dark.Muted)
+		t.Fatalf("first overlay both must survive where the second is silent: %q", th.Dark.Muted)
 	}
 }
 
