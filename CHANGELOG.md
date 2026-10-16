@@ -10,7 +10,7 @@ The models behind the zen tier became thinking-only mid-October; the glm effort 
 
 ### Agent
 
-- **Progress nudge.** A non-plan run that has taken 12 tool batches without creating or editing a file gets one persisted nudge to start acting on what it already knows — or to name the blocking unknown, or why no file needs to change (§14).
+- **Progress nudge.** A non-plan run that has taken `context.progressNudgeAt` tool batches (default 12; `0` disables the nudge) without creating or editing a file gets one persisted nudge to start acting on what it already knows — or to name the blocking unknown, or why no file needs to change (§14).
 - **Working-style prompt.** Time-boxed orientation (dependencies' internals only when a concrete behavior blocks you), falsifiable verification (a check that never reaches the changed code, or validates output against its own reconstruction, proves nothing), no fabricated data (lost or unobtainable data is reported, never rebuilt and presented as fact), and: copy stateful files before probing them — opening a SQLite DB checkpoints it and can delete its WAL.
 
 ## v0.5.1-beta (2026-10-15)

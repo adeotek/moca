@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/adeotek/moca/internal/config"
 )
 
 func hasWarning(evs *[]Event, sub string) bool {
@@ -15,23 +17,23 @@ func hasWarning(evs *[]Event, sub string) bool {
 	return false
 }
 
-// TestProgressNudge: a run that has taken progressNudgeAt tool batches
-// without creating or editing a file gets exactly one persisted nudge to
-// start acting (§14; the TB2 review found runs burning their whole budget
-// on reconnaissance).
+// TestProgressNudge: a run that has taken the configured number of tool
+// batches (the default here) without creating or editing a file gets exactly
+// one persisted nudge to start acting (§14; the TB2 review found runs burning
+// their whole budget on reconnaissance).
 func TestProgressNudge(t *testing.T) {
 	var turns []string
-	for range progressNudgeAt {
+	for range config.DefaultProgressNudgeAt {
 		turns = append(turns, toolTurn([2]string{"ls", `{}`}))
 	}
 	turns = append(turns, textTurn("nothing to change here"))
 	s := newScript(t, turns...)
 	a, _, _ := startTest(t, s, 40)
 	out, err := a.Run(context.Background(), "investigate")
-	if err != nil || out.Text != "nothing to change here" || s.bodyCount() != progressNudgeAt+1 {
+	if err != nil || out.Text != "nothing to change here" || s.bodyCount() != config.DefaultProgressNudgeAt+1 {
 		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
 	}
-	if last := lastMessageJSON(t, s, progressNudgeAt); !strings.Contains(last, "without creating or editing") {
+	if last := lastMessageJSON(t, s, config.DefaultProgressNudgeAt); !strings.Contains(last, "without creating or editing") {
 		t.Fatalf("nudge missing from the request after the recon budget: %s", last)
 	}
 }
@@ -43,7 +45,7 @@ func TestProgressNudgeSkippedAfterAChange(t *testing.T) {
 		toolTurn([2]string{"write", `{"path":"a.go","content":"package a\n"}`},
 			[2]string{"shell", `{"command":"test -e a.go"}`}),
 	}
-	for range progressNudgeAt - 1 {
+	for range config.DefaultProgressNudgeAt - 1 {
 		turns = append(turns, toolTurn([2]string{"ls", `{}`}))
 	}
 	turns = append(turns, textTurn("done"))
@@ -51,12 +53,54 @@ func TestProgressNudgeSkippedAfterAChange(t *testing.T) {
 	a, _, _ := startTest(t, s, 40)
 	a.opts.Env.Commands = allowAll{}
 	out, err := a.Run(context.Background(), "x")
-	if err != nil || out.Text != "done" || s.bodyCount() != progressNudgeAt+1 {
+	if err != nil || out.Text != "done" || s.bodyCount() != config.DefaultProgressNudgeAt+1 {
 		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
 	}
 	for i := 0; i < s.bodyCount(); i++ {
 		if strings.Contains(lastMessageJSON(t, s, i), "without creating or editing") {
 			t.Fatalf("progress nudge must not fire after a change (request %d)", i)
+		}
+	}
+}
+
+// TestProgressNudgeThresholdFromConfig: context.progressNudgeAt sets the
+// threshold and the nudge text names the count that actually ran.
+func TestProgressNudgeThresholdFromConfig(t *testing.T) {
+	var turns []string
+	for range 3 {
+		turns = append(turns, toolTurn([2]string{"ls", `{}`}))
+	}
+	turns = append(turns, textTurn("nothing to change here"))
+	s := newScript(t, turns...)
+	three := 3
+	a, _, _ := startTest(t, s, 40, func(o *StartOptions) { o.Config.Context.ProgressNudgeAt = &three })
+	out, err := a.Run(context.Background(), "investigate")
+	if err != nil || out.Text != "nothing to change here" || s.bodyCount() != 4 {
+		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
+	}
+	if last := lastMessageJSON(t, s, 3); !strings.Contains(last, "3 tool batches") {
+		t.Fatalf("nudge must name the configured count: %s", last)
+	}
+}
+
+// TestProgressNudgeDisabled: context.progressNudgeAt 0 turns the nudge off —
+// a long read-only run finishes with no nudge anywhere in its requests.
+func TestProgressNudgeDisabled(t *testing.T) {
+	var turns []string
+	for range config.DefaultProgressNudgeAt + 2 {
+		turns = append(turns, toolTurn([2]string{"ls", `{}`}))
+	}
+	turns = append(turns, textTurn("done"))
+	s := newScript(t, turns...)
+	zero := 0
+	a, _, _ := startTest(t, s, 40, func(o *StartOptions) { o.Config.Context.ProgressNudgeAt = &zero })
+	out, err := a.Run(context.Background(), "investigate")
+	if err != nil || out.Text != "done" || s.bodyCount() != config.DefaultProgressNudgeAt+3 {
+		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
+	}
+	for i := 0; i < s.bodyCount(); i++ {
+		if strings.Contains(lastMessageJSON(t, s, i), "without creating or editing") {
+			t.Fatalf("disabled progress nudge fired (request %d)", i)
 		}
 	}
 }

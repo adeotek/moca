@@ -27,18 +27,13 @@ const wrapUpText = "You have reached the step limit for this run. Do not call to
 // emptyNudge answers a turn with neither text nor tool calls.
 const emptyNudge = "Your last reply was empty. Continue the task where you left off, or give your final answer."
 
-// progressNudgeAt is the tool-batch count after which a run that has not yet
-// created or edited a file gets one persisted nudge (§14): the 2026-10-16 TB2
-// review found a run spending its entire step budget reading dependency
-// internals and never acting — orientation must time-box itself.
-const progressNudgeAt = 12
-
-// progressNudge is that nudge's text: act on what is known, or name the
-// concrete blocker (or why no file needs to change).
-func progressNudge() string {
-	return fmt.Sprintf("You have taken %d tool steps without creating or editing a file. "+
+// progressNudge is the §14 progress nudge's text, naming the configured
+// threshold (context.progressNudgeAt, default 12): act on what is known, or
+// name the concrete blocker (or why no file needs to change).
+func progressNudge(batches int) string {
+	return fmt.Sprintf("You have taken %d tool batches without creating or editing a file. "+
 		"Start implementing what the task asks for with what you already know; keep investigating only where a concrete unknown blocks you — "+
-		"or state in one line why no file needs to change.", progressNudgeAt)
+		"or state in one line why no file needs to change.", batches)
 }
 
 // stuckText is the wrap-up of a run stopped for repeating a failing call.
@@ -406,6 +401,9 @@ func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
 	// identical-failure counts): tools/runstate.go.
 	a.opts.Env.BeginRun()
 	nudged, verifyNudged, reserved, execNudged, emptyNudged, progressNudged := false, false, false, false, false, false
+	// The §14 progress nudge's threshold (context.progressNudgeAt, default 12;
+	// 0 disables it) and the tool batches executed this run.
+	progressAt, batches := a.opts.Config.Context.ProgressNudge(), 0
 	if err := a.maybeCompact(ctx); err != nil {
 		return Outcome{}, err
 	}
@@ -427,14 +425,6 @@ func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
 				return Outcome{}, err
 			}
 		}
-		if !a.plan && !progressNudged && !a.opts.Env.Edited && step == progressNudgeAt {
-			// One bounded nudge (§14): a run must not spend its whole budget
-			// investigating without acting — say what blocks you instead.
-			progressNudged = true
-			if err := a.nudge("progress", progressNudge()); err != nil {
-				return Outcome{}, err
-			}
-		}
 		resp, calls, err := a.turnWithRecovery(ctx, llm.ToolChoiceAuto)
 		if err != nil {
 			return Outcome{}, err
@@ -445,6 +435,7 @@ func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
 			for i, c := range calls {
 				names[i] = c.Name
 			}
+			batches++
 			a.logger().Debug("step", "n", step+1, "tools", names)
 		}
 		if len(calls) == 0 {
@@ -531,6 +522,17 @@ func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
 		}
 		if err := a.maybeCompact(ctx); err != nil {
 			return Outcome{}, err
+		}
+		// Progress nudge (§14): once the configured number of tool batches has
+		// run with no file created or edited, one persisted nudge to act on
+		// what is known — the 2026-10-16 TB2 review found a run spending its
+		// whole budget reading dependency internals. One-shot, never in plan
+		// mode; context.progressNudgeAt 0 disables it.
+		if !a.plan && !progressNudged && progressAt > 0 && batches >= progressAt && !a.opts.Env.Edited {
+			progressNudged = true
+			if err := a.nudge("progress", progressNudge(batches)); err != nil {
+				return Outcome{}, err
+			}
 		}
 	}
 }
