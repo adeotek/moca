@@ -88,17 +88,31 @@ func TestResolveModeProjectReceipts(t *testing.T) {
 // execute`: executing a plan is explicitly plan-exiting — the execution
 // writes code, not a plan.
 func TestExecuteIgnoresConfiguredPlan(t *testing.T) {
-	for _, cfg := range []config.Config{
-		{Permissions: config.PermissionsConfig{DefaultMode: "plan"}},
-		{Project: &config.ProjectConfig{Permissions: config.PermissionsConfig{DefaultMode: "plan"}}},
+	perm := func(m string) config.PermissionsConfig { return config.PermissionsConfig{DefaultMode: m} }
+	for _, c := range []struct {
+		cfg  config.Config
+		want string
+	}{
+		{config.Config{Permissions: perm("plan")}, "default"},
+		{config.Config{Project: &config.ProjectConfig{Permissions: perm("plan")}}, "default"},
+		// Two layers: the project's plan is skipped, the user's auto decides.
+		{config.Config{Permissions: perm("auto"), Project: &config.ProjectConfig{Permissions: perm("plan")}}, "auto"},
 	} {
 		o, err := parseArgs([]string{"execute", "docs/plans/x.md"}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if mode, plan := o.ResolveMode(cfg); mode != "default" || plan {
-			t.Errorf("execute under a plan default: (%q, %v), want (default, false)", mode, plan)
+		if mode, plan := o.ResolveMode(c.cfg); mode != c.want || plan {
+			t.Errorf("execute under %+v: (%q, %v), want (%q, false)", c.cfg.Permissions, mode, plan, c.want)
 		}
+	}
+	// An explicit flag is never skipped (Review Focus 2).
+	o, err := parseArgs([]string{"--mode", "auto", "execute", "docs/plans/x.md"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode, plan := o.ResolveMode(config.Config{Project: &config.ProjectConfig{Permissions: perm("plan")}}); mode != "auto" || plan {
+		t.Errorf("execute --mode auto over project plan: (%q, %v), want (auto, false)", mode, plan)
 	}
 }
 

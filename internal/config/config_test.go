@@ -337,6 +337,31 @@ func TestThemeValidation(t *testing.T) {
 	}
 }
 
+// TestResolveExecuteMode: executing a plan is plan-exiting (§3) — a layer
+// whose mode is "plan" is skipped and the next layer decides; an explicit
+// flag still wins.
+func TestResolveExecuteMode(t *testing.T) {
+	user := func(m string) PermissionsConfig { return PermissionsConfig{DefaultMode: m} }
+	cases := []struct {
+		name string
+		flag string
+		cfg  Config
+		want string
+	}{
+		{"project plan over user auto", "", Config{Permissions: user("auto"), Project: &ProjectConfig{Permissions: user("plan")}}, "auto"},
+		{"user plan alone", "", Config{Permissions: user("plan")}, "default"},
+		{"project plan, user unset", "", Config{Project: &ProjectConfig{Permissions: user("plan")}}, "default"},
+		{"project auto over user plan", "", Config{Permissions: user("plan"), Project: &ProjectConfig{Permissions: user("auto")}}, "auto"},
+		{"flag wins over project plan", "auto", Config{Project: &ProjectConfig{Permissions: user("plan")}}, "auto"},
+		{"legacy yolo", "", Config{Yolo: true}, "yolo"},
+	}
+	for _, c := range cases {
+		if got := ResolveExecuteMode(c.flag, c.cfg); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestResolveMode(t *testing.T) {
 	base := Config{}
 	proj := Config{Project: &ProjectConfig{Permissions: PermissionsConfig{DefaultMode: "auto"}}}
