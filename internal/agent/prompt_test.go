@@ -22,6 +22,9 @@ func TestBuildSystemPrompt(t *testing.T) {
 		"commit when the task asks", "- Project checks: `make vet && make test` (from Makefile)",
 		"never change files through shell", "Never weaken or delete a test", "edge cases, invalid inputs",
 		"read or search that file instead of re-running",
+		"open dependencies' internals only when a concrete behavior blocks you",
+		"Verification must be able to fail", "Never present guessed, rebuilt or extrapolated data as fact",
+		"copy first (opening a SQLite DB checkpoints it and can delete its WAL)",
 		"rtk", "- rtk: compressed output (/d/rtk/SKILL.md)", "- context7: docs lookup", "Use tabs.", "moca 0.1.0"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt missing %q", want)

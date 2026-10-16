@@ -36,5 +36,5 @@
 
   "yolo": false,                         // true = all permission checks off by default (§7.5); --mode default overrides
 
-  "context": { "reserveTokens": 16384, "keepRecentTokens": 20000, "maxSteps": 40 }
+  "context": { "reserveTokens": 16384, "keepRecentTokens": 20000, "maxSteps": 40, "progressNudgeAt": 12 }   // progressNudgeAt: tool batches before the one-shot "start acting" nudge (§14); 0 disables
 }

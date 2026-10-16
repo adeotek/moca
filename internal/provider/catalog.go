@@ -77,18 +77,31 @@ func costM(in, out, cr, cw float64) config.CostConfig {
 }
 
 var (
-	anthropicAdaptive   = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortMax: "max"}
-	anthropicBudget     = map[llm.Effort]string{llm.EffortOff: "", llm.EffortLow: "", llm.EffortMedium: "", llm.EffortHigh: "", llm.EffortMax: ""}
-	openaiReasoning     = map[llm.Effort]string{llm.EffortMinimal: "minimal", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
-	glmThinking         = map[llm.Effort]string{llm.EffortOff: "none", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
+	anthropicAdaptive = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortMax: "max"}
+	anthropicBudget   = map[llm.Effort]string{llm.EffortOff: "", llm.EffortLow: "", llm.EffortMedium: "", llm.EffortHigh: "", llm.EffortMax: ""}
+	openaiReasoning   = map[llm.Effort]string{llm.EffortMinimal: "minimal", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
+	// glm-5.3 and glm-5.3-flash diverged on 2026-10-16 (live-verified against
+	// https://opencode.ai/zen/go/v1): both are thinking-only now — sending
+	// "none" is `[1210] … cannot be disabled; please use low, high, or max` —
+	// but the serving variants accept different levels. Off is absent from
+	// both (no disabling); ClampEffort lands the default medium on the
+	// nearest supported level (flash: low).
+	glmThinking      = map[llm.Effort]string{llm.EffortMinimal: "minimal", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortMax: "max"}
+	glmFlashThinking = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortHigh: "high", llm.EffortMax: "max"}
+	// kimi-k3 still disables thinking through "none" (live-verified
+	// 2026-10-16) and accepts every level above it; "off" is an invalid wire
+	// value there ("off" is moca's label, "none" the wire one).
+	kimiThinking        = map[llm.Effort]string{llm.EffortOff: "none", llm.EffortMinimal: "minimal", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortMax: "max"}
 	deepseekThinking    = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortHigh: "high", llm.EffortMax: "max"}
 	deepseekProThinking = map[llm.Effort]string{llm.EffortHigh: "high", llm.EffortMax: "max"}
 	qwenThinking        = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortXHigh: "xhigh"}
 	basicThinking       = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
 )
 
-// builtinCatalog — prices/limits verified 2026-10-04 (phase 1) and 2026-10-07
-// (opencode-go expansion rows). Sources:
+// builtinCatalog — prices/limits verified 2026-10-04 (phase 1), 2026-10-07
+// (opencode-go expansion rows) and 2026-10-16 (glm-5.3 / glm-5.3-flash /
+// kimi-k3 effort acceptance re-verified live — the glm serving variants
+// became thinking-only). Sources:
 //   - opencode-go: Pi 1.0.1 shipped catalog (pi-ai providers/data/opencode-go.json)
 //   - opencode.ai/docs/zen and /docs/go (protocol per model, go-tier endpoint
 //     table). Cost is standard (non-tiered) rates; the deepseek rows use the
@@ -108,13 +121,13 @@ var builtinCatalog = []Model{
 		ThinkingMode: "openai", ThinkingLevelMap: glmThinking},
 	{Provider: "opencode-go", ID: "glm-5.3-flash", Protocol: "openai-completions",
 		ContextWindow: 1_000_000, MaxOutput: 131072, Cost: costM(0.15, 0.5, 0.03, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: glmThinking},
+		ThinkingMode: "openai", ThinkingLevelMap: glmFlashThinking},
 	{Provider: "opencode-go", ID: "minimax-m3", Protocol: "anthropic-messages",
 		ContextWindow: 1_000_000, MaxOutput: 131072, Cost: costM(0.3, 1.2, 0.06, 0),
 		ThinkingMode: "budget", ThinkingLevelMap: anthropicBudget},
 	{Provider: "opencode-go", ID: "kimi-k3", Protocol: "openai-completions",
 		ContextWindow: 1_048_576, MaxOutput: 131072, Cost: costM(3, 15, 0.3, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: glmThinking},
+		ThinkingMode: "openai", ThinkingLevelMap: kimiThinking},
 	{Provider: "opencode-go", ID: "gpt-6-luna", Protocol: "openai-responses",
 		ContextWindow: 1_050_000, MaxOutput: 128000, Cost: costM(0.1, 0.5, 0.01, 0.125),
 		ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning},

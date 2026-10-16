@@ -42,7 +42,8 @@ func TestSpecExampleDecodesIntact(t *testing.T) {
 	if c.MCP.IdleTimeout != 600 || c.RetentionDays() != 30 {
 		t.Fatal("scalars lost")
 	}
-	if c.Context != (ContextConfig{ReserveTokens: 16384, KeepRecentTokens: 20000, MaxSteps: 40}) {
+	if c.Context.ReserveTokens != 16384 || c.Context.KeepRecentTokens != 20000 || c.Context.MaxSteps != 40 ||
+		c.Context.ProgressNudge() != 12 {
 		t.Fatalf("context: %+v", c.Context)
 	}
 	if c.Yolo {
@@ -60,6 +61,9 @@ func TestDefaultsApplied(t *testing.T) {
 	}
 	if c.Context.ReserveTokens != 16384 || c.Context.KeepRecentTokens != 20000 || c.Context.MaxSteps != 40 {
 		t.Fatalf("context defaults: %+v", c.Context)
+	}
+	if c.Context.ProgressNudge() != DefaultProgressNudgeAt {
+		t.Fatalf("progress nudge default: %d", c.Context.ProgressNudge())
 	}
 	if c.MCP.IdleTimeout != 600 || c.RetentionDays() != 30 || c.TUI.Notify != "osc9" {
 		t.Fatal("scalar defaults")
@@ -81,6 +85,20 @@ func TestRetentionZeroMeansForever(t *testing.T) {
 	}
 }
 
+// TestProgressNudgeAtConfig: the threshold is context.progressNudgeAt — absent
+// means the default, an explicit 0 disables the nudge (it must survive
+// defaults, like snapshot.retentionDays), a positive value is used as given.
+func TestProgressNudgeAtConfig(t *testing.T) {
+	c, err := Parse([]byte(`{"context":{"progressNudgeAt":0}}`))
+	if err != nil || c.Context.ProgressNudge() != 0 {
+		t.Fatalf("progressNudgeAt 0 must disable, not default: %v %d", err, c.Context.ProgressNudge())
+	}
+	c, err = Parse([]byte(`{"context":{"progressNudgeAt":5}}`))
+	if err != nil || c.Context.ProgressNudge() != 5 {
+		t.Fatalf("progressNudgeAt 5: %v %d", err, c.Context.ProgressNudge())
+	}
+}
+
 func TestValidationErrors(t *testing.T) {
 	cases := map[string]string{
 		`{"model":"glm-5.3"}`: "provider/model",
@@ -92,10 +110,11 @@ func TestValidationErrors(t *testing.T) {
 		`{"providers":{"vllm":{"baseUrl":"http://x/v1","protocol":"openai-completions","auth":"api_key","apiKey":"env:K","models":{"m":{}}}}}`:                     "contextWindow",
 		`{"providers":{"vllm":{"baseUrl":"http://x/v1","protocol":"openai-completions","auth":"api_key","apiKey":"env:K","models":{"m":{"contextWindow":8192}}}}}`: "16384",
 		`{"providers":{"vllm":{"baseUrl":"http://x/v1","protocol":"grpc","auth":"api_key","apiKey":"env:K"}}}`:                                                     "protocol",
-		`{"modle":"x/y"}`:             "unknown field",
-		`{"context":{"maxSteps":-1}}`: "maxSteps",
-		`{"mcp":{"idleTimeout":-5}}`:  "mcp.idleTimeout",
-		`{"tui":{"notify":"sms"}}`:    "tui.notify",
+		`{"modle":"x/y"}`:                    "unknown field",
+		`{"context":{"maxSteps":-1}}`:        "maxSteps",
+		`{"context":{"progressNudgeAt":-1}}`: "progressNudgeAt",
+		`{"mcp":{"idleTimeout":-5}}`:         "mcp.idleTimeout",
+		`{"tui":{"notify":"sms"}}`:           "tui.notify",
 	}
 	for in, want := range cases {
 		_, err := Parse([]byte(in))

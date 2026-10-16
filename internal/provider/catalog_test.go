@@ -96,3 +96,40 @@ func TestBuiltinCatalogSane(t *testing.T) {
 		}
 	}
 }
+
+// TestGLMEffortMapsMatchTheThinkingOnlyServingVariants pins the 2026-10-16
+// live-verified reality (zen go; https://opencode.ai/zen/go/v1): glm-5.3 and
+// glm-5.3-flash no longer allow disabling thinking ("none" → `[1210] … cannot
+// be disabled`), and the variants accept different levels — flash takes
+// low|high|max only, so moca's default medium must clamp to low before
+// hitting the wire (it used to be sent as-is and 400'd mid-run). kimi-k3
+// still disables thinking through "none".
+func TestGLMEffortMapsMatchTheThinkingOnlyServingVariants(t *testing.T) {
+	byID := map[string]Model{}
+	for _, m := range builtinCatalog {
+		byID[m.Qualified()] = m
+	}
+	flash := byID["opencode-go/glm-5.3-flash"]
+	if _, ok := flash.ThinkingLevelMap[llm.EffortOff]; ok {
+		t.Fatal("glm-5.3-flash: off must not be mapped (thinking cannot be disabled)")
+	}
+	if got := flash.ClampEffort(llm.EffortMedium); got != llm.EffortLow {
+		t.Fatalf("glm-5.3-flash: default medium clamps to %q, want low", got)
+	}
+	if got := flash.ClampEffort(llm.EffortMax); got != llm.EffortMax {
+		t.Fatalf("glm-5.3-flash: max clamps to %q", got)
+	}
+	glm := byID["opencode-go/glm-5.3"]
+	if _, ok := glm.ThinkingLevelMap[llm.EffortOff]; ok {
+		t.Fatal("glm-5.3: off must not be mapped (thinking cannot be disabled)")
+	}
+	if got := glm.ClampEffort(llm.EffortMedium); got != llm.EffortMedium {
+		t.Fatalf("glm-5.3: medium clamps to %q, want medium", got)
+	}
+	if got := glm.ClampEffort(llm.EffortOff); got != llm.EffortMinimal {
+		t.Fatalf("glm-5.3: off clamps to %q, want minimal", got)
+	}
+	if v := byID["opencode-go/kimi-k3"].ThinkingLevelMap[llm.EffortOff]; v != "none" {
+		t.Fatalf("kimi-k3: off must map to \"none\", got %q", v)
+	}
+}

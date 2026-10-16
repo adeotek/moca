@@ -234,6 +234,24 @@ type ContextConfig struct {
 	ReserveTokens    int `json:"reserveTokens"`
 	KeepRecentTokens int `json:"keepRecentTokens"`
 	MaxSteps         int `json:"maxSteps"`
+	// ProgressNudgeAt: the tool-batch count after which a run that has not
+	// created or edited a file gets one §14 progress nudge. nil = the default
+	// (DefaultProgressNudgeAt), 0 disables the nudge — a pointer so an
+	// explicit 0 is distinguishable from an absent key.
+	ProgressNudgeAt *int `json:"progressNudgeAt"`
+}
+
+// DefaultProgressNudgeAt is the §14 progress nudge's threshold when
+// context.progressNudgeAt is absent.
+const DefaultProgressNudgeAt = 12
+
+// ProgressNudge resolves the §14 progress-nudge threshold: the configured
+// value, else the default; 0 (or below) means the nudge is off.
+func (c ContextConfig) ProgressNudge() int {
+	if c.ProgressNudgeAt == nil {
+		return DefaultProgressNudgeAt
+	}
+	return *c.ProgressNudgeAt
 }
 
 func (c Config) RetentionDays() int {
@@ -432,6 +450,9 @@ func (c Config) Validate() error {
 	}
 	if c.Context.MaxSteps < 1 || c.Context.ReserveTokens < 1 || c.Context.KeepRecentTokens < 1 {
 		return fmt.Errorf("context: reserveTokens, keepRecentTokens and maxSteps must be positive")
+	}
+	if c.Context.ProgressNudgeAt != nil && *c.Context.ProgressNudgeAt < 0 {
+		return fmt.Errorf("context.progressNudgeAt must be >= 0 (0 disables the progress nudge, absent = %d)", DefaultProgressNudgeAt)
 	}
 	if !slices.Contains(NotifyModes, c.TUI.Notify) {
 		return fmt.Errorf("tui.notify %q unknown (want %s)", c.TUI.Notify, strings.Join(NotifyModes, "|"))
