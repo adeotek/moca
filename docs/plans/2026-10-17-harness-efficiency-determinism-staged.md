@@ -99,9 +99,13 @@ Gate: `go test ./test/evals/replay -race`; `bash test/evals/replay/run.sh`; self
 
 ### A3 — Baselines and the crutch record (eval-only, no code PR)
 
-1. Build merged main, run `bash test/evals/run.sh -n 3 -j 4 -l v0.6.1-instr`.
-2. Strong-model leg: `-m opencode-go/deepseek-v4-pro -l strong-pro`; if an Anthropic key exists,
-   also `-m anthropic/claude-sonnet-5-5 -l strong-claude` (this run also pre-warms B3).
+1. Build merged main, run `bash test/evals/run.sh -n 6 -j 4 -l v0.6.1-instr` (**n=6, not the
+   original n=3** — the A2 retro-read showed n=3 cannot certify a delta of this size; deviation
+   recorded 2026-10-17, results in `test/evals/BASELINE.md`).
+2. Strong-model leg: `-n 3 -j 4 -m opencode-go/deepseek-v4-pro -l strong-pro` (**n=3**: ~3.5×
+   flash per run, and this leg feeds the crutch record + external validity, not the B gate); if an
+   Anthropic key exists, also `-m anthropic/claude-sonnet-5-5 -l strong-claude` (this run also
+   pre-warms B3).
 3. `BASELINE.md` gains an "Instrumented baseline" section per model: per-scenario pass,
    tokens/solved, steps, **cache eff, first-hit, breaks/run with the top `After` strings**, top-3
    `Residency` tools, `redundant read tok`, `Nudges`/`EditRefusals`/`Hints` per run, and
@@ -109,6 +113,12 @@ Gate: `go test ./test/evals/replay -race`; `bash test/evals/replay/run.sh`; self
 4. Write the crutch decision record (*original Task 11 steps 2–3*): if a crutch fires in ≥ 1/3 of
    strong-model runs while passes hold, record a §16 "per-model harness profile" discussion item;
    otherwise record "crutches are cheap on strong models: <numbers>".
+
+**A3 executed 2026-10-17** (flash n=6: 42 runs, 40/42, $0.1520; strong-pro n=3: 21 runs, 19/21,
+$0.2624). Crutch record: **0 nudges in 21 strong-model runs**, 0 cache breaks, 0 redundant read
+tokens → "crutches are cheap on strong models"; no §16 item. Replay self-check: 36/36 non-web
+transcripts byte-identical (Δ 0.0 %, zero prefix breaks). Full tables + readings in
+`test/evals/BASELINE.md` → "Instrumented baseline — A3".
 
 ---
 

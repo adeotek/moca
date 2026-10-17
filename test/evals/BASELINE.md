@@ -112,6 +112,86 @@ a pass, so the direction of the v0.6.1 delta is real — but three runs per scen
 it. This is exactly the class of delta the harness exists to measure; quote a number only after
 `-n 6` on the moved scenarios (`bugfix`, `refactor`, `vague`, `web`).
 
+## Instrumented baseline — A3 (2026-10-17)
+
+Both legs ran on merged main (`v0.6.1-2-g366696d` — the A1/A2 instrument merge, behaviorally
+v0.6.1), with the instrumented build copied aside as `bin/moca-instr`, `-j 4`. Protocol
+deviation from the staged plan, recorded: the plan's A3 said `-n 3` for the baseline; the A2
+retro-read above proved n=3 cannot certify a delta of this size, so the baseline runs at **n=6**
+(the strong leg stays at n=3 — `deepseek-v4-pro` costs ~3.5× flash per run).
+
+- flash: `MOCA=bin/moca-instr bash test/evals/run.sh -n 6 -j 4 -l v0.6.1-instr` — 42 runs, $0.1520
+- strong: `… -n 3 -j 4 -m opencode-go/deepseek-v4-pro -l strong-pro` — 21 runs, $0.2624; the
+  effort map clamps the default `medium` to `high` (`deepseekProThinking` supports high/max only),
+  and the kept sessions record `effort: high` on the wire.
+
+`tok/solved` below is **fresh** tokens (`input + output`) per solved run; evalstats' headline
+column counts the whole wire (`input + cacheRead + output`) — flash: 51,920, strong: 76,818.
+
+### flash — `opencode-go/glm-5.3-flash`, n=6
+
+| scenario | runs | pass | fresh tok/solved | steps | cache eff | first-hit | breaks/run | top break `after` | top-3 residency (tok·req) | red. read tok | nudges/run | edit refusals | hints | sys prompt tok |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| bugfix | 6 | 6/6 | 16756 | 10.8 ± 2.5 | 0.83 | 832 | 2.7 | tool_use×19, tool_result×19, snapshot×4 | read:25429, shell:11472, edit:7451 | 0 | 0.0 | 11 | 33 | 1801 |
+| feature | 6 | 6/6 | 22834 | 11.5 ± 3.3 | 0.69 | 0 | 4.0 | tool_use×31, tool_result×31, snapshot×14 | edit:20794, read:18208, shell:2624 | 0 | 0.0 | 0 | 0 | 1802 |
+| largefile | 6 | 6/6 | 11788 | 8.5 ± 1.3 | 0.89 | 0 | 0.8 | tool_use×5, tool_result×5 | read:65391, shell:7181, edit:1872 | 0 | 0.2 | 4 | 28 | 1802 |
+| plan | 6 | 6/6 | 11830 | 4.2 ± 0.4 | 0.53 | 0 | 1.7 | tool_use×16, tool_result×16, snapshot×4 | read:3791, search:781, ls:152 | 0 | 0.0 | 0 | 0 | 1801 |
+| refactor | 6 | 6/6 | 11824 | 8.5 ± 1.9 | 0.86 | 0 | 1.3 | tool_use×11, tool_result×11, snapshot×3 | read:20688, search:12828, edit:11800 | 0 | 0.0 | 0 | 0 | 1802 |
+| vague | 6 | 4/6 | 13700 | 14.8 ± 7.2 | 0.99 | 1664 | 0.0 | — | edit:45759, shell:22552, read:17696 | 0 | 0.0 | 0 | 0 | 1801 |
+| web | 6 | 6/6 | 17379 | 3.0 ± 0.0 | 0.68 | 832 | 0.8 | tool_use×5, tool_result×5, snapshot×2 | web:60852, write:48 | 0 | 0.0 | 0 | 0 | 1778 |
+| **∑** | 42 | **40/42** | 15231 | 8.8 ± 5.0 | 0.78 | 0 | 1.6 | | read:151203, edit:87676, web:60852, shell:44993, search:19660 | 0 | 0.02 | 15 | 61 | 1801 |
+
+### strong — `opencode-go/deepseek-v4-pro`, n=3
+
+| scenario | runs | pass | fresh tok/solved | steps | cache eff | first-hit | breaks/run | top-3 residency (tok·req) | red. read tok | nudges/run | edit refusals | hints | sys prompt tok |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| bugfix | 3 | 3/3 | 10390 | 9.0 ± 0.8 | 1.07 | 0 | 0.0 | read:10886, edit:3641, shell:3016 | 0 | 0.0 | 4 | 11 | 1801 |
+| feature | 3 | 3/3 | 9675 | 9.7 ± 0.9 | 1.04 | 0 | 0.0 | edit:9273, read:8004, shell:1070 | 0 | 0.0 | 0 | 0 | 1802 |
+| largefile | 3 | 3/3 | 11554 | 7.0 ± 0.8 | 1.01 | 0 | 0.0 | read:47754, shell:2705, edit:564 | 0 | 0.0 | 0 | 12 | 1802 |
+| plan | 3 | 3/3 | 9616 | 5.7 ± 0.5 | 1.20 | 0 | 0.0 | read:3322, ls:322, shell:182 | 0 | 0.0 | 0 | 0 | 1801 |
+| refactor | 3 | 3/3 | 9490 | 9.0 ± 0.0 | 1.03 | 0 | 0.0 | read:20301, edit:6093, search:2096 | 0 | 0.0 | 0 | 0 | 1802 |
+| vague | 3 | 1/3 | 44388 | 14.0 ± 7.8 | 1.04 | 0 | 0.0 | edit:33563, shell:19116, read:10626 | 0 | 0.0 | 0 | 0 | 1801 |
+| web | 3 | 3/3 | 7341 | 3.7 ± 0.9 | 1.02 | 0 | 0.0 | web:10214, write:40, read:7 | 0 | 0.0 | 0 | 0 | 1778 |
+| **∑** | 21 | **19/21** | 11505 | 8.3 ± 4.3 | 1.06 | 0 | 0.0 | read:100900, edit:53134, shell:27542, web:10214, search:2813 | 0 | 0.0 | 4 | 23 | 1801 |
+
+### What the numbers say
+
+- **System prompt = 1,801 tok** (median, both legs; `web` 1,778) — the fixed per-request cost the
+  C2 static-first split would shave, and the number its gate compares against (< 512 first-hit).
+- **flash's cache breaks are provider misses, not rewrites.** 1.6/run, attributed `tool_use,
+  tool_result` (with `snapshot` third) — appends the provider did not serve from cache. The A2
+  replay independently proves the bytes are append-only (see below), so an append-only fix cannot
+  recover them; B1's plan-envelope work targets the *plan-toggling* rewrite, which the `plan`
+  scenario (which never leaves plan mode) does not exercise.
+- **The strong leg has no cache breaks at all** (0.0/run, eff ~1.0–1.2) — the pro route keeps the
+  prefix warm, so `cache eff > 1.0` is possible on this instrument (cache reads can exceed the
+  `min(prevPrompt, prompt)` estimate). Read it as "no misses", not as a percentage.
+- **Redundant read tokens: 0 on both legs** — task 9's gate (≥ 10 % of read tokens) is a skip
+  unless the TB2 sessions contradict it.
+- **`first-hit` 0 for most scenarios, 832/1664 for `bugfix`/`vague`/`web`**: the provider's prefix
+  cache is shared across runs of a scenario, so a non-zero first-request cache read is normal in a
+  repeated corpus (and it means C2's `< 512` gate must be read per scenario, not as a median over 0s).
+- **Residency mass sits in `read`** on both legs (151K/101K tok·req over the leg) — the elision
+  and read-cap levers target the right tool, and `largefile` concentrates it (read:65391 in 6 runs).
+- **The `vague` failure mode reproduces on both models**: `accepted invalid input: -to f -- -300`
+  (flash 2/6, pro 2/3). It is the corpus's recurring flaky mode (see the v0.5.2 section above) and
+  is a checker-vs-domain-validation question worth settling before it is read as a regression signal.
+- **Identical-behavior calibration**: `-compare v0.6.1.jsonl,v0.6.1-instr.jsonl` → overall
+  **1.12 [0.94, 1.32], verdict underpowered** — but `feature` alone reads 1.54 [1.07, 2.13]. That is
+  the corpus's noise floor at n=3–6 on unchanged code: Stage C's gates must read the overall verdict
+  plus the replay, never a single scenario's point estimate.
+- **Replay self-check** (A2.2 on real transcripts): 36/36 non-web transcripts replayed byte-identically
+  (Δ 0.0 %, zero prefix breaks on both sides, no divergence over 7.44 MB of request bodies); the six
+  `web` runs are skipped as non-hermetic. The harness's formatting is invariant under replay — which
+  is the zero-variance half of every future A/B.
+
+### Crutch decision record (A3.4)
+
+Crutches fire rarely on the strong model — **0 nudges in 21 runs** (flash: 1 `empty` nudge in 42),
+0 cache breaks, 0 redundant read tokens, no elision, system prompt 1.8K tok. Per the plan's rule
+(≥ 1/3 of strong runs firing a crutch opens a §16 per-model-harness-profile item):
+**crutches are cheap on strong models** — numbers above; no §16 item is opened.
+
 ## Found by the evals (fixed in rev 21)
 
 - The failing-test investigation protocol armed on the run's own build breakage (baseline `vague#1`:
