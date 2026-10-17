@@ -155,6 +155,10 @@ type Env struct {
 	TestFailed  bool
 	FailingTest string
 	Searched    bool
+	// copied holds the stateful files (abs paths) the run has byte-copied:
+	// the SQLite sidecar guard stops refusing their opens then (§10).
+	// Per-run (runstate.go, reset by BeginRun).
+	copied map[string]struct{}
 }
 
 type Registry struct {
