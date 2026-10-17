@@ -87,6 +87,31 @@ stateful files before probing), the 12-batch progress nudge, and the glm flash e
   — the session headers in `results/v0.5.2.jsonl` runs show `"effort": "low"`). Re-run with an
   explicit `--effort` (or on a quiet endpoint) before attributing a delta to the prompt alone.
 
+## Retro-read: v0.5.2 → v0.6.1 through the A2 bootstrap (2026-10-17)
+
+`go run ./test/evals/evalstats -compare test/evals/results/v0.5.2.jsonl,test/evals/results/v0.6.1.jsonl`
+— stratified bootstrap, 2000 iterations, seed 1 (deterministic). The interval is computed with the
+pass counts held at their observed values: it measures token-volume uncertainty; outcome changes
+are judged by the explicit pass rules (better needs ≤ 1 lost pass, worse fires at 2+).
+
+| scenario | passes base→cand | runs | tokens/solved [lo, hi] | cost/run [lo, hi] | steps [lo, hi] |
+|---|---|---|---|---|---|
+| bugfix | 2→3 | 3→3 | 0.22 [0.10, 0.95] | 0.57 [0.25, 2.03] | 0.54 [0.27, 1.35] |
+| feature | 3→3 | 3→3 | 1.09 [0.77, 1.58] | 1.38 [1.09, 1.84] | 1.04 [0.77, 1.45] |
+| largefile | 3→3 | 3→3 | 0.89 [0.75, 1.06] | 1.27 [0.83, 1.96] | 0.86 [0.76, 0.96] |
+| plan | 3→3 | 3→3 | 1.02 [0.88, 1.18] | 0.89 [0.69, 1.14] | 1.00 [0.86, 1.17] |
+| refactor | 2→3 | 3→3 | 0.67 [0.42, 3.85] | 0.86 [0.52, 2.60] | 1.04 [0.69, 4.17] |
+| vague | 1→2 | 3→3 | 0.87 [0.50, 1.65] | 1.23 [0.78, 2.07] | 1.57 [1.07, 2.41] |
+| web | 3→3 | 3→3 | 1.29 [1.00, 2.95] | 1.22 [0.67, 3.05] | 1.00 [1.00, 1.00] |
+| **∑ all** | **17→20** | 21→21 | **0.69 [0.45, 1.08]** | 0.98 [0.71, 1.41] | 0.91 [0.69, 1.22] |
+
+**Verdict: underpowered — CI [0.45, 1.08] spans the band; rerun the moved scenarios with -n 6.**
+
+The point estimate (0.69) reproduces the tables' tokens/solved (67481 → 46508), and no scenario lost
+a pass, so the direction of the v0.6.1 delta is real — but three runs per scenario cannot certify
+it. This is exactly the class of delta the harness exists to measure; quote a number only after
+`-n 6` on the moved scenarios (`bugfix`, `refactor`, `vague`, `web`).
+
 ## Found by the evals (fixed in rev 21)
 
 - The failing-test investigation protocol armed on the run's own build breakage (baseline `vague#1`:
