@@ -23,7 +23,7 @@
 - **Discovery, trust gate, prompt listing, on-demand body read: already exist.** Nothing to build there.
 - **Caps:** ≤ 8 auto skills per project (an emptied one does not count), ≤ 2 creations per run, body ≤ 1500 runes, ≤ 12 rule lines, rule line ≤ 240 runes, description ≤ 160 runes, name `moca-<domain>` equal to its directory. All constants live in `internal/skills/autoskill.go` (§3.4).
 - **The switch:** `skills.selfManaged` — user config only can enable; a trusted project file may set `false`; `true` in a project file is a config error (§3.3).
-- **Hygiene:** at startup, a token-free pass drops dated `×1` rules older than 90 days from `auto: true` skills and removes the `SKILL.md` of an auto skill left empty. It never drops a line it cannot date.
+- **Hygiene:** at startup, a token-free pass drops dated `×1` rules older than 90 days from `auto: true` skills and removes the `SKILL.md` of an auto skill left empty. It never drops a line it cannot date, and it never drops a pinned (`user`) rule — a year-old pin is named in the startup warning instead. Startup also notes how many auto skills the project carries (one `note:` line, feature on and trusted only).
 - **Everything model-facing is inert when the switch is off** — nil guard, empty `SkillDir`, no prompt block, no hint, no pass, no ACP `/remember`. The one visible change is the TUI's `/remember` built-in, which prints an off notice.
 
 Verify the repo state before starting (§1.1), then follow the execution order in §9.
@@ -130,7 +130,7 @@ cd "$REPO" && go test -tags acpgate -count=1 -race ./test/acpgate -args -moca "$
 - **Import direction:** `llm`/`config`/`update` import nothing internal → `provider` → `mcp` → `agent` → `tui` | `acp`; `tools`/`permissions`/`session`/`skills`/`compact` stay mutually independent and talk through **structural interfaces** — that is exactly why the guard is a `func` field on `tools.Env` and not a `skills` import. New leaf: `internal/secret` (imports nothing internal), shared by `mcp` and `skills`.
 - **The eight tool schemas and descriptions stay byte-identical** (`internal/tools/testdata/schemas.golden.json`); `git diff --exit-code` on it is part of PR A's done-ness.
 - **No new prompt slots:** `internal/agent/system-prompt.md` is untouched — the feature adds an *appended* block only. `BuildSystemPrompt(PromptInput{})` must stay byte-identical (dump before/after and `diff`).
-- **Feature-off inertness:** with the switch off there is no prompt block, no hint, a nil guard, an empty `SkillDir`, no hygiene pass and no ACP `/remember` — zero model-facing change. The single user-visible addition is the TUI `/remember` built-in (listed in `/help`, prints the off notice).
+- **Feature-off inertness:** with the switch off there is no prompt block, no hint, a nil guard, an empty `SkillDir`, no hygiene pass and no ACP `/remember` — zero model-facing change. **One deliberate, artifact-keyed exception:** an auto skill that exists is listed with an `(auto)` marker and gains the fallible-memory framing line (task 6) — they ride the artifacts, not the switch, because the laundering protection must reach sessions with the feature off as much as on; a repo that never had auto skills is byte-identical (gate leg 1 compares two off paths on a fresh fixture). The single user-visible addition is the TUI `/remember` built-in (listed in `/help`, prints the off notice).
 - **Caps and ownership are structural:** enforced by the guard and the hygiene pass, never by prose; only `auto: true` skills are ever trimmed or deleted by the machinery. Ownership is one-way and not the model's choice: a new agent-created `SKILL.md` must be auto, and no write may drop the marker.
 - **The scope check is the trust boundary:** it compares symlink-resolved paths, case-insensitively on darwin/windows. `SkillDir` comes from `jail.Resolve(filepath.Join(".moca", "skills"), true)` — **never** a lexical join under `jail.Root()`: `Root()` is canonical but nothing *below* it is resolved, so a symlinked `workdir`, `.moca` or `.moca/skills` would resolve differently from the write path (`Paths.Resolve`) and silently turn the guard off.
 - **Skill writes are not code changes:** a write into `SkillDir` does not touch the per-run state machines (`noteChange`, the investigation gate, the repeat counter).
@@ -152,7 +152,7 @@ cd "$REPO" && go test -tags acpgate -count=1 -race ./test/acpgate -args -moca "$
 | `moca execute` / `/execute` | **Learns like a normal run.** It is *not* plan mode (`internal/agent/execplan.go`; `/execute` refuses while plan mode is on): writes are unconfined, and the guard, block and hint all apply. |
 | ACP | Same as the TUI, including trust: ACP's resolver (`cmd/moca/acp.go:85-101`) is flag > yolo > saved decision > **trusted by default**, so ACP needs no `--approve`. `/remember` is advertised and intercepted host-side **only when the feature is on for the session**. Auto skills are not advertised as commands. |
 | Resumed session | On only when the stored prompt carries the block **and** the switch resolves on now (with trust). A mismatch emits one warning and leaves the feature off for that session; `/clear` starts a fresh session that follows the current switch. |
-| When the switch is off | Model-facing surface byte-identical to today: nil guard, empty `SkillDir`, no prompt block, no hint, no hygiene pass, no ACP `/remember`. The TUI `/remember` built-in is the only visible addition. |
+| When the switch is off | Model-facing surface byte-identical to today: nil guard, empty `SkillDir`, no prompt block, no hint, no hygiene pass, no ACP `/remember`, no startup `Note`. The TUI `/remember` built-in is the only visible addition, plus the artifact-keyed `(auto)` marker + framing line where auto skills exist (§2.1's exception). |
 
 ### 3.2 The artifacts
 
@@ -206,6 +206,7 @@ auto: true
 | `SkillBodyCap` / `SkillMaxRules` / `SkillRuleLineCap` / `SkillWhenCap` | 1500 runes / 12 / 240 runes / 80 runes | one body read ≈ 400 tokens; a rule line must be a rule, not a paragraph | a measured need for deeper skills |
 | `SkillDescriptionCap` | 160 | the description is both the retrieval key and a prompt line | retrieval quality in task 9 |
 | `SkillExpiryDays` | 90 | a `×1` observation that survived a quarter is either rare or wrong; `user` rules are pinned and never expire | nothing — promoted to config only on request |
+| `SkillPinAgeNoticeDays` | 365 | a pinned rule is a user statement; a year-old one is a review candidate — hygiene *surfaces* it and never acts | nothing — a notice threshold, not a cleanup mechanism |
 | `SkillNamePrefix` | `moca-` | greppable, filterable, collision-proof against hand-written and ecosystem skills | nothing |
 
 All are constants, not config keys (YAGNI); each has a pinning test. Every length cap counts runes (`utf8.RuneCountInString`), so a refusal's "N chars" matches what the model wrote.
@@ -214,16 +215,16 @@ All are constants, not config keys (YAGNI); each has a pinning test. Every lengt
 
 | Situation | Added cost |
 |---|---|
-| feature off | **0** — nil guard, no block, no hint, no pass |
+| feature off | **0 when the repo has no auto skills** (the common case before opting in); once auto skills exist they stay listed with `(auto)` — one extra token per listed auto skill plus one framing line (~30 tokens/request) |
 | feature on, nothing worth keeping in a run | the prompt block (~200 tokens/request: 12 lines, guarded by `TestSelfManagedBlockSize`), nothing else |
 | a rule is written | one `write`/`edit` tool call + its result (the model already has the content in context) |
 | a rule is updated | the read it must do first (read-guard) + the edit |
 | steady state with 8 auto skills | ~240 tokens/request in listing lines; bodies only when read (~400 tokens each) |
-| startup hygiene | **0 tokens** — one directory scan of the trusted project's `.moca/skills` |
+| startup hygiene | **0 tokens** — one directory scan of the trusted project's `.moca/skills`, plus one host-side `Note` event when auto skills exist |
 
 ### 3.6 Non-goals (v1)
 
-No ninth tool; no global/cross-project skills; no session-end curator pass; no `moca skills` CLI; no manifest or index file; no auto-created `.gitignore`s or hidden state; no skills for untrusted workdirs; no embedding-based retrieval (the description is the retrieval key); no provenance rule beyond the secret scan unless task 9b triggers; nothing retro-fitted into sessions that predate the feature.
+No ninth tool; no global/cross-project skills (data-gated promotion trigger: task 9 — a user-level skills layer only when the corpus shows the same normalized rule in ≥ 2 repos); no session-end curator pass; no `moca skills` CLI; no manifest or index file; no auto-created `.gitignore`s or hidden state; no skills for untrusted workdirs; no embedding-based retrieval (the description is the retrieval key); no provenance rule beyond the secret scan unless task 9b triggers; nothing retro-fitted into sessions that predate the feature.
 
 ---
 
@@ -233,7 +234,7 @@ No ninth tool; no global/cross-project skills; no session-end curator pass; no `
 |---|---|---|
 | Project skill discovery | `internal/skills/skills.go` `Discover(dirs)`; wired in `internal/agent/start.go:139-141` | `<workdir>/.moca/skills` joins **only** for a trusted workdir; first source wins a name collision (silently — hence name == dir for auto skills); a skill without a description is skipped with a warning; symlinked skill dirs are skipped; **you add an `Auto bool` field** (task 2) |
 | Frontmatter parsing | `internal/skills/frontmatter.go` `ParseFrontmatter(data) (map[string]string, body []byte, err error)` | top-level scalars only (nested keys and comments are dropped — never re-serialize the map); missing frontmatter is an error; CRLF and a BOM are tolerated |
-| Prompt listing | `internal/agent/prompt.go:73-78` (`BuildSystemPrompt`) | `- name: description (path)` per skill; **you append one block** right after it, before the MCP and project-instruction blocks (task 6) |
+| Prompt listing | `internal/agent/prompt.go:73-78` (`BuildSystemPrompt`) | `- name: description (path)` per skill — auto skills carry ` (auto)` and, when any auto skill is listed, one fallible-memory framing line follows the listing (artifact-keyed, switch-independent); **you append the framing line, then one block**, before the MCP and project-instruction blocks (task 6) |
 | Body read on demand | the `read` tool + the jail | the project skills dir is inside the workdir, so it is readable with no extra root |
 | Reload between runs | `internal/agent/agent.go:169-178` (`Skills()`/`ReloadSkills`), TUI `app.go:1154`, ACP `commands.go:115` | a skill created mid-session appears in the picker at run end; the system prompt's listing is **frozen per session** |
 | Env construction | `internal/agent/start.go:214` (`build()`, shared by `Start` and `Resume`; `prepare()` has no `Env`) | where the guard closure, `SkillDir` and the resume mismatch check go (task 4/6); `build` receives the system prompt (`system`) and `prior` (non-nil on resume) |
@@ -426,6 +427,7 @@ const (
 	SkillNamePrefix      = "moca-"
 	SkillAutoKey         = "auto"
 	SkillExpiryDays      = 90
+	SkillPinAgeNoticeDays = 365 // hygiene surfaces (user, …) rules older than this — never acts
 )
 
 // SkillFacts is what a skill file says about itself.
@@ -582,7 +584,7 @@ Edits to an existing hand-written skill (prev not auto, data not auto) are check
 
 **Files:**
 - Create: `internal/skills/autoskill_prune.go`, `internal/skills/autoskill_prune_test.go`
-- Modify: `internal/agent/start.go` (`prepare()`, immediately **before** `skills.Discover`, so the listing reflects the pruning)
+- Modify: `internal/agent/start.go` (`prepare()`, immediately **before** `skills.Discover`, so the listing reflects the pruning; **after** discovery, the startup `Note`), `internal/agent/events.go` (`agent.Note` — `type Note struct{ Text string }` beside `Warning`; `-p` prints `note: …`, the TUI gets one rendering case; its only source is the startup count)
 
 **Interfaces:**
 
@@ -592,6 +594,7 @@ type PrunedSkills struct {
 	RulesRemoved int
 	SkillsRemoved []string
 	Touched       []string
+	PinnedAged    []string // skill names holding a (user, …) rule older than SkillPinAgeNoticeDays — named in the startup warning, never acted on
 }
 
 // PruneAutoSkills drops expired, dated ×1 rules from auto skills under dir
@@ -616,6 +619,9 @@ for each entry:
         every other line stays — including a rule line with no or an undatable
         provenance: the guard never lets the model write one, so it came from a
         person editing by hand, and hygiene does not delete what it cannot date
+        (a `(user, …)` rule older than SkillPinAgeNoticeDays is NAMED in the
+        startup warning instead — never dropped: a pin is a user statement, its
+        age is data for the user, not an expiry)
     IsEmptyBody(remaining body) → os.Remove(p), then os.Remove(<dir>/<entry>)
         (fails harmlessly when the user keeps other files there — the dir stays,
         Discover skips a dir without SKILL.md); SkillsRemoved += name.
@@ -630,13 +636,13 @@ No `.bak` (Decision 4): git is the backup for a committed file, and the startup 
 
 **Steps:**
 
-- [ ] **Step 1:** failing tests — `TestPruneAutoExpiresX1Only` (a 91-day-old `×1` rule goes; a 91-day-old `×2` rule stays; a `user` rule stays at any age; an ASCII `x1` rule is treated like `×1`), `TestPruneAutoKeepsUndatedLines` (a rule line with no provenance and one with an undatable date both survive), `TestPruneAutoRemovesEmptySkillFileOnly` (no rules and no prose left → `SKILL.md` gone; with a user's `notes.md` beside it the dir and `notes.md` survive; without, the dir is gone), `TestPruneAutoKeepsProseWithoutRules` (a body with a paragraph and no rules survives), `TestPruneAutoPreservesFrontmatterBytes` (nested keys, comments and key order are byte-identical after a rewrite; CRLF line endings preserved), `TestPruneAutoNeverTouchesUserSkills` (same ages, no `auto: true` → file byte-identical, mtime unchanged), `TestPruneAutoIgnoresUnrelatedFiles` (a README.md, a `.bak`, a hidden dir, a symlinked dir), `TestPruneAutoAtomicRewriteKeepsMode`, `TestPruneAutoLeavesNoTempOrBakFiles` (after a prune the skill dir holds exactly the files it held before minus a removed `SKILL.md` — no `.tmp-*`, no `.bak`), `TestPruneAutoFailureIsReturned` (an unwritable dir → error, other skills still processed).
+- [ ] **Step 1:** failing tests — `TestPruneAutoExpiresX1Only` (a 91-day-old `×1` rule goes; a 91-day-old `×2` rule stays; a `user` rule stays at any age; an ASCII `x1` rule is treated like `×1`), `TestPruneAutoSurfacesStalePins` (a 400-day-old `(user, …)` rule is never dropped but `PinnedAged` names its skill; a young pin is neither), `TestPruneAutoKeepsUndatedLines` (a rule line with no provenance and one with an undatable date both survive), `TestPruneAutoRemovesEmptySkillFileOnly` (no rules and no prose left → `SKILL.md` gone; with a user's `notes.md` beside it the dir and `notes.md` survive; without, the dir is gone), `TestPruneAutoKeepsProseWithoutRules` (a body with a paragraph and no rules survives), `TestPruneAutoPreservesFrontmatterBytes` (nested keys, comments and key order are byte-identical after a rewrite; CRLF line endings preserved), `TestPruneAutoNeverTouchesUserSkills` (same ages, no `auto: true` → file byte-identical, mtime unchanged), `TestPruneAutoIgnoresUnrelatedFiles` (a README.md, a `.bak`, a hidden dir, a symlinked dir), `TestPruneAutoAtomicRewriteKeepsMode`, `TestPruneAutoLeavesNoTempOrBakFiles` (after a prune the skill dir holds exactly the files it held before minus a removed `SKILL.md` — no `.tmp-*`, no `.bak`), `TestPruneAutoFailureIsReturned` (an unwritable dir → error, other skills still processed).
 - [ ] **Step 2:** implement; `go test ./internal/skills -race -count=1`.
-- [ ] **Step 3:** wire into `prepare()` (task 5's resolver must exist — §9 orders task 5 before this task), immediately before `skills.Discover`. Resolve the skills dir with the jail's own resolver — the same `jail.Resolve(filepath.Join(".moca", "skills"), true)` call task 4 uses, never `filepath.Join(jailRoot, …)` (the traversal jail makes both reads hit the same files, but one resolution story): on a resolution error, one warning, skip the pass; else `if config.ResolveSelfManagedSkills(cfg) && o.Trusted { pruned, perr := skills.PruneAutoSkills(resolvedDir, time.Now()); … }`; a non-zero `RulesRemoved/SkillsRemoved` emits **one** `Warning` event summarizing every skill touched (`skill hygiene: removed 2 stale rules from moca-testing; removed empty moca-tui`); an error emits a warning and never blocks startup. Hygiene follows switch + trust only: it runs in plan mode and in headless runs too (§5.1 #4).
-- [ ] **Step 4:** `TestStartPrunesStaleSkillsOnlyWhenEnabled`, `TestStartHygieneFailureIsAWarning`.
+- [ ] **Step 3:** wire into `prepare()` (task 5's resolver must exist — §9 orders task 5 before this task), immediately before `skills.Discover`. Resolve the skills dir with the jail's own resolver — the same `jail.Resolve(filepath.Join(".moca", "skills"), true)` call task 4 uses, never `filepath.Join(jailRoot, …)` (the traversal jail makes both reads hit the same files, but one resolution story): on a resolution error, one warning, skip the pass; else `if config.ResolveSelfManagedSkills(cfg) && o.Trusted { pruned, perr := skills.PruneAutoSkills(resolvedDir, time.Now()); … }`; a non-zero `RulesRemoved/SkillsRemoved` emits **one** `Warning` event summarizing every skill touched (`skill hygiene: removed 2 stale rules from moca-testing; removed empty moca-tui`); an error emits a warning and never blocks startup; when `pruned.PinnedAged` is non-zero the same warning names them after the removals (`2 pinned user rules older than a year (moca-testing, moca-git) — review or delete`). Hygiene follows switch + trust only: it runs in plan mode and in headless runs too (§5.1 #4). Immediately **after** `skills.Discover`/`filterSkills` in the same wiring: when the switch resolves on, the workdir is trusted and ≥ 1 **auto** skill exists, emit one `Note` — `note: this project carries M agent-learned skills under .moca/skills (agent-maintained; review the files or git status)` — the only source of `agent.Note`; no auto skills, no note; switch off or untrusted, no note.
+- [ ] **Step 4:** `TestStartPrunesStaleSkillsOnlyWhenEnabled`, `TestStartHygieneFailureIsAWarning` (removals and aged pins in one warning), `TestStartNoticeNamesAutoCount` (one `Note` naming the auto-skill count; hand-written project skills are not counted; no `Note` when off, untrusted or zero autos).
 - [ ] **Step 5:** `make vet`; commit `[feat:core] skills: startup hygiene for auto-created project skills`.
 
-**Acceptance:** with the switch off, `PruneAutoSkills` is never called (assert by test, not by reading the code); no test observes a new file appearing in the workdir; no test date is a literal.
+**Acceptance:** with the switch off, `PruneAutoSkills` is never called (assert by test, not by reading the code); no pin is ever dropped (aged pins survive and are surfaced via `PinnedAged`); no test observes a new file appearing in the workdir; no test date is a literal.
 
 **SPECS:** §12 (hygiene, expiry), §15 (tests).
 
@@ -948,6 +954,24 @@ if in.SelfManaged != nil {
 }
 ```
 
+**Code — the artifact-keyed marker (`internal/agent/prompt.go`, the listing loop in `BuildSystemPrompt`):** auto skills carry `(auto)` at the end of their listing line, and the listing section gains one framing line whenever any auto skill is listed. This is the reading-side countermeasure to memory laundering: later sessions — any switch state — must know these lines are dated self-report from past agent sessions, not law. It rides the artifacts, not the switch: the one deliberate exception to §2.1's byte-identity, and only where auto skills exist (a repo that never opted in is byte-identical; gate leg 1 still compares two off paths on a fresh fixture).
+
+```go
+// the listing loop, before the self-managed block insertion:
+for _, s := range in.Skills {
+	if s.Auto {
+		fmt.Fprintf(&sb, "- %s: %s (%s) (auto)\n", s.Name, oneLine(s.Description), s.Path)
+		continue
+	}
+	fmt.Fprintf(&sb, "- %s: %s (%s)\n", s.Name, oneLine(s.Description), s.Path)
+}
+if slices.ContainsFunc(in.Skills, func(s skills.Skill) bool { return s.Auto }) {
+	sb.WriteString("- Auto skills are dated notes from past agent sessions — fallible\n" +
+		"  memory: verify against the repo before relying on them, and contradict\n" +
+		"  or correct them when reality disagrees.\n")
+}
+```
+
 The `skills` eval scenario (task 9) is the check on the wording: its rule (an env var the Makefile sets) is learned by *running* the suite, which the block allows; the `skills-inject` README instruction is only *read*, which the block forbids.
 
 **Code — the resume rule (`internal/agent/start.go` `build()`, replacing task 4's gate):**
@@ -1039,12 +1063,12 @@ return res
 
 **Steps:**
 
-- [ ] **Step 1:** failing tests — `TestBuildSystemPromptSelfManagedBlock` (block present with `SelfManaged` set, **absent with nil**; `BuildSystemPrompt(PromptInput{})` byte-identical to a dump taken before the change; the existing ≤ 60-line core pin stays green), `TestSelfManagedBlockSize` (the block adds ≤ 12 lines: with vs without `SelfManaged`), `TestSelfManagedProbeMatchesTheBlock` (`BuildSystemPrompt` with a `SelfManaged` dir contains `selfManagedProbe(dir)` verbatim — the resume rule's one-string guarantee), `TestSelfManagedBlockNamesCapsDirAndProvenance` (8, 12, 1500, the dir, `(user,`, `×1`), `TestSkillHintDeliveredOnFirstSuccessAfterArming` (armed by a refusal → absent from the refusal, present on the next successful result, exactly once), `TestSkillHintPrefersVerifyingSuccess` (a successful `read` after arming waits; the verifying `go test` result carries it), `TestSkillHintDeliversAfterOneWait` (two successful non-verifying results → the second carries it, exactly once), `TestSkillHintSignals` (each signal alone arms it — a refusal, a 3rd identical failure, steering, an explicit "remember" prompt; a quiet run never shows it), `TestSkillHintNotArmedByGuardRefusal`, `TestSkillWriteSatisfiesHint` (armed by a refusal → a landed skill write: the write's own result carries no hint, disarms it, and the next unrelated success carries none either — the per-write flag must satisfy before the one-wait branch), `TestSkillHintSuppressedInPlanMode`, `TestSkillHintAbsentWithoutTheGuard` (switch off ⇒ nil guard ⇒ no hint), `TestTrackFailureOncePerError` (the repeat count moves by exactly one per failing call), `TestMentionsRemembering` (word bounds; "From now on" true; "remembered" false), `TestUserSignalArming` (an explicit-remember prompt and remember-class steering set `SkillUserSignal` after `BeginRun`; a plain prompt and a neutral steering do not — they arm the hint only; the two flags have distinct arming sources), `TestResumeSelfManagedMismatchWarns` (both directions: one warning, guard nil, no hint), `TestResumeResolveErrorWarns` (the task 4 resolution-error warning survives the merged gate — one warning, nil guard, no hint).
+- [ ] **Step 1:** failing tests — `TestAutoListingMarker` (an auto skill's listing line ends in ` (auto)`; non-auto listings unchanged), `TestAutoFramingLine` (present iff ≥ 1 auto skill is listed, ≤ 3 lines, absent otherwise), `TestAutoMarkerWithSwitchOff` (switch off in a repo holding a committed auto skill: the listing marks and frames it anyway — the artifact-keyed exception; no auto skills ⇒ byte-identical), `TestBuildSystemPromptSelfManagedBlock` (block present with `SelfManaged` set, **absent with nil**; `BuildSystemPrompt(PromptInput{})` byte-identical to a dump taken before the change; the existing ≤ 60-line core pin stays green), `TestSelfManagedBlockSize` (the block adds ≤ 12 lines: with vs without `SelfManaged`), `TestSelfManagedProbeMatchesTheBlock` (`BuildSystemPrompt` with a `SelfManaged` dir contains `selfManagedProbe(dir)` verbatim — the resume rule's one-string guarantee), `TestSelfManagedBlockNamesCapsDirAndProvenance` (8, 12, 1500, the dir, `(user,`, `×1`), `TestSkillHintDeliveredOnFirstSuccessAfterArming` (armed by a refusal → absent from the refusal, present on the next successful result, exactly once), `TestSkillHintPrefersVerifyingSuccess` (a successful `read` after arming waits; the verifying `go test` result carries it), `TestSkillHintDeliversAfterOneWait` (two successful non-verifying results → the second carries it, exactly once), `TestSkillHintSignals` (each signal alone arms it — a refusal, a 3rd identical failure, steering, an explicit "remember" prompt; a quiet run never shows it), `TestSkillHintNotArmedByGuardRefusal`, `TestSkillWriteSatisfiesHint` (armed by a refusal → a landed skill write: the write's own result carries no hint, disarms it, and the next unrelated success carries none either — the per-write flag must satisfy before the one-wait branch), `TestSkillHintSuppressedInPlanMode`, `TestSkillHintAbsentWithoutTheGuard` (switch off ⇒ nil guard ⇒ no hint), `TestTrackFailureOncePerError` (the repeat count moves by exactly one per failing call), `TestMentionsRemembering` (word bounds; "From now on" true; "remembered" false), `TestUserSignalArming` (an explicit-remember prompt and remember-class steering set `SkillUserSignal` after `BeginRun`; a plain prompt and a neutral steering do not — they arm the hint only; the two flags have distinct arming sources), `TestResumeSelfManagedMismatchWarns` (both directions: one warning, guard nil, no hint), `TestResumeResolveErrorWarns` (the task 4 resolution-error warning survives the merged gate — one warning, nil guard, no hint).
 - [ ] **Step 2:** implement; `go test ./internal/agent ./internal/tools -race -count=1`; `make vet`; commit `[feat:core] agent: skill-learning prompt block and the decision-point hint`.
 
-**Acceptance:** the prompt with `SelfManaged == nil` is byte-identical to the pre-change prompt (dump both and `diff`); the hint never appears twice in a run and never on an error result; no new prompt slot (the template file is untouched).
+**Acceptance:** the prompt with `SelfManaged == nil` **and no auto skills on disk** is byte-identical to the pre-change prompt (dump both and `diff`); the `(auto)` marker + framing line are the only artifact-keyed additions and exist nowhere else; the hint never appears twice in a run and never on an error result; no new prompt slot (the template file is untouched).
 
-**SPECS:** §14 (the block, the hint, the resume rule), §11 (the hint's trigger set and delivery), §15.
+**SPECS:** §14 (the block, the artifact-keyed `(auto)` marker + framing line, the hint, the resume rule), §11 (the hint's trigger set and delivery), §15.
 
 ---
 
@@ -1154,12 +1178,12 @@ func env(t *testing.T, workdir string) []string
 **Legs (each a subtest; any failure → non-zero exit):**
 
 1. **Off is inert** — no user opt-in, `--approve`: a scripted `write` of an over-cap, unmarked skill file still lands (ordinary workdir behavior — assert exactly that), no `# Project skills you maintain`, no hint line in any tool result; and the request bodies the provider received (system prompt included) are byte-identical to a second run that *is* opted in at user level but opted out by a trusted `.moca/config.jsonc` (`"skills": {"selfManaged": false}`) — two different "off" paths, same trust, same bytes (each run in a fresh copy of the fixture with everything committed — the prompt carries the git state, and the first run's write must not leak into the second's listing; compare after replacing every scratch path with a placeholder — the workdir **and** the XDG config/data/state dirs: the system prompt names the config/prompt/skills dirs, and A2's replay work shows the stored prompt carries XDG paths verbatim).
-2. **On, conforming write** — user opt-in + `--approve`: the scripted conforming `moca-<domain>/SKILL.md` lands; the file parses; the stored prompt carries the block; a second run's stored prompt lists `- moca-<domain>:`.
+2. **On, conforming write** — user opt-in + `--approve`: the scripted conforming `moca-<domain>/SKILL.md` lands; the file parses; the stored prompt carries the block; a second run's stored prompt lists `- moca-<domain>:` with `(auto)` and the fallible-memory framing line below the section, and its output carries the startup `Note` (one line, naming the count).
 3. **Caps and ownership** — over-cap body, a 13th rule line, a missing provenance, a name not matching `moca-<domain>` or differing from its directory, a new skill without `auto: true`, an edit dropping `auto: true`, an extra file inside an auto skill's directory, a foreign file into a dir that has no `SKILL.md` yet (the write-order bypass, apply-fixes pass): each refused with a model-facing message and **nothing on disk** (or the previous bytes kept); with 8 seeded non-empty auto skills (dates generated) the 9th is refused with the existing names listed, and an emptied seeded skill frees the slot.
 4. **Secret scan** — a scripted write of a rule quoting a fake `ghp_…` token is refused; the token appears nowhere **on disk in the workdir** (no skill file, nothing in `git status`). The session JSONL is deliberately *not* scanned for it: the transcript stores tool-call input verbatim, so the scripted call is there by construction. The provider-key leak scan (acpgate shape) still runs over the session JSONL, the log, stdout and stderr.
 5. **Per-run cap** — the 3rd creation in one run refused; the first two on disk.
 6. **Project cannot enable** — a **trusted** `.moca/config.jsonc` with `selfManaged: true` → exit 2, the message names the user config key.
-7. **Hygiene** — a fixture with a `×1` rule dated 91 days before now: the next start reports the removal, a `×3` rule survives, a rule line with no provenance survives, a hand-written skill is byte-identical.
+7. **Hygiene** — a fixture with a `×1` rule dated 91 days before now: the next start reports the removal, a `×3` rule survives, a rule line with no provenance survives, a hand-written skill is byte-identical; a 400-day-old `(user, …)` rule is neither removed nor expired — it is named in the startup warning (`PinnedAged`).
 8. **No files we did not ask for** — after a full run, `git status --porcelain` in the fixture lists only the skill files the run wrote: no `.gitignore`, no manifest, no `.bak`, no `.tmp-*`.
 9. **`-p` without `--approve` is inert (the trust gate)** — user opt-in on, untrusted workdir: no block, no hint, and a scripted write of an *invalid* auto skill lands unvalidated (proving the guard is nil, i.e. the feature is off rather than half-on).
 10. **Plan mode never learns** — `--mode plan --approve` with the opt-in: the block **is** in the stored prompt (it follows switch + trust; the prompt is frozen per session), no hint appears on any result, and a scripted skill write is refused by the plan confinement, nothing on disk.
@@ -1234,7 +1258,7 @@ one():  if "$EVALS/$s/sessions.txt" exists, read one prompt per non-empty line;
 - [ ] **Step 4:** record the **injection verdict** (§5.2) — pass or fail — in `BASELINE.md`.
 - [ ] **Step 5:** commit `[chore:evals] skill-learning scenarios (two-session + injection) and the skill metrics`.
 
-**Tuning follow-ups this task gates (only with data):** if session 2 never reads the skill → strengthen the description convention (the retrieval key) before adding anything structural; if the model creates noisy skills → raise the "durable" bar in the block or lower `SkillMaxAuto` (one constant); if the injection leg fails → task 9b.
+**Tuning follow-ups this task gates (only with data):** if session 2 never reads the skill → strengthen the description convention (the retrieval key) before adding anything structural; if the model creates noisy skills → raise the "durable" bar in the block or lower `SkillMaxAuto` (one constant); if the injection leg fails → task 9b; if the same normalized rule lands in ≥ 2 distinct repos, the **cross-project promotion trigger** fires — design a user-level skills layer before per-repo duplication drifts (§3.6's rejection stands until then); if descriptions fail as retrieval keys — bodies read wastefully or the needed skill skipped — require triggers in descriptions (`When: …`) on new auto skills (one `ValidateSkill` row), or append per-skill rule counts to the listing lines; pick from the data, don't pre-build.
 
 **Metric to report either way:** the delta in tool calls, failures and tokens between `-on` and `-off` on the `skills.2` rows, and the number of skill writes on the `skills.1` rows. A green session 2 in both labels means the feature is decoration — write that down.
 
@@ -1313,7 +1337,7 @@ Only backticked command-shaped tokens are inspected; prose and bare flags (`--ra
 
 ### 8.2 The manual leg (do it once before asking for review)
 
-Scripted provider + the real binary in a tmux pane (recipe in Appendix B): enable the key in a scratch user config, run a session that hits a refusal and then succeeds, watch exactly one hint line appear — on the successful result, not on the refusal — and `moca-testing/SKILL.md` land with the rule; `/undo` reverts it; start a second session in the same repo: the stored prompt lists the skill, `/help` shows it on the `auto skills:` line, and the completion dropdown does not offer `/moca-testing`; `/remember` with plan mode on prints the plan-mode error; put a hand-written skill beside it and confirm the hygiene pass leaves it byte-identical.
+Scripted provider + the real binary in a tmux pane (recipe in Appendix B): enable the key in a scratch user config, run a session that hits a refusal and then succeeds, watch exactly one hint line appear — on the successful result, not on the refusal — and `moca-testing/SKILL.md` land with the rule; `/undo` reverts it; start a second session in the same repo: the startup shows the `self-managed skills:` note, the stored prompt lists the skill marked `(auto)` with the fallible-memory framing line, `/help` shows it on the `auto skills:` line, and the completion dropdown does not offer `/moca-testing`; `/remember` with plan mode on prints the plan-mode error; put a hand-written skill beside it and confirm the hygiene pass leaves it byte-identical.
 
 ### 8.3 Evidence to keep
 
@@ -1361,9 +1385,9 @@ Review PR A in **two passes**: tasks 1–6 (the mechanics — leaf, contract, hy
 
 **SPECS §11 (permissions).** A new bullet: **the skill write guard** — when `skills.selfManaged` is on, the workdir is trusted and the session's prompt carries the block, `write`/`edit` run `Env.SkillGuard` on the exact bytes before the write (nothing lands on a refusal); the scope is `Env.SkillDir`, built with `jail.Resolve(".moca/skills", true)` (a symlinked `workdir`, `.moca` or `.moca/skills` must not open it) and compared case-insensitively on darwin/windows; it polices only `<workdir>/.moca/skills/**`; ownership is one-way (new agent-created skills must be auto; the marker cannot be dropped); auto skills are single-file — and the write order is pinned (a dir without a `SKILL.md` refuses every other file, so a foreign-first companion cannot ride the later `auto: true`); a new `(user, …)` rule needs an explicit remember-class user signal in the run (remember-class prompt text, remember-class steering text, or `/remember`; any steering arms only the hint); refusals are model-facing `refused: …` results; the per-run creation cap counts landed files; skill-dir writes do not touch the per-run state (`Edited`, the repeat counter, the investigation gate). And: **the decision-point hint** — armed by a refusal (other than the skill guard's own), a third identical failing call, any steering, or an explicit "remember"; delivered on the first successful result after it; a landed skill write satisfies it silently; one line, at most once per run, never in plan mode.
 
-**SPECS §12 (skills).** A new subsection **Self-managed project skills**: the artifacts (`moca-<domain>/SKILL.md`, `auto: true` top-level scalar, name == directory, single-file — the write order pinned too: a dir without `SKILL.md` refuses every other file), the rule-line grammar with provenance (`×N, date` observed — ASCII `x` accepted — / `user, date` pinned), lengths in runes, the caps table (§3.4, including that an emptied auto skill does not count and that a **new** auto skill needs at least one rule), one-skill-per-domain, that the working agent writes them with `write`/`edit` (no new tool), ownership (Decisions 10–11), the trust requirement (`-p` needs `--approve`; ACP trusts by default), plan mode (never learns; `moca execute` does), the resume rule, the hygiene pass (dated `×1` rules older than 90 days, auto skills only, never an undatable line, only `SKILL.md` removed, no `.bak`, one startup warning), that auto skills are not slash commands (`/help`'s `auto skills:` line), and the explicit statements: **no `.gitignore` is created**, nothing is deleted when the switch is turned off, hand-written project skills are never touched.
+**SPECS §12 (skills).** A new subsection **Self-managed project skills**: the artifacts (`moca-<domain>/SKILL.md`, `auto: true` top-level scalar, name == directory, single-file — the write order pinned too: a dir without `SKILL.md` refuses every other file), the rule-line grammar with provenance (`×N, date` observed — ASCII `x` accepted — / `user, date` pinned), lengths in runes, the caps table (§3.4, including that an emptied auto skill does not count and that a **new** auto skill needs at least one rule), one-skill-per-domain, that the working agent writes them with `write`/`edit` (no new tool), ownership (Decisions 10–11), the trust requirement (`-p` needs `--approve`; ACP trusts by default), plan mode (never learns; `moca execute` does), the resume rule, the hygiene pass (dated `×1` rules older than 90 days, auto skills only, never an undatable line, only `SKILL.md` removed, no `.bak`, one startup warning; a `user` rule older than a year is named in that warning and never dropped), that auto skills are not slash commands (`/help`'s `auto skills:` line), that listing lines of auto skills end with `(auto)` and one fallible-memory framing line follows the listing when any auto skill is listed (artifact-keyed: present in off-sessions too), and the explicit statements: **no `.gitignore` is created**, nothing is deleted when the switch is turned off, hand-written project skills are never touched.
 
-**SPECS §14 (agent loop / prompt).** The appended `# Project skills you maintain` block (only when the feature is on; the core template untouched), the hint, the resume rule (on only when the stored prompt carries the block and the switch + trust resolve on now; a mismatch warns once), and the fact that the prompt's skill listing remains frozen per session (`ReloadSkills` refreshes the picker, not the prompt).
+**SPECS §14 (agent loop / prompt).** The appended `# Project skills you maintain` block (only when the feature is on; the core template untouched), the artifact-keyed `(auto)` listing marker + the one fallible-memory framing line (they ride the auto-skill artifacts, not the switch — a repo with no auto skills is byte-identical), the hint, the resume rule (on only when the stored prompt carries the block and the switch + trust resolve on now; a mismatch warns once), and the fact that the prompt's skill listing remains frozen per session (`ReloadSkills` refreshes the picker, not the prompt).
 
 **SPECS §3.5 / §9.5.** `/remember` in the TUI command list (usage line, the off-notice, the plan-mode refusal; auto skills off the dropdown and on `/help`'s `auto skills:` line) and in the ACP command list (the first ACP built-in, advertised and intercepted only when the feature is on; the expansion; auto skills not advertised).
 
@@ -1371,7 +1395,7 @@ Review PR A in **two passes**: tasks 1–6 (the mechanics — leaf, contract, hy
 
 **SPECS §16 / AGENTS.md.** `internal/secret` as a new leaf package (AGENTS.md's import-direction line names it, imported by `mcp` and `skills`); internal package count 15 → 16; the Go file count; the gate list; the eval-corpus line (ten scenarios, `-c <variant>`).
 
-**README.md.** A "Self-managed skills" section: what it does; how to enable (`"skills": { "selfManaged": true }` in the user config); the layout (`.moca/skills/moca-*`, ordinary files — *you* decide whether to commit or gitignore them); how to turn it off (user config, or `false` in a trusted `.moca/config.jsonc`); the `--approve` requirement for `-p`/CI, and that ACP trusts by default — **with the switch on, every folder your editor opens over ACP can grow skills**, so opt out per project with `false` if that matters; that the agent cannot create hand-written project skills while it is on; the caps; and the warning: **rules are recorded by the model from what it saw during the session, and a trusted repository can still carry hostile content (a README, a dependency, a web page, an MCP result) — read the file before committing it.**
+**README.md.** A "Self-managed skills" section: what it does; how to enable (`"skills": { "selfManaged": true }` in the user config); the layout (`.moca/skills/moca-*`, ordinary files — *you* decide whether to commit or gitignore them); how to turn it off (user config, or `false` in a trusted `.moca/config.jsonc`); the `--approve` requirement for `-p`/CI, and that ACP trusts by default — **with the switch on, every folder your editor opens over ACP can grow skills**, so opt out per project with `false` if that matters; that the agent cannot create hand-written project skills while it is on; the caps; sessions start with a one-line `note:` of how many agent-learned skills the project carries (feature on, trusted only); auto skills are marked `(auto)` in listings with a fallible-memory framing line even when the switch is off; and the warning: **rules are recorded by the model from what it saw during the session, and a trusted repository can still carry hostile content (a README, a dependency, a web page, an MCP result) — read the file before committing it.**
 
 **CHANGELOG.md.** A `## v0.7.0` section — **the existing `## Unreleased` block on `main` becomes it** (rename, fold the feature bullets beneath its harness bullets; never a second floating section), 4–6 feature bullets (the feature, the config key, the guard, the gate, the known limitations reference, and that the `/remember` built-in shadows a user prompt template or skill named `remember`).
 
@@ -1440,10 +1464,10 @@ graphify extract . && graphify cluster-only . --backend opencode-go   # docs cha
 | Symbol | Package / file | Purpose |
 |---|---|---|
 | `secret.Value/Tokenish/Key/Userinfo/Embedded/Match` | `internal/secret/secret.go` | the shared credential table |
-| `SkillBodyCap`, `SkillMaxRules`, `SkillRuleLineCap`, `SkillWhenCap`, `SkillDescriptionCap`, `SkillMaxAuto`, `SkillCreationsPerRun`, `SkillNamePrefix`, `SkillAutoKey`, `SkillExpiryDays` | `internal/skills/autoskill.go` | every cap, one place |
+| `SkillBodyCap`, `SkillMaxRules`, `SkillRuleLineCap`, `SkillWhenCap`, `SkillDescriptionCap`, `SkillMaxAuto`, `SkillCreationsPerRun`, `SkillNamePrefix`, `SkillAutoKey`, `SkillExpiryDays`, `SkillPinAgeNoticeDays` | `internal/skills/autoskill.go` | every cap, one place |
 | `SkillFacts`, `AutoCount`, `WriteContext`, `Rule` | `internal/skills/autoskill.go` | parsed shapes and the guard's context |
 | `ParseSkill`, `ParseRule`, `IsEmptyBody`, `CountAutoSkills`, `ValidateSkill` | `internal/skills/autoskill.go` | the contract |
-| `PruneAutoSkills`, `PrunedSkills` | `internal/skills/autoskill_prune.go` | startup hygiene |
+| `PruneAutoSkills`, `PrunedSkills` (incl. `PinnedAged`), `agent.Note` | `internal/skills/autoskill_prune.go`, `internal/agent/events.go` | startup hygiene; the one-line startup visibility `Note` |
 | `Skill.Auto` | `internal/skills/skills.go` | ownership on the discovered list (keeps auto skills off the command surfaces) |
 | `Env.SkillDir`, `Env.SkillGuard`, `Env.SkillCreations`, `Env.SkillUserSignal`, `Env.SkillHintArmed`, `Env.SkillHintDone`, `skillRefused`/`skillWrote` (per call), `Env.RanCommands` (9b) | `internal/tools/tool.go` | the structural hooks |
 | `skillRel`, `isSkillFile`, `caseInsensitiveFS` | `internal/tools/skilldir.go` | the scope check (the trust boundary) |
