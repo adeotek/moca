@@ -22,31 +22,44 @@ func (a *Agent) applyPlan(on bool) {
 // SetPlan toggles plan mode between runs (never during Run). The tools layer
 // enforces the write confinement (write/edit only reach docs/plans/*.md);
 // shell, mcp, web and the read tools stay available under their normal
-// permission rules; the envelope rides every request while it is on. Plan
-// rides only on default: turning plan on leaves a wider mode (auto, yolo)
-// for default first (its own ModeChanged) — previously only yolo did.
+// permission rules; the envelope rides every user message *sent while plan
+// mode is on* (§14). Plan rides only on default: turning plan on leaves a
+// wider mode (auto, yolo) for default first (its own ModeChanged) —
+// previously only yolo did.
 func (a *Agent) SetPlan(on bool) {
+	was := a.plan
 	if on && a.mode != ModeDefault {
 		a.SetMode(ModeDefault)
 	}
 	a.applyPlan(on)
 	a.append(session.Entry{Type: session.TypePermissionMode,
 		PermissionMode: &session.PermissionMode{Yolo: a.mode == ModeYolo, Plan: on, Mode: string(a.mode)}})
+	if was && !on {
+		// The envelopes stay in the history — they were part of what the
+		// model received, and the history is append-only. This note tells the
+		// model they no longer apply (the next request carries it once).
+		a.append(session.Entry{Type: session.TypeMessage, Message: userText(planOffNote)})
+	}
 	a.emit(PlanChanged{On: on})
 }
 
-// planEnvelope is appended to every user text message of every request
-// built while plan mode is on — a request-only transform (like the
-// cross-provider thinking transform): the transcript keeps exactly what the
-// user wrote. Every message, not just the last: a moving envelope would
-// rewrite an earlier message on each new prompt and forfeit the prompt cache
-// from there (B4); toggling the mode costs one cache miss instead.
+// planEnvelope rides user text messages appended while plan mode was on — a
+// request-only render (like the cross-provider thinking transform): the
+// transcript keeps exactly what the user wrote, plus the entry's plan flag.
+// The flag lives on the entry, so an earlier message renders byte-identically
+// in every later request and toggling the mode costs one cache miss instead
+// of a rewrite of the whole history (B1.1, §14).
 const planEnvelope = "[plan mode] You are producing an implementation plan, not making changes. " +
 	"Investigate with read/search/ls/shell/web/mcp as needed — shell and mcp run under the normal permission rules, and you must use them only to inspect, never to change anything. " +
 	"The write and edit tools refuse any path outside docs/plans. " +
 	"Then write the plan to docs/plans/<kebab-case-slug>.md with the write tool (edit to update an existing one) and stop with a 3-5 line summary naming the file. " +
 	"Plan format: a one-paragraph goal; current state (file paths); numbered steps as `- [ ]` checkboxes (each: what changes, which files, how it is verified); then verification, out-of-scope and risks/decisions sections. " +
 	"Do not modify any other file."
+
+// planOffNote is appended once when plan mode turns off. The envelopes
+// attached to earlier messages cannot be un-sent, so the note says they no
+// longer apply.
+const planOffNote = "[plan mode is off] The plan-mode instructions attached to earlier messages no longer apply: you may change files again under the normal permission rules."
 
 // planNudge is persisted and answered when a plan-mode run is about to end
 // without its deliverable: one bounded retry, then the run ends with a
@@ -67,30 +80,19 @@ func (a *Agent) warnPlanMissing() {
 	}
 }
 
-// withPlanEnvelope appends the envelope to every user message that carries
-// text (never a tool-result-only message).
-func withPlanEnvelope(msgs []llm.Message, on bool) []llm.Message {
-	if !on {
-		return msgs
+// planExtra is the per-entry hook session.MessagesWith runs for each user
+// message entry: a flagged entry (appended while plan mode was on, §13) gets
+// the envelope appended immediately after its own blocks — before any later
+// entry merges in, so an entry appended later can never move or drop the
+// envelope an earlier request already carried.
+func planExtra(e session.Entry) []llm.ContentBlock {
+	if !e.Plan || e.Message == nil || e.Message.Role != llm.RoleUser {
+		return nil
 	}
-	for i := range msgs {
-		if msgs[i].Role != llm.RoleUser {
-			continue
+	for _, b := range e.Message.Content {
+		if b.Type == llm.BlockText {
+			return []llm.ContentBlock{{Type: llm.BlockText, Text: planEnvelope}}
 		}
-		hasText := false
-		for _, b := range msgs[i].Content {
-			if b.Type == llm.BlockText {
-				hasText = true
-				break
-			}
-		}
-		if !hasText {
-			continue
-		}
-		content := make([]llm.ContentBlock, 0, len(msgs[i].Content)+1)
-		content = append(content, msgs[i].Content...)
-		content = append(content, llm.ContentBlock{Type: llm.BlockText, Text: planEnvelope})
-		msgs[i].Content = content
 	}
-	return msgs
+	return nil
 }

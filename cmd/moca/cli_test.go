@@ -168,9 +168,22 @@ func fakeCompletions(t *testing.T, status int, body string) *httptest.Server {
 
 func TestOneShotStreamsToStdout(t *testing.T) {
 	isolate(t)
-	srv := fakeCompletions(t, 200, "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n"+
-		"data: {\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n"+
-		"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n")
+	// Two turns: a tool call (so the run acts — a -p run that answers with
+	// text alone gets the action nudge, which would add a third request),
+	// then the answer.
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if calls.Add(1) == 1 {
+			io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"ls\",\"arguments\":\"{}\"}}]}}]}\n\n"+
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"+
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n")
+			return
+		}
+		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n"+
+			"data: {\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n"+
+			"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n")
+	}))
 	defer srv.Close()
 	t.Setenv("MOCA_T_KEY", "k")
 	cfg := writeCfg(t, `{"model":"loc/m","providers":{"loc":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions",
@@ -180,7 +193,7 @@ func TestOneShotStreamsToStdout(t *testing.T) {
 	if code != 0 || out.String() != "hello\n" {
 		t.Fatalf("code %d stdout %q stderr %q", code, out.String(), errb.String())
 	}
-	if !strings.Contains(errb.String(), "tokens 3/2") || !strings.Contains(errb.String(), "$") {
+	if !strings.Contains(errb.String(), "tokens 6/4") || !strings.Contains(errb.String(), "$") {
 		t.Fatalf("exit summary missing: %q", errb.String())
 	}
 }

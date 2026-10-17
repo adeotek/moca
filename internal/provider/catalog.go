@@ -24,6 +24,16 @@ type Model struct {
 
 func (m Model) Qualified() string { return m.Provider + "/" + m.ID }
 
+// HistoryBound reports whether the route binds the submitted history to the
+// exact prefix its thinking was produced against (preserved/adaptive
+// thinking). On such a route a kept-tail thinking strip or an elision — both
+// of which rewrite earlier messages — risks the provider dropping the tail's
+// thinking or rejecting the request, so both are disabled (B1.2, §7/§14).
+// Today that is exactly the adaptive anthropic rows; the openai-responses
+// encrypted-reasoning route is recorded as an open question in §16, not
+// silently included.
+func (m Model) HistoryBound() bool { return m.ThinkingMode == "adaptive" }
+
 func (m Model) ClampEffort(e llm.Effort) llm.Effort {
 	if m.ThinkingMode == "none" || len(m.ThinkingLevelMap) == 0 {
 		return llm.EffortOff
@@ -77,7 +87,7 @@ func costM(in, out, cr, cw float64) config.CostConfig {
 }
 
 var (
-	anthropicAdaptive = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortMax: "max"}
+	anthropicAdaptive = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortXHigh: "xhigh", llm.EffortMax: "max"}
 	anthropicBudget   = map[llm.Effort]string{llm.EffortOff: "", llm.EffortLow: "", llm.EffortMedium: "", llm.EffortHigh: "", llm.EffortMax: ""}
 	openaiReasoning   = map[llm.Effort]string{llm.EffortMinimal: "minimal", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
 	// glm-5.3 and glm-5.3-flash diverged on 2026-10-16 (live-verified against

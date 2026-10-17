@@ -114,3 +114,64 @@ func TestOverflowIsPerSession(t *testing.T) {
 		t.Fatalf("spilled file must resolve in the jail: %v", err)
 	}
 }
+
+// TestShouldElide (B1.2): the elision decision — forced elisions need some
+// savings, a history-bound route never elides unforced, and every other route
+// needs the threshold.
+func TestShouldElide(t *testing.T) {
+	for _, tc := range []struct {
+		saved  int
+		force  bool
+		bound  bool
+		expect bool
+	}{
+		{9000, false, false, true},
+		{100, false, false, false},
+		{9000, false, true, false}, // history-bound: never rewrite unforced
+		{1, true, true, true},      // a compaction resets the cache anyway
+		{0, true, false, false},    // nothing stale: no entry
+		{8000, false, false, true}, // the threshold itself counts
+	} {
+		if got := shouldElide(tc.saved, tc.force, tc.bound); got != tc.expect {
+			t.Errorf("shouldElide(%d, %v, %v) = %v, want %v", tc.saved, tc.force, tc.bound, got, tc.expect)
+		}
+	}
+}
+
+// TestHistoryBoundFollowsActiveModel (B1.2): the guard reads the model at
+// elide time, so a /model switch takes effect on the next run.
+func TestHistoryBoundFollowsActiveModel(t *testing.T) {
+	big := strings.Repeat("x", 40000) // ~10k tokens: over the 8000 threshold
+	stage := func(t *testing.T, thinking string) bool {
+		a, _, _ := startTest(t, newScript(t), 40)
+		a.model.ThinkingMode = thinking
+		call := func(id string) session.Entry {
+			return session.Entry{Type: session.TypeToolUse, ToolUse: &session.ToolUse{
+				Call: llm.ToolCall{ID: id, Name: "read", Input: json.RawMessage(`{"path":"a.go"}`)}}}
+		}
+		for _, id := range []string{"c1", "c2"} { // the same call twice: the first result is stale
+			if _, err := a.append(call(id)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.append(session.Entry{Type: session.TypeToolResult,
+				ToolResult: &llm.ToolResult{CallID: id, Content: big}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := a.elide(false); err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range a.entries {
+			if e.Type == session.TypeElision {
+				return true
+			}
+		}
+		return false
+	}
+	if stage(t, "adaptive") {
+		t.Fatal("a history-bound model must not elide unforced")
+	}
+	if !stage(t, "openai") {
+		t.Fatal("a non-bound model elides past the threshold")
+	}
+}

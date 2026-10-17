@@ -39,10 +39,14 @@ type StartOptions struct {
 	Trusted bool
 	Mode    PermMode // default | auto | yolo (the plan's Defaults first, then this)
 	Plan    bool
-	Ask     tools.Asker
-	Emit    func(Event)
-	HTTP    *http.Client
-	Slug    string
+	// Headless marks a one-shot task run (-p): there a text-only reply with
+	// no tool call at all is a defect (the action nudge applies), while an
+	// interactive turn may legitimately be a question.
+	Headless bool
+	Ask      tools.Asker
+	Emit     func(Event)
+	HTTP     *http.Client
+	Slug     string
 	// ConfigPath is the user config file this run loaded (warnings name it);
 	// "" means config.ConfigFile().
 	ConfigPath string
@@ -230,7 +234,8 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 		reg.Register(mcp.NewTool(mgr, cfg.MCP.Servers))
 	}
 	a, err := New(Options{Config: cfg, Providers: st.reg, Tools: reg, Env: env,
-		Session: w, Snapshots: snaps, System: system, Model: model, Effort: effort, Emit: o.Emit, Prior: prior, MCP: mgr})
+		Session: w, Snapshots: snaps, System: system, Model: model, Effort: effort, Emit: o.Emit, Prior: prior, MCP: mgr,
+		Headless: o.Headless})
 	if err != nil {
 		return nil, err
 	}
