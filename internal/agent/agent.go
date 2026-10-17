@@ -27,6 +27,14 @@ const wrapUpText = "You have reached the step limit for this run. Do not call to
 // emptyNudge answers a turn with neither text nor tool calls.
 const emptyNudge = "Your last reply was empty. Continue the task where you left off, or give your final answer."
 
+// actionNudge answers a run that is ending after a text-only reply without a
+// single tool call: describing an action is not taking it (§14, TB2 round 3 —
+// a filter-js trial ended after one "let's look at the environment" turn with
+// zero tool calls and zero files touched). Bounded: once per run.
+const actionNudge = "Your reply would end this run without a single tool call. " +
+	"If the task needs any investigation, change or verification, do it now with the tools instead of describing it. " +
+	"If the reply above is already the complete answer to what was asked, repeat it unchanged and stop."
+
 // progressNudge is the §14 progress nudge's text, naming the configured
 // threshold (context.progressNudgeAt, default 12): act on what is known, or
 // name the concrete blocker (or why no file needs to change).
@@ -59,6 +67,9 @@ type Options struct {
 	Effort    llm.Effort
 	Emit      func(Event)
 	Prior     []session.Entry
+	// Headless marks a one-shot (-p) task run: the action nudge (a text-only
+	// reply with no tool call anywhere) applies only there.
+	Headless bool
 	// MCP is the lazy MCP-server manager when servers are configured
 	// (start.go); nil otherwise.
 	MCP *mcp.Manager
@@ -81,6 +92,9 @@ type Agent struct {
 	cost    float64
 	plan    bool
 	steps   int // steps taken by the current run (run-end log line)
+	// warnedDrop gates the once-per-run thinking-drop warning (B1.2); reset
+	// at the start of every run.
+	warnedDrop bool
 	// execPlan/execPlanRel: the plan file a RunPlan run executes (abs, display).
 	execPlan, execPlanRel string
 	hard                  *savedModel
@@ -199,6 +213,12 @@ func (a *Agent) emit(e Event) {
 }
 
 func (a *Agent) append(e session.Entry) (session.Entry, error) {
+	// A user message appended while plan mode is on carries the flag its
+	// envelope renders from (B1.1): the flag lives on the entry, so the
+	// request rendering stays append-only across /plan toggles.
+	if a.plan && e.Type == session.TypeMessage && e.Message != nil && e.Message.Role == llm.RoleUser {
+		e.Plan = true
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	e, err := a.opts.Session.Append(e)
@@ -214,14 +234,16 @@ func userText(s string) *llm.Message {
 
 func (a *Agent) request(choice llm.ToolChoice) llm.Request {
 	// Snapshot the transcript under the lock: the TUI may append a `!` note
-	// from another goroutine while a run is in progress.
+	// from another goroutine while a run is in progress. The render carries
+	// the plan envelope per flagged entry (B1.1) and keeps the kept tail's
+	// thinking verbatim on a preserved-thinking route (B1.2).
 	a.mu.Lock()
-	msgs := session.Messages(a.entries)
+	msgs := session.MessagesWith(a.entries, planExtra, a.model.HistoryBound())
 	a.mu.Unlock()
 	return llm.Request{
 		Model:      a.model.ID,
 		System:     a.opts.System,
-		Messages:   withPlanEnvelope(TransformHistory(msgs, a.model.Qualified()), a.plan),
+		Messages:   TransformHistory(msgs, a.model.Qualified()),
 		Tools:      a.opts.Tools.Specs(),
 		ToolChoice: choice,
 		CacheKey:   a.cacheKey(),
@@ -278,8 +300,17 @@ func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, 
 	a.usage, a.cost = a.usage.Add(resp.Usage), a.cost+cost
 	a.mu.Unlock()
 	u := resp.Usage
+	if resp.ThinkingDropped > 0 && !a.warnedDrop {
+		// The provider reported dropping thinking blocks from the history we
+		// sent: on a preserved-thinking route the request no longer matched
+		// the prefix the reasoning was produced against, which is a moca bug
+		// (§14). One warning per run; the count rides the entry either way.
+		a.warnedDrop = true
+		a.emit(Warning{"the provider dropped thinking blocks because the request history changed (prefix_binding_mismatch) — a moca bug; please report it"})
+	}
 	msgEntry, err := a.append(session.Entry{Type: session.TypeMessage, Model: a.model.Qualified(), Usage: &u, Cost: cost,
-		Message: &llm.Message{Role: llm.RoleAssistant, Content: body}})
+		ThinkingDropped: resp.ThinkingDropped,
+		Message:         &llm.Message{Role: llm.RoleAssistant, Content: body}})
 	if err != nil {
 		return resp, nil, err
 	}
@@ -400,7 +431,8 @@ func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
 	// Per-run tool state (plan deliverable, changes awaiting verification,
 	// identical-failure counts): tools/runstate.go.
 	a.opts.Env.BeginRun()
-	nudged, verifyNudged, reserved, execNudged, emptyNudged, progressNudged := false, false, false, false, false, false
+	a.warnedDrop = false
+	nudged, verifyNudged, reserved, execNudged, emptyNudged, progressNudged, actionNudged := false, false, false, false, false, false, false
 	// The §14 progress nudge's threshold (context.progressNudgeAt, default 12;
 	// 0 disables it) and the tool batches executed this run.
 	progressAt, batches := a.opts.Config.Context.ProgressNudge(), 0
@@ -457,6 +489,18 @@ func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
 					continue
 				}
 				a.emit(Warning{"the model ended the run with an empty reply"})
+			} else if !actionNudged && batches == 0 && !a.plan && a.opts.Headless {
+				// A text-only final reply with no tool call in the entire run:
+				// describing the work is not doing it (§14, TB2 round 3 — a
+				// filter-js trial answered once and stopped with nothing
+				// touched). One bounded nudge; plan mode has its own
+				// deliverable nudge, and a run that executed any batch has
+				// already acted.
+				actionNudged = true
+				if err := a.nudge("action", actionNudge); err != nil {
+					return Outcome{}, err
+				}
+				continue
 			}
 			if a.plan && !a.opts.Env.PlanWrote {
 				if !nudged {

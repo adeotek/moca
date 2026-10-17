@@ -75,3 +75,71 @@ func TestRepair(t *testing.T) {
 		t.Fatal("idempotent")
 	}
 }
+
+// TestMessagesWithAppendsPerEntry: the extra hook runs per user message entry
+// and its blocks land right after that entry's own blocks, before a later
+// entry merges in — the property that makes the plan envelope append-only
+// across toggles (B1.1).
+func TestMessagesWithAppendsPerEntry(t *testing.T) {
+	extra := func(e Entry) []llm.ContentBlock {
+		if !e.Plan {
+			return nil
+		}
+		return []llm.ContentBlock{{Type: llm.BlockText, Text: "[env]"}}
+	}
+	es := []Entry{
+		{ID: "r1", Type: TypeToolResult, ToolResult: &llm.ToolResult{CallID: "c1", Content: "x"}},
+		{ID: "u1", Type: TypeMessage, Plan: true, Message: txt(llm.RoleUser, "a")},
+		{ID: "u2", Type: TypeMessage, Plan: true, Message: txt(llm.RoleUser, "b")},
+	}
+	m := MessagesWith(es, extra, false)
+	if len(m) != 1 || m[0].Role != llm.RoleUser || len(m[0].Content) != 5 {
+		t.Fatalf("merged user message: %+v", m)
+	}
+	if m[0].Content[0].Type != llm.BlockToolResult || m[0].Content[1].Text != "a" ||
+		m[0].Content[2].Text != "[env]" || m[0].Content[3].Text != "b" || m[0].Content[4].Text != "[env]" {
+		t.Fatalf("per-entry placement: %+v", m[0].Content)
+	}
+	plain := MessagesWith([]Entry{{ID: "u", Type: TypeMessage, Message: txt(llm.RoleUser, "p")}}, extra, false)
+	if len(plain) != 1 || len(plain[0].Content) != 1 {
+		t.Fatalf("an unflagged entry gets no extra blocks: %+v", plain[0].Content)
+	}
+	if noHook := Messages(es); len(noHook) != 1 || len(noHook[0].Content) != 3 {
+		t.Fatalf("Messages must equal MessagesWith(entries, nil, false): %+v", noHook[0].Content)
+	}
+}
+
+// TestMessagesStripKeptTailThinking: a compaction's kept tail replays without
+// its thinking blocks on a route that is not history-bound (the summary
+// stands in for that stretch), while post-compaction turns keep theirs; a
+// history-bound route keeps the tail verbatim — the provider binds thinking
+// to the exact prefix it was produced against (B1.2).
+func TestMessagesStripKeptTailThinking(t *testing.T) {
+	asst := func(id, text string) Entry {
+		return Entry{ID: id, Type: TypeMessage, Message: &llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: llm.BlockThinking, Text: "think " + id}, {Type: llm.BlockText, Text: text}}}}
+	}
+	es := []Entry{
+		{ID: "u1", Type: TypeMessage, Message: txt(llm.RoleUser, "go")},
+		asst("a1", "tail"),
+		{ID: "c1", Type: TypeCompaction, Compaction: &Compaction{Summary: "sum", FirstKeptEntryID: "a1"}},
+		asst("a2", "post"),
+	}
+	m := Messages(es)
+	if len(m) != 3 {
+		t.Fatalf("summary, kept tail, post-compaction turn: %d", len(m))
+	}
+	if len(m[1].Content) != 1 || m[1].Content[0].Type == llm.BlockThinking {
+		t.Fatalf("kept tail must drop thinking: %+v", m[1].Content)
+	}
+	if len(m[2].Content) != 2 || m[2].Content[0].Type != llm.BlockThinking {
+		t.Fatalf("post-compaction turns keep thinking: %+v", m[2].Content)
+	}
+	b := MessagesWith(es, nil, true)
+	if len(b[1].Content) != 2 || b[1].Content[0].Type != llm.BlockThinking {
+		t.Fatalf("history-bound keeps the kept tail verbatim: %+v", b[1].Content)
+	}
+	if plain := Messages([]Entry{asst("a3", "no compaction")}); len(plain[0].Content) != 2 {
+		t.Fatalf("without a compaction nothing is stripped: %+v", plain[0].Content)
+	}
+}
