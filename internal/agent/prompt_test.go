@@ -24,7 +24,12 @@ func TestBuildSystemPrompt(t *testing.T) {
 		"read or search that file instead of re-running",
 		"open dependencies' internals only when a concrete behavior blocks you",
 		"Verification must be able to fail", "Never present guessed, rebuilt or extrapolated data as fact",
-		"copy first (opening a SQLite DB checkpoints it and can delete its WAL)",
+		"An inconsistency you notice is a defect to investigate",
+		"Leave the finish state a checker will see pristine",
+		"A build that compiles is not a port that works",
+		"your first action on one is a byte copy",
+		"never put a read and a stateful open in the same shell call",
+		"SQLite deletes a WAL it cannot parse",
 		"rtk", "- rtk: compressed output (/d/rtk/SKILL.md)", "- context7: docs lookup", "Use tabs.", "moca 0.1.0"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt missing %q", want)
