@@ -133,3 +133,39 @@ func TestGLMEffortMapsMatchTheThinkingOnlyServingVariants(t *testing.T) {
 		t.Fatalf("kimi-k3: off must map to \"none\", got %q", v)
 	}
 }
+
+// TestHistoryBoundIsAdaptiveOnly (B1.2): exactly the adaptive anthropic rows
+// bind the history to their thinking prefix; every other route does not.
+func TestHistoryBoundIsAdaptiveOnly(t *testing.T) {
+	byID := map[string]Model{}
+	for _, m := range builtinCatalog {
+		byID[m.Qualified()] = m
+	}
+	for _, id := range []string{"anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5"} {
+		if !byID[id].HistoryBound() {
+			t.Fatalf("%s must be history-bound (adaptive thinking)", id)
+		}
+	}
+	for _, id := range []string{"opencode-go/glm-5.3-flash", "opencode-go/minimax-m3", "anthropic/claude-haiku-4-5"} {
+		if byID[id].HistoryBound() {
+			t.Fatalf("%s must not be history-bound", id)
+		}
+	}
+}
+
+// TestAdaptiveMapIncludesXHigh (B1.2): the adaptive map accepts xhigh, so the
+// clamp no longer pulls it down to high.
+func TestAdaptiveMapIncludesXHigh(t *testing.T) {
+	if v := anthropicAdaptive[llm.EffortXHigh]; v != "xhigh" {
+		t.Fatalf("anthropicAdaptive[xhigh] = %q, want \"xhigh\"", v)
+	}
+	var m Model
+	for _, row := range builtinCatalog {
+		if row.Qualified() == "anthropic/claude-opus-5-5" {
+			m = row
+		}
+	}
+	if got := m.ClampEffort(llm.EffortXHigh); got != llm.EffortXHigh {
+		t.Fatalf("xhigh clamps to %q on an adaptive model, want xhigh", got)
+	}
+}

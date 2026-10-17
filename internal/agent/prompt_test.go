@@ -24,6 +24,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		"read or search that file instead of re-running",
 		"open dependencies' internals only when a concrete behavior blocks you",
 		"Verification must be able to fail", "Never present guessed, rebuilt or extrapolated data as fact",
+		"The stated behaviour outranks a name it gives",
 		"An inconsistency you notice is a defect to investigate",
 		"Leave the finish state a checker will see pristine",
 		"A build that compiles is not a port that works",

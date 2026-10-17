@@ -84,12 +84,29 @@ func callKey(name string, input json.RawMessage) string {
 	return name + "\x00" + buf.String()
 }
 
+// shouldElide decides whether stubbing the stale results is worth rewriting
+// earlier messages at all. force: right after a compaction, which resets the
+// cache anyway — whatever is stale goes. historyBound: a preserved-thinking
+// route binds the history to the exact prefix its thinking was produced
+// against, so an unforced elision (a rewrite) is never worth it there (§14).
+// The caller reads the active model at call time, so a /model switch takes
+// effect immediately.
+func shouldElide(saved int, force, historyBound bool) bool {
+	if force {
+		return saved > 0
+	}
+	if historyBound {
+		return false
+	}
+	return saved >= elideMinTokens
+}
+
 // elide persists an elision of the live window's stale results when they
 // are worth it (force: whatever is stale — right after a compaction).
 func (a *Agent) elide(force bool) error {
 	live, _ := a.liveEntries()
 	ids, saved := staleResults(live)
-	if len(ids) == 0 || (!force && saved < elideMinTokens) {
+	if len(ids) == 0 || !shouldElide(saved, force, a.model.HistoryBound()) {
 		return nil
 	}
 	if _, err := a.append(session.Entry{Type: session.TypeElision, Elision: &session.Elision{IDs: ids, Tokens: saved}}); err != nil {

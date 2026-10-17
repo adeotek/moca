@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/session"
 )
 
@@ -220,5 +221,178 @@ func TestModeEntriesRecordBothFlags(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+// isMessagePrefix reports whether every message of prev appears, in order and
+// element-for-element, at the head of cur — the wire-level append-only
+// property (B1.1).
+func isMessagePrefix(prev, cur []any) bool {
+	if len(cur) < len(prev) {
+		return false
+	}
+	for i := range prev {
+		if !reflect.DeepEqual(prev[i], cur[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// msgJSON returns each message of a request body as JSON text.
+func msgJSON(t *testing.T, body map[string]any) []string {
+	t.Helper()
+	msgs, _ := body["messages"].([]any)
+	out := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		b, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, string(b))
+	}
+	return out
+}
+
+// TestPlanToggleIsAppendOnly (B1.1): plan on → Run A → off → Run B → on →
+// Run C. Every consecutive request pair is an append-only extension; A's
+// message carries the envelope in every later request, B's never, C's does.
+func TestPlanToggleIsAppendOnly(t *testing.T) {
+	s := newScript(t,
+		toolTurn([2]string{"write", `{"path":"docs/plans/a.md","content":"# a"}`}), textTurn("A done"),
+		toolTurn([2]string{"read", `{"path":"a.txt"}`}), textTurn("B done"),
+		toolTurn([2]string{"read", `{"path":"a.txt"}`}), textTurn("C done"),
+	)
+	a, work, _ := startTest(t, s, 40)
+	if err := os.WriteFile(filepath.Join(work, "a.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.SetPlan(true)
+	if _, err := a.Run(context.Background(), "plan A"); err != nil {
+		t.Fatal(err)
+	}
+	a.SetPlan(false)
+	if _, err := a.Run(context.Background(), "plan B"); err != nil {
+		t.Fatal(err)
+	}
+	a.SetPlan(true)
+	if _, err := a.Run(context.Background(), "plan C"); err != nil {
+		t.Fatal(err)
+	}
+	bodies := snapshotBodies(s)
+	if len(bodies) < 6 {
+		t.Fatalf("want at least two requests per run, got %d", len(bodies))
+	}
+	var prev []any
+	for i, b := range bodies {
+		msgs, _ := b["messages"].([]any)
+		if i > 0 && !isMessagePrefix(prev, msgs) {
+			t.Fatalf("request %d is not an append-only extension of request %d", i+1, i)
+		}
+		prev = msgs
+	}
+	carries := func(msg, what string) bool { return strings.Contains(msg, what) }
+	for i, b := range bodies {
+		for _, m := range msgJSON(t, b) {
+			switch {
+			case carries(m, "plan A"):
+				if !carries(m, "[plan mode]") {
+					t.Fatalf("request %d: A's message lost its envelope: %s", i+1, m)
+				}
+			case carries(m, "plan C"):
+				if !carries(m, "[plan mode]") {
+					t.Fatalf("request %d: C's message lost its envelope: %s", i+1, m)
+				}
+			case carries(m, "plan B"):
+				if carries(m, "[plan mode]") {
+					t.Fatalf("request %d: an unflagged message must not carry the envelope: %s", i+1, m)
+				}
+			}
+		}
+	}
+}
+
+// TestPlanOffNoteFollowsToggle: turning plan off appends the off note once;
+// a repeated off toggle appends nothing.
+func TestPlanOffNoteFollowsToggle(t *testing.T) {
+	s := newScript(t,
+		toolTurn([2]string{"read", `{"path":"a.txt"}`}), textTurn("A done"),
+		toolTurn([2]string{"read", `{"path":"a.txt"}`}), textTurn("B done"),
+		toolTurn([2]string{"read", `{"path":"a.txt"}`}), textTurn("C done"),
+	)
+	a, work, _ := startTest(t, s, 40)
+	if err := os.WriteFile(filepath.Join(work, "a.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.SetPlan(true)
+	if _, err := a.Run(context.Background(), "A"); err != nil {
+		t.Fatal(err)
+	}
+	a.SetPlan(false)
+	if _, err := a.Run(context.Background(), "B"); err != nil {
+		t.Fatal(err)
+	}
+	count := func() int {
+		bodies := snapshotBodies(s)
+		last := msgJSON(t, bodies[len(bodies)-1])
+		n := 0
+		for _, m := range last {
+			n += strings.Count(m, "[plan mode is off]")
+		}
+		return n
+	}
+	if got := count(); got != 1 {
+		t.Fatalf("after on→off the note must appear exactly once, got %d", got)
+	}
+	a.SetPlan(false) // off → off: no second note
+	if _, err := a.Run(context.Background(), "C"); err != nil {
+		t.Fatal(err)
+	}
+	if got := count(); got != 1 {
+		t.Fatalf("a repeated off toggle must not add a note, got %d", got)
+	}
+}
+
+// TestResumeRendersLegacyPlanSession: a session written before the plan flag
+// existed resumes without gaining an envelope, and two resumes of the same
+// file render identical requests.
+func TestResumeRendersLegacyPlanSession(t *testing.T) {
+	s := newScript(t, textTurn("first"))
+	a, _, _ := startTest(t, s, 40)
+	if _, err := a.Run(context.Background(), "q1"); err != nil {
+		t.Fatal(err)
+	}
+	path := a.Session().Path()
+	work := session.WorkdirOf(path)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"plan"`) {
+		t.Fatal("the fixture must be a legacy session (no plan field)")
+	}
+	a.Session().Close()
+	render := func() []llm.Message {
+		b, err := Resume(StartOptions{Config: a.opts.Config, Workdir: work, HTTP: s.srv.Client()}, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msgs := session.MessagesWith(b.entries, planExtra, false)
+		b.Session().Close()
+		return msgs
+	}
+	m1, m2 := render(), render()
+	if !reflect.DeepEqual(m1, m2) {
+		t.Fatal("two resumes of the same file must render identical requests")
+	}
+	for _, m := range m1 {
+		for _, b := range m.Content {
+			if strings.Contains(b.Text, "[plan mode]") {
+				t.Fatal("a legacy session must not gain an envelope")
+			}
+		}
+	}
+	if len(m1) == 0 {
+		t.Fatal("the resumed history must not be empty")
 	}
 }

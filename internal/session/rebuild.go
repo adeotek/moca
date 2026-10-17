@@ -37,10 +37,30 @@ const SummaryPrefix = "[Summary of earlier conversation]"
 // Messages rebuilds request messages: the latest compaction summary (if any),
 // then entries from its firstKeptEntryId onward (§8). Without a compaction
 // the whole transcript is used, unchanged.
-func Messages(entries []Entry) []llm.Message {
+func Messages(entries []Entry) []llm.Message { return MessagesWith(entries, nil, false) }
+
+// MessagesWith rebuilds request messages with the two render-time hooks the
+// agent needs:
+//
+//   - extra: run for every user message entry; the blocks it returns are
+//     appended immediately after that entry's own blocks (before any later
+//     entry merges in). The plan envelope rides this hook per entry — the flag
+//     lives on the entry, so an earlier message renders identically in every
+//     later request and a /plan toggle never rewrites history (§14). Per-entry
+//     placement is deliberate: one envelope anchored at the end of the merged
+//     message would move as soon as a second flagged entry merged in.
+//   - historyBound: a preserved-thinking route binds the history to the exact
+//     prefix it produced, so the kept tail — assistant entries positioned
+//     before the latest compaction — replays verbatim, thinking blocks
+//     included. Everywhere else the kept tail's thinking is stripped: the
+//     summary already stands in for that stretch, and replaying its thinking
+//     buys no reasoning. Post-compaction turns keep theirs either way (the
+//     strip is scoped to entries before the compaction boundary).
+func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, historyBound bool) []llm.Message {
 	var out []llm.Message
-	start := 0
+	start, compactionIdx := 0, -1
 	if c, idx := LatestCompaction(entries); c != nil {
+		compactionIdx = idx
 		found := false
 		for i, e := range entries {
 			if e.ID == c.FirstKeptEntryID {
@@ -56,17 +76,29 @@ func Messages(entries []Entry) []llm.Message {
 		}
 		appendUser(&out, llm.ContentBlock{Type: llm.BlockText, Text: SummaryPrefix + "\n" + c.Summary})
 	}
+	stripThinking := !historyBound && compactionIdx >= 0
 	assistantIdx := map[string]int{}
 	elided := ElidedIDs(entries)
-	for _, e := range entries[start:] {
+	for i := start; i < len(entries); i++ {
+		e := entries[i]
 		switch e.Type {
 		case TypeMessage:
 			if e.Message.Role == llm.RoleAssistant {
-				out = append(out, llm.Message{Role: llm.RoleAssistant, Content: append([]llm.ContentBlock{}, e.Message.Content...)})
+				content := e.Message.Content
+				if stripThinking && i < compactionIdx {
+					content = withoutThinking(content)
+				}
+				out = append(out, llm.Message{Role: llm.RoleAssistant, Content: append([]llm.ContentBlock{}, content...)})
 				assistantIdx[e.ID] = len(out) - 1
 				continue
 			}
-			appendUser(&out, e.Message.Content...)
+			content := e.Message.Content
+			if extra != nil {
+				if ex := extra(e); len(ex) > 0 {
+					content = append(append([]llm.ContentBlock{}, content...), ex...)
+				}
+			}
+			appendUser(&out, content...)
 		case TypeToolUse:
 			if i, ok := assistantIdx[e.ToolUse.MessageID]; ok {
 				call := e.ToolUse.Call
@@ -79,6 +111,19 @@ func Messages(entries []Entry) []llm.Message {
 			}
 			appendUser(&out, llm.ContentBlock{Type: llm.BlockToolResult, ToolResult: &r})
 		}
+	}
+	return out
+}
+
+// withoutThinking copies the blocks minus thinking: the kept tail's reasoning
+// is already replaced by the compaction summary.
+func withoutThinking(blocks []llm.ContentBlock) []llm.ContentBlock {
+	out := make([]llm.ContentBlock, 0, len(blocks))
+	for _, b := range blocks {
+		if b.Type == llm.BlockThinking {
+			continue
+		}
+		out = append(out, b)
 	}
 	return out
 }

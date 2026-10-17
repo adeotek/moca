@@ -101,7 +101,17 @@ type Entry struct {
 	PermissionMode *PermissionMode `json:"permissionMode,omitempty"`
 	Elision        *Elision        `json:"elision,omitempty"`
 	// Nudge names the bounded nudge that produced this user message (§14,
-	// metadata only — never sent with the request): empty, plan, plan_reserve,
-	// verify, progress, execute.
+	// metadata only — never sent with the request): empty, action, plan,
+	// plan_reserve, verify, progress, execute.
 	Nudge string `json:"nudge,omitempty"`
+	// Plan marks a user message entry appended while plan mode was on: the
+	// request rendering appends that entry's plan envelope right after its own
+	// blocks, so toggling plan mode never rewrites an earlier message (§14).
+	Plan bool `json:"plan,omitempty"`
+	// ThinkingDropped counts the thinking blocks the provider reported
+	// dropping for this turn (anthropic input_transformations,
+	// prefix_binding_mismatch) — a preserved-thinking route's signal that the
+	// history it was sent no longer matches the prefix it was produced
+	// against. Plumbed now, parsed by the anthropic adapter later (§14).
+	ThinkingDropped int `json:"thinkingDropped,omitempty"`
 }
