@@ -350,6 +350,9 @@ func covered(prev []*readWindow, from, to int, lines map[int]string,
 func main() {
 	sess := flag.String("session", "", "session jsonl to measure")
 	summary := flag.String("summary", "", "results jsonl to aggregate")
+	compare := flag.String("compare", "", "two results jsonl paths, base.jsonl,cand.jsonl — bootstrap comparison")
+	iters := flag.Int("iters", 2000, "bootstrap iterations for -compare")
+	seed := flag.Int64("seed", 1, "bootstrap RNG seed for -compare (deterministic output)")
 	scenario := flag.String("scenario", "", "scenario name")
 	label := flag.String("label", "", "run label")
 	run := flag.Int("run", 0, "run number")
@@ -357,17 +360,14 @@ func main() {
 	exit := flag.Int("exit", 0, "moca exit code")
 	flag.Parse()
 	switch {
+	case *compare != "":
+		parts := strings.SplitN(*compare, ",", 2)
+		if len(parts) != 2 {
+			fatal(fmt.Errorf("-compare wants base.jsonl,cand.jsonl (got %q)", *compare))
+		}
+		fmt.Print(RenderComparison(Compare(readResultsFile(parts[0]), readResultsFile(parts[1]), *iters, *seed)))
 	case *summary != "":
-		f, err := os.Open(*summary)
-		if err != nil {
-			fatal(err)
-		}
-		defer f.Close()
-		rows, err := readResults(f)
-		if err != nil {
-			fatal(err)
-		}
-		fmt.Print(Summarize(rows))
+		fmt.Print(Summarize(readResultsFile(*summary)))
 	case *sess != "":
 		entries, err := session.ReadFile(*sess)
 		if err != nil {
@@ -381,6 +381,19 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
+}
+
+func readResultsFile(path string) []Metrics {
+	f, err := os.Open(path)
+	if err != nil {
+		fatal(err)
+	}
+	defer f.Close()
+	rows, err := readResults(f)
+	if err != nil {
+		fatal(err)
+	}
+	return rows
 }
 
 func fatal(err error) {
