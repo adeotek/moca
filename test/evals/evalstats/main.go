@@ -78,6 +78,11 @@ type Metrics struct {
 	EditRefusals        int            `json:"editRefusals,omitempty"`
 	Hints               int            `json:"hints,omitempty"`
 	SystemPromptTokens  int            `json:"systemPromptTokens,omitempty"`
+	// ThinkingDropped sums the thinking blocks the provider reported dropping
+	// for the session (anthropic input_transformations, prefix_binding_mismatch):
+	// non-zero means a preserved-thinking route saw history that no longer
+	// matched the prefix its thinking was produced against.
+	ThinkingDropped int `json:"thinkingDropped,omitempty"`
 }
 
 // Tokens is every billed token of the run (cache reads included: they are
@@ -197,6 +202,7 @@ func Collect(entries []session.Entry) Metrics {
 			if e.Nudge != "" {
 				m.Nudges[e.Nudge]++
 			}
+			m.ThinkingDropped += e.ThinkingDropped
 		case session.TypeToolUse:
 			if e.ToolUse == nil {
 				continue
