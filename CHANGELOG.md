@@ -9,6 +9,17 @@
 - **A/B read: `evalstats -compare` (A2.1).** `go run ./test/evals/evalstats -compare base.jsonl,cand.jsonl [-iters 2000 -seed 1]` resamples per scenario (seeded PCG — identical inputs and seed give identical output), holds the observed pass counts while the interval measures token-volume uncertainty, and prints a verdict per scenario and overall: better / worse / inconclusive / underpowered (a CI that spans the band, or fewer than 3 runs per side). The v0.5.2 → v0.6.1 retro-read recorded in `test/evals/BASELINE.md` lands in the underpowered class — 0.69 tokens/solved point estimate, passes 17 → 20 — and an `-n 6` rerun of the moved scenarios is what would certify it.
 - **Trajectory replay (A2.2).** `go run ./test/evals/replay -base <bin> -cand <bin> -label <l> [-scenarios a,b]` re-runs kept transcripts turn by turn: the model's recorded turns are served back over a local openai-completions SSE stream (no usage chunk, so moca's chars/4 fallback anchors the context estimate deterministically), tools execute for real on a fresh fixture copy, and the report gives request bytes, append-only prefix breaks and divergence per transcript. Compared runs get same-length run dirs on purpose — the workdir and the XDG paths ride the stored system prompt, so a longer path is a longer request body. `bash test/evals/replay/run.sh` builds the binary and replays one synthetic session (read → edit → text) twice: identical request bytes, zero prefix breaks, no divergence. Replay is counterfactual the other way — it measures formatting and token accounting exactly and says nothing about how a real model would react.
 
+## v0.6.3 (2026-10-17)
+
+Two working-style corrections from the Terminal-Bench round 4 (subset 8/12,
+below v0.6.1's 10/12 — diagnosed cell by cell; the changed code is not the
+cause).
+
+### Agent
+
+- **The pending state is part of the behaviour.** A human-in-the-loop flow (confirm, approve, invite) is only satisfied when the request does **not** take effect before confirmation *and* the confirmation is actually delivered and answered. A setting that skips the step satisfies the name the task gives, not the flow its checker exercises. Round 4's mailman run set both subscription policies to `open` — which is what the task text literally asked — made joins immediate, and failed the hidden test's **first** assertion, which wants the request pending until the reply. Making the confirmation mail reach the user's mailbox was the actual work.
+- **A run has a wall-clock budget.** Once a probe has answered the question you asked, stop probing and change the code; reading a dependency's internals, or fetching its source, is a last resort — justified only when the acceptance depends on that exact behaviour, and then bounded to one falsifiable hypothesis at a time. Round 4's cobol trial spent 3.5× v0.6.1's clock explaining a GnuCOBOL `cob_move` quirk and hit the 900 s cap with the port unfinished.
+
 ## v0.6.2 (2026-10-17)
 
 The history-correctness pass, plus two lessons from the Terminal-Bench round 3
