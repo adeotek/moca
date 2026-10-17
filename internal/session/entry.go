@@ -100,4 +100,8 @@ type Entry struct {
 	Error          *ErrorInfo      `json:"error,omitempty"`
 	PermissionMode *PermissionMode `json:"permissionMode,omitempty"`
 	Elision        *Elision        `json:"elision,omitempty"`
+	// Nudge names the bounded nudge that produced this user message (§14,
+	// metadata only — never sent with the request): empty, plan, plan_reserve,
+	// verify, progress, execute.
+	Nudge string `json:"nudge,omitempty"`
 }

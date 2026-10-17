@@ -18,10 +18,11 @@ func (a *Agent) logger() *slog.Logger {
 	return slog.Default().With("session", a.opts.Session.ID8())
 }
 
-// nudge persists one bounded nudge (§14) and logs its kind.
+// nudge persists one bounded nudge (§14) and logs its kind. The entry carries
+// the kind as metadata (evalstats attributes nudges; it never reaches the wire).
 func (a *Agent) nudge(kind, text string) error {
 	a.logger().Info("nudge", "kind", kind)
-	_, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(text)})
+	_, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(text), Nudge: kind})
 	return err
 }
 

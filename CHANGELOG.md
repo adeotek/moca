@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Harness
+
+- **Append-only request invariant (A1.1).** `test/wire` provides `FirstDivergence`/`Strip`; pins at the agent level (`TestRequestsAreAppendOnly` over a run with steering, an empty reply and the verify nudge) and at every codec (`TestCodecBodiesPreservePrefix`: encoding a longer history never rewrites the shorter encoding; cache breakpoints are ignored).
+- **Token attribution in evalstats (A1.2).** Per-run cache efficiency (first-request prompt/cache read, `Σ cacheRead / Σ min(prevPrompt, prompt)` for requests 2..n), cache breaks with the entry types that preceded them, per-tool residency (tokens × later requests still holding the result, elision-aware), redundant read tokens, nudge counts by kind, investigation refusals/hints, and system-prompt tokens; the summary gains `cache eff`, `first-hit`, `breaks/run` and `redundant read tok` columns. `run.sh` keeps every transcript under `test/evals/results/<label>/` (newest 200; gitignored) instead of deleting a passing run's data dir; `message` entries carry the nudge kind as metadata.
+
 ## v0.6.1 (2026-10-17)
 
 The second Terminal-Bench 2.0 round (the v0.6.0 re-run: subset 7/12, up from 6/12; the diagnostic set 6/8, up from 3/8) showed the discipline pass works but leaves four repeatable gaps. They become working-style rules; nothing else changes.

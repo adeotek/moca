@@ -72,6 +72,8 @@ if [ -f "$REPO/.env" ]; then set -a; . "$REPO/.env"; set +a; fi
 [ -x "$MOCA" ] || { echo "build moca first: make build (looked for $MOCA)"; exit 2; }
 mkdir -p "$EVALS/results"
 OUT="$EVALS/results/$LABEL.jsonl"
+RESULTS_DIR="$EVALS/results/$LABEL"
+KEEP=200 # newest transcripts kept per label (results/ is gitignored)
 STATS="$EVALS/results/.evalstats"
 (cd "$REPO" && go build -o "$STATS" ./test/evals/evalstats) || exit 2
 
@@ -94,6 +96,10 @@ one() {
   sess=$(ls -t "$data"/moca/sessions/*.jsonl 2>/dev/null | head -1)
   if why=$(cd "$work" && SESSION="$sess" bash "$EVALS/$s/check.sh" 2>&1); then pass=true; fi
   if [ -n "$sess" ]; then
+    # Keep the transcript: a passing run's data dir is deleted below, and a
+    # regression inside a passing run is undiagnosable after that.
+    mkdir -p "$RESULTS_DIR"
+    cp "$sess" "$RESULTS_DIR/$s-$n.jsonl"
     local args=(-session "$sess" -scenario "$s" -label "$LABEL" -run "$n" -exit "$code")
     [ "$pass" = true ] && args+=(-pass)
     "$STATS" "${args[@]}" >> "$OUT"
@@ -113,5 +119,9 @@ for n in $(seq 1 "$RUNS"); do
   done
 done
 wait
+# Retention: keep the newest KEEP transcripts per label.
+if [ -d "$RESULTS_DIR" ]; then
+  ls -1t "$RESULTS_DIR"/*.jsonl 2>/dev/null | tail -n "+$((KEEP + 1))" | while read -r f; do rm -f "$f"; done
+fi
 echo "results: $OUT"
 "$STATS" -summary "$OUT"

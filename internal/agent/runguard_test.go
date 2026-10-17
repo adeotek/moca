@@ -36,6 +36,17 @@ func TestProgressNudge(t *testing.T) {
 	if last := lastMessageJSON(t, s, config.DefaultProgressNudgeAt); !strings.Contains(last, "without creating or editing") {
 		t.Fatalf("nudge missing from the request after the recon budget: %s", last)
 	}
+	a.mu.Lock()
+	var kinds []string
+	for _, e := range a.entries {
+		if e.Nudge != "" {
+			kinds = append(kinds, e.Nudge)
+		}
+	}
+	a.mu.Unlock()
+	if len(kinds) != 1 || kinds[0] != "progress" {
+		t.Fatalf("persisted nudge kinds = %v, want [progress]", kinds)
+	}
 }
 
 // TestProgressNudgeSkippedAfterAChange: once a file has been created or
