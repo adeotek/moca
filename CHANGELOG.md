@@ -10,6 +10,7 @@ The second Terminal-Bench 2.0 round (the v0.6.0 re-run: subset 7/12, up from 6/1
 - **Finish-state hygiene.** Your test runs must not become the next checker's starting state: use your own throwaway identities, not the task's fixtures, and reset what you created (mailboxes, memberships, accounts).
 - **Name inconsistencies.** When values the task's definitions imply should differ come out equal, or output contradicts what you read, that is a defect to investigate before finishing — not something to argue away in the final message.
 - **A build is not a port.** Exercise every module and entry point the task names with the task's own inputs; changed or removed APIs fail only on the call paths you execute.
+- **Stateful-file guard (shell).** The shell tool refuses a `sqlite3` open (unless `-readonly`) of a database whose `-wal` sidecar is not a valid SQLite WAL, or that has any `-journal` — SQLite deletes such a sidecar when it opens the database. The refusal names the exact `cp` commands; a `cp` in the same command or a successful one earlier in the run lifts it (only exit-0 copies count). A valid WAL is normal recovery and stays allowed — the guard targets the bench's failure (`xxd main.db-wal && sqlite3 main.db` deleted an encrypted WAL), not ordinary database work.
 
 ## v0.6.0 (2026-10-16)
 
