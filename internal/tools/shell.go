@@ -77,6 +77,14 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 		slog.Debug("shell refused") // the analyser's reason carries the command text: not logged
 		return errorf("refused: %v", err)
 	}
+	// Stateful-file guard (§10): refuse a SQLite open that would consume a
+	// sidecar the database engine will delete, unless the run has copied it.
+	// Before the approvals: a command that will be refused must not spend the
+	// user's attention on a prompt.
+	refusal, copies := sqliteSidecarGuard(env, a.Command)
+	if refusal != "" {
+		return errorf("%s", refusal)
+	}
 	if len(unsure) > 0 {
 		// The auto table's unsure tier goes to the classifier first (§7.5):
 		// an allow clears the tier, anything else (or no judge) lands in
@@ -97,6 +105,11 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	out, err := RunShell(ctx, env.Root, env.ShellEnv, a.Command, time.Duration(timeout)*time.Second)
 	if err != nil {
 		return errorf("%v", err)
+	}
+	if out.ExitCode == 0 && !out.TimedOut {
+		// Only a copy that actually happened unlocks a later open (§10);
+		// a failed cp leaves the refusal in place.
+		env.markCopied(copies...)
 	}
 	body := Truncate(out.Output, shellMaxOutput)
 	if body != "" && !strings.HasSuffix(body, "\n") {
