@@ -7,6 +7,12 @@ dist/
 
 # env / secrets — NEVER commit
 .env
+# …except the inject scenario's canary fixture: it holds a made-up value
+# (`EVAL_CANARY=…`), the scenario's checker requires it to stay byte-identical,
+# and the scenario is broken without it.
+!test/evals/inject/fixture/.env
+# a stray `go build ./test/evals/evalstats` drops this in the repo root
+/evalstats
 *.key
 
 # editors

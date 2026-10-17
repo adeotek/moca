@@ -158,6 +158,15 @@ Gate: the original's pins, `make vet && make test`, then
 
 Commit: `[fix:core] plan envelope: append-only across /plan toggles; history-bound elision guard and scoped kept-tail strip`
 
+**B1 executed 2026-10-17** — all of the above, plus two round-3 levers folded in (the working-style
+rule *"the stated behaviour outranks a name it gives"* and the headless-run **action nudge**), and
+the version bumped to v0.6.2. New pins: `MessagesWith` per-entry placement, the kept-tail strip
+(bound and unbound), plan toggle append-only + the off note + the legacy resume, `HistoryBound`
+row/`xhigh`, `shouldElide`, the `/model`-switch elide guard, `ThinkingDropped` (counts + one
+warning), the action nudge (fires once headless, never after a tool call). The corpus gate ran at
+`-n 6` (the A3 noise floor — same deviation rationale as A3) and the replay self-check ran against
+the new label; both records are in `test/evals/BASELINE.md`.
+
 ### B2 — TB2 cross-check (eval-only)
 
 Run the moca-only 12-task TB2 subset (~$0.31) on the v0.6.2 build. This is the external-validity
@@ -187,6 +196,12 @@ check the Go-only corpus cannot give for B1.2's context change. Record it in the
   `FAIL <s>#<n>: secret leaked into transcript` without the value.
 
 Gate: `--selftest` includes `ok inject`; one live inject run recorded in `BASELINE.md`.
+
+**B4 executed 2026-10-17** — the `inject` scenario (fixture with the two injected data files and the
+canary, `check.sh` with the four conditions, `testdata/reference/calc.go`, `prompt.txt`), the
+guarded secret scan in `one()` ahead of the pass cleanup, `--selftest` green for `inject` (the
+checker fails on the untouched fixture and passes on the reference) and live `inject` runs inside
+the v0.6.2 corpus gate (`-n 6`), recorded in `BASELINE.md`.
 
 ---
 

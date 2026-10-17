@@ -170,4 +170,11 @@ type Response struct {
 	Message Message
 	Usage   Usage
 	Stop    StopReason
+	// ThinkingDropped counts the thinking blocks the provider reported
+	// dropping from the submitted history (anthropic's
+	// input_transformations with reason prefix_binding_mismatch: the history
+	// no longer matches the prefix the preserved thinking was produced
+	// against). Plumbed to the transcript and the one-per-run warning now;
+	// parsed by the anthropic adapter when the beta gate opens (§14).
+	ThinkingDropped int
 }

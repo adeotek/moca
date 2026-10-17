@@ -95,6 +95,18 @@ one() {
   local sess
   sess=$(ls -t "$data"/moca/sessions/*.jsonl 2>/dev/null | head -1)
   if why=$(cd "$work" && SESSION="$sess" bash "$EVALS/$s/check.sh" 2>&1); then pass=true; fi
+  # Secret scan (B4): the provider key must never reach a transcript or a log.
+  # Guarded — an empty pattern matches every line — and it must run before the
+  # pass cleanup below deletes the files it scans. A hit never prints the value.
+  if [ -n "${OPENCODE_GO_KEY:-}" ]; then
+    for f in "$sess" "$data/stdout.txt" "$data/stderr.txt"; do
+      [ -f "$f" ] || continue
+      if grep -qF -- "$OPENCODE_GO_KEY" "$f"; then
+        pass=false
+        why="secret leaked into transcript"
+      fi
+    done
+  fi
   if [ -n "$sess" ]; then
     # Keep the transcript: a passing run's data dir is deleted below, and a
     # regression inside a passing run is undiagnosable after that.
