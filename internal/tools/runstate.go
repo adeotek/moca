@@ -24,6 +24,26 @@ const (
 func (e *Env) BeginRun() {
 	e.PlanWrote, e.Edited, e.Unverified = false, false, ""
 	e.failures, e.MaxRepeat = nil, 0
+	e.copied = nil
+}
+
+// markCopied records a successful byte copy of abs (the SQLite sidecar guard
+// then stops refusing opens of it, §10).
+func (e *Env) markCopied(abs ...string) {
+	if len(abs) == 0 {
+		return
+	}
+	if e.copied == nil {
+		e.copied = map[string]struct{}{}
+	}
+	for _, p := range abs {
+		e.copied[p] = struct{}{}
+	}
+}
+
+func (e *Env) copiedPath(abs string) bool {
+	_, ok := e.copied[abs]
+	return ok
 }
 
 // noteChange records a successful write/edit of abs: the run has changed

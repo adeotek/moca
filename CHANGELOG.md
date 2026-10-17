@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.6.1 (2026-10-17)
+
+The second Terminal-Bench 2.0 round (the v0.6.0 re-run: subset 7/12, up from 6/12; the diagnostic set 6/8, up from 3/8) showed the discipline pass works but leaves four repeatable gaps. They become working-style rules; nothing else changes.
+
+### Agent
+
+- **Copy-first is an ordering rule.** The first action on a stateful file (database, journal, WAL) is a byte copy, and a read never shares a shell call with a stateful open — `xxd f && sqlite3 f.db` still opens the DB, and SQLite deletes a WAL it cannot parse (a bench trial destroyed an encrypted WAL exactly this way).
+- **Finish-state hygiene.** Your test runs must not become the next checker's starting state: use your own throwaway identities, not the task's fixtures, and reset what you created (mailboxes, memberships, accounts).
+- **Name inconsistencies.** When values the task's definitions imply should differ come out equal, or output contradicts what you read, that is a defect to investigate before finishing — not something to argue away in the final message.
+- **A build is not a port.** Exercise every module and entry point the task names with the task's own inputs; changed or removed APIs fail only on the call paths you execute.
+- **Stateful-file guard (shell).** The shell tool refuses a `sqlite3` open (unless `-readonly`) of a database whose `-wal` sidecar is not a valid SQLite WAL, or that has any `-journal` — SQLite deletes such a sidecar when it opens the database. The refusal names the exact `cp` commands; a `cp` in the same command or a successful one earlier in the run lifts it (only exit-0 copies count). A valid WAL is normal recovery and stays allowed — the guard targets the bench's failure (`xxd main.db-wal && sqlite3 main.db` deleted an encrypted WAL), not ordinary database work.
+
 ## v0.6.0 (2026-10-16)
 
 The models behind the zen tier became thinking-only mid-October; the glm effort maps now match the live-verified acceptance, and the agent gains a progress nudge plus working-style rules from the TB2 bench review (2026-10-16). The scrollback bands are darker, the trust prompt lists its resources on a second line, the TUI's colors are configurable — one built-in palette, overridable from your user config — and the permission mode a session starts in can be pinned per user or per trusted project.
