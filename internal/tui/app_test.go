@@ -188,6 +188,87 @@ func TestInputRulesAndNoPrefix(t *testing.T) {
 	}
 }
 
+// fullWidthRules returns the view's full-width rule lines (the test width is
+// 120). Comparison drops the SGR so a styled rule still matches.
+func fullWidthRules(v string) []string {
+	rule := strings.Repeat("─", 120)
+	var out []string
+	for _, l := range strings.Split(v, "\n") {
+		if strings.HasPrefix(ansi.Strip(l), rule) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// The two rules framing the input area take the welcome badge's accent orange
+// (§3.5) — #d97706, one SGR on the `moca` word and on both rules.
+func TestInputRulesUseAccentOrange(t *testing.T) {
+	m := newTestModel()
+	const orange = "38;2;217;119;6" // #d97706
+	if !strings.Contains(m.welcomeText(), orange) {
+		t.Fatalf("the welcome badge must carry the accent orange: %q", m.welcomeText())
+	}
+	v := m.View().Content
+	rules := fullWidthRules(v)
+	if len(rules) != 2 {
+		t.Fatalf("want the two input rules, got %d:\n%s", len(rules), v)
+	}
+	for _, l := range rules {
+		if !strings.Contains(l, orange) {
+			t.Fatalf("input rule not in the accent orange: %q", l)
+		}
+	}
+}
+
+// The picker carries its own grey rule at the top of its panel (§3.5): the
+// separator grey of the theme, visible exactly while the picker is (the input
+// rules below it stay accent orange).
+func TestPickerSeparatorRule(t *testing.T) {
+	for _, tc := range []struct {
+		dark bool
+		grey string
+	}{{true, "38;2;91;99;107"}, // #5b636b
+		{false, "38;2;158;167;176"}} { // #9ea7b0
+		m := newTestModel()
+		m.darkBG = tc.dark
+		if got := fullWidthRules(m.View().Content); len(got) != 2 {
+			t.Fatalf("dark=%v: %d rules without a picker, want 2", tc.dark, len(got))
+		}
+		m.openPicker(&pickState{title: "pick one", items: []pickItem{{key: "a", label: "first"}}})
+		v := m.View().Content
+		rules := fullWidthRules(v)
+		if len(rules) != 3 {
+			t.Fatalf("dark=%v: want picker rule + two input rules, got %d:\n%s", tc.dark, len(rules), v)
+		}
+		if !strings.Contains(rules[0], tc.grey) {
+			t.Fatalf("dark=%v: the picker's rule must be the separator grey: %q", tc.dark, rules[0])
+		}
+		// It opens the panel — question line right below — and the accent
+		// rules stay where they were.
+		lines := strings.Split(v, "\n")
+		idx := -1
+		for i, l := range lines {
+			if l == rules[0] {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 || !strings.Contains(ansi.Strip(lines[idx+1]), "? pick one") {
+			t.Fatalf("dark=%v: the grey rule must sit directly above the question:\n%s", tc.dark, v)
+		}
+		for _, l := range rules[1:] {
+			if !strings.Contains(l, "38;2;217;119;6") {
+				t.Fatalf("dark=%v: input rule lost the accent: %q", tc.dark, l)
+			}
+		}
+		m.pick = nil
+		if got := fullWidthRules(m.View().Content); len(got) != 2 {
+			t.Fatalf("dark=%v: %d rules after the picker closed, want 2", tc.dark, len(got))
+		}
+	}
+}
+
 // A skill invoked by name starts a run whose message points the agent at
 // the skill's path — the scrollback echoes it, exactly like a prompt
 // template's expansion.
