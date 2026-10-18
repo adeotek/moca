@@ -29,9 +29,16 @@ func (m Model) Qualified() string { return m.Provider + "/" + m.ID }
 // thinking). On such a route a kept-tail thinking strip or an elision — both
 // of which rewrite earlier messages — risks the provider dropping the tail's
 // thinking or rejecting the request, so both are disabled (B1.2, §7/§14).
-// Today that is exactly the adaptive anthropic rows; the openai-responses
-// encrypted-reasoning route is recorded as an open question in §16, not
-// silently included.
+//
+// Today that is exactly the adaptive anthropic rows. The openai-responses
+// encrypted-reasoning route was the recorded open question: it replays
+// reasoning items next to their function calls, so a dropped item looked like
+// a rejection risk. Probed live on the zen go route 2026-10-18 — a request
+// that keeps a function_call but omits its reasoning item is accepted (200;
+// control with the reasoning item replayed: 200; control dropping the tool
+// output instead: 400) — so the strip and elision stay enabled there and this
+// predicate stays adaptive-only. §15 records the probe; the api.openai.com
+// rows ride the same adapter and are covered by the no-vendor-keys item.
 func (m Model) HistoryBound() bool { return m.ThinkingMode == "adaptive" }
 
 func (m Model) ClampEffort(e llm.Effort) llm.Effort {
