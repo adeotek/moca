@@ -16,6 +16,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -83,7 +84,16 @@ type Metrics struct {
 	// non-zero means a preserved-thinking route saw history that no longer
 	// matched the prefix its thinking was produced against.
 	ThinkingDropped int `json:"thinkingDropped,omitempty"`
+	// SkillWrites counts write/edit calls targeting .moca/skills/ (the
+	// self-managed skills feature, §12); SkillListed reports that this
+	// session's stored prompt lists a moca-* skill — the skills.2 row is the
+	// one that matters (session 1 wrote it, session 2 reads it).
+	SkillWrites int  `json:"skillWrites,omitempty"`
+	SkillListed bool `json:"skillListed,omitempty"`
 }
+
+// skillListedRe matches a moca-* skill line in the system prompt's listing.
+var skillListedRe = regexp.MustCompile(`(?m)^- moca-[a-z0-9-]+:`)
 
 // Tokens is every billed token of the run (cache reads included: they are
 // cheaper, not free).
@@ -194,6 +204,7 @@ func Collect(entries []session.Entry) Metrics {
 		case session.TypeSession:
 			if e.Session != nil {
 				m.SystemPromptTokens = compact.Tokens(len(e.Session.SystemPrompt))
+				m.SkillListed = skillListedRe.MatchString(e.Session.SystemPrompt)
 			}
 		case session.TypeMessage:
 			if e.Message != nil && e.Message.Role == llm.RoleAssistant {
@@ -222,6 +233,9 @@ func Collect(entries []session.Entry) Metrics {
 			case "write", "edit":
 				if in.Path != "" {
 					editAt[in.Path] = i
+				}
+				if strings.Contains(filepath.ToSlash(in.Path), ".moca/skills/") {
+					m.SkillWrites++
 				}
 			}
 		case session.TypeToolResult:
@@ -450,12 +464,12 @@ func Summarize(rows []Metrics) string {
 		return keys[i].scenario < keys[j].scenario
 	})
 	var sb strings.Builder
-	sb.WriteString("| label | scenario | runs | pass | tokens (mean ± sd) | steps (mean ± sd) | cache eff | first-hit | breaks/run | redundant read tok | cost $ | tokens/solved | repeated fails |\n")
-	sb.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
+	sb.WriteString("| label | scenario | runs | pass | tokens (mean ± sd) | steps (mean ± sd) | cache eff | first-hit | breaks/run | redundant read tok | cost $ | tokens/solved | repeated fails | skill writes | skill listed |\n")
+	sb.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, k := range keys {
 		g := groups[k]
 		var toks, steps, firstHit []float64
-		passes, rep, breaks, redundant := 0, 0, 0, 0
+		passes, rep, breaks, redundant, skillWrites, skillListed := 0, 0, 0, 0, 0, 0
 		cost, total, eff := 0.0, 0, 0.0
 		for _, m := range g {
 			toks = append(toks, float64(m.Tokens()))
@@ -470,6 +484,10 @@ func Summarize(rows []Metrics) string {
 			cost += m.Cost
 			total += m.Tokens()
 			eff += m.CacheEff
+			skillWrites += m.SkillWrites
+			if m.SkillListed {
+				skillListed++
+			}
 		}
 		perSolved := "—"
 		if passes > 0 {
@@ -478,9 +496,9 @@ func Summarize(rows []Metrics) string {
 		tm, ts := meanSD(toks)
 		sm, ss := meanSD(steps)
 		n := float64(len(g))
-		fmt.Fprintf(&sb, "| %s | %s | %d | %d/%d | %.0f ± %.0f | %.1f ± %.1f | %.2f | %.0f | %.1f | %.0f | %.4f | %s | %d |\n",
+		fmt.Fprintf(&sb, "| %s | %s | %d | %d/%d | %.0f ± %.0f | %.1f ± %.1f | %.2f | %.0f | %.1f | %.0f | %.4f | %s | %d | %d | %d/%d |\n",
 			k.label, k.scenario, len(g), passes, len(g), tm, ts, sm, ss,
-			eff/n, median(firstHit), float64(breaks)/n, float64(redundant)/n, cost, perSolved, rep)
+			eff/n, median(firstHit), float64(breaks)/n, float64(redundant)/n, cost, perSolved, rep, skillWrites, skillListed, len(g))
 	}
 	return sb.String()
 }

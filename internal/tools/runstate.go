@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/adeotek/moca/internal/llm"
 )
 
 // Per-run state (§10/§14): what one agent run changed, whether it verified
@@ -25,6 +27,8 @@ func (e *Env) BeginRun() {
 	e.PlanWrote, e.Edited, e.Unverified = false, false, ""
 	e.failures, e.MaxRepeat = nil, 0
 	e.copied = nil
+	e.SkillCreations, e.SkillUserSignal, e.SkillTyped = 0, false, nil
+	e.SkillHintArmed, e.SkillHintDone, e.lastFailedVerify = false, false, ""
 }
 
 // markCopied records a successful byte copy of abs (the SQLite sidecar guard
@@ -53,6 +57,9 @@ func (e *Env) copiedPath(abs string) bool {
 func noteChange(env *Env, abs string) {
 	env.Edited = true
 	env.failures = nil
+	// An edit between a failing verification and the next green run means the
+	// fix was in the code, not in how it is run: no recovery trigger.
+	env.lastFailedVerify = ""
 	if !isDocPath(abs) {
 		rel, err := filepath.Rel(env.Root, abs)
 		if err != nil || strings.HasPrefix(rel, "..") {
@@ -98,6 +105,49 @@ func verifies(command string) bool {
 // spillPathRe matches the overflow file named in a Spill note: its name is
 // random per call, so it must not make identical failures look different.
 var spillPathRe = regexp.MustCompile(`saved to \S+ — `)
+
+// normCommand is the whitespace-collapsed form of a command line — the
+// comparison form for "did the command change?" (verifies() applies the same
+// collapsing per pipeline segment).
+func normCommand(cmd string) string { return strings.Join(strings.Fields(cmd), " ") }
+
+// mutatesOnly reports a command made only of state changes that exercise no
+// code (mkdir/cp/mv/rm/touch/chmod/ln): not a verification, so a successful
+// one after a failure is not a recovery.
+func mutatesOnly(cmd string) bool {
+	r := strings.NewReplacer("&&", "\n", "||", "\n", ";", "\n", "|", "\n")
+	seen := false
+	for _, seg := range strings.Split(r.Replace(cmd), "\n") {
+		f := strings.Fields(seg)
+		for len(f) > 0 && (strings.Contains(f[0], "=") || f[0] == "rtk" || f[0] == "sudo" || f[0] == "time" || f[0] == "--") {
+			f = f[1:]
+		}
+		if len(f) == 0 {
+			continue
+		}
+		switch f[0] {
+		case "mkdir", "cp", "mv", "rm", "touch", "chmod", "ln":
+			seen = true
+		default:
+			return false
+		}
+	}
+	return seen
+}
+
+// cmdOf extracts the shell command from a tool call's arguments.
+func cmdOf(call llm.ToolCall) string {
+	var a struct {
+		Command string `json:"command"`
+	}
+	json.Unmarshal(call.Input, &a)
+	return a.Command
+}
+
+// verifyingCall reports a shell call that exercises the code.
+func verifyingCall(call llm.ToolCall) bool {
+	return call.Name == "shell" && verifies(cmdOf(call))
+}
 
 // trackFailure counts identical failing calls (tool, normalized input,
 // output) and returns the hint for a repeat.

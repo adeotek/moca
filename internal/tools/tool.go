@@ -159,7 +159,49 @@ type Env struct {
 	// the SQLite sidecar guard stops refusing their opens then (§10).
 	// Per-run (runstate.go, reset by BeginRun).
 	copied map[string]struct{}
+	// SkillDir is the project's skills dir, symlink-resolved — build it with
+	// jail.Resolve(".moca/skills", true), never filepath.Join(Root(), …); ""
+	// = no self-managed skills for this session. SkillGuard validates a write
+	// under it lands; rel is abs relative to SkillDir, slash-separated. Both
+	// are set together (agent.build) or not at all. Structural on purpose:
+	// internal/tools must not import internal/skills (§2).
+	SkillDir   string
+	SkillGuard func(abs, rel string, data []byte) error
+	// SkillGuardRefusing marks C5b's guard: installed on a resumed session
+	// whose frozen prompt still carries the block after the switch went off.
+	// A guard must be installed there (block ⇒ guard), but it only refuses —
+	// and nothing may answer "this session learns" from SkillGuard != nil
+	// alone. The single predicate is Env.SkillLearning().
+	SkillGuardRefusing bool
+	// SkillCreations/SkillUserSignal/SkillTyped/SkillHintArmed/SkillHintDone
+	// are per-run (runstate.go, reset by BeginRun): creations counts SKILL.md
+	// files created under SkillDir this run, after they landed; the user
+	// signal gates new (user, …) rules (Decision 11 — set ONLY by
+	// Agent.Remember); SkillTyped is the run's typed texts (Decision 15);
+	// the hint fields drive the one-shot nudge.
+	SkillCreations  int
+	SkillUserSignal bool
+	SkillTyped      []string
+	SkillHintArmed  bool
+	SkillHintDone   bool
+	// lastFailedVerify is the recovery trigger's state: the normalized
+	// command of the last failing verifying shell call (shell.go), cleared by
+	// noteChange (an edit in between means the fix was in the code).
+	lastFailedVerify string
+	// skillRefused/skillWrote/internalRefusal are per-call (reset by
+	// Registry.Run, set by guardedWrite / the internal guards): the current
+	// call was refused by the skill guard / landed a write to a skill file
+	// (SKILL.md) under SkillDir / came from an internal guard.
+	skillRefused    bool
+	skillWrote      bool
+	internalRefusal bool
 }
+
+// SkillLearning reports whether this session may learn: a VALIDATING guard is
+// installed. False with the feature off (nil guard) and false for C5b's
+// refusing guard — the only state where the two differ, and the one that must
+// not advertise the feature (Agent.SelfManagedSkills reads it too).
+func (e *Env) SkillLearning() bool { return e.SkillGuard != nil && !e.SkillGuardRefusing }
 
 type Registry struct {
 	order []string
@@ -199,14 +241,30 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 		return errorf("invalid JSON arguments for %s (the call was probably cut off at the output limit). "+
 			"Split the work into smaller calls, e.g. write a large file in parts with edit.", call.Name)
 	}
+	env.skillRefused, env.skillWrote, env.internalRefusal = false, false, false // per-call flags
 	start := time.Now()
 	res := runRecovered(ctx, t, env, call)
 	slog.Debug("tool", "name", call.Name, "duration", time.Since(start).Round(time.Millisecond),
 		"is_error", res.IsError, "bytes", len(res.Content))
+	if env.skillWrote {
+		env.SkillHintDone = true // unconditional — before any arming logic (H4)
+	}
 	if res.IsError {
-		res.Content += trackFailure(env, call.Name, call.Input, res.Content)
+		rh := trackFailure(env, call.Name, call.Input, res.Content)
+		res.Content += rh
+		if env.SkillGuard != nil && !env.skillRefused && !env.internalRefusal &&
+			(rh != "" || strings.HasPrefix(res.Content, "refused:")) { // both branches guarded (H2)
+			env.SkillHintArmed = true
+		}
+	} else if call.Name == "shell" && env.lastFailedVerify != "" &&
+		verifies(cmdOf(call)) && !mutatesOnly(cmdOf(call)) &&
+		normCommand(cmdOf(call)) != env.lastFailedVerify {
+		env.SkillHintArmed = true // recovery (H1) — skillHint delivers on this same result
 	}
 	if h := investigationHint(env); h != "" {
+		res.Content += h
+	}
+	if h := skillHint(env, call, res); h != "" {
 		res.Content += h
 	}
 	return res
@@ -267,6 +325,25 @@ func investigationRefusal(env *Env) string {
 		return fmt.Sprintf("refused: tests are failing — read the failing test file (%s) with the read tool and locate the cause with the search tool before editing", name)
 	}
 	return "refused: tests are failing — locate the cause with the search tool before editing"
+}
+
+// skillHint is the one-shot skill-learning nudge (SPECS §11/§12). At most
+// once per run; never in plan mode; never without a validating guard (C5b's
+// refusing one does not count — it would invite a write it then rejects);
+// never on a read, a search, or any non-verifying result.
+func skillHint(env *Env, call llm.ToolCall, res Result) string {
+	if env.Plan || !env.SkillLearning() || !env.SkillHintArmed || env.SkillHintDone || res.IsError {
+		return ""
+	}
+	if env.skillWrote { // a landed skill write satisfies it before anything else (H4)
+		env.SkillHintDone = true
+		return ""
+	}
+	if !verifyingCall(call) {
+		return ""
+	}
+	env.SkillHintDone = true
+	return "\n[hint: something durable came up — if the rule, pattern or gotcha behind what just worked should outlive this session, record it as a project skill under .moca/skills/ (see \"Project skills you maintain\" in your instructions)]"
 }
 
 func decode[T any](input json.RawMessage, v *T) *Result {

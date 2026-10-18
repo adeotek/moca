@@ -47,6 +47,13 @@ func execNudge(rel string, n int) string {
 // RunPlan executes the plan file at path (relative to the workdir or
 // absolute, inside the jail). extra is appended as additional instructions.
 func (a *Agent) RunPlan(ctx context.Context, path, extra string) (Outcome, error) {
+	return a.RunPlanWith(ctx, path, extra, RunOpts{})
+}
+
+// RunPlanWith is RunPlan carrying RunOpts: the TUI passes the /execute extra
+// instructions as the run's typed text, so a hand-written skill they name can
+// be changed (Decision 15).
+func (a *Agent) RunPlanWith(ctx context.Context, path, extra string, o RunOpts) (Outcome, error) {
 	if a.plan {
 		return Outcome{}, errors.New("plan mode is on (writes are confined to docs/plans/) — turn it off to execute a plan")
 	}
@@ -68,7 +75,7 @@ func (a *Agent) RunPlan(ctx context.Context, path, extra string) (Outcome, error
 	rel = filepath.ToSlash(rel)
 	a.execPlan, a.execPlanRel = abs, rel
 	defer func() { a.execPlan, a.execPlanRel = "", "" }()
-	return a.Run(ctx, execPrompt(rel, n, extra))
+	return a.RunWith(ctx, execPrompt(rel, n, extra), o)
 }
 
 // nudgeExecPlan appends the unchecked-steps nudge when the plan being executed

@@ -76,6 +76,17 @@ func main() {
 		if len(want) > 0 && !want[scen] {
 			continue
 		}
+		// A multi-session scenario cannot be replayed: the replay starts from
+		// the scenario's fixture, where session 1's skills do not exist yet, so
+		// session 2 diverges by construction.
+		dir := scen
+		if i := strings.Index(dir, "."); i > 0 {
+			dir = dir[:i]
+		}
+		if _, err := os.Stat(filepath.Join(*evals, dir, "sessions.txt")); err == nil {
+			fmt.Printf("skip %s: multi-session scenario (the fixture lacks the earlier sessions)\n", filepath.Base(f))
+			continue
+		}
 		entries, err := session.ReadFile(f)
 		if err != nil {
 			fmt.Printf("skip %s: %v\n", filepath.Base(f), err)

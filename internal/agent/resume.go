@@ -73,7 +73,7 @@ func Resume(o StartOptions, path string) (*Agent, error) {
 		}
 		effort = e
 	}
-	st, err := prepare(o, h.Workdir)
+	st, err := prepare(o, h.Workdir, false)
 	if err != nil {
 		var se *StartError
 		if errors.As(err, &se) {

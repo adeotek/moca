@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.7.0 (2026-10-18)
+
+### Self-managed project skills
+
+Opt-in (`"skills": {"selfManaged": true}` in the user config): moca records reusable working rules as ordinary project files — `<repo>/.moca/skills/moca-<domain>/SKILL.md`, frontmatter `auto: true`, one `- **when**: rule (×N, date)` per line — and later sessions in that repository read them from their prompt. Written with the existing `write`/`edit` tools: no ninth tool, no session-end pass, no second model call. Detection is in-turn (a prompt block plus a one-shot decision-point hint armed by a guard refusal, a third identical failure, steering or a verified recovery), and `/remember <text>` is the only way a `(user, …)` rule enters a skill.
+
+- **The contract** (`internal/skills/autoskill.go`) — `when` ≤ 80 runes, line ≤ 240, body ≤ 1500, ≤ 12 rules, description ≤ 160, ≤ 8 auto skills per project, ≤ 2 creations per run; every length in runes. Provenance is code-checked on the host clock: a new line is `(×1, today)` or `(user, today)`, an unchanged line bumps to `×2` once and a `×2` line is final.
+- **The guard** (`Env.SkillGuard`, §11.4) — `write`/`edit` validate the exact bytes that would land: scope is the skills dir resolved once through the jail's resolver (symlinks and case-variants refused), ownership is one-way (`auto: true` cannot be dropped, a hand-written skill is untouched without typed text naming it), caps check changes rather than states, and a credential-shaped value is refused via the new `internal/secret` leaf package (shared with the MCP importer). The `shell` tool refuses the common write patterns into that dir; stored auto skills are re-validated at discovery, so one that breaks the contract never reaches a prompt.
+- **Hygiene** — `skills.PruneAutoSkills`: `×1` rules older than 90 days and auto skills left with only headings are dropped at an interactive start (never on resume, never a `(user, …)` rule, never `RemoveAll`); a `-p` run reports what it would remove.
+- **Surfaces** — `/remember` in the TUI and ACP (ACP advertises it only when the switch is on), auto skills marked `(auto)` in the prompt with a read-only fallible-memory line, excluded from the `/` dropdown and the ACP command list, a startup note naming them, and warnings for the resolution errors (a project `true` without the user opt-in, an unresolvable skills dir).
+- **Config** — `skills.selfManaged` (user config) and a project `skills` block: `false` opts a repository out, `true` is declarative and never enables the feature alone (§4).
+- **Gates** — `test/skillgate` (16 hermetic legs on the built binary against a scripted provider) and four eval scenarios (`skills`, `skills-inject`, `skills-inject-paste`, `skills-inject-output`), plus `evalstats`' `skillWrites`/`skillListed` metrics; the harness runs a `sessions.txt` scenario as sequential sessions sharing one workdir, a `-c <variant>` picks `config.<variant>.jsonc`, and replay skips multi-session scenarios.
+
 ## Unreleased
 
 ### Harness

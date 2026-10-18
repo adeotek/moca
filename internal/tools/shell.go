@@ -83,6 +83,7 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	// user's attention on a prompt.
 	refusal, copies := sqliteSidecarGuard(env, a.Command)
 	if refusal != "" {
+		env.internalRefusal = true // moca's own guard, not the project's wisdom
 		return errorf("%s", refusal)
 	}
 	if len(unsure) > 0 {
@@ -130,6 +131,14 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	}
 	if verifies(a.Command) {
 		env.Unverified = ""
+	}
+	// The skill-hint recovery trigger's state (task 6): a failing verifying
+	// command, remembered so a later, different green one can arm the hint.
+	// A purely mutating command (mkdir/cp/rm/…) exercises no code.
+	if out.ExitCode != 0 || out.TimedOut {
+		if verifies(a.Command) && !mutatesOnly(a.Command) {
+			env.lastFailedVerify = normCommand(a.Command)
+		}
 	}
 	if testRunCommand(a.Command) {
 		switch {

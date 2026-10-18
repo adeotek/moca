@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -66,9 +67,18 @@ type setup struct {
 	// and Resume, and re-read by Agent.ReloadSkills after a run.
 	skills    []skills.Skill
 	skillDirs []skills.Dir
+	// Self-managed project skills (SPECS §12): the switch, resolved once here,
+	// and the project's skills dir — symlink-resolved by the jail's own
+	// resolver — shared by the prompt block condition, build()'s guard, the
+	// shell refusal, hygiene and the resume rule (C5a). No call site
+	// re-resolves; a resolution error is handled in exactly one place.
+	sm          config.SelfManagedState
+	skillDir    string
+	skillDirErr error
+	sessionDate time.Time
 }
 
-func prepare(o StartOptions, jailRoot string) (*setup, error) {
+func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error) {
 	cfg := o.Config
 	if o.Model != "" {
 		cfg.Model = o.Model
@@ -130,6 +140,40 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	if err != nil {
 		return nil, &StartError{err}
 	}
+	// The self-managed skills switch and its one-time messages (§3.3): the
+	// user config is the only opt-in; a trusted project file can opt the
+	// repository out (false) or declare it (true — accepted, never enabling
+	// the feature alone, and it warns a user who has not opted in).
+	sm := config.ResolveSelfManagedSkills(cfg)
+	if o.Trusted && emit != nil {
+		if sm.Warning != "" {
+			emit(Warning{Text: sm.Warning})
+		}
+		if sm.Note != "" {
+			emit(Note{Text: sm.Note})
+		}
+	}
+	// The dir the feature writes into, resolved by the jail's own resolver so
+	// a symlinked workdir, .moca or .moca/skills resolves exactly as a write
+	// target would — never filepath.Join(jailRoot, ".moca", "skills").
+	var skillDir string
+	var skillDirErr error
+	if o.Trusted {
+		skillDir, skillDirErr = jail.Resolve(filepath.Join(".moca", "skills"), true)
+	}
+	// Hygiene runs before discovery so the listing reflects the pruning. It
+	// is interactive-Start only (never Resume: a deletion would contradict the
+	// frozen prompt the session resumed with) and report-only in headless
+	// runs, which must never touch the checkout.
+	if applyHygiene && sm.On && o.Trusted && skillDirErr == nil {
+		pruned, perr := skills.PruneAutoSkills(skillDir, time.Now(), o.Headless)
+		if perr != nil && emit != nil {
+			emit(Warning{Text: fmt.Sprintf("skill hygiene: %v", perr)})
+		}
+		if msg := hygieneSummary(pruned, o.Headless); msg != "" && emit != nil {
+			emit(Warning{Text: msg})
+		}
+	}
 	// Skill discovery happens once here, so Start's system prompt and a
 	// resumed agent share one list — and the TUI's picker reads it off the
 	// agent (Agent.Skills). The project dir belongs to the session's
@@ -147,6 +191,13 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 		}
 	}
 	sk = filterSkills(sk)
+	// The startup note: how many agent-learned skills the project carries —
+	// trusted, whenever auto skills are listed, switch on or off (M10).
+	if o.Trusted && emit != nil {
+		if msg := autoSkillsNote(sk); msg != "" {
+			emit(Note{Text: msg})
+		}
+	}
 	// A trusted project's MCP servers join the user layer (§10.5): the project
 	// config file's `mcp.servers` (cmd loaded it with the trust decision) plus
 	// the ecosystem's project-level files (`.mcp.json`, `opencode.json[c]`,
@@ -173,7 +224,59 @@ func prepare(o StartOptions, jailRoot string) (*setup, error) {
 	if o.Trusted && projMCP.IdleTimeout > 0 {
 		cfg.MCP.IdleTimeout = projMCP.IdleTimeout
 	}
-	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail, spillDir: spillDir, skills: sk, skillDirs: skillDirs}, nil
+	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail, spillDir: spillDir, skills: sk, skillDirs: skillDirs,
+		sm: sm, skillDir: skillDir, skillDirErr: skillDirErr, sessionDate: time.Now()}, nil
+}
+
+// hygieneSummary renders one startup warning for what the hygiene pass did
+// (or, in a headless run, would do).
+func hygieneSummary(p skills.PrunedSkills, dryRun bool) string {
+	var parts []string
+	if p.RulesRemoved > 0 && len(p.Touched) > 0 {
+		noun := "stale rules"
+		if p.RulesRemoved == 1 {
+			noun = "stale rule"
+		}
+		if dryRun {
+			parts = append(parts, fmt.Sprintf("%d %s would be removed from %s — run moca interactively to apply", p.RulesRemoved, noun, strings.Join(p.Touched, ", ")))
+		} else {
+			parts = append(parts, fmt.Sprintf("removed %d %s from %s", p.RulesRemoved, noun, strings.Join(p.Touched, ", ")))
+		}
+	}
+	if len(p.SkillsRemoved) > 0 {
+		names := strings.Join(p.SkillsRemoved, ", ")
+		if dryRun {
+			parts = append(parts, fmt.Sprintf("%s holds no rules left and would be removed — run moca interactively to apply", names))
+		} else {
+			parts = append(parts, "removed empty "+names)
+		}
+	}
+	if len(p.PinnedAged) > 0 {
+		parts = append(parts, fmt.Sprintf("a pinned rule in %s is over a year old — review it", strings.Join(p.PinnedAged, ", ")))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "skill hygiene: " + strings.Join(parts, "; ")
+}
+
+// autoSkillsNote names how many auto skills a project carries (trusted, when
+// the listing holds any — switch on or off).
+func autoSkillsNote(sk []skills.Skill) string {
+	var names []string
+	for _, s := range sk {
+		if s.Auto && s.Source == "project" {
+			names = append(names, s.Name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	noun := "skills"
+	if len(names) == 1 {
+		noun = "skill"
+	}
+	return fmt.Sprintf("self-managed skills: %d %s in this project (%s)", len(names), noun, strings.Join(names, ", "))
 }
 
 // discoverLocal reads a configured Ollama server's models into the registry
@@ -223,6 +326,36 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	}
 	shell := permissions.NewShell(shellRules, jail, runtime.GOOS)
 	env.Commands = shell
+	// Self-managed project skills (SPECS §12): installed when the feature
+	// resolves on (§3.3's table), the workdir is trusted (ACP's default trust
+	// counts — Decision 14), and prepare()'s resolution succeeded. The dir is
+	// prepare()'s — no call site re-resolves it (C5a).
+	hadBlock := len(prior) > 0 && prior[0].Session != nil && prior[0].Session.SelfManagedSkills
+	switchOn := st.sm.On && o.Trusted && st.skillDirErr == nil
+	switch {
+	case st.skillDirErr != nil && st.sm.On && o.Trusted && o.Emit != nil:
+		o.Emit(Warning{Text: fmt.Sprintf("self-managed skills are off for this session: %v", st.skillDirErr)}) // switch-gated (H7)
+	case switchOn && !hadBlock && prior != nil && o.Emit != nil: // resumed from a session started with the feature off
+		o.Emit(Warning{Text: "self-managed skills stay off in this resumed session (it started without them) — /clear starts a session with them on"})
+	case hadBlock && !switchOn && o.Emit != nil: // resumed after the switch went off or trust was withdrawn
+		o.Emit(Warning{Text: "this resumed session's instructions still describe project skills, but skills.selfManaged is off (or the workdir is not trusted) now — auto-skill writes are refused; /clear starts a session without them"})
+	}
+	if switchOn {
+		env.SkillDir = st.skillDir
+		if cs, ok := env.Commands.(interface{ SetSkillDir(string) }); ok {
+			cs.SetSkillDir(st.skillDir) // the shell refusal (C1)
+		}
+		env.SkillGuard = skillGuard(env, st.skillDir, st.sessionDate)
+	} else if hadBlock && st.skillDirErr == nil {
+		// C5b: the frozen prompt still invites writes the absent guard would
+		// not check — install a refusing one instead of going nil (§2.1's
+		// invariant: block present ⇒ guard installed, validating or refusing).
+		// The shell check is not installed here: it belongs to the feature
+		// being on, and a shell write in this state is caught at load.
+		env.SkillDir = st.skillDir
+		env.SkillGuard = refusingAutoGuard(st.skillDir)
+		env.SkillGuardRefusing = true
+	}
 	reg := tools.NewRegistry(tools.Builtins()...)
 	// With servers configured, the frozen `mcp` stub is replaced by the lazy
 	// proxy (§10.5): nothing starts here, and no server tool schema ever
@@ -365,7 +498,7 @@ func webSearchKey(cfg config.Config) (string, error) {
 }
 
 func Start(o StartOptions) (*Agent, error) {
-	st, err := prepare(o, o.Workdir)
+	st, err := prepare(o, o.Workdir, true)
 	if err != nil {
 		return nil, err
 	}
@@ -381,10 +514,16 @@ func Start(o StartOptions) (*Agent, error) {
 	slices.SortFunc(servers, func(a, b ServerLine) int { return strings.Compare(a.Name, b.Name) })
 	osName, arch := Platform()
 	verify, verifySrc := DetectVerify(jail.Root())
+	// The block is added only when a validating guard will be installed for
+	// the same dir (C5): block present ⇒ guard installed.
+	var selfManaged *SelfManagedInput
+	if st.sm.On && o.Trusted && st.skillDirErr == nil {
+		selfManaged = &SelfManagedInput{Dir: st.skillDir}
+	}
 	system := BuildSystemPrompt(PromptInput{Workdir: jail.Root(), OS: osName, Arch: arch, Verify: verify, VerifySource: verifySrc,
 		Date: time.Now().Format("2006-01-02"), Git: GitState(jail.Root()), Version: config.Version,
 		ConfigDir: config.ConfigDir(), PromptsDir: config.PromptsDir(), SkillsDir: filepath.Join(config.ConfigDir(), "skills"),
-		RTK: toolOnPath("rtk"), Skills: st.skills, Servers: servers, Instructions: instr})
+		RTK: toolOnPath("rtk"), Skills: st.skills, Servers: servers, Instructions: instr, SelfManaged: selfManaged})
 
 	session.Prune(filepath.Join(config.DataDir(), "snapshot"), cfg.RetentionDays())
 	pruneOverflow(cfg.RetentionDays())
@@ -403,7 +542,8 @@ func Start(o StartOptions) (*Agent, error) {
 	}
 	w, err := session.Create(filepath.Join(config.DataDir(), "sessions"), session.Header{
 		Workdir: jail.Root(), Provider: m.Provider, Model: cfg.Model, Effort: string(effort),
-		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.mode() == ModeYolo, Mode: string(o.mode())}, slug)
+		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.mode() == ModeYolo, Mode: string(o.mode()),
+		SelfManagedSkills: selfManaged != nil}, slug)
 	if err != nil {
 		return nil, &StartError{err}
 	}
@@ -424,4 +564,104 @@ func defaultHTTPClient() *http.Client {
 	ct := tr.Clone()
 	ct.ResponseHeaderTimeout = headerTimeout
 	return &http.Client{Transport: ct}
+}
+
+// skillGuard is the validating guard: it enforces the skill contract (§12) on
+// the exact bytes that would land, for paths under dir, plus the per-run
+// creation cap. Structural — internal/tools holds it as a func.
+func skillGuard(env *tools.Env, dir string, sessionDate time.Time) func(abs, rel string, data []byte) error {
+	return func(abs, rel string, data []byte) error {
+		parts := strings.Split(rel, "/")
+		if len(parts) < 2 {
+			return nil // a loose file in the skills root is not a skill
+		}
+		if canon, caseMatched := tools.CanonicalSkillPath(dir, abs); caseMatched && canon != abs {
+			// A case-variant spelling lands a file a Linux checkout (a
+			// teammate, CI) never discovers (H11). caseMatched is false when
+			// abs is not under dir at all; on Linux the scope test is
+			// byte-exact, so only darwin/windows (or MOCA_CASEFOLD_FS=1) get
+			// here.
+			return fmt.Errorf("refused: write skill files as .moca/skills/<dir>/SKILL.md exactly — this spelling (%s) is invisible on case-sensitive systems", rel)
+		}
+		skillMD := filepath.Join(dir, parts[0], "SKILL.md")
+		if len(parts) > 2 || !tools.IsSkillName(parts[1]) {
+			// A resource file — and the write ORDER matters: a dir without
+			// SKILL.md is not a skill yet, and every skill the model creates
+			// while the feature is on is an auto skill — a notes.md-first
+			// write would land a permanent companion file inside what
+			// SKILL.md then makes an auto skill.
+			cur, rerr := os.ReadFile(skillMD)
+			if errors.Is(rerr, fs.ErrNotExist) {
+				return fmt.Errorf("refused: .moca/skills/%s/ has no SKILL.md yet, and a skill starts with it — write SKILL.md first (a skill you create must be an auto skill), or keep this file outside the skills dir", parts[0])
+			} else if rerr != nil {
+				return fmt.Errorf("refused: cannot read %s/SKILL.md to check the write: %v", parts[0], rerr)
+			}
+			name := parts[0]
+			if f, perr := skills.ParseSkill(cur, parts[0]); perr == nil {
+				if f.Auto {
+					return fmt.Errorf("refused: %s is an auto skill, and auto skills are a single SKILL.md — put this in its body, or keep the file outside .moca/skills", parts[0])
+				}
+				name = f.Name
+			}
+			if !skills.Named(env.SkillTyped, name, parts[0]) { // a hand-written skill's files (Decision 15)
+				return fmt.Errorf("refused: %s is a hand-written skill — change its files only when the user's request names it", name)
+			}
+			return nil
+		}
+		prev, err := os.ReadFile(abs)
+		if errors.Is(err, fs.ErrNotExist) {
+			prev = nil
+		} else if err != nil {
+			return fmt.Errorf("refused: cannot read %s to check the write: %v", rel, err)
+		}
+		named := false // Decision 15: only an existing hand-written SKILL.md consults it
+		if prev != nil {
+			name := parts[0]
+			if f, perr := skills.ParseSkill(prev, parts[0]); perr == nil {
+				name = f.Name
+			}
+			named = skills.Named(env.SkillTyped, name, parts[0])
+		}
+		others, err := skills.CountAutoSkills(dir, parts[0]) // by DIRECTORY NAME, not by path (H11)
+		if err != nil {
+			return fmt.Errorf("refused: cannot read .moca/skills to count the project's skills: %v", err)
+		}
+		if err := skills.ValidateSkill(data, skills.WriteContext{DirName: parts[0], Prev: prev,
+			Others: others, UserSignal: env.SkillUserSignal, Named: named,
+			Today: time.Now(), SessionDate: sessionDate}); err != nil {
+			return err
+		}
+		if prev == nil && env.SkillCreations >= skills.SkillCreationsPerRun {
+			return fmt.Errorf("refused: %d new skills were already created in this run (cap %d) — update an existing skill instead, or record it in a later request",
+				env.SkillCreations, skills.SkillCreationsPerRun)
+		}
+		return nil
+	}
+}
+
+// skillRefusingText is C5b's refusal: the session's frozen prompt still
+// describes project skills, but the switch is off now.
+const skillRefusingText = "refused: self-managed skills were turned off after this session started — don't write under .moca/skills; /clear starts a session without them"
+
+// refusingAutoGuard refuses any write whose previous or new content is an auto
+// skill; hand-written skill edits pass (unvalidated, like any write with the
+// feature off).
+func refusingAutoGuard(dir string) func(abs, rel string, data []byte) error {
+	return func(abs, rel string, data []byte) error {
+		name := strings.Split(rel, "/")[0]
+		if prev, err := os.ReadFile(abs); err == nil && isAutoSkill(prev, name) {
+			return errors.New(skillRefusingText)
+		}
+		if isAutoSkill(data, name) {
+			return errors.New(skillRefusingText)
+		}
+		return nil
+	}
+}
+
+// isAutoSkill reports whether data parses as an auto skill (false on any
+// error — a file that cannot be parsed is not one the machinery owns).
+func isAutoSkill(data []byte, dirName string) bool {
+	f, err := skills.ParseSkill(data, dirName)
+	return err == nil && f.Auto
 }

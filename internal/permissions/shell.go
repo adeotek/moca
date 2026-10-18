@@ -31,14 +31,25 @@ type Shell struct {
 	auto  bool // auto mode: the risk table (auto.go) replaces "needs approval"
 	jail  *Jail
 	goos  string
+	// skillDir is the project's resolved skills dir: a write target under it
+	// is refused (the skill guard in tools validates those writes, and the
+	// shell cannot). "" = no check — the feature is off.
+	skillDir string
 }
+
+// SetSkillDir installs the skill-dir refusal (C1). It belongs to the feature
+// being on: a resumed session whose switch went off does not call it.
+func (s *Shell) SetSkillDir(dir string) { s.skillDir = dir }
 
 // AutoView returns the auto-mode view of s: the same Rules (an allow-always
 // learned in either view applies in both), the jail j (normally
 // s.jail.WithWritable(TempRoots()...)), and the risk table instead of the
 // default "needs approval" class.
 func (s *Shell) AutoView(j *Jail) *Shell {
-	return &Shell{rules: s.rules, auto: true, jail: j, goos: s.goos}
+	// skillDir travels with the copy: auto mode swaps in this view
+	// (agent.New), and losing the field would silently drop the refusal in
+	// the mode that runs the most shell commands.
+	return &Shell{rules: s.rules, auto: true, jail: j, goos: s.goos, skillDir: s.skillDir}
 }
 
 func NewShell(rules *Rules, jail *Jail, goos string) *Shell {
@@ -606,6 +617,19 @@ func gitComponent(p string) bool {
 	return false
 }
 
+const skillWriteRefusal = "refused: skill files are written with write/edit (the skill guard validates them), not the shell — use write or edit on .moca/skills/<dir>/SKILL.md"
+
+// skillTarget reports whether a literal write target lands under the project's
+// skills dir after resolution. Pattern-level only: it knows nothing about
+// approval and is not a sandbox (an interpreter can still write there).
+func (s *Shell) skillTarget(t string) bool {
+	if s.skillDir == "" || t == "" {
+		return false
+	}
+	res, err := s.jail.Resolve(t, true)
+	return err == nil && within(s.skillDir, res)
+}
+
 // gitTarget reports whether a write target names .git or lands in it after
 // resolution (a symlink to .git).
 func (s *Shell) gitTarget(t string) bool {
@@ -709,6 +733,9 @@ func (s *Shell) checkWrapperOutputs(ws []Word, idxs []int, cwdUnknown bool, v *v
 			if !has {
 				continue
 			}
+			if s.skillTarget(target) {
+				return errors.New(skillWriteRefusal)
+			}
 			if err := s.checkTargetText(target, cwdUnknown); err != nil {
 				return err
 			}
@@ -754,9 +781,11 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 				if !check {
 					continue
 				}
-				if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
+				if t, ok := wordLit(r.Word); ok && s.skillTarget(t) {
+					fail(errors.New(skillWriteRefusal))
+				} else if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
 					fail(err)
-				} else if t, _ := wordLit(r.Word); s.auto && s.gitTarget(t) {
+				} else if s.auto && s.gitTarget(t) {
 					v.add(&v.every, stmtLabel(x)) // .git/config, hooks: code that git runs later
 				}
 			}
@@ -810,14 +839,31 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 						tainted = true
 					}
 					cwdUnknown = true
+				case "cp", "mv", "install", "ln", "truncate", "rm":
+					for _, a := range x.Args[idx+1:] {
+						if t, ok := wordLit(a); ok && !strings.HasPrefix(t, "-") && s.skillTarget(t) {
+							fail(errors.New(skillWriteRefusal))
+						}
+					}
+				case "sed":
+					if hasOpt(ws, idx+1, "i") {
+						for _, a := range x.Args[idx+1:] {
+							if t, ok := wordLit(a); ok && !strings.HasPrefix(t, "-") && s.skillTarget(t) {
+								fail(errors.New(skillWriteRefusal))
+							}
+						}
+					}
 				case "tee":
 					for _, a := range x.Args[idx+1:] {
-						if l, ok := wordLit(a); ok && strings.HasPrefix(l, "-") {
+						t, ok := wordLit(a)
+						if ok && strings.HasPrefix(t, "-") {
 							continue
 						}
-						if err := s.checkTarget(a, cwdUnknown); err != nil {
+						if s.skillTarget(t) {
+							fail(errors.New(skillWriteRefusal))
+						} else if err := s.checkTarget(a, cwdUnknown); err != nil {
 							fail(err)
-						} else if t, _ := wordLit(a); s.auto && s.gitTarget(t) {
+						} else if s.auto && s.gitTarget(t) {
 							v.add(&v.every, headName(ws[idx].Text))
 						}
 					}

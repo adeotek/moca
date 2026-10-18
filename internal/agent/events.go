@@ -26,6 +26,11 @@ type TurnEnd struct {
 type Retry struct{ Notice provider.RetryNotice }
 type Warning struct{ Text string }
 
+// Note is a quiet, non-problem notice (the startup auto-skill count, the
+// switch table's note): the TUI prints it muted, -p as "note: …", ACP as an
+// info notice.
+type Note struct{ Text string }
+
 func (TextDelta) isEvent()     {}
 func (ThinkingDelta) isEvent() {}
 func (StreamReset) isEvent()   {}
@@ -34,3 +39,4 @@ func (ToolEnd) isEvent()       {}
 func (TurnEnd) isEvent()       {}
 func (Retry) isEvent()         {}
 func (Warning) isEvent()       {}
+func (Note) isEvent()          {}

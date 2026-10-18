@@ -69,7 +69,7 @@ func TestSteeringLandsAfterToolResults(t *testing.T) {
 	a, _, _ := startTestWith(t, s, "", "")
 	a.opts.Emit = func(e Event) {
 		if _, ok := e.(ToolStart); ok {
-			a.Steer("also check README")
+			a.Steer("also check README", "")
 		}
 	}
 	a.Run(context.Background(), "go")
@@ -86,7 +86,7 @@ func TestSteeringWithoutToolsBecomesNextMessage(t *testing.T) {
 	a, _, _ := startTestWith(t, s, "", "")
 	a.opts.Emit = func(e Event) {
 		if _, ok := e.(TextDelta); ok && s.bodyCount() == 1 {
-			a.Steer("follow-up")
+			a.Steer("follow-up", "")
 		}
 	}
 	out, _ := a.Run(context.Background(), "go")
@@ -104,7 +104,7 @@ func TestAbortReturnsSteering(t *testing.T) {
 		// abort() reports synthetic results as ToolEnds too; steer once.
 		if _, ok := e.(ToolEnd); ok && !steered {
 			steered = true
-			a.Steer("draft")
+			a.Steer("draft", "")
 			cancel()
 		}
 	}

@@ -416,8 +416,16 @@ func (m *model) commitLive() []string {
 }
 
 func (m *model) startRun(text string) tea.Cmd {
+	return m.startRunTyped(text, "")
+}
+
+// startRunTyped starts a run carrying the typed part of its prompt (a
+// template body or a skill message is not what the user typed — Decision 15).
+func (m *model) startRunTyped(text, typed string) tea.Cmd {
 	a := m.agent
-	return m.startRunWith(text, func(ctx context.Context) (agent.Outcome, error) { return a.Run(ctx, text) })
+	return m.startRunWith(text, func(ctx context.Context) (agent.Outcome, error) {
+		return a.RunWith(ctx, text, agent.RunOpts{Typed: typed})
+	})
 }
 
 // startRunWith starts a run echoing label as the user line; run is the
@@ -802,9 +810,10 @@ func (m *model) submit() tea.Cmd {
 			// Nothing can run yet; the red notice says how to fix it.
 			return m.printlnSetupNotice()
 		}
+		typed := typedText(parsed) // a template body or a skill message is not what the user typed
 		if m.running {
 			if m.agent != nil {
-				m.agent.Steer(parsed.Text)
+				m.agent.Steer(parsed.Text, typed)
 			}
 			return m.printlnMuted("↳ queued: " + firstLineOf(parsed.Text))
 		}
@@ -814,7 +823,7 @@ func (m *model) submit() tea.Cmd {
 		if m.shellBusy {
 			return m.refuseBusy()
 		}
-		return m.startRun(parsed.Text)
+		return m.startRunTyped(parsed.Text, typed)
 	case KindCommand:
 		// A submitted command echoes into the scrollback as a user message
 		// (same `›` band) before it runs, so the transcript reads as
@@ -886,7 +895,7 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 	case "logout":
 		return m.runLogout(c.Args)
 	case "help":
-		return m.printlnContent(HelpText(m.opts.Prompts, m.agentSkills()))
+		return m.printlnContent(HelpText(m.opts.Prompts, m.allSkills()))
 	case "exit":
 		return m.quit()
 	case "copy":
@@ -998,6 +1007,24 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		}
 		m.agent.SetPlan(!m.agent.Plan()) // PlanChanged prints + refreshes
 		return nil
+	case "remember":
+		if cmd, refused := m.refuseRunning(); refused {
+			return cmd
+		}
+		text := strings.TrimSpace(c.Args)
+		if text == "" {
+			return m.println("usage: /remember <text>  — ask moca to record this as a project skill")
+		}
+		if !m.agent.SelfManagedSkills() { // the agent's answer: switch + trust + the resume rule
+			return m.println("self-managed skills are off for this session — enable `skills.selfManaged` in " +
+				config.ConfigFile() + " and restart moca (the workdir must also be trusted; /clear alone will not re-read the config)")
+		}
+		if m.agent.Plan() {
+			return m.printlnError("error: plan mode is on (writes are confined to docs/plans/) — /plan to turn it off, then /remember")
+		}
+		return m.startRunWith("/remember "+text, func(ctx context.Context) (agent.Outcome, error) {
+			return m.agent.Remember(ctx, text) // arms the user signal (Decision 11); the transcript keeps the typed command
+		})
 	case "execute":
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
@@ -1011,7 +1038,7 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		}
 		a := m.agent
 		return m.startRunWith("/execute "+strings.TrimSpace(c.Args), func(ctx context.Context) (agent.Outcome, error) {
-			return a.RunPlan(ctx, path, extra)
+			return a.RunPlanWith(ctx, path, extra, agent.RunOpts{Typed: extra})
 		})
 	case "clear":
 		if cmd, refused := m.refuseRunning(); refused {
@@ -1336,6 +1363,8 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		return nil
 	case agent.Warning:
 		return m.printlnWarn("warning: " + e.Text)
+	case agent.Note:
+		return m.printlnMuted(e.Text)
 	case agent.Compacted:
 		m.status.Transient = ""
 		m.refreshStatus()
