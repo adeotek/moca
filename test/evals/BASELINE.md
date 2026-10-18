@@ -240,3 +240,22 @@ the earlier "Δ 0.0%" claim: byte-stable for unchanged content, exactly the edit
 - An empty model reply (no text, no calls) ended a run as "done" with tests still failing (`largefile#1`).
 - `edit` panicked rendering the diff when an `old_string`'s trailing blank line matched past EOF — the
   whole process died (`feature#3`); tool panics are now recovered into error results.
+
+## `vague` checker — settled and tightened (2026-10-18)
+
+The `-to f -- -300` case (`accepted invalid input`) that fails on both models is **not a checker bug**:
+`-to f` takes *Celsius* input (`temp -to f 100 → 212.0`, and the fixture's own flag help says "target
+unit: f (from Celsius)"), so −300 °C is below absolute zero and a correct implementation must reject it.
+The reference (`test/evals/vague/testdata/reference`) validates per input scale.
+
+Two per-scale valid-side cases were added, because a *celsius-only* bound (`if v < -273.15 { fail }`
+applied to both directions) passed the whole suite before:
+
+| added case | expects | why it discriminates |
+|---|---|---|
+| `-to c -- -40` | `-40.0` | −40 °F is above −459.67 °F; a celsius-only bound rejects it |
+| `-to c -- -274` | `-170.0` | −274 °F is valid (above absolute zero *in its own scale*) |
+
+`bash test/evals/run.sh --selftest` stays green (fixture fails, reference passes). **`vague` numbers
+recorded before this change (the A3 baseline, the v0.6.1/v0.6.2 corpora) are not directly comparable
+to runs after it** — the tightened suite is strictly harder.

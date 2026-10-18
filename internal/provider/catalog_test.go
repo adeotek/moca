@@ -146,7 +146,15 @@ func TestHistoryBoundIsAdaptiveOnly(t *testing.T) {
 			t.Fatalf("%s must be history-bound (adaptive thinking)", id)
 		}
 	}
-	for _, id := range []string{"opencode-go/glm-5.3-flash", "opencode-go/minimax-m3", "anthropic/claude-haiku-4-5"} {
+	for _, id := range []string{"opencode-go/glm-5.3-flash", "opencode-go/minimax-m3", "anthropic/claude-haiku-4-5",
+		"opencode-go/gpt-6-luna", "opencode-go/grok-4.7", "openai/gpt-6-astra", "openai/gpt-6-luna"} {
+		// The openai-responses rows ride the same encrypted-reasoning replay as
+		// the anthropic rows above; the v0.6.4 probe (§15) settled that a
+		// dropped reasoning item next to a kept function_call is accepted, so
+		// they stay out of the bound set by evidence, not by omission.
+		if byID[id].Protocol == "" {
+			t.Fatalf("%s missing from the catalog", id)
+		}
 		if byID[id].HistoryBound() {
 			t.Fatalf("%s must not be history-bound", id)
 		}
