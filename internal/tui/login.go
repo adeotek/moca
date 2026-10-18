@@ -570,10 +570,12 @@ func (m *model) loginKey(k tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// loginPanel renders the active login state above the input rule.
+// loginPanel renders the active login state above the input rule, opened by
+// the same grey separator as the picker (the panel is its own thing).
 func (m *model) loginPanel() string {
 	s := m.login
 	var b strings.Builder
+	b.WriteString(m.panelSeparator())
 	q := func(text string) { b.WriteString(m.th.promptMark(m.darkBG) + Sanitize(text) + "\n") }
 	switch s.step {
 	case loginPickProvider:

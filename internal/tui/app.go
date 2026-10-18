@@ -1665,10 +1665,17 @@ func badgeText(mode agent.PermMode, plan bool) string {
 	return modeBadgeText(mode, plan)
 }
 
-// rule is the full-width dim separator between the scrollback output, the
-// input area and the status bar.
+// rule is the full-width rule that frames the input area — above it and
+// between it and the status bar — in the welcome badge's accent orange (§3.5).
 func (m *model) rule() string {
-	return dim.Render(strings.Repeat("─", max(20, m.width))) + "\n"
+	return m.th.ruleStyle(m.darkBG).Render(strings.Repeat("─", max(20, m.width))) + "\n"
+}
+
+// panelSeparator is the grey full-width line that opens a modal panel — the
+// picker, the login wizard: it is part of the panel, so it is on screen
+// exactly while the panel is (the accent input rules sit below it).
+func (m *model) panelSeparator() string {
+	return m.th.separatorStyle(m.darkBG).Render(strings.Repeat("─", max(20, m.width))) + "\n"
 }
 
 func firstLineOf(s string) string { l, _, _ := strings.Cut(s, "\n"); return l }

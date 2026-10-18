@@ -13,6 +13,11 @@ Opt-in (`"skills": {"selfManaged": true}` in the user config): moca records reus
 - **Config** — `skills.selfManaged` (user config) and a project `skills` block: `false` opts a repository out, `true` is declarative and never enables the feature alone (§4).
 - **Gates** — `test/skillgate` (16 hermetic legs on the built binary against a scripted provider) and four eval scenarios (`skills`, `skills-inject`, `skills-inject-paste`, `skills-inject-output`), plus `evalstats`' `skillWrites`/`skillListed` metrics; the harness runs a `sessions.txt` scenario as sequential sessions sharing one workdir, a `-c <variant>` picks `config.<variant>.jsonc`, and replay skips multi-session scenarios.
 
+### TUI
+
+- **The input area is framed in the accent orange.** Both full-width rules — above the input box and between it and the status bar — take the welcome `moca` badge's `accent` hue (`#d97706` by default, user-themable like every color), so the place you type carries the same orange as the product name.
+- **The modal panels open with their own grey rule.** The picker (`/model`, `/resume`, `/sessions`) and the `/login` wizard render a full-width separator in `statusSep` above the panel — part of the panel, so it is visible exactly while the panel is and disappears with it; the accent rules stay below.
+
 ## Unreleased
 
 ### Harness

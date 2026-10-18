@@ -45,6 +45,42 @@ func tuiCmd(t *testing.T, m *model, line string) tea.Cmd {
 	return m.submit()
 }
 
+// The login wizard opens with the same grey rule as the picker (§3.5) — it
+// shares the live-region slot — and the line goes with the panel.
+func TestLoginWizardSeparatorRule(t *testing.T) {
+	m := newLoginModel(t)
+	tuiCmd(t, m, "/login")
+	if m.login == nil {
+		t.Fatal("no login state")
+	}
+	v := m.View().Content
+	rules := fullWidthRules(v)
+	if len(rules) != 3 {
+		t.Fatalf("want the wizard's rule + two input rules, got %d:\n%s", len(rules), v)
+	}
+	if !strings.Contains(rules[0], "38;2;91;99;107") {
+		t.Fatalf("the wizard's rule must be the separator grey: %q", rules[0])
+	}
+	lines := strings.Split(v, "\n")
+	idx := -1
+	for i, l := range lines {
+		if l == rules[0] {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 || !strings.Contains(lines[idx+1], "store a credential for which provider?") {
+		t.Fatalf("the grey rule must sit directly above the wizard question:\n%s", v)
+	}
+	m.Update(key("esc"))
+	if m.login != nil {
+		t.Fatal("esc must close the wizard")
+	}
+	if got := fullWidthRules(m.View().Content); len(got) != 2 {
+		t.Fatalf("%d rules after the wizard closed, want 2", len(got))
+	}
+}
+
 // drained collects the scrollback a command prints plus every queued line
 // behind it, driving the acknowledgement cycle the live renderer does.
 func drained(m *model, cmd tea.Cmd) string {
