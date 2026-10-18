@@ -9,6 +9,17 @@
 - **A/B read: `evalstats -compare` (A2.1).** `go run ./test/evals/evalstats -compare base.jsonl,cand.jsonl [-iters 2000 -seed 1]` resamples per scenario (seeded PCG — identical inputs and seed give identical output), holds the observed pass counts while the interval measures token-volume uncertainty, and prints a verdict per scenario and overall: better / worse / inconclusive / underpowered (a CI that spans the band, or fewer than 3 runs per side). The v0.5.2 → v0.6.1 retro-read recorded in `test/evals/BASELINE.md` lands in the underpowered class — 0.69 tokens/solved point estimate, passes 17 → 20 — and an `-n 6` rerun of the moved scenarios is what would certify it.
 - **Trajectory replay (A2.2).** `go run ./test/evals/replay -base <bin> -cand <bin> -label <l> [-scenarios a,b]` re-runs kept transcripts turn by turn: the model's recorded turns are served back over a local openai-completions SSE stream (no usage chunk, so moca's chars/4 fallback anchors the context estimate deterministically), tools execute for real on a fresh fixture copy, and the report gives request bytes, append-only prefix breaks and divergence per transcript. Compared runs get same-length run dirs on purpose — the workdir and the XDG paths ride the stored system prompt, so a longer path is a longer request body. `bash test/evals/replay/run.sh` builds the binary and replays one synthetic session (read → edit → text) twice: identical request bytes, zero prefix breaks, no divergence. Replay is counterfactual the other way — it measures formatting and token accounting exactly and says nothing about how a real model would react.
 
+## v0.6.4 (2026-10-18)
+
+One working-style rule, from the cell diagnostics that overturned the mailman
+verdict (3 attempts × 2 models on the four contested Terminal-Bench cells:
+fix-git 6/6, custom-memory 5/6, cobol 5/6, **mailman 3/6** after five
+consecutive round failures).
+
+### Agent
+
+- **The handoff is part of the task.** When a flow hands off to another service — mail, a queue, a daemon — put the message where the recipient actually reads it (the mailbox, the spool, the queue) and verify it arrives; a local send that never reaches its destination is not a delivery. Every winning mailman attempt on both models did the delivery-path work (Postfix transport/alias maps, the generated LMTP map, the mailman and postfix runners started by hand, the confirmation verified in `/var/mail/<user>`); every losing attempt set `SubscriptionPolicy.open`, skipped the MTA, and never delivered a confirmation. The rule agrees with the task text instead of fighting it, which the v0.6.3 pending-state rule did not.
+
 ## v0.6.3 (2026-10-17)
 
 Two working-style corrections from the Terminal-Bench round 4 (subset 8/12,
