@@ -184,6 +184,10 @@ type Env struct {
 	SkillTyped      []string
 	SkillHintArmed  bool
 	SkillHintDone   bool
+	// SkillCold is set once by the agent when the project carries no recorded
+	// auto skill: it arms the hint on the run's first successful verification
+	// (see Registry.Run), the moment a cold repo's own procedure gets proved.
+	SkillCold bool
 	// lastFailedVerify is the recovery trigger's state: the normalized
 	// command of the last failing verifying shell call (shell.go), cleared by
 	// noteChange (an edit in between means the fix was in the code).
@@ -260,6 +264,13 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 		verifies(cmdOf(call)) && !mutatesOnly(cmdOf(call)) &&
 		normCommand(cmdOf(call)) != env.lastFailedVerify {
 		env.SkillHintArmed = true // recovery (H1) — skillHint delivers on this same result
+	} else if env.SkillCold && env.SkillCreations == 0 && call.Name == "shell" &&
+		verifies(cmdOf(call)) && !mutatesOnly(cmdOf(call)) {
+		// Cold repo: the first verification that succeeds there is itself the
+		// durable fact ("this is how the repo is checked"), and waiting for a
+		// recovery means the nudge almost never arms in the ordinary flow —
+		// measured at 0/6 in test/evals/skills-cold (BASELINE.md, v0.7.0).
+		env.SkillHintArmed = true
 	}
 	if h := investigationHint(env); h != "" {
 		res.Content += h
@@ -331,6 +342,35 @@ func investigationRefusal(env *Env) string {
 // once per run; never in plan mode; never without a validating guard (C5b's
 // refusing one does not count — it would invite a write it then rejects);
 // never on a read, a search, or any non-verifying result.
+// skillHintMark is the stable prefix of the skill-learning nudge's text (the
+// tests match on it, so the prose below can change without rewriting them).
+const skillHintMark = "[hint: record what this just proved"
+
+// callCommand is a shell call's command, one line and short: the hint names
+// the concrete fact it is asking about (the command that just worked) rather
+// than describing the category of fact in the abstract — the abstract form was
+// measured at 0/6 conversions on a cold repo (BASELINE.md, v0.7.0).
+func callCommand(call llm.ToolCall) string {
+	if call.Name != "shell" {
+		return ""
+	}
+	var in struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(call.Input, &in); err != nil {
+		return ""
+	}
+	c := strings.TrimSpace(strings.SplitN(strings.TrimSpace(in.Command), "\n", 2)[0])
+	if r := []rune(c); len(r) > 120 {
+		c = string(r[:120]) + "…"
+	}
+	return c
+}
+
+// skillHint is the one-shot skill-learning nudge (SPECS §11/§12). At most
+// once per run; never in plan mode; never without a validating guard (C5b's
+// refusing one does not count — it would invite a write it then rejects);
+// never on a read, a search, or any non-verifying result.
 func skillHint(env *Env, call llm.ToolCall, res Result) string {
 	if env.Plan || !env.SkillLearning() || !env.SkillHintArmed || env.SkillHintDone || res.IsError {
 		return ""
@@ -343,7 +383,12 @@ func skillHint(env *Env, call llm.ToolCall, res Result) string {
 		return ""
 	}
 	env.SkillHintDone = true
-	return "\n[hint: something durable came up — if the rule, pattern or gotcha behind what just worked should outlive this session, record it as a project skill under .moca/skills/ (see \"Project skills you maintain\" in your instructions)]"
+	what := "that verification"
+	if cmd := callCommand(call); cmd != "" {
+		what = "`" + cmd + "`"
+	}
+	return fmt.Sprintf("\n%s — %s is how this repo verifies, and that is what .moca/skills/moca-<domain>/SKILL.md is for: write it now with write/edit (frontmatter `auto: true`, one `- **when**: rule (×1, <today>)` line), unless the file already records it]",
+		skillHintMark, what)
 }
 
 func decode[T any](input json.RawMessage, v *T) *Result {

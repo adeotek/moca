@@ -343,3 +343,95 @@ bash test/evals/run.sh -n 2 -j 2 -l skills-pro   -m opencode-go/deepseek-v4-pro 
   quality.
 - Cost of the whole measurement: $0.69 (120 gate runs) + $0.04 (benefit runs); the second batch's tokens
   per run (35k flash / 47k pro) are the price of `--approve` on a small Go fixture.
+## v0.7.0 follow-ups (2026-10-18, second pass)
+
+### A. Recording rate — measured 0 %, instrument built, one lever moved
+
+`skills-cold` (new scenario) is the instrument: the fixture ships **no**
+`.moca/skills`, session 1 is asked only to fix a failing suite, so anything
+recorded afterwards was recorded spontaneously — the cold-start case the
+feature exists for. Its checker asks for the suite green, an auto skill naming
+the runner the session had to discover, and no `(user, …)` rule.
+
+```bash
+bash test/evals/run.sh -n 6 -j 3 -l <label> -m <model> skills-cold
+```
+
+| arm | model | runs | session-1 hint fired | session-1 recorded | pass |
+|---|---|---|---|---|---|
+| before (recovery-only arming) | glm-5.3-flash | 3 | 3/3 | 0 | 0/3 |
+| before | deepseek-v4-pro | 3 | — | 0 | 0/3 |
+| after (cold arming + rewritten hint) | glm-5.3-flash | 6 | 6/6 | 2 | 1/6 |
+| after | deepseek-v4-pro | 6 | 6/6 | 0 (2 in session 2) | 1/6 |
+
+Two findings, both worth the measurement:
+
+1. **The nudge barely armed at all.** `SkillHintArmed` fired on a *recovery*
+   (a failed verification, a mutation, then the same verification succeeding) —
+   in the ordinary flow that never happens: a session that reads the Makefile
+   or hits the strict failure once fixes the code and re-verifies. The
+   `after` arm adds a second trigger: **in a repo with no recorded skill, the
+   run's first successful verification arms it** (`Env.SkillCold`, set once by
+   the agent). That is the moment the durable fact is established ("this is how
+   the repo is checked"), and it lifts delivery from ~never to **6/6**.
+2. **Conversion stays low: the hint firing is not enough.** With the hint
+   delivered in every session, flash recorded in 2/6 runs and pro in 0/6
+   (it recorded twice during *session 2*, the follow-up task). The hint text was
+   rewritten to name the concrete command (`[hint: record what this just
+   proved — `make test` is how this repo verifies …]`) and the shape of the
+   result did not change. **The lever that remains is a product decision, not a
+   prompt tweak** — e.g. making the record a required deliverable of a run, or
+   an end-of-run gate — so it is a v0.7.1 candidate, with `skills-cold` as its
+   instrument. The feature is offline-by-default and nothing regressed, hence
+   the v0.7.0 release does not wait on it.
+
+### B. Generic runners in the allow list — closed for `make`, open for the rest
+
+`TestGenericRunnerAllowRules` pins the class: the default allow list names
+tools, and some of those run *arbitrary repository code* chosen by their
+arguments. Before this pass every row below reached `Check` with **no prompt**:
+
+| command | before | now |
+|---|---|---|
+| `make test`, `make -j4 build`, `make VAR=1 check` | allowed | allowed |
+| `make bootstrap` | allowed | **refused** (naming the allowed recipes; `permissions.allow: ["make bootstrap"]` covers it) |
+| `make` (default recipe) | allowed | **refused** |
+| `make -f other.mk test` | allowed | **refused** |
+| `make $TARGET` | allowed | **refused** (non-literal) |
+| `python3 -c …`, `python3 tools/gen.py`, `node -e …`, `npm run build`, `pytest`, `docker run …` | allowed | allowed — **open item** |
+
+The rule (`permissions/genericRunnerRefusal` + `Rules.AllowsNamed`): a bare-name
+allow entry covers a tool's *workflow* forms; a recipe of its own choosing needs
+a rule that names it. The interpreters stay open on purpose: a `-p` run has no
+asker, so asking means refusing, which would break legitimate interpreter
+workflows — that is a policy call, listed in SPECS §15, with the probe as the
+test that will fail loudly when it changes.
+### C. Corpus-wide switch A/B (record only — Decision 16)
+
+The eight original scenarios, both arms, `-c off` (the shared corpus config, no
+`skills` key) vs `-c on` (`config.on.jsonc` = the same config plus
+`"skills": {"selfManaged": true}`), 3 runs each, `glm-5.3-flash`:
+
+```bash
+bash test/evals/run.sh -n 3 -j 4 -l corpus-off -c off bugfix feature refactor vague largefile plan web inject
+bash test/evals/run.sh -n 3 -j 4 -l corpus-on  -c on  bugfix feature refactor vague largefile plan web inject
+go run ./test/evals/evalstats -compare test/evals/results/corpus-off.jsonl,test/evals/results/corpus-on.jsonl -seed 1
+```
+
+**Outcomes are identical: 22/24 in both arms**, the only failures being `vague`
+(1/3 each, the known-hard scenario — `-to f -- -300` and the `-274 °C` case,
+the same modes recorded for it before). No scenario moved. Skill writes: 0 in
+both arms — none of the eight makes a session want to record anything, which is
+item A's finding from the other side.
+
+The volume read is **underpowered**: `∑ all` tokens/solved 1.20 [0.88, 1.62],
+steps 1.09 [0.88, 1.35], and the tool says so verbatim ("rerun the moved
+scenarios with -n 6"). One `vague` run dominates the noise (19 steps, 131k
+tokens — 3.19× [1.10, 6.96] on its own scenario), while two scenarios moved the
+other way (`inject` 0.80 [0.66, 0.95], `feature` 0.79 [0.37, 1.65]). Cost:
+$0.09 (off) vs $0.13 (on) for 24 runs each.
+
+**Read**: the switch costs nothing measurable in outcome and the feature is off
+unless a user opts in, so it does not gate the release; per-scenario movement is
+inside n=3 noise. Extending the record to a resolvable read is a matter of
+`-n 6` on the same two labels.

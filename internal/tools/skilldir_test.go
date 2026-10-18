@@ -265,11 +265,11 @@ func TestRegistryHintDelivery(t *testing.T) {
 	// Armed by a read failure that is not internal (a plain "refused:").
 	env.SkillHintArmed = true
 	read := reg.Run(t.Context(), env, llm.ToolCall{ID: "1", Name: "read", Input: []byte(`{"path":"absent.txt"}`)})
-	if strings.Contains(read.Content, "[hint: something durable") {
+	if strings.Contains(read.Content, "[hint: record what this just proved") {
 		t.Fatal("a read must never carry the skill hint")
 	}
 	green := reg.Run(t.Context(), env, llm.ToolCall{ID: "2", Name: "shell", Input: []byte(`{"command":"go version"}`)})
-	if green.IsError || !strings.Contains(green.Content, "[hint: something durable") {
+	if green.IsError || !strings.Contains(green.Content, "[hint: record what this just proved") {
 		t.Fatalf("the next verifying success must carry the hint: %q", green.Content)
 	}
 	if green2 := reg.Run(t.Context(), env, llm.ToolCall{ID: "3", Name: "shell", Input: []byte(`{"command":"go version"}`)}); strings.Contains(green2.Content, "[hint:") {
@@ -288,7 +288,7 @@ func TestRecoveryArmsTheHint(t *testing.T) {
 		t.Fatalf("a failing verifying command must be remembered: %v %q", bad.IsError, env.lastFailedVerify)
 	}
 	good := reg.Run(t.Context(), env, llm.ToolCall{ID: "2", Name: "shell", Input: []byte(`{"command":"go version"}`)})
-	if !strings.Contains(good.Content, "[hint: something durable") {
+	if !strings.Contains(good.Content, "[hint: record what this just proved") {
 		t.Fatalf("the recovery must arm and deliver the hint on the same result: %q", good.Content)
 	}
 }
@@ -302,7 +302,7 @@ func TestNoRecoveryHintAfterCodeEdit(t *testing.T) {
 	reg.Run(t.Context(), env, llm.ToolCall{ID: "1", Name: "shell", Input: []byte(`{"command":"false"}`)})
 	reg.Run(t.Context(), env, llm.ToolCall{ID: "2", Name: "write", Input: []byte(`{"path":"a.go","content":"x"}`)})
 	good := reg.Run(t.Context(), env, llm.ToolCall{ID: "3", Name: "shell", Input: []byte(`{"command":"go version"}`)})
-	if strings.Contains(good.Content, "[hint: something durable") {
+	if strings.Contains(good.Content, "[hint: record what this just proved") {
 		t.Fatalf("an edit between failure and success means the fix was in the code: %q", good.Content)
 	}
 }

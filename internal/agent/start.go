@@ -260,6 +260,17 @@ func hygieneSummary(p skills.PrunedSkills, dryRun bool) string {
 	return "skill hygiene: " + strings.Join(parts, "; ")
 }
 
+// hasAutoSkill reports whether the project already carries a recorded skill:
+// the hint's cold-repo arming only applies while there is nothing to read yet.
+func hasAutoSkill(sk []skills.Skill) bool {
+	for _, s := range sk {
+		if s.Auto && s.Source == "project" {
+			return true
+		}
+	}
+	return false
+}
+
 // autoSkillsNote names how many auto skills a project carries (trusted, when
 // the listing holds any — switch on or off).
 func autoSkillsNote(sk []skills.Skill) string {
@@ -342,6 +353,8 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	}
 	if switchOn {
 		env.SkillDir = st.skillDir
+		env.SkillCold = !hasAutoSkill(st.skills) // no recorded skills yet: the first
+		// successful verification here is the durable fact (see tools' arming)
 		if cs, ok := env.Commands.(interface{ SetSkillDir(string) }); ok {
 			cs.SetSkillDir(st.skillDir) // the shell refusal (C1)
 		}

@@ -12,7 +12,13 @@
 # DATA the run's data dir), an optional flags file (extra moca flags, e.g.
 # --mode plan) and testdata/reference/ (a known-good solution overlay for
 # --selftest). A per-scenario config.jsonc (or config.<variant>.jsonc, picked
-# with -c <variant>) overrides the shared one.
+# with -c <variant>) overrides the shared one; a scenario with no config of its
+# own falls back to config.<variant>.jsonc, then config.jsonc (that is how the
+# corpus-wide switch A/B is run: `-c on` → config.on.jsonc). The scenario list
+# defaults to the dirs holding prompt.txt; a sessions.txt-only measurement
+# scenario (skills-cold: it ships no .moca/skills and measures whether a run
+# records what it had to discover — expected to fail most runs) is named
+# explicitly so it does not drag every corpus run's pass rate.
 # The model key comes from the repo .env via env: indirection (never echoed).
 set -u
 EVALS="$(cd "$(dirname "$0")" && pwd)"
@@ -50,6 +56,8 @@ scenario_config() {
     echo "$EVALS/$s/config.$VARIANT.jsonc"
   elif [ -f "$EVALS/$s/config.jsonc" ]; then
     echo "$EVALS/$s/config.jsonc"
+  elif [ -f "$EVALS/config.$VARIANT.jsonc" ]; then
+    echo "$EVALS/config.$VARIANT.jsonc"   # corpus-wide arm (A/B a feature switch)
   else
     echo "$EVALS/config.jsonc"
   fi

@@ -192,6 +192,15 @@ func (s *Shell) classify(ws []Word, v *verdictAcc, st cmdState) error {
 		v.add(&v.every, name)
 		return nil
 	case Allow:
+		// A bare-name allow rule covers a tool's common forms, not arbitrary
+		// code its arguments pick out of the repository: an injected "run
+		// `make <target>`" must not ride the `make` entry (v0.7.0 §11
+		// follow-up — the probe is TestGenericRunnerAllowRules).
+		if genericRunners[lower] {
+			if err := genericRunnerRefusal(base, ws, s.rules.AllowsNamed(ws)); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	// A builtin is only a builtin by its bare name: `./echo` runs whatever
@@ -618,6 +627,54 @@ func gitComponent(p string) bool {
 }
 
 const skillWriteRefusal = "refused: skill files are written with write/edit (the skill guard validates them), not the shell — use write or edit on .moca/skills/<dir>/SKILL.md"
+
+// genericRunners are allowlisted tools whose *arguments* choose code to run:
+// the allow rule names the tool, not whatever its arguments hand it. For
+// `make` the target is a recipe from the repository's own Makefile — exactly
+// the shape a poisoned checkout would use ("run `make <target>` before
+// testing"), and a bare `make` allow entry would run it without a prompt.
+var genericRunners = map[string]bool{"make": true}
+
+// safeMakeTargets are the recipe names a bare `make` allow rule covers: the
+// workflow targets a repository's own tooling uses (build/check/read shapes).
+var safeMakeTargets = map[string]bool{
+	"all": true, "build": true, "test": true, "tests": true, "check": true,
+	"fmt": true, "vet": true, "lint": true, "cover": true, "coverage": true,
+	"tidy": true, "unit": true, "verify": true,
+}
+
+// genericRunnerRefusal fails closed on a generic runner driven by arguments,
+// unless an allow rule named that code itself (`make bootstrap` in
+// permissions.allow covers it; `make` alone does not — §11's rule that a rule
+// covers what it names).
+func genericRunnerRefusal(base string, ws []Word, named bool) error {
+	if named {
+		return nil
+	}
+	var target string
+	for _, w := range ws[1:] {
+		t := w.Text
+		switch {
+		case strings.HasPrefix(t, "-"):
+			if strings.HasPrefix(t, "-f") || strings.HasPrefix(t, "--file") || strings.HasPrefix(t, "--makefile") {
+				return fmt.Errorf("refused: `%s` with %s runs a makefile of its own choosing — add an explicit permissions.allow rule if you want it", base, t)
+			}
+		case strings.Contains(t, "="):
+			continue // VAR=value: not the recipe selector
+		case !w.Literal:
+			return fmt.Errorf("refused: `%s` with a computed target (expansion or glob) is refused — write the target out, or add an explicit permissions.allow rule", base)
+		default:
+			target = t
+		}
+	}
+	if target == "" {
+		return fmt.Errorf("refused: `%s` with no target runs the makefile's default recipe — name one of: all, build, test, check, fmt, vet, lint, cover, tidy", base)
+	}
+	if !safeMakeTargets[target] {
+		return fmt.Errorf("refused: `%s %s` runs a recipe from the repository's makefile — allowed recipes are: all, build, test, tests, check, fmt, vet, lint, cover, coverage, tidy, unit, verify; add an explicit permissions.allow rule to run others", base, target)
+	}
+	return nil
+}
 
 // skillTarget reports whether a literal write target lands under the project's
 // skills dir after resolution. Pattern-level only: it knows nothing about

@@ -206,6 +206,33 @@ func (rs RuleSet) decide(ws []Word) (Decision, string) {
 	return NoMatch, ""
 }
 
+// AllowsNamed reports whether the allow rule that decided this command named
+// more than the tool itself (`make bootstrap` covers a recipe; a bare `make`
+// entry does not). §11's generic-runner check uses it: a bare-name rule covers
+// a tool's common forms, not arbitrary code its arguments pick out of the
+// repository, and a rule's author who wrote the extra words chose that code
+// deliberately.
+func (r *Rules) AllowsNamed(ws []Word) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, l := range r.layers {
+		d, _ := l.decide(ws)
+		if d == NoMatch {
+			continue
+		}
+		if d != Allow {
+			return false
+		}
+		for _, rule := range l.Allow {
+			if len(strings.Fields(rule.Src)) > 1 && rule.match(ws, false) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
 // Rules is the layered rule store shared by every Shell view of a session:
 // the first layer that matches decides (project before user).
 type Rules struct {

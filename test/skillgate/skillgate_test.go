@@ -440,7 +440,7 @@ func legOffIsInert(t *testing.T) {
 	if g.headerHasBlock() {
 		t.Fatal("off: the header must not record a block")
 	}
-	if strings.Contains(out+errOut, "[hint: something durable") {
+	if strings.Contains(out+errOut, "[hint: record what this just proved") {
 		t.Fatal("off: no hint")
 	}
 	// Two different "off" paths — no opt-in, and opted in but opted out by a
@@ -833,7 +833,7 @@ func legPlanMode(t *testing.T) {
 	if g.exists(".moca/skills/moca-x/SKILL.md") {
 		t.Fatal("plan mode: the write must be confined")
 	}
-	if strings.Contains(errOut, "[hint: something durable") {
+	if strings.Contains(errOut, "[hint: record what this just proved") {
 		t.Fatal("no hint in plan mode")
 	}
 	t.Logf("leg 10: plan mode never learns")
