@@ -26,6 +26,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		"Verification must be able to fail", "Never present guessed, rebuilt or extrapolated data as fact",
 		"The stated behaviour outranks a name it gives",
 		"the pending state is part of the behaviour",
+		"A local send that never reaches its destination is not a delivery",
 		"An inconsistency you notice is a defect to investigate",
 		"Leave the finish state a checker will see pristine",
 		"A build that compiles is not a port that works",
