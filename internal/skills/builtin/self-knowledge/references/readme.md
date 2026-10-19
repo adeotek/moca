@@ -2,7 +2,6 @@
 
 [![CI](https://github.com/adeotek/moca/actions/workflows/ci.yml/badge.svg)](https://github.com/adeotek/moca/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/adeotek/moca)](https://github.com/adeotek/moca/releases/latest)
-[![Go Report Card](https://goreportcard.com/badge/github.com/adeotek/moca)](https://goreportcard.com/report/github.com/adeotek/moca)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, eight tools, no framework.**
