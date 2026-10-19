@@ -37,6 +37,9 @@ func TestShellRefusesSkillWrites(t *testing.T) {
 		"rm .moca/skills/moca-x/SKILL.md",
 		"truncate -s 0 .moca/skills/moca-x/SKILL.md",
 		"install -m 644 a.md .moca/skills/moca-x/SKILL.md",
+		"patch .moca/skills/moca-x/SKILL.md < fix.diff",
+		"patch -i fix.diff .moca/skills/moca-x/SKILL.md",
+		"rsync -a m.md .moca/skills/moca-x/SKILL.md",
 		"/usr/bin/time -o .moca/skills/moca-x/SKILL.md go test ./...", // path-qualified: the bare `time` keyword is its own case
 	}
 	for _, cmd := range refused {
@@ -63,6 +66,31 @@ func TestShellSkillCheckOffWhenFeatureOff(t *testing.T) {
 	s := NewShell(RulesFromAllow([]string{"tee", "cp"}), j, "linux")
 	if _, _, _, err := s.Check("printf x > .moca/skills/moca-x/SKILL.md"); err != nil {
 		t.Fatalf("without a skills dir there is no check: %v", err)
+	}
+}
+
+// A case-variant spelling resolves into the real skills dir where the
+// filesystem folds case (H11): the C1 refusal must still catch it there.
+func TestShellRefusesCaseVariantSkillWrites(t *testing.T) {
+	root, _, _ := setup(t)
+	j, _ := NewJail(root, nil, nil)
+	dir := filepath.Join(root, ".moca", "skills")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewShell(RulesFromAllow([]string{"printf", "echo", "tee"}), j, "darwin")
+	s.SetSkillDir(res)
+	for _, cmd := range []string{
+		"printf x > .moca/Skills/moca-x/SKILL.md",
+		"echo x | tee .moca/sKills/moca-x/SKILL.md",
+	} {
+		if _, _, _, err := s.Check(cmd); err == nil || !strings.Contains(err.Error(), "written with write/edit") {
+			t.Errorf("%q: want the case-folded skill-write refusal, got %v", cmd, err)
+		}
 	}
 }
 

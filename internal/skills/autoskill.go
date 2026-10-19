@@ -411,7 +411,7 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 			if r.Line == old.Line || r.Pinned && old.Pinned && r.Last.Equal(old.Last) && old.HasProv {
 				continue
 			}
-			if !old.Pinned && old.HasProv && r.HasProv && !r.Pinned && old.Seen == 1 && r.Seen == 2 && r.Last.After(old.Last) {
+			if !old.Pinned && old.HasProv && r.HasProv && !r.Pinned && old.Seen == 1 && r.Seen == 2 && !r.Last.Before(old.Last) {
 				continue
 			}
 			return fmt.Errorf("refused: a confirmed rule goes (×1, %s) → (×2, %s) once and then never changes — rewrite its text instead if the rule itself changed", old.Last.Format("2006-01-02"), today)

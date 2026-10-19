@@ -217,6 +217,13 @@ func TestValidateSkillUpdatesAndTransitions(t *testing.T) {
 	if err := ValidateSkill(autoSkill("moca-x", "d", "- **a**: b (×2, 2026-10-15)\n"), c); err == nil {
 		t.Fatal("a bump must move the date forward")
 	}
+	// ×1 → ×2 observed the SAME day (two sessions on one day) passes: the
+	// provenance counts sessions, not dates — the bump date may equal the
+	// stored one, never precede it.
+	c.Prev = autoSkill("moca-x", "d", "- **a**: b (×1, 2026-10-18)\n")
+	if err := ValidateSkill(autoSkill("moca-x", "d", "- **a**: b (×2, 2026-10-18)\n"), c); err != nil {
+		t.Fatalf("×1→×2 on the same day must pass: %v", err)
+	}
 	// a changed text is a new rule: back to ×1, or refused at ×2
 	c.Prev = prev
 	if err := ValidateSkill(autoSkill("moca-x", "d", "- **a**: c (×2, 2026-10-18)\n"), c); err == nil || !strings.Contains(err.Error(), "a new rule starts") {

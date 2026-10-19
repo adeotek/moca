@@ -186,17 +186,25 @@ func (a *Agent) takeSteering() []steerMsg {
 // and any steering arms the one-shot skill hint.
 func (a *Agent) applySteering() (bool, error) {
 	msgs := a.takeSteering()
-	texts := make([]string, 0, len(msgs))
-	for _, m := range msgs {
-		if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(m.text)}); err != nil {
+	for i := 0; i < len(msgs); i++ {
+		if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(msgs[i].text)}); err != nil {
+			// A failed append must not swallow the rest of the queue:
+			// re-queue the messages that did not land (an aborted run's
+			// texts return to the editor through TakeSteering).
+			a.mu.Lock()
+			a.steer = append(msgs[i+1:], a.steer...)
+			a.mu.Unlock()
 			return false, err
-		}
-		texts = append(texts, m.text)
-		if m.typed != "" {
-			a.opts.Env.SkillTyped = append(a.opts.Env.SkillTyped, m.typed)
 		}
 	}
 	if len(msgs) > 0 {
+		texts := make([]string, len(msgs))
+		for i, m := range msgs {
+			texts[i] = m.text
+			if m.typed != "" {
+				a.opts.Env.SkillTyped = append(a.opts.Env.SkillTyped, m.typed)
+			}
+		}
 		a.opts.Env.SkillHintArmed = true // any steering arms the hint, never the signal
 		a.emit(SteeringApplied{Texts: texts})
 	}

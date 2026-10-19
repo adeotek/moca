@@ -30,6 +30,14 @@ func TestGenericRunnerAllowRules(t *testing.T) {
 		"make":                  "runs the makefile's default recipe",
 		"make -f other.mk test": "runs a makefile of its own choosing",
 		"make $TARGET":          "computed target",
+		// -C/--directory outside the workdir points at a makefile of its own
+		// choosing too: the value may not be a literal path elsewhere.
+		"make -C ../sibling test":        "of its own choosing",
+		"make --directory=/sneaky build": "of its own choosing",
+		"make -C/tmp/evil build":         "of its own choosing",
+		"make --dir /tmp/evil lint":      "of its own choosing",
+		"cd /tmp && make -C sub test":    "new directory's choosing",
+		"cd /tmp && make test":           "new directory's choosing",
 	}
 	for cmd, want := range refused {
 		_, _, _, err := s.Check(cmd)
@@ -94,6 +102,15 @@ func TestGenericRunnerAllowRules(t *testing.T) {
 	named := NewShell(NewRules(RuleSet{Name: "user", Allow: mustRules(t, "make", "make bootstrap")}), j, "linux")
 	if _, _, _, err := named.Check("make bootstrap"); err != nil {
 		t.Errorf("an explicit `make bootstrap` rule must cover it, got %v", err)
+	}
+	// A named rule waives only the target list: the option- and
+	// environment-level checks stay unconditional (`*` rides anywhere inside
+	// a named rule's own words, and must not buy its way past -f).
+	if _, _, _, err := named.Check("make -f evil.mk bootstrap"); err == nil || !strings.Contains(err.Error(), "of its own choosing") {
+		t.Errorf("a named rule must not cover a makefile of its own choosing, got %v", err)
+	}
+	if _, _, _, err := named.Check("cd /tmp && make bootstrap"); err == nil || !strings.Contains(err.Error(), "directory's choosing") {
+		t.Errorf("a named rule must not cover a makefile picked by a changed directory, got %v", err)
 	}
 
 	// Open item (SPECS §15): these still reach the tool unapproved.

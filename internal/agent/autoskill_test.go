@@ -665,6 +665,31 @@ func TestResumeKeepsOrRefusesTheGuard(t *testing.T) {
 	}
 }
 
+// Resumed UNTRUSTED (the approval was declined for this process): the switch
+// is on, but C5b must still hold — the dir resolves with or without trust,
+// the refusing guard exists, and an auto-skill write is REFUSED, not landed
+// unvalidated through a dead one.
+func TestResumeUntrustedInstallsAReachingRefusingGuard(t *testing.T) {
+	s := newScript(t, textTurn("ok"))
+	a, _, _ := startManaged(t, s)
+	path := a.Session().Path()
+	a.Session().Close()
+
+	d, err := Resume(StartOptions{Config: a.opts.Config, Workdir: session.WorkdirOf(path), Trusted: false, HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Session().Close()
+	if !d.opts.Env.SkillGuardRefusing || d.opts.Env.SkillGuard == nil || d.opts.Env.SkillDir == "" {
+		t.Fatalf("an untrusted resume of a blocked session installs a REACHING refusing guard: refusing=%v dir=%q",
+			d.opts.Env.SkillGuardRefusing, d.opts.Env.SkillDir)
+	}
+	r := runTool(t, d, "write", writeArgs(".moca/skills/moca-x/SKILL.md", autoFile("moca-x", "d", autoBody("rule"))))
+	if !r.IsError || !strings.Contains(r.Content, "turned off after this session started") {
+		t.Fatalf("an auto-skill write must be refused on the untrusted resume: %q", r.Content)
+	}
+}
+
 func TestResumeOfAFeatureOffSessionStaysOff(t *testing.T) {
 	// Started with the switch off (no block in the frozen prompt), resumed
 	// after it went on: the session stays off — no guard, no /remember, no

@@ -120,6 +120,24 @@ func TestAbortReturnsSteering(t *testing.T) {
 	}
 }
 
+// A failed append must not swallow the rest of the drained queue: the
+// messages that did not land are re-queued and return to the editor through
+// TakeSteering (the aborted-run contract).
+func TestSteeringRequeuesOnAppendFailure(t *testing.T) {
+	s := newScript(t, textTurn("ok"))
+	a, _, _ := startTestWith(t, s, "", "")
+	defer a.Session().Close()
+	a.Steer("first", "first")
+	a.Steer("second", "second")
+	a.Session().Close() // the underlying appends now fail
+	if _, err := a.applySteering(); err == nil {
+		t.Fatal("a closed session's append must fail")
+	}
+	if got := a.TakeSteering(); len(got) != 1 || got[0] != "second" {
+		t.Fatalf("the un-appended messages must be back in the queue, got %q", got)
+	}
+}
+
 func TestContextTokensAnchored(t *testing.T) {
 	s := newScript(t, textTurn("ok")) // usage: prompt 10 + completion 5
 	a, _, _ := startTestWith(t, s, "", "")

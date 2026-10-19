@@ -160,11 +160,12 @@ func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error)
 	// The dir the feature writes into, resolved by the jail's own resolver so
 	// a symlinked workdir, .moca or .moca/skills resolves exactly as a write
 	// target would — never filepath.Join(jailRoot, ".moca", "skills").
-	var skillDir string
-	var skillDirErr error
-	if o.Trusted {
-		skillDir, skillDirErr = jail.Resolve(filepath.Join(".moca", "skills"), true)
-	}
+	// Resolved for EVERY start and resume, trusted or not (Resolve creates
+	// nothing): C5b installs the refusing guard on a resumed session whose
+	// trust was withdrawn, and env.SkillDir must be non-empty there or
+	// skillRel never routes a write to the guard — the block would be present
+	// with a dead guard, and the write lands unvalidated.
+	skillDir, skillDirErr := jail.Resolve(filepath.Join(".moca", "skills"), true)
 	smOn := sm.On && o.Trusted && skillDirErr == nil
 	// Hygiene runs before discovery so the listing reflects the pruning. It
 	// is interactive-Start only (never Resume: a deletion would contradict the
