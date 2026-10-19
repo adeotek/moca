@@ -28,6 +28,9 @@ func ProjectConfigFile(workdir string) string {
 type ProjectConfig struct {
 	Permissions PermissionsConfig `json:"permissions"`
 	MCP         MCPConfig         `json:"mcp"`
+	// Skills may opt the repository out (selfManaged: false); a `true` is
+	// declarative and never enables the feature on its own (§4/§12).
+	Skills SkillsConfig `json:"skills"`
 }
 
 // Mode is the project layer's default permission mode ("" when unset).

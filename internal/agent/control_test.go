@@ -69,7 +69,7 @@ func TestSteeringLandsAfterToolResults(t *testing.T) {
 	a, _, _ := startTestWith(t, s, "", "")
 	a.opts.Emit = func(e Event) {
 		if _, ok := e.(ToolStart); ok {
-			a.Steer("also check README")
+			a.Steer("also check README", "")
 		}
 	}
 	a.Run(context.Background(), "go")
@@ -86,7 +86,7 @@ func TestSteeringWithoutToolsBecomesNextMessage(t *testing.T) {
 	a, _, _ := startTestWith(t, s, "", "")
 	a.opts.Emit = func(e Event) {
 		if _, ok := e.(TextDelta); ok && s.bodyCount() == 1 {
-			a.Steer("follow-up")
+			a.Steer("follow-up", "")
 		}
 	}
 	out, _ := a.Run(context.Background(), "go")
@@ -104,7 +104,7 @@ func TestAbortReturnsSteering(t *testing.T) {
 		// abort() reports synthetic results as ToolEnds too; steer once.
 		if _, ok := e.(ToolEnd); ok && !steered {
 			steered = true
-			a.Steer("draft")
+			a.Steer("draft", "")
 			cancel()
 		}
 	}
@@ -117,6 +117,26 @@ func TestAbortReturnsSteering(t *testing.T) {
 		if e.Message != nil && len(e.Message.Content) > 0 && e.Message.Content[0].Text == "draft" {
 			t.Fatal("aborted steering must not reach the transcript")
 		}
+	}
+}
+
+// A failed append must not swallow the rest of the drained queue: the
+// messages that did not land are re-queued and return to the editor through
+// TakeSteering (the aborted-run contract).
+func TestSteeringRequeuesOnAppendFailure(t *testing.T) {
+	s := newScript(t, textTurn("ok"))
+	a, _, _ := startTestWith(t, s, "", "")
+	defer a.Session().Close()
+	a.Steer("first", "first")
+	a.Steer("second", "second")
+	a.Session().Close() // the underlying appends now fail
+	if _, err := a.applySteering(); err == nil {
+		t.Fatal("a closed session's append must fail")
+	}
+	// "first" is the append that failed: it did not land either, so it comes
+	// back too — dropping it would lose text the user typed.
+	if got := a.TakeSteering(); len(got) != 2 || got[0] != "first" || got[1] != "second" {
+		t.Fatalf("the un-appended messages must be back in the queue, got %q", got)
 	}
 }
 

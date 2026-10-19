@@ -291,8 +291,8 @@ func TestRunDoneReturnsSteeringToEditor(t *testing.T) {
 	m := newAgentModel(t)
 	m.running = true
 	m.input.SetBuffer("draft")
-	m.agent.Steer("queued one")
-	m.agent.Steer("queued two")
+	m.agent.Steer("queued one", "")
+	m.agent.Steer("queued two", "")
 	m.handleRunDone(runDoneMsg{err: context.Canceled})
 	if got := m.ta.Value(); got != "queued one\nqueued two\ndraft" {
 		t.Fatalf("editor %q", got)

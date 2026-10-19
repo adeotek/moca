@@ -142,11 +142,17 @@ func (a *Agent) ToggleHard() (bool, error) {
 	return true, nil
 }
 
+// steerMsg is one queued steering message: what is appended to the
+// transcript, and the part of it the user typed ("" for none).
+type steerMsg struct{ text, typed string }
+
 // Steer queues a message to be appended after the current tool batch's
-// results (thread-safe: the TUI calls it from another goroutine).
-func (a *Agent) Steer(text string) {
+// results (thread-safe: the TUI calls it from another goroutine). typed is
+// the part the user typed — a mid-run "fix the deploy skill too" names it
+// (Decision 15); the text alone is not typed.
+func (a *Agent) Steer(text, typed string) {
 	a.mu.Lock()
-	a.steer = append(a.steer, text)
+	a.steer = append(a.steer, steerMsg{text: text, typed: typed})
 	a.mu.Unlock()
 }
 
@@ -159,6 +165,15 @@ func (a *Agent) PendingSteering() int {
 
 // TakeSteering drains the queue (an aborted run's texts return to the editor).
 func (a *Agent) TakeSteering() []string {
+	msgs := a.takeSteering()
+	out := make([]string, len(msgs))
+	for i, m := range msgs {
+		out[i] = m.text
+	}
+	return out
+}
+
+func (a *Agent) takeSteering() []steerMsg {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := a.steer
@@ -167,17 +182,34 @@ func (a *Agent) TakeSteering() []string {
 }
 
 // applySteering appends queued texts as user messages; reports whether any.
+// A steering message's typed part joins the run's typed text (Decision 15),
+// and any steering arms the one-shot skill hint.
 func (a *Agent) applySteering() (bool, error) {
-	texts := a.TakeSteering()
-	for _, t := range texts {
-		if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(t)}); err != nil {
+	msgs := a.takeSteering()
+	for i := 0; i < len(msgs); i++ {
+		if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(msgs[i].text)}); err != nil {
+			// A failed append must not swallow the rest of the queue:
+			// re-queue the messages that did not land — this one included
+			// (an aborted run's texts return to the editor through
+			// TakeSteering).
+			a.mu.Lock()
+			a.steer = append(msgs[i:], a.steer...)
+			a.mu.Unlock()
 			return false, err
 		}
 	}
-	if len(texts) > 0 {
+	if len(msgs) > 0 {
+		texts := make([]string, len(msgs))
+		for i, m := range msgs {
+			texts[i] = m.text
+			if m.typed != "" {
+				a.opts.Env.SkillTyped = append(a.opts.Env.SkillTyped, m.typed)
+			}
+		}
+		a.opts.Env.SkillHintArmed = true // any steering arms the hint, never the signal
 		a.emit(SteeringApplied{Texts: texts})
 	}
-	return len(texts) > 0, nil
+	return len(msgs) > 0, nil
 }
 
 // AddNote appends a user message without running (the `!` prefix).

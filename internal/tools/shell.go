@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -75,6 +76,12 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	need, every, unsure, err := env.Commands.Check(a.Command)
 	if err != nil {
 		slog.Debug("shell refused") // the analyser's reason carries the command text: not logged
+		// The skill-dir refusal is the skill guard's shell side: moca's own
+		// procedure, which must not arm the hint (H2/H3).
+		var ie interface{ Internal() bool }
+		if errors.As(err, &ie) && ie.Internal() {
+			env.internalRefusal = true
+		}
 		return errorf("refused: %v", err)
 	}
 	// Stateful-file guard (§10): refuse a SQLite open that would consume a
@@ -83,6 +90,7 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	// user's attention on a prompt.
 	refusal, copies := sqliteSidecarGuard(env, a.Command)
 	if refusal != "" {
+		env.internalRefusal = true // moca's own guard, not the project's wisdom
 		return errorf("%s", refusal)
 	}
 	if len(unsure) > 0 {
@@ -130,6 +138,14 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	}
 	if verifies(a.Command) {
 		env.Unverified = ""
+	}
+	// The skill-hint recovery trigger's state (task 6): a failing verifying
+	// command, remembered so a later, different green one can arm the hint.
+	// A purely mutating command (mkdir/cp/rm/…) exercises no code.
+	if out.ExitCode != 0 || out.TimedOut {
+		if verifies(a.Command) && !mutatesOnly(a.Command) {
+			env.lastFailedVerify = normCommand(a.Command)
+		}
 	}
 	if testRunCommand(a.Command) {
 		switch {

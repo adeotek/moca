@@ -16,6 +16,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -83,7 +84,16 @@ type Metrics struct {
 	// non-zero means a preserved-thinking route saw history that no longer
 	// matched the prefix its thinking was produced against.
 	ThinkingDropped int `json:"thinkingDropped,omitempty"`
+	// SkillWrites counts write/edit calls targeting .moca/skills/ (the
+	// self-managed skills feature, §12); SkillListed reports that this
+	// session's stored prompt lists a moca-* skill — the skills.2 row is the
+	// one that matters (session 1 wrote it, session 2 reads it).
+	SkillWrites int  `json:"skillWrites,omitempty"`
+	SkillListed bool `json:"skillListed,omitempty"`
 }
+
+// skillListedRe matches a moca-* skill line in the system prompt's listing.
+var skillListedRe = regexp.MustCompile(`(?m)^- moca-[a-z0-9-]+:`)
 
 // Tokens is every billed token of the run (cache reads included: they are
 // cheaper, not free).
@@ -148,6 +158,7 @@ func parseReadWindow(content string) (from, to int, lines map[int]string, ok boo
 func Collect(entries []session.Entry) Metrics {
 	m := Metrics{Calls: map[string]int{}, Residency: map[string]int{}, Nudges: map[string]int{}}
 	callNames := map[string]string{}
+	callInputs := map[string]json.RawMessage{} // the repeated-failure key's input, by call id
 	pending := map[string]readArgs{}
 	elided := map[string]bool{}
 	index := map[string]int{}
@@ -194,6 +205,7 @@ func Collect(entries []session.Entry) Metrics {
 		case session.TypeSession:
 			if e.Session != nil {
 				m.SystemPromptTokens = compact.Tokens(len(e.Session.SystemPrompt))
+				m.SkillListed = skillListedRe.MatchString(e.Session.SystemPrompt)
 			}
 		case session.TypeMessage:
 			if e.Message != nil && e.Message.Role == llm.RoleAssistant {
@@ -209,6 +221,7 @@ func Collect(entries []session.Entry) Metrics {
 			}
 			c := e.ToolUse.Call
 			callNames[c.ID] = c.Name
+			callInputs[c.ID] = c.Input
 			m.Calls[c.Name]++
 			var in struct {
 				Path   string `json:"path"`
@@ -223,6 +236,9 @@ func Collect(entries []session.Entry) Metrics {
 				if in.Path != "" {
 					editAt[in.Path] = i
 				}
+				if strings.Contains(filepath.ToSlash(in.Path), ".moca/skills/") {
+					m.SkillWrites++
+				}
 			}
 		case session.TypeToolResult:
 			if e.ToolResult == nil {
@@ -231,7 +247,7 @@ func Collect(entries []session.Entry) Metrics {
 			tr := e.ToolResult
 			if tr.IsError {
 				m.ToolErrors++
-				key := callNames[tr.CallID] + "\x00" + string(toolInputOf(entries, tr.CallID)) + "\x00" + tr.Content
+				key := callNames[tr.CallID] + "\x00" + string(callInputs[tr.CallID]) + "\x00" + tr.Content
 				if seenFail[key] {
 					m.RepeatedFailures++
 				}
@@ -311,17 +327,6 @@ func Collect(entries []session.Entry) Metrics {
 		}
 	}
 	return m
-}
-
-// toolInputOf returns the recorded input of a call (for the repeated-failure
-// key); an unknown call yields nil.
-func toolInputOf(entries []session.Entry, callID string) json.RawMessage {
-	for _, e := range entries {
-		if e.Type == session.TypeToolUse && e.ToolUse != nil && e.ToolUse.Call.ID == callID {
-			return e.ToolUse.Call.Input
-		}
-	}
-	return nil
 }
 
 // covered reports whether an earlier read window still in the live window
@@ -411,18 +416,31 @@ func readResults(r io.Reader) ([]Metrics, error) {
 	var out []Metrics
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	var lines []string
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
+		if line := strings.TrimSpace(sc.Text()); line != "" {
+			lines = append(lines, line)
 		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	for i, line := range lines {
 		var m Metrics
 		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			return nil, fmt.Errorf("bad results line: %w", err)
+			if i == len(lines)-1 {
+				// A harness killed mid-append leaves a torn final line. It is
+				// not a corrupt file, and refusing every later summary would
+				// make the whole label unreadable until someone edited it by
+				// hand — report it and read the rest.
+				fmt.Fprintf(os.Stderr, "evalstats: ignoring a torn final line (%d bytes) in the results file\n", len(line))
+				break
+			}
+			return nil, fmt.Errorf("bad results line %d: %w", i+1, err)
 		}
 		out = append(out, m)
 	}
-	return out, sc.Err()
+	return out, nil
 }
 
 // Summarize renders one row per (label, scenario) plus a total row per
@@ -450,12 +468,12 @@ func Summarize(rows []Metrics) string {
 		return keys[i].scenario < keys[j].scenario
 	})
 	var sb strings.Builder
-	sb.WriteString("| label | scenario | runs | pass | tokens (mean ± sd) | steps (mean ± sd) | cache eff | first-hit | breaks/run | redundant read tok | cost $ | tokens/solved | repeated fails |\n")
-	sb.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
+	sb.WriteString("| label | scenario | runs | pass | tokens (mean ± sd) | steps (mean ± sd) | cache eff | first-hit | breaks/run | redundant read tok | cost $ | tokens/solved | repeated fails | skill writes | skill listed |\n")
+	sb.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, k := range keys {
 		g := groups[k]
 		var toks, steps, firstHit []float64
-		passes, rep, breaks, redundant := 0, 0, 0, 0
+		passes, rep, breaks, redundant, skillWrites, skillListed := 0, 0, 0, 0, 0, 0
 		cost, total, eff := 0.0, 0, 0.0
 		for _, m := range g {
 			toks = append(toks, float64(m.Tokens()))
@@ -470,6 +488,10 @@ func Summarize(rows []Metrics) string {
 			cost += m.Cost
 			total += m.Tokens()
 			eff += m.CacheEff
+			skillWrites += m.SkillWrites
+			if m.SkillListed {
+				skillListed++
+			}
 		}
 		perSolved := "—"
 		if passes > 0 {
@@ -478,9 +500,9 @@ func Summarize(rows []Metrics) string {
 		tm, ts := meanSD(toks)
 		sm, ss := meanSD(steps)
 		n := float64(len(g))
-		fmt.Fprintf(&sb, "| %s | %s | %d | %d/%d | %.0f ± %.0f | %.1f ± %.1f | %.2f | %.0f | %.1f | %.0f | %.4f | %s | %d |\n",
+		fmt.Fprintf(&sb, "| %s | %s | %d | %d/%d | %.0f ± %.0f | %.1f ± %.1f | %.2f | %.0f | %.1f | %.0f | %.4f | %s | %d | %d | %d/%d |\n",
 			k.label, k.scenario, len(g), passes, len(g), tm, ts, sm, ss,
-			eff/n, median(firstHit), float64(breaks)/n, float64(redundant)/n, cost, perSolved, rep)
+			eff/n, median(firstHit), float64(breaks)/n, float64(redundant)/n, cost, perSolved, rep, skillWrites, skillListed, len(g))
 	}
 	return sb.String()
 }
