@@ -588,7 +588,7 @@ func legSecretScan(t *testing.T) {
 		textTurn("done"),
 	)
 	g.user(`"skills":{"selfManaged":true}`)
-	_, errOut, code := g.run("learn", "--approve")
+	stdOut, errOut, code := g.run("learn", "--approve")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
@@ -611,13 +611,15 @@ func legSecretScan(t *testing.T) {
 		t.Fatalf("the token reached %v", found)
 	}
 	// The transcript does store tool input verbatim by construction; the key
-	// scan is the provider key (acpgate shape).
+	// scan is the provider key (acpgate shape). The child's stdout is scanned
+	// too: the -p path is where echoed config or error text would land.
 	var captured strings.Builder
 	captured.WriteString(g.readSessions())
+	captured.WriteString(stdOut)
 	captured.WriteString(errOut)
 	captured.WriteString(g.readLogs())
 	if strings.Contains(captured.String(), providerKey) {
-		t.Fatal("the provider key leaked into the transcript, stderr or the log")
+		t.Fatal("the provider key leaked into the transcript, stdout, stderr or the log")
 	}
 	t.Logf("leg 4: the secret scan refuses the rule; nothing reached the workdir; the provider key never leaked")
 }
@@ -684,7 +686,10 @@ func legSwitchTable(t *testing.T) {
 	b := newGate(t, textTurn("ok"))
 	b.user(`"skills":{"selfManaged":false}`)
 	b.project(`{"skills":{"selfManaged":true}}`)
-	_, errOut, _ = b.run("hello", "--approve")
+	_, errOut, code = b.run("hello", "--approve")
+	if code != 0 {
+		t.Fatalf("b: exit %d: %s", code, errOut)
+	}
 	if !strings.Contains(errOut, "your user config sets it false") {
 		t.Fatalf("wording: %q", errOut)
 	}
@@ -692,7 +697,10 @@ func legSwitchTable(t *testing.T) {
 	c := newGate(t, textTurn("ok"))
 	c.user(`"skills":{"selfManaged":true}`)
 	c.project(`{"skills":{"selfManaged":false}}`)
-	_, errOut, _ = c.run("hello", "--approve")
+	_, errOut, code = c.run("hello", "--approve")
+	if code != 0 {
+		t.Fatalf("c: exit %d: %s", code, errOut)
+	}
 	if !strings.Contains(errOut, "note: self-managed skills are off in this project") {
 		t.Fatalf("note: %q", errOut)
 	}
@@ -703,7 +711,10 @@ func legSwitchTable(t *testing.T) {
 	d := newGate(t, textTurn("ok"))
 	d.user(`"skills":{"selfManaged":true}`)
 	d.project(`{"skills":{"selfManaged":true}}`)
-	_, errOut, _ = d.run("hello", "--approve")
+	_, errOut, code = d.run("hello", "--approve")
+	if code != 0 {
+		t.Fatalf("d: exit %d: %s", code, errOut)
+	}
 	if strings.Contains(errOut, "skills.selfManaged") {
 		t.Fatalf("no message expected: %q", errOut)
 	}

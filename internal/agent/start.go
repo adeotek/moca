@@ -164,7 +164,11 @@ func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error)
 	// nothing): C5b installs the refusing guard on a resumed session whose
 	// trust was withdrawn, and env.SkillDir must be non-empty there or
 	// skillRel never routes a write to the guard — the block would be present
-	// with a dead guard, and the write lands unvalidated.
+	// with a dead guard, and the write lands unvalidated. When resolution
+	// itself fails (a broken symlink, .moca/skills replaced by a file) no
+	// SkillDir exists to route to, and none is needed: every write into the
+	// broken structure fails in this same resolver before any guard is
+	// consulted — nothing lands unvalidated there either.
 	skillDir, skillDirErr := jail.Resolve(filepath.Join(".moca", "skills"), true)
 	smOn := sm.On && o.Trusted && skillDirErr == nil
 	// Hygiene runs before discovery so the listing reflects the pruning. It
@@ -372,7 +376,10 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	} else if hadBlock && st.skillDirErr == nil {
 		// C5b: the frozen prompt still invites writes the absent guard would
 		// not check — install a refusing one instead of going nil (§2.1's
-		// invariant: block present ⇒ guard installed, validating or refusing).
+		// invariant: block present ⇒ guard installed, validating or refusing,
+		// whenever the dir resolves; when it cannot, no write into it can
+		// either — the same resolver refuses both — so there is nothing to
+		// route and the resolution error warns).
 		// The shell check is not installed here: it belongs to the feature
 		// being on, and a shell write in this state is caught at load.
 		env.SkillDir = st.skillDir
@@ -671,12 +678,27 @@ const skillRefusingText = "refused: self-managed skills were turned off after th
 // feature off).
 func refusingAutoGuard(dir string) func(abs, rel string, data []byte) error {
 	return func(abs, rel string, data []byte) error {
-		name := strings.Split(rel, "/")[0]
+		parts := strings.Split(rel, "/")
+		name := parts[0]
 		if prev, err := os.ReadFile(abs); err == nil && isAutoSkill(prev, name) {
 			return errors.New(skillRefusingText)
 		}
 		if isAutoSkill(data, name) {
 			return errors.New(skillRefusingText)
+		}
+		// A resource write INTO an auto skill's directory corrupts the
+		// machine-owned artifact without either check above seeing it: the
+		// target file is not itself a skill, and its absent previous content
+		// is not one either. Auto skills are a single SKILL.md — the
+		// validating guard refuses companions (and SKILL.md-first for that
+		// matter), so this one refuses them too; otherwise the write lands
+		// contract-breaking and the next session's load-time re-validation
+		// drops a skill this session's frozen prompt still advertises.
+		if len(parts) >= 2 && !tools.IsSkillName(parts[1]) {
+			if cur, err := os.ReadFile(filepath.Join(dir, name, "SKILL.md")); err == nil &&
+				isAutoSkill(cur, name) {
+				return errors.New(skillRefusingText)
+			}
 		}
 		return nil
 	}

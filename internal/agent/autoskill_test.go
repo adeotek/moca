@@ -663,6 +663,22 @@ func TestResumeKeepsOrRefusesTheGuard(t *testing.T) {
 	if r.IsError {
 		t.Fatalf("hand-written edits pass in this state: %q", r.Content)
 	}
+	// A companion file INTO an auto skill's directory is refused too: the
+	// target file is not itself a skill and has no previous content, so the
+	// refusing guard must consult the dir's SKILL.md — the validating guard
+	// refuses companions (an auto skill is a single SKILL.md), and a landed
+	// one would be dropped by the next session's load-time re-validation.
+	auto := filepath.Join(c.opts.Env.Root, ".moca", "skills", "moca-auto")
+	if err := os.MkdirAll(auto, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(auto, "SKILL.md"), []byte(autoFile("moca-auto", "d", autoBody("rule"))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r = runTool(t, c, "write", writeArgs(".moca/skills/moca-auto/notes.md", "notes\n"))
+	if !r.IsError || !strings.Contains(r.Content, "turned off after this session started") {
+		t.Fatalf("a companion write into an auto skill's dir must be refused in this state: %q", r.Content)
+	}
 }
 
 // A session resumed days after it started still carries its start date in

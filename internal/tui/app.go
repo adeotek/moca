@@ -999,11 +999,13 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		}
 		if req := strings.TrimSpace(c.Args); req != "" {
 			// `/plan <request>` plans it now (mode on if it was off); the
-			// plain toggle prints via PlanChanged.
+			// plain toggle prints via PlanChanged. The request is the user's
+			// own words — carried as Typed like every other typed start
+			// (Decision 15), even though plan mode exercises none of it.
 			if !m.agent.Plan() {
 				m.agent.SetPlan(true)
 			}
-			return m.startRun(req)
+			return m.startRunTyped(req, req)
 		}
 		m.agent.SetPlan(!m.agent.Plan()) // PlanChanged prints + refreshes
 		return nil

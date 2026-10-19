@@ -14,9 +14,11 @@ import (
 
 // CLI: replay -base bin/moca-base -cand bin/moca -label <label> [-scenarios a,b]
 //
-// For every kept transcript test/evals/results/<label>/<scenario>-<n>.jsonl it
-// re-runs both binaries on the model's recorded turns and compares request
-// bytes and prefix breaks: zero-variance measurement of harness-side changes.
+// For every kept transcript test/evals/results/<label>/<scenario>.<j>-<n>.jsonl
+// (one file per session; rows from before the v0.7.0 multi-session naming are
+// <scenario>-<n>.jsonl and replay handles both) it re-runs both binaries on
+// the model's recorded turns and compares request bytes and prefix breaks:
+// zero-variance measurement of harness-side changes.
 func main() {
 	base := flag.String("base", "", "base binary (required)")
 	cand := flag.String("cand", "", "candidate binary (required)")

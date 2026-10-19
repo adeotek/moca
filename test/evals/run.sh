@@ -75,7 +75,10 @@ fresh_repo() {
 
 if [ "$SELFTEST" = 1 ]; then
   bad=0
-  for s in "${SCENARIOS[@]}"; do
+  # skills-cold is sessions.txt-only (kept out of the default scenario list on
+  # purpose), but its checker's file-state arms need the gate like the rest —
+  # with SESSION unset, so the loop below covers it without naming it here.
+  for s in "${SCENARIOS[@]}" skills-cold; do
     work=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-self.XXXXXX")
     fresh_repo "$s" "$work"
     if (cd "$work" && VARIANT=on bash "$EVALS/$s/check.sh" >/dev/null 2>&1); then
@@ -120,13 +123,13 @@ one() {
   [ -n "$MODEL" ] && flags+=(--model "$MODEL")
   local prompts=()
   if [ -f "$EVALS/$s/sessions.txt" ]; then
-    while IFS= read -r line; do
+    while IFS= read -r line || [ -n "$line" ]; do
       [ -n "$line" ] && prompts+=("$line")
     done < "$EVALS/$s/sessions.txt"
   else
     prompts+=("$(cat "$EVALS/$s/prompt.txt")")
   fi
-  local i=0 sess="" last
+  local i=0 sess="" last code=1
   for p in "${prompts[@]}"; do
     i=$((i + 1))
     (cd "$work" && XDG_DATA_HOME="$data" XDG_CONFIG_HOME="$cfg" XDG_STATE_HOME="$data" timeout 900 \
