@@ -665,6 +665,47 @@ func TestResumeKeepsOrRefusesTheGuard(t *testing.T) {
 	}
 }
 
+func TestResumeOfAFeatureOffSessionStaysOff(t *testing.T) {
+	// Started with the switch off (no block in the frozen prompt), resumed
+	// after it went on: the session stays off — no guard, no /remember, no
+	// shell refusal — and the warning says so (SPECS §12's resume rule).
+	s := newScript(t, textTurn("ok"))
+	a, _, _ := startWith(t, s, 40, "", "", func(o *StartOptions) { o.Trusted = true })
+	path := a.Session().Path()
+	on := a.opts.Config
+	a.Session().Close()
+	yes := true
+	on.Skills.SelfManaged = &yes
+	var evs []Event
+	b, err := Resume(StartOptions{Config: on, Workdir: session.WorkdirOf(path), Trusted: true,
+		Emit: func(e Event) { evs = append(evs, e) }, HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Session().Close()
+	if b.SelfManagedSkills() || b.opts.Env.SkillGuard != nil || b.opts.Env.SkillDir != "" || b.opts.Env.SkillCold {
+		t.Fatal("a session that started without the block must not learn after a resume")
+	}
+	if !slices.ContainsFunc(warningTexts(&evs), func(x string) bool { return strings.Contains(x, "stay off in this resumed session") }) {
+		t.Fatalf("one warning about the mismatch: %v", warningTexts(&evs))
+	}
+}
+
+func TestRememberRefusesEmptyTextAndPlanMode(t *testing.T) {
+	a, _, _ := startManaged(t, newScript(t))
+	defer a.Session().Close()
+	if _, err := a.Remember(context.Background(), "  "); err == nil || !strings.Contains(err.Error(), "needs the rule") {
+		t.Fatalf("an empty /remember must not start a user-signal run: %v", err)
+	}
+	a.SetPlan(true)
+	if _, err := a.Remember(context.Background(), "use make test"); err == nil || !strings.Contains(err.Error(), "plan mode is on") {
+		t.Fatalf("/remember in plan mode must refuse before the run: %v", err)
+	}
+	if a.opts.Env.SkillUserSignal {
+		t.Fatal("a refused /remember never arms the signal")
+	}
+}
+
 func TestStartOmitsBlockOnResolveError(t *testing.T) {
 	outer := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(outer, "skills"), 0o755); err != nil {
@@ -795,11 +836,9 @@ func TestRememberRequestText(t *testing.T) {
 	}
 }
 
-func TestNoHintWithoutTheBlock(t *testing.T) {
-	// Switch off: armed by hand, the hint still never appears.
-	env := &tools.Env{}
-	env.SkillHintArmed = true
-	if env.SkillLearning() {
-		t.Fatal("no guard: no learning")
-	}
-}
+// The "no block ⇒ no hint" end-to-end pin lives with the tools that decide it
+// (internal/tools: TestArmedHintNeedsAValidatingGuard — armed by hand, silent
+// with no guard and with C5b's refusing one, delivered only under a validating
+// guard, with that delivery as the non-vacuity control). The predicate itself
+// is pinned by tools.TestSkillLearningPredicate; the test that used to sit here
+// only re-asserted that predicate on an empty Env and pinned nothing.

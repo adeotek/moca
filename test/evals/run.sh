@@ -24,7 +24,10 @@ set -u
 EVALS="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$EVALS/../.." && pwd)"
 MOCA="${MOCA:-$REPO/bin/moca}"
-RUNS=1 JOBS=4 LABEL="dev" MODEL="" SELFTEST=0 VARIANT="on"
+# VARIANT is set only by -c: without it every scenario runs its own config
+# (or the shared corpus config), never a variant arm; the checkers still see
+# "on" (the scenarios' own configs are the on arm).
+RUNS=1 JOBS=4 LABEL="dev" MODEL="" SELFTEST=0 VARIANT=""
 SCENARIOS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -49,14 +52,14 @@ fi
 command -v go >/dev/null 2>&1 || { echo "go not found (mise install?)"; exit 2; }
 
 # scenario_config <scenario>: the user config a scenario runs with — a
-# variant-specific one, its own, else the shared corpus config.
+# variant-specific one (-c only), its own, else the shared corpus config.
 scenario_config() {
   local s="$1"
-  if [ -f "$EVALS/$s/config.$VARIANT.jsonc" ]; then
+  if [ -n "$VARIANT" ] && [ -f "$EVALS/$s/config.$VARIANT.jsonc" ]; then
     echo "$EVALS/$s/config.$VARIANT.jsonc"
   elif [ -f "$EVALS/$s/config.jsonc" ]; then
     echo "$EVALS/$s/config.jsonc"
-  elif [ -f "$EVALS/config.$VARIANT.jsonc" ]; then
+  elif [ -n "$VARIANT" ] && [ -f "$EVALS/config.$VARIANT.jsonc" ]; then
     echo "$EVALS/config.$VARIANT.jsonc"   # corpus-wide arm (A/B a feature switch)
   else
     echo "$EVALS/config.jsonc"
@@ -126,7 +129,7 @@ one() {
   local i=0 sess="" last
   for p in "${prompts[@]}"; do
     i=$((i + 1))
-    (cd "$work" && XDG_DATA_HOME="$data" XDG_CONFIG_HOME="$cfg" timeout 900 \
+    (cd "$work" && XDG_DATA_HOME="$data" XDG_CONFIG_HOME="$cfg" XDG_STATE_HOME="$data" timeout 900 \
       "$MOCA" --config "$(scenario_config "$s")" "${flags[@]}" -p "$p" \
       > "$data/stdout.$i.txt" 2> "$data/stderr.$i.txt")
     last=$?
@@ -134,15 +137,18 @@ one() {
     [ "$last" != 0 ] && code=$last
   done
   sess=$(ls -t "$data"/moca/sessions/*.jsonl 2>/dev/null | head -1)
-  if why=$(cd "$work" && SESSION="$sess" DATA="$data" VARIANT="$VARIANT" bash "$EVALS/$s/check.sh" 2>&1); then pass=true; fi
+  if why=$(cd "$work" && SESSION="$sess" DATA="$data" VARIANT="${VARIANT:-on}" bash "$EVALS/$s/check.sh" 2>&1); then pass=true; fi
   # Secret scan (B4): the provider key must never reach a transcript, a log or
   # the captured output. Guarded — an empty pattern matches every line — and it
   # runs before the pass cleanup below deletes the files it scans. A hit never
-  # prints the value. Every session and every stdout/stderr file is scanned,
-  # not just the newest session.
+  # prints the value. Every session, every stdout/stderr file and every
+  # diagnostic log is scanned, not just the newest session: XDG_STATE_HOME
+  # points at the run's data dir, so the logs land under it (moca writes
+  # <state>/logs, and without it they would escape both the scan and the
+  # cleanup into the host's real state dir).
   if [ -n "${OPENCODE_GO_KEY:-}" ]; then
     local f
-    for f in "$data"/moca/sessions/*.jsonl "$data"/stdout.*.txt "$data"/stderr.*.txt; do
+    for f in "$data"/moca/sessions/*.jsonl "$data"/moca/logs/* "$data"/stdout.*.txt "$data"/stderr.*.txt; do
       [ -f "$f" ] || continue
       if grep -qF -- "$OPENCODE_GO_KEY" "$f"; then
         pass=false

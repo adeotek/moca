@@ -106,6 +106,15 @@ func TestMatch(t *testing.T) {
 	if class, ok := Match("-race"); ok {
 		t.Errorf("Match(-race) = %q, want no match", class)
 	}
+	// A token prefix inside a longer word is prose, not a credential.
+	for _, s := range []string{"run the task-scheduler suite", "the risk-assessment job", "make desk-integration"} {
+		if class, ok := Match(s); ok {
+			t.Errorf("Match(%q) = %q, want no match (a prefix inside a word)", s, class)
+		}
+	}
+	if class, ok := Match("token: sk-abc123xyz42"); !ok || class != "credential token" {
+		t.Errorf("Match(sk-…) at a word start = %q/%v, want credential token", class, ok)
+	}
 }
 
 func TestMatchIgnoresEnvReferences(t *testing.T) {

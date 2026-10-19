@@ -12,7 +12,14 @@
 #   (b) at least one auto skill exists and its body names that runner —
 #       the session recorded the thing it had to discover;
 #   (c) no `(user, …)` rule exists (-p has no /remember).
+#
+# Variant scoping (-c off): with the feature off no skill can exist, so (b) is
+# REPORT-ONLY there — the session must still get the suite green (a), or the
+# off arm would score a pass for doing nothing.
 set -u
+VARIANT="${VARIANT:-on}"
+required=1
+[ "$VARIANT" = "off" ] && required=0
 
 CALC_STRICT=1 go test ./... >/dev/null 2>&1 || { echo "(a) the suite is not green"; exit 1; }
 
@@ -25,6 +32,9 @@ for f in .moca/skills/moca-*/SKILL.md; do
 done
 
 if [ "$recorded" != 1 ]; then
-  echo "(b) no auto skill records the runner the session had to discover (recording rate: miss)"
-  exit 1
+  if [ "$required" = 1 ]; then
+    echo "(b) no auto skill records the runner the session had to discover (recording rate: miss)"
+    exit 1
+  fi
+  echo "report: (b) no auto skill records the runner (feature off)"
 fi

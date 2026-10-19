@@ -184,9 +184,10 @@ type Env struct {
 	SkillTyped      []string
 	SkillHintArmed  bool
 	SkillHintDone   bool
-	// SkillCold is set once by the agent when the project carries no recorded
+	// SkillCold is set by the agent when the project carries no recorded
 	// auto skill: it arms the hint on the run's first successful verification
 	// (see Registry.Run), the moment a cold repo's own procedure gets proved.
+	// guardedWrite clears it once this session creates a skill.
 	SkillCold bool
 	// lastFailedVerify is the recovery trigger's state: the normalized
 	// command of the last failing verifying shell call (shell.go), cleared by
@@ -256,7 +257,7 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 	if res.IsError {
 		rh := trackFailure(env, call.Name, call.Input, res.Content)
 		res.Content += rh
-		if env.SkillGuard != nil && !env.skillRefused && !env.internalRefusal &&
+		if env.SkillLearning() && !env.skillRefused && !env.internalRefusal &&
 			(rh != "" || strings.HasPrefix(res.Content, "refused:")) { // both branches guarded (H2)
 			env.SkillHintArmed = true
 		}
@@ -264,7 +265,7 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 		verifies(cmdOf(call)) && !mutatesOnly(cmdOf(call)) &&
 		normCommand(cmdOf(call)) != env.lastFailedVerify {
 		env.SkillHintArmed = true // recovery (H1) — skillHint delivers on this same result
-	} else if env.SkillCold && env.SkillCreations == 0 && call.Name == "shell" &&
+	} else if env.SkillCold && call.Name == "shell" &&
 		verifies(cmdOf(call)) && !mutatesOnly(cmdOf(call)) {
 		// Cold repo: the first verification that succeeds there is itself the
 		// durable fact ("this is how the repo is checked"), and waiting for a
@@ -338,10 +339,6 @@ func investigationRefusal(env *Env) string {
 	return "refused: tests are failing — locate the cause with the search tool before editing"
 }
 
-// skillHint is the one-shot skill-learning nudge (SPECS §11/§12). At most
-// once per run; never in plan mode; never without a validating guard (C5b's
-// refusing one does not count — it would invite a write it then rejects);
-// never on a read, a search, or any non-verifying result.
 // skillHintMark is the stable prefix of the skill-learning nudge's text (the
 // tests match on it, so the prose below can change without rewriting them).
 const skillHintMark = "[hint: record what this just proved"

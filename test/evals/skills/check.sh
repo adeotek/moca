@@ -25,7 +25,11 @@ for f in .moca/skills/moca-*/SKILL.md; do
   [ -f "$f" ] || continue
   grep -q '^auto: true' "$f" || continue
   if grep -qE 'make test|CALC_STRICT' "$f"; then rule=1; fi
-  if grep -q 'directly — the fixtures need nothing else' "$f"; then stale=1; fi
+  # (e) is about the CLAIM, not the wording: a line still directing the reader
+  # to plain `go test ./...` (with no make test / CALC_STRICT next to it) is the
+  # stale rule — a minimally corrected rule that keeps the old sentence tail is
+  # a correction, and must not be scored as duplication.
+  if grep -E 'go test' "$f" | grep -vqE 'make test|CALC_STRICT|strict'; then stale=1; fi
 done
 if [ "$rule" != 1 ]; then
   if [ "$required" = 1 ]; then echo "(a) no auto skill records the repo's test command"; exit 1; fi

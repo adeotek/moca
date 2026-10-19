@@ -82,6 +82,23 @@ func TestACPTypedExcludesResources(t *testing.T) {
 	}
 }
 
+func TestACPRememberSplitsOnAnyWhitespace(t *testing.T) {
+	// A newline after the command is a separator for expand, so the typed
+	// rule must be split the same way — never truncated at the first space.
+	s := newScript(t, textTurn("ok"))
+	c := startClient(t, managedOptions(t, s))
+	sid := c.newSession(t.TempDir())
+	if _, err := c.prompt(sid, "/remember\nuse make test"); err != nil {
+		t.Fatalf("prompt: %v", err.Message)
+	}
+	if txt := lastUserText(t, s); !strings.Contains(txt, "Remember this project rule: use make test") {
+		t.Fatalf("the whole typed rule must reach the run, got %s", txt)
+	}
+	if name, args := splitCommand("/remember\tuse  it"); name != "remember" || args != "use  it" {
+		t.Fatalf("splitCommand = %q, %q", name, args)
+	}
+}
+
 func TestACPRememberIntercepted(t *testing.T) {
 	s := newScript(t, textTurn("ok"))
 	c := startClient(t, managedOptions(t, s))

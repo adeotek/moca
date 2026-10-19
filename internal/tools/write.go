@@ -81,6 +81,10 @@ func guardedWrite(env *Env, abs string, data []byte) error {
 	}
 	if created {
 		env.SkillCreations++ // counted once the file landed, never on a failed write
+		// The repo is not cold any more: under the validating guard a created
+		// SKILL.md is an auto skill, so later runs of this session must not get
+		// the cold-repo nudge again.
+		env.SkillCold = false
 	}
 	return env.Reads.Record(abs)
 }

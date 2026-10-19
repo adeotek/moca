@@ -73,16 +73,19 @@ func main() {
 		if i := strings.LastIndex(scen, "-"); i > 0 {
 			scen = scen[:i]
 		}
-		if len(want) > 0 && !want[scen] {
+		// run.sh names every transcript <scenario>.<session>-<run>.jsonl: the
+		// scenario DIRECTORY (fixture, flags, sessions.txt) is the part before
+		// the session suffix, and -scenarios accepts either spelling.
+		dir := scen
+		if i := strings.Index(dir, "."); i > 0 {
+			dir = dir[:i]
+		}
+		if len(want) > 0 && !want[scen] && !want[dir] {
 			continue
 		}
 		// A multi-session scenario cannot be replayed: the replay starts from
 		// the scenario's fixture, where session 1's skills do not exist yet, so
 		// session 2 diverges by construction.
-		dir := scen
-		if i := strings.Index(dir, "."); i > 0 {
-			dir = dir[:i]
-		}
 		if _, err := os.Stat(filepath.Join(*evals, dir, "sessions.txt")); err == nil {
 			fmt.Printf("skip %s: multi-session scenario (the fixture lacks the earlier sessions)\n", filepath.Base(f))
 			continue
@@ -104,8 +107,8 @@ func main() {
 		// Equal-length Dirs for the pair: both paths appear in the system prompt.
 		run := func(bin, tag string) (Result, error) {
 			return Run(context.Background(), Options{
-				Moca: bin, Fixture: filepath.Join(*evals, scen, "fixture"), Prompt: prompt,
-				Flags: scenarioFlags(filepath.Join(*evals, scen, "flags")),
+				Moca: bin, Fixture: filepath.Join(*evals, dir, "fixture"), Prompt: prompt,
+				Flags: scenarioFlags(filepath.Join(*evals, dir, "flags")),
 				Dirs:  filepath.Join(scratch, tag), ContextWindow: *ctxWindow, Turns: turns,
 			})
 		}

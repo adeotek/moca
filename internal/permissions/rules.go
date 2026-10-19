@@ -224,11 +224,23 @@ func (r *Rules) AllowsNamed(ws []Word) bool {
 			return false
 		}
 		for _, rule := range l.Allow {
-			if len(strings.Fields(rule.Src)) > 1 && rule.match(ws, false) {
+			if rule.namesArgs() && rule.match(ws, false) {
 				return true
 			}
 		}
 		return false
+	}
+	return false
+}
+
+// namesArgs reports whether the rule names words past the command: `make
+// bootstrap` does, while `make` and `make *` (the same rule — ParseRule makes
+// a one-word rule `make *`) name only the tool.
+func (r Rule) namesArgs() bool {
+	for _, w := range r.words[1:] {
+		if w != "*" {
+			return true
+		}
 	}
 	return false
 }

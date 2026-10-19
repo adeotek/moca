@@ -197,7 +197,7 @@ func (s *Shell) classify(ws []Word, v *verdictAcc, st cmdState) error {
 		// `make <target>`" must not ride the `make` entry (v0.7.0 §11
 		// follow-up — the probe is TestGenericRunnerAllowRules).
 		if genericRunners[lower] {
-			if err := genericRunnerRefusal(base, ws, s.rules.AllowsNamed(ws)); err != nil {
+			if err := genericRunnerRefusal(base, ws, st.tainted, s.rules.AllowsNamed(ws)); err != nil {
 				return err
 			}
 		}
@@ -626,7 +626,9 @@ func gitComponent(p string) bool {
 	return false
 }
 
-const skillWriteRefusal = "refused: skill files are written with write/edit (the skill guard validates them), not the shell — use write or edit on .moca/skills/<dir>/SKILL.md"
+// skillWriteRefusal carries no "refused:" prefix: the shell tool adds it to
+// every Check error.
+const skillWriteRefusal = "skill files are written with write/edit (the skill guard validates them), not the shell — use write or edit on .moca/skills/<dir>/SKILL.md"
 
 // genericRunners are allowlisted tools whose *arguments* choose code to run:
 // the allow rule names the tool, not whatever its arguments hand it. For
@@ -643,35 +645,153 @@ var safeMakeTargets = map[string]bool{
 	"tidy": true, "unit": true, "verify": true,
 }
 
+// safeMakeTargetList is safeMakeTargets for the refusal texts, sorted (one
+// source: the messages cannot drift from the map).
+var safeMakeTargetList = func() string {
+	names := make([]string, 0, len(safeMakeTargets))
+	for n := range safeMakeTargets {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return strings.Join(names, ", ")
+}()
+
+// makeCodeVars are variables whose command-line override picks the code make
+// runs regardless of what the makefile says (the recipe shell, extra
+// makefiles, nested flags).
+var makeCodeVars = map[string]bool{"SHELL": true, ".SHELLFLAGS": true, "MAKEFILES": true,
+	"MAKEFLAGS": true, "MFLAGS": true, "MAKE": true, "MAKESHELL": true}
+
+// makeArgLong are make's long options whose argument may be the next word;
+// makeCountLong take an optional numeric next word. Matched with longIn, so
+// abbreviations count (`--dir sub` is --directory: make resolves a unique
+// prefix and refuses an ambiguous one).
+var (
+	makeArgLong   = []string{"--directory", "--include-dir", "--old-file", "--assume-old", "--new-file", "--assume-new", "--what-if"}
+	makeCountLong = []string{"--jobs", "--load-average", "--max-load"}
+)
+
+// plainMakeValue reports whether a command-line override's value is inert
+// data — a word, number or version (`VAR=1`, `VERSION=1.2.3`). Any variable a
+// recipe runs as a command can be overridden (`make test GORUN=./x.sh` runs
+// ./x.sh in this repo's own Makefile), so paths, command strings, flags
+// (`CFLAGS=-B.`) and expansions are code, not data.
+func plainMakeValue(v string) bool {
+	if strings.HasPrefix(v, "-") {
+		return false
+	}
+	for _, c := range v {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("._,+-", c)) {
+			return false
+		}
+	}
+	return true
+}
+
 // genericRunnerRefusal fails closed on a generic runner driven by arguments,
 // unless an allow rule named that code itself (`make bootstrap` in
 // permissions.allow covers it; `make` alone does not — §11's rule that a rule
-// covers what it names).
-func genericRunnerRefusal(base string, ws []Word, named bool) error {
+// covers what it names). EVERY target is checked (make runs them all), and
+// the options and overrides that hand make code of their own — another
+// makefile, --eval, SHELL=…, an immediate or shell assignment, a value that
+// is not plain data, an option argument that is computed rather than written
+// out (`-C $DIR` would otherwise be skipped unexamined) — are refused, as is
+// a changed environment (envChanged: a prefix assignment, `env NAME=…` or an
+// earlier export — make reads MAKEFILES and MAKEFLAGS from it, and every
+// recipe inherits it).
+func genericRunnerRefusal(base string, ws []Word, envChanged, named bool) error {
 	if named {
 		return nil
 	}
-	var target string
-	for _, w := range ws[1:] {
+	if envChanged {
+		return fmt.Errorf("`%s` with a changed environment (a NAME=value prefix, env, or an earlier assignment or export) can choose the code it runs — pass plain overrides as arguments (`%s <target> NAME=value`), or add an explicit permissions.allow rule", base, base)
+	}
+	ownMakefile := func(t string) error {
+		return fmt.Errorf("`%s` with %s runs a makefile of its own choosing — add an explicit permissions.allow rule if you want it", base, t)
+	}
+	// computedArg: an option that takes an argument may not be handed a
+	// computed word — `-C $DIR` changes directory to a path nothing here can
+	// see, and the argument would otherwise be skipped unexamined.
+	computedArg := func(t string) error {
+		return fmt.Errorf("`%s` with %s and a computed argument (expansion or glob) is refused — write the argument out, or add an explicit permissions.allow rule", base, t)
+	}
+	// count is a numeric make argument (`-j 4`, `-l 2.5`).
+	count := func(s string) bool {
+		return s != "" && strings.Trim(s, "0123456789.") == "" &&
+			strings.ContainsFunc(s, func(r rune) bool { return r >= '0' && r <= '9' })
+	}
+	var targets []string
+	for i := 1; i < len(ws); i++ {
+		w := ws[i]
 		t := w.Text
+		if !w.Literal {
+			return fmt.Errorf("`%s` with a computed target or option (expansion or glob) is refused — write it out, or add an explicit permissions.allow rule", base)
+		}
 		switch {
-		case strings.HasPrefix(t, "-"):
-			if strings.HasPrefix(t, "-f") || strings.HasPrefix(t, "--file") || strings.HasPrefix(t, "--makefile") {
-				return fmt.Errorf("refused: `%s` with %s runs a makefile of its own choosing — add an explicit permissions.allow rule if you want it", base, t)
+		case t == "--":
+			continue
+		case strings.HasPrefix(t, "--"):
+			name, _, hasVal := strings.Cut(t, "=")
+			if longIs(name, "--file") || longIs(name, "--makefile") || longIs(name, "--eval") {
+				return ownMakefile(t)
+			}
+			switch {
+			case hasVal:
+			case longIn(name, makeArgLong):
+				if i+1 < len(ws) && !ws[i+1].Literal {
+					return computedArg(t)
+				}
+				i++ // the option's argument, not a target
+			case longIn(name, makeCountLong):
+				if i+1 < len(ws) && ws[i+1].Literal && count(ws[i+1].Text) {
+					i++ // make takes a numeric next word as the count
+				}
+			}
+		case strings.HasPrefix(t, "-") && len(t) > 1:
+			cluster := t[1:]
+			for k := 0; k < len(cluster); k++ {
+				c, rest := cluster[k], cluster[k+1:]
+				if c == 'f' || c == 'E' {
+					return ownMakefile(t)
+				}
+				if strings.IndexByte("CIoW", c) >= 0 {
+					if rest == "" && i+1 < len(ws) {
+						if !ws[i+1].Literal {
+							return computedArg(t)
+						}
+						i++ // -C dir: the next word is the argument
+					}
+					break
+				}
+				if c == 'j' || c == 'l' {
+					if rest == "" && i+1 < len(ws) && ws[i+1].Literal && count(ws[i+1].Text) {
+						i++
+					}
+					if rest == "" || count(rest) {
+						break
+					}
+				}
 			}
 		case strings.Contains(t, "="):
-			continue // VAR=value: not the recipe selector
-		case !w.Literal:
-			return fmt.Errorf("refused: `%s` with a computed target (expansion or glob) is refused — write the target out, or add an explicit permissions.allow rule", base)
+			// VAR=value: not a recipe selector, but an override may still pick
+			// the code make runs.
+			name, val, _ := strings.Cut(t, "=")
+			op := name
+			name = strings.TrimRight(name, ":+?!")
+			if makeCodeVars[name] || strings.Contains(op, "!") || !plainMakeValue(val) {
+				return fmt.Errorf("`%s` with the override %s chooses code make runs — add an explicit permissions.allow rule if you want it", base, t)
+			}
 		default:
-			target = t
+			targets = append(targets, t)
 		}
 	}
-	if target == "" {
-		return fmt.Errorf("refused: `%s` with no target runs the makefile's default recipe — name one of: all, build, test, check, fmt, vet, lint, cover, tidy", base)
+	if len(targets) == 0 {
+		return fmt.Errorf("`%s` with no target runs the makefile's default recipe — name one of: %s", base, safeMakeTargetList)
 	}
-	if !safeMakeTargets[target] {
-		return fmt.Errorf("refused: `%s %s` runs a recipe from the repository's makefile — allowed recipes are: all, build, test, tests, check, fmt, vet, lint, cover, coverage, tidy, unit, verify; add an explicit permissions.allow rule to run others", base, target)
+	for _, target := range targets {
+		if !safeMakeTargets[target] {
+			return fmt.Errorf("`%s %s` runs a recipe from the repository's makefile — allowed recipes are: %s; add an explicit permissions.allow rule to run others", base, target, safeMakeTargetList)
+		}
 	}
 	return nil
 }
@@ -903,7 +1023,7 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 						}
 					}
 				case "sed":
-					if hasOpt(ws, idx+1, "i") {
+					if hasOpt(ws, idx+1, "i", "--in-place") {
 						for _, a := range x.Args[idx+1:] {
 							if t, ok := wordLit(a); ok && !strings.HasPrefix(t, "-") && s.skillTarget(t) {
 								fail(errors.New(skillWriteRefusal))

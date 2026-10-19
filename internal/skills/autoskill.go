@@ -259,7 +259,11 @@ func ValidateStored(skillDir, dirName string) error {
 		return fmt.Errorf("%s: %v", p, err)
 	}
 	for _, e := range ents {
-		if e.Name() == "SKILL.md" {
+		// Hidden entries are skipped, as every skills walker skips them: an OS
+		// or editor file (.DS_Store, a swap file) or a crashed hygiene temp
+		// (.tmp-prune-*) must not drop a valid skill from the listing. The
+		// write guard still refuses any companion the agent itself writes.
+		if e.Name() == "SKILL.md" || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
 		return fmt.Errorf("%s: auto skills are single-file — %s must not be in this directory", p, e.Name())

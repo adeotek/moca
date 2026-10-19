@@ -76,6 +76,10 @@ type setup struct {
 	skillDir    string
 	skillDirErr error
 	sessionDate time.Time
+	// smOn is the feature for a fresh session: switch on, trusted, the dir
+	// resolved. Start's block, the header field and hygiene read it; build()
+	// adds the resume rule on top.
+	smOn bool
 }
 
 func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error) {
@@ -161,11 +165,12 @@ func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error)
 	if o.Trusted {
 		skillDir, skillDirErr = jail.Resolve(filepath.Join(".moca", "skills"), true)
 	}
+	smOn := sm.On && o.Trusted && skillDirErr == nil
 	// Hygiene runs before discovery so the listing reflects the pruning. It
 	// is interactive-Start only (never Resume: a deletion would contradict the
 	// frozen prompt the session resumed with) and report-only in headless
 	// runs, which must never touch the checkout.
-	if applyHygiene && sm.On && o.Trusted && skillDirErr == nil {
+	if applyHygiene && smOn {
 		pruned, perr := skills.PruneAutoSkills(skillDir, time.Now(), o.Headless)
 		if perr != nil && emit != nil {
 			emit(Warning{Text: fmt.Sprintf("skill hygiene: %v", perr)})
@@ -225,7 +230,7 @@ func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error)
 		cfg.MCP.IdleTimeout = projMCP.IdleTimeout
 	}
 	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail, spillDir: spillDir, skills: sk, skillDirs: skillDirs,
-		sm: sm, skillDir: skillDir, skillDirErr: skillDirErr, sessionDate: time.Now()}, nil
+		sm: sm, skillDir: skillDir, skillDirErr: skillDirErr, sessionDate: time.Now(), smOn: smOn}, nil
 }
 
 // hygieneSummary renders one startup warning for what the hygiene pass did
@@ -341,14 +346,18 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	// resolves on (§3.3's table), the workdir is trusted (ACP's default trust
 	// counts — Decision 14), and prepare()'s resolution succeeded. The dir is
 	// prepare()'s — no call site re-resolves it (C5a).
+	// The resume rule: a resumed session learns only when its header records
+	// the block AND the switch resolves on now — a session that started
+	// without the block has no contract in its frozen prompt, so it stays off.
 	hadBlock := len(prior) > 0 && prior[0].Session != nil && prior[0].Session.SelfManagedSkills
-	switchOn := st.sm.On && o.Trusted && st.skillDirErr == nil
+	resumed := prior != nil
+	switchOn := st.smOn && (!resumed || hadBlock)
 	switch {
 	case st.skillDirErr != nil && st.sm.On && o.Trusted && o.Emit != nil:
 		o.Emit(Warning{Text: fmt.Sprintf("self-managed skills are off for this session: %v", st.skillDirErr)}) // switch-gated (H7)
-	case switchOn && !hadBlock && prior != nil && o.Emit != nil: // resumed from a session started with the feature off
+	case st.smOn && !hadBlock && resumed && o.Emit != nil: // resumed from a session started with the feature off
 		o.Emit(Warning{Text: "self-managed skills stay off in this resumed session (it started without them) — /clear starts a session with them on"})
-	case hadBlock && !switchOn && o.Emit != nil: // resumed after the switch went off or trust was withdrawn
+	case hadBlock && !st.smOn && o.Emit != nil: // resumed after the switch went off or trust was withdrawn
 		o.Emit(Warning{Text: "this resumed session's instructions still describe project skills, but skills.selfManaged is off (or the workdir is not trusted) now — auto-skill writes are refused; /clear starts a session without them"})
 	}
 	if switchOn {
@@ -530,7 +539,7 @@ func Start(o StartOptions) (*Agent, error) {
 	// The block is added only when a validating guard will be installed for
 	// the same dir (C5): block present ⇒ guard installed.
 	var selfManaged *SelfManagedInput
-	if st.sm.On && o.Trusted && st.skillDirErr == nil {
+	if st.smOn {
 		selfManaged = &SelfManagedInput{Dir: st.skillDir}
 	}
 	system := BuildSystemPrompt(PromptInput{Workdir: jail.Root(), OS: osName, Arch: arch, Verify: verify, VerifySource: verifySrc,

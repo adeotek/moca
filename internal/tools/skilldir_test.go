@@ -277,6 +277,26 @@ func TestRegistryHintDelivery(t *testing.T) {
 	}
 }
 
+func TestColdArmingEndsOnceASkillIsCreated(t *testing.T) {
+	env, root := testEnv(t)
+	setSkillDir(t, env, root)
+	env.SkillGuard = func(abs, rel string, data []byte) error { return nil }
+	env.Commands = &fakeCmds{}
+	env.SkillCold = true
+	reg := NewRegistry(writeTool{}, shellTool{})
+	w := reg.Run(t.Context(), env, llm.ToolCall{ID: "1", Name: "write",
+		Input: []byte(`{"path":".moca/skills/moca-x/SKILL.md","content":"---\nname: moca-x\ndescription: d\nauto: true\n---\n"}`)})
+	if w.IsError || env.SkillCold {
+		t.Fatalf("a created skill ends the cold state: %q cold=%v", w.Content, env.SkillCold)
+	}
+	// A later run of the same session: the repo now carries a skill.
+	env.BeginRun()
+	green := reg.Run(t.Context(), env, llm.ToolCall{ID: "2", Name: "shell", Input: []byte(`{"command":"go version"}`)})
+	if strings.Contains(green.Content, "[hint:") {
+		t.Fatalf("the cold-repo nudge must not repeat once the session recorded a skill: %q", green.Content)
+	}
+}
+
 func TestRecoveryArmsTheHint(t *testing.T) {
 	env, root := testEnv(t)
 	setSkillDir(t, env, root)
@@ -316,6 +336,88 @@ func TestInternalRefusalDoesNotArmTheHint(t *testing.T) {
 	reg.Run(t.Context(), env, llm.ToolCall{ID: "1", Name: "write", Input: []byte(`{"path":"pkg/x.go","content":"x"}`)})
 	if env.SkillHintArmed {
 		t.Fatal("plan confinement is moca's own refusal: it must not arm the hint")
+	}
+}
+
+// The investigation gate's refusal is moca's own protocol, not something the
+// model can learn from: it must not arm the skill hint either (SPECS §14 lists
+// the four arming signals, and this is not one of them). Without the
+// internalRefusal flag the refusal text — like any "refused:" result — would
+// arm it, which is exactly what this pins.
+func TestInvestigationRefusalDoesNotArmTheHint(t *testing.T) {
+	env, root := testEnv(t)
+	setSkillDir(t, env, root)
+	env.SkillGuard = func(abs, rel string, data []byte) error { return nil } // a validating guard: the hint could be delivered
+	if err := os.WriteFile(filepath.Join(root, "f.go"), []byte("package x\n\nvar V = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry(readTool{}, editTool{})
+	reg.Run(t.Context(), env, llm.ToolCall{ID: "1", Name: "read", Input: []byte(`{"path":"f.go"}`)})
+	env.TestFailed, env.FailingTest = true, "x_test.go" // the failing test is not read yet: the edit gate fires
+	r := reg.Run(t.Context(), env, llm.ToolCall{ID: "2", Name: "edit",
+		Input: []byte(`{"path":"f.go","old_string":"var V = 1","new_string":"var V = 2"}`)})
+	if !r.IsError || !strings.Contains(r.Content, "read the failing test file") {
+		t.Fatalf("the edit must be refused by the investigation gate: %q", r.Content)
+	}
+	if env.SkillHintArmed || strings.Contains(r.Content, "[hint: record what this just proved") {
+		t.Fatalf("the investigation gate's refusal must not arm the hint: armed=%v %q", env.SkillHintArmed, r.Content)
+	}
+}
+
+// The one-shot hint needs a VALIDATING guard to be delivered: armed by hand it
+// stays silent with no guard (the feature is off) and with C5b's refusing one,
+// and the control below proves the assertion is not vacuous — the same armed
+// flag delivers as soon as a validating guard is installed.
+func TestArmedHintNeedsAValidatingGuard(t *testing.T) {
+	env, root := testEnv(t)
+	setSkillDir(t, env, root)
+	env.Commands = &fakeCmds{}
+	reg := NewRegistry(shellTool{})
+	run := func(id, cmd string) Result {
+		return reg.Run(t.Context(), env, llm.ToolCall{ID: id, Name: "shell", Input: []byte(`{"command":"` + cmd + `"}`)})
+	}
+	env.SkillHintArmed = true // the signal is not the gate
+	if r := run("1", "go version"); strings.Contains(r.Content, skillHintMark) {
+		t.Fatalf("without a guard the armed hint must not be delivered: %q", r.Content)
+	}
+	env.BeginRun()
+	env.SkillGuard = func(abs, rel string, data []byte) error { return nil }
+	env.SkillHintArmed = true
+	if r := run("2", "go version"); !strings.Contains(r.Content, skillHintMark) {
+		t.Fatalf("control: a validating guard must deliver the armed hint: %q", r.Content)
+	}
+	env.BeginRun()
+	env.SkillGuardRefusing = true // C5b: the block is in the frozen prompt, the feature is off now
+	env.SkillHintArmed = true
+	if r := run("3", "go version"); strings.Contains(r.Content, skillHintMark) {
+		t.Fatalf("a refusing guard must not deliver the hint: %q", r.Content)
+	}
+}
+
+// The third identical failure is one of the four arming signals (SPECS §14):
+// the count comes from trackFailure's repeat hint, and the hint itself is
+// delivered on the next verifying result (a failing result carries no hint).
+func TestThirdIdenticalFailureArmsTheHint(t *testing.T) {
+	env, root := testEnv(t)
+	setSkillDir(t, env, root)
+	env.SkillGuard = func(abs, rel string, data []byte) error { return nil }
+	env.Commands = &fakeCmds{}
+	reg := NewRegistry(shellTool{})
+	fail := func(id string) Result {
+		return reg.Run(t.Context(), env, llm.ToolCall{ID: id, Name: "shell", Input: []byte(`{"command":"false"}`)})
+	}
+	fail("1")
+	fail("2")
+	if env.SkillHintArmed {
+		t.Fatal("two identical failures are not yet the third")
+	}
+	fail("3")
+	if !env.SkillHintArmed {
+		t.Fatal("the third identical failure must arm the hint")
+	}
+	good := reg.Run(t.Context(), env, llm.ToolCall{ID: "4", Name: "shell", Input: []byte(`{"command":"go version"}`)})
+	if !strings.Contains(good.Content, skillHintMark) {
+		t.Fatalf("the armed hint must be delivered on the next verifying result: %q", good.Content)
 	}
 }
 

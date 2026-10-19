@@ -163,9 +163,17 @@ func (s *session) sendCommands() {
 	s.send(AvailableCommandsUpdate{SessionUpdate: updCommands, AvailableCommands: cmds})
 }
 
-// expand applies a leading /name the TUI's way: a template expands, a skill
-// becomes its load-and-follow message, `//` escapes; anything else is sent
-// as written (the model sees an unknown /word as text).
+// splitCommand splits a trimmed "/name args" at the first whitespace of any
+// kind (a newline after the name counts): the one split expand and the
+// typed-text extraction share, so they cannot disagree on what was typed.
+func splitCommand(t string) (name, args string) {
+	name = strings.TrimPrefix(t, "/")
+	if i := strings.IndexFunc(name, unicode.IsSpace); i >= 0 {
+		name, args = name[:i], strings.TrimSpace(name[i:])
+	}
+	return name, args
+}
+
 // expand applies a leading /name the TUI's way: a template expands, a skill
 // becomes its load-and-follow message, `//` escapes; anything else is sent
 // as written (the model sees an unknown /word as text). The second return
@@ -179,10 +187,7 @@ func (s *session) expand(text string) (string, bool) {
 	if !strings.HasPrefix(t, "/") {
 		return text, false
 	}
-	name, args := t[1:], ""
-	if i := strings.IndexFunc(name, unicode.IsSpace); i >= 0 {
-		name, args = name[:i], strings.TrimSpace(name[i:])
-	}
+	name, args := splitCommand(t)
 	if name == "remember" && args != "" && s.agent.SelfManagedSkills() {
 		return agent.RememberRequest(args), true
 	}

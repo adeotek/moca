@@ -71,33 +71,48 @@ func Embedded(s string) bool {
 // must never learn: a matched value that is only a variable reference
 // (`${VAR}`, `$VAR`, `env:VAR`, `$env:VAR`, `%VAR%`, optionally closed by a
 // quote or backtick) is not a credential (H10). ok is false for none.
+// The token classes are prefix-shaped (sk-, ghp_, AIza, npm_, …) and must
+// start a word: unanchored, `sk-` matches inside prose — "task-scheduler",
+// "risk-assessment" — and a skill naming a hyphenated target would be refused
+// as a credential. The importer's Tokenish stays unanchored (moved verbatim).
 // The refusal quotes the class.
 func Match(s string) (class string, ok bool) {
-	classes := []struct {
-		name string
-		re   *regexp.Regexp
-	}{
-		{"URL credentials", userinfo},
-		{"credential token", tokenish},
-		{"password", passwordKV},
-		{"private key", pemKey},
-		{"JWT", jwtRe},
-		{"Stripe key", stripeRe},
-		{"Google API key", googleRe},
-		{"npm token", npmRe},
-		{"PyPI token", pypiRe},
-		{"Slack token", slackRe},
-		{"Slack webhook", webhook},
-	}
-	for _, c := range classes {
-		for _, m := range c.re.FindAllString(s, -1) {
-			if onlyVarRef(m) {
+	for _, c := range matchClasses {
+		for _, loc := range c.re.FindAllStringIndex(s, -1) {
+			if c.wordStart && loc[0] > 0 && wordChar(s[loc[0]-1]) {
+				continue // the prefix sits inside a longer word
+			}
+			if onlyVarRef(s[loc[0]:loc[1]]) {
 				continue
 			}
 			return c.name, true
 		}
 	}
 	return "", false
+}
+
+// matchClasses is Match's table, built once.
+var matchClasses = []struct {
+	name      string
+	re        *regexp.Regexp
+	wordStart bool // the match must not continue a word (prefix-shaped tokens)
+}{
+	{"URL credentials", userinfo, false},
+	{"credential token", tokenish, true},
+	{"password", passwordKV, false},
+	{"private key", pemKey, false},
+	{"JWT", jwtRe, true},
+	{"Stripe key", stripeRe, true},
+	{"Google API key", googleRe, true},
+	{"npm token", npmRe, true},
+	{"PyPI token", pypiRe, true},
+	{"Slack token", slackRe, true},
+	{"Slack webhook", webhook, false},
+}
+
+// wordChar is an ASCII letter or digit: what a token prefix must not follow.
+func wordChar(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
 }
 
 // onlyVarRef reports whether a matched value is nothing but an environment

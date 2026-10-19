@@ -425,18 +425,31 @@ func readResults(r io.Reader) ([]Metrics, error) {
 	var out []Metrics
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	var lines []string
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
+		if line := strings.TrimSpace(sc.Text()); line != "" {
+			lines = append(lines, line)
 		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	for i, line := range lines {
 		var m Metrics
 		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			return nil, fmt.Errorf("bad results line: %w", err)
+			if i == len(lines)-1 {
+				// A harness killed mid-append leaves a torn final line. It is
+				// not a corrupt file, and refusing every later summary would
+				// make the whole label unreadable until someone edited it by
+				// hand — report it and read the rest.
+				fmt.Fprintf(os.Stderr, "evalstats: ignoring a torn final line (%d bytes) in the results file\n", len(line))
+				break
+			}
+			return nil, fmt.Errorf("bad results line %d: %w", i+1, err)
 		}
 		out = append(out, m)
 	}
-	return out, sc.Err()
+	return out, nil
 }
 
 // Summarize renders one row per (label, scenario) plus a total row per

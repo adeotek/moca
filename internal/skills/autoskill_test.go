@@ -179,10 +179,19 @@ func TestValidateSkillLengthCaps(t *testing.T) {
 	if err := ValidateSkill(autoSkill("moca-x", "d", runeBody), wc("moca-x")); err != nil {
 		t.Fatalf("a body under the cap in runes must pass: %v", err)
 	}
-	over := "- **a**: " + strings.Repeat("×", SkillBodyCap) + " (×1, 2026-10-18)\n"
+	// The BODY cap, not the line cap: one 1526-rune line would trip the 240
+	// per-line cap first (checked first) and prove nothing about SkillBodyCap.
+	var ob strings.Builder
+	for i := 0; i < 12; i++ {
+		ob.WriteString("- **rule" + string(rune('a'+i)) + "**: " + strings.Repeat("×", 180) + " (×1, 2026-10-18)\n")
+	}
+	over := ob.String()
+	if n := utf8len(over); n <= SkillBodyCap {
+		t.Fatalf("fixture too short: %d runes", n)
+	}
 	err = ValidateSkill(autoSkill("moca-x", "d", over), wc("moca-x"))
-	if err == nil || (!strings.Contains(err.Error(), "cap 1500") && !strings.Contains(err.Error(), "cap 240")) {
-		t.Fatalf("want a size cap, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "cap 1500") {
+		t.Fatalf("want the body cap, got %v", err)
 	}
 }
 

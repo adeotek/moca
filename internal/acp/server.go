@@ -294,14 +294,18 @@ func (srv *Server) prompt(ctx context.Context, params json.RawMessage) (any, err
 	expanded, rem := s.expand(text)
 	var out agent.Outcome
 	if rem {
-		_, args, _ := strings.Cut(strings.TrimSpace(typedSrc), " ")  // "/remember <args>" — the user's own text
-		out, err = s.agent.Remember(runCtx, strings.TrimSpace(args)) // the run STARTS here; the signal is structural (C4)
+		// "/remember <args>" — the rule is the user's own text blocks, split the
+		// way expand split it; an attachment never supplies it, so text blocks
+		// holding only "/remember" leave nothing to record (Agent.Remember refuses).
+		_, args := splitCommand(strings.TrimSpace(typedSrc))
+		expanded = agent.RememberRequest(args)
+		out, err = s.agent.Remember(runCtx, args) // the run STARTS here; the signal is structural (C4)
 	} else {
-		typed := typedSrc
-		if t := strings.TrimSpace(typedSrc); strings.HasPrefix(t, "/") && !strings.HasPrefix(t, "//") && expanded != text {
-			_, typed, _ = strings.Cut(t, " ") // a template/skill expansion: only its args were typed (a `//` escape is plain text)
+		typed := strings.TrimSpace(typedSrc)
+		if strings.HasPrefix(typed, "/") && !strings.HasPrefix(typed, "//") && expanded != text {
+			_, typed = splitCommand(typed) // a template/skill expansion: only its args were typed (a `//` escape is plain text)
 		}
-		out, err = s.agent.RunWith(runCtx, expanded, agent.RunOpts{Typed: strings.TrimSpace(typed)})
+		out, err = s.agent.RunWith(runCtx, expanded, agent.RunOpts{Typed: typed})
 	}
 	if s.reloadCommands() {
 		s.sendCommands()

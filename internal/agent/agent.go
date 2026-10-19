@@ -191,9 +191,10 @@ func (a *Agent) SelfManagedSkills() bool {
 }
 
 // RememberRequest is what /remember submits (TUI and ACP): an ordinary user
-// request — there is no host-side writer (Decision 8). It starts with
-// "Remember", which arms the hint; the user signal is armed structurally by
-// Agent.Remember (Decision 11: never by word-matching the prompt — C4).
+// request — there is no host-side writer (Decision 8). The request itself
+// asks for the write, so a /remember run arms no hint; the user signal is
+// armed structurally by Agent.Remember (Decision 11: never by word-matching
+// the prompt — C4).
 func RememberRequest(text string) string {
 	return "Remember this project rule: " + text + " — record it in the project skills under .moca/skills " +
 		"(one skill per domain, named moca-<domain>, auto: true) with provenance (user, <today's date>), so later sessions follow it."
@@ -202,8 +203,17 @@ func RememberRequest(text string) string {
 // Remember runs a /remember request: the only run in which the guard accepts a
 // new (user, …) rule (Decision 11). The user's text is also the run's typed
 // text, so naming a hand-written skill in it allows changing that skill
-// (Decision 15).
+// (Decision 15). Every front end lands here, so the refusals live here too:
+// no rule text (the signal must never arm a run the user stated nothing in)
+// and plan mode (its write confinement would refuse every skill write).
 func (a *Agent) Remember(ctx context.Context, text string) (Outcome, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return Outcome{}, errors.New("/remember needs the rule to record: /remember <text>")
+	}
+	if a.plan {
+		return Outcome{}, errors.New("plan mode is on (writes are confined to docs/plans/) — turn it off to /remember")
+	}
 	return a.RunWith(ctx, RememberRequest(text), RunOpts{Typed: text, Remember: true})
 }
 
@@ -492,8 +502,10 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 		a.opts.Env.SkillTyped = []string{o.Typed}
 	}
 	a.opts.Env.SkillUserSignal = o.Remember
-	if mentionsRemembering(o.Typed) {
-		a.opts.Env.SkillHintArmed = true // the hint only, never the signal (C4)
+	if !o.Remember && mentionsRemembering(o.Typed) {
+		// The hint only, never the signal (C4); a /remember run is already a
+		// recording request and arms no hint.
+		a.opts.Env.SkillHintArmed = true
 	}
 	a.warnedDrop = false
 	nudged, verifyNudged, reserved, execNudged, emptyNudged, progressNudged, actionNudged := false, false, false, false, false, false, false
