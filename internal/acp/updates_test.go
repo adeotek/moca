@@ -153,6 +153,32 @@ func TestSessionInfoAfterPrompts(t *testing.T) {
 	}
 }
 
+// A request that names a session id proves the client has it: lookup flushes
+// the updates session/new held back, so they cannot arrive behind that
+// request's own response (a client may send set_mode or a prompt the instant
+// it has the id, before the new-session follow-up has run).
+func TestLookupFlushesHeldUpdates(t *testing.T) {
+	var buf bytes.Buffer
+	srv := &Server{sessions: map[string]*session{}}
+	srv.conn = NewConn(&buf, srv)
+	s := newSession(srv, "/w", true)
+	s.id = "abcd1234"
+	srv.add(s)
+	s.send(CurrentModeUpdate{SessionUpdate: updCurrentMode, CurrentModeID: "plan"}) // held: not ready
+	if buf.Len() != 0 {
+		t.Fatalf("an update reached the wire before the client could route it: %q", buf.String())
+	}
+	if _, err := srv.lookup("abcd1234"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), updCurrentMode) {
+		t.Fatalf("lookup left the held update queued: %q", buf.String())
+	}
+	if _, err := srv.lookup("ffffffff"); err == nil {
+		t.Fatal("an unknown id must not resolve")
+	}
+}
+
 func TestEffortOption(t *testing.T) {
 	thinking := provider.Model{Provider: "p", ID: "m", ThinkingMode: "openai",
 		ThinkingLevelMap: map[llm.Effort]string{llm.EffortLow: "low", llm.EffortHigh: "high"}}
