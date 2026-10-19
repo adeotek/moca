@@ -189,10 +189,11 @@ func (a *Agent) applySteering() (bool, error) {
 	for i := 0; i < len(msgs); i++ {
 		if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(msgs[i].text)}); err != nil {
 			// A failed append must not swallow the rest of the queue:
-			// re-queue the messages that did not land (an aborted run's
-			// texts return to the editor through TakeSteering).
+			// re-queue the messages that did not land — this one included
+			// (an aborted run's texts return to the editor through
+			// TakeSteering).
 			a.mu.Lock()
-			a.steer = append(msgs[i+1:], a.steer...)
+			a.steer = append(msgs[i:], a.steer...)
 			a.mu.Unlock()
 			return false, err
 		}

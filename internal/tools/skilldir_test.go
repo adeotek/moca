@@ -339,6 +339,56 @@ func TestInternalRefusalDoesNotArmTheHint(t *testing.T) {
 	}
 }
 
+// A purely mutating command exercises no code: an armed hint is not delivered
+// on it (it would call `mkdir -p build` "how this repo verifies"), and the
+// next real verification still gets it.
+func TestSkillHintNotDeliveredOnMutatingCommand(t *testing.T) {
+	env, root := testEnv(t)
+	setSkillDir(t, env, root)
+	env.SkillGuard = func(abs, rel string, data []byte) error { return nil }
+	env.Commands = &fakeCmds{}
+	env.SkillHintArmed = true
+	reg := NewRegistry(shellTool{})
+	m := reg.Run(t.Context(), env, llm.ToolCall{ID: "1", Name: "shell", Input: []byte(`{"command":"mkdir -p build"}`)})
+	if m.IsError || strings.Contains(m.Content, skillHintMark) {
+		t.Fatalf("no hint on a purely mutating command: %q", m.Content)
+	}
+	v := reg.Run(t.Context(), env, llm.ToolCall{ID: "2", Name: "shell", Input: []byte(`{"command":"go version"}`)})
+	if !strings.Contains(v.Content, skillHintMark) {
+		t.Fatalf("the next verifying success delivers the hint: %q", v.Content)
+	}
+}
+
+// internalCheckErr mimics the permissions package's skill-dir refusal: an
+// error reporting Internal() (the shell side of the skill guard).
+type internalCheckErr struct{}
+
+func (internalCheckErr) Error() string  { return "skill files are written with write/edit" }
+func (internalCheckErr) Internal() bool { return true }
+
+// The shell's skill-dir refusal is the skill guard's shell side: like the
+// guard's own refusals it must not arm the hint, while an ordinary analyser
+// refusal (a deny rule) still does.
+func TestShellSkillRefusalDoesNotArmTheHint(t *testing.T) {
+	env, root := testEnv(t)
+	setSkillDir(t, env, root)
+	env.SkillGuard = func(abs, rel string, data []byte) error { return nil }
+	env.Commands = &fakeCmds{err: internalCheckErr{}}
+	reg := NewRegistry(shellTool{})
+	r := reg.Run(t.Context(), env, llm.ToolCall{ID: "1", Name: "shell", Input: []byte(`{"command":"cp a .moca/skills/moca-x/SKILL.md"}`)})
+	if !r.IsError || !strings.HasPrefix(r.Content, "refused:") {
+		t.Fatalf("the shell must refuse: %q", r.Content)
+	}
+	if env.SkillHintArmed {
+		t.Fatal("the shell's skill-dir refusal is moca's own guard: it must not arm the hint")
+	}
+	env.Commands = &fakeCmds{err: errors.New("`x` is denied by the permissions rule")}
+	reg.Run(t.Context(), env, llm.ToolCall{ID: "2", Name: "shell", Input: []byte(`{"command":"x"}`)})
+	if !env.SkillHintArmed {
+		t.Fatal("a project/user deny rule still arms the hint")
+	}
+}
+
 // The investigation gate's refusal is moca's own protocol, not something the
 // model can learn from: it must not arm the skill hint either (SPECS §14 lists
 // the four arming signals, and this is not one of them). Without the

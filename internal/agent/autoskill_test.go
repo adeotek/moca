@@ -665,6 +665,49 @@ func TestResumeKeepsOrRefusesTheGuard(t *testing.T) {
 	}
 }
 
+// A session resumed days after it started still carries its start date in
+// the frozen prompt: the provenance check must accept that date (the guard's
+// SessionDate is the header's StartedAt, not the resume time).
+func TestResumeGuardAcceptsTheSessionStartDate(t *testing.T) {
+	s := newScript(t, textTurn("ok"))
+	a, _, _ := startManaged(t, s)
+	path := a.Session().Path()
+	cfg := a.opts.Config
+	a.Session().Close()
+
+	started := time.Now().AddDate(0, 0, -5)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, rest, _ := strings.Cut(string(data), "\n")
+	var hdr map[string]any
+	if err := json.Unmarshal([]byte(head), &hdr); err != nil {
+		t.Fatal(err)
+	}
+	sess, _ := hdr["session"].(map[string]any)
+	if sess == nil {
+		t.Fatalf("no session header in %q", head)
+	}
+	sess["startedAt"] = started.Format(time.RFC3339Nano)
+	nh, _ := json.Marshal(hdr)
+	if err := os.WriteFile(path, []byte(string(nh)+"\n"+rest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := Resume(StartOptions{Config: cfg, Workdir: session.WorkdirOf(path), Trusted: true, HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Session().Close()
+	d := started.Format("2006-01-02")
+	r := runTool(t, b, "write", writeArgs(".moca/skills/moca-x/SKILL.md",
+		autoFile("moca-x", "d", "- **ra**: run the suite with -count=1 (×1, "+d+")\n")))
+	if r.IsError {
+		t.Fatalf("the frozen prompt's date must be accepted after a resume: %q", r.Content)
+	}
+}
+
 // Resumed UNTRUSTED (the approval was declined for this process): the switch
 // is on, but C5b must still hold — the dir resolves with or without trust,
 // the refusing guard exists, and an auto-skill write is REFUSED, not landed

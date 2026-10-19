@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -75,6 +76,12 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	need, every, unsure, err := env.Commands.Check(a.Command)
 	if err != nil {
 		slog.Debug("shell refused") // the analyser's reason carries the command text: not logged
+		// The skill-dir refusal is the skill guard's shell side: moca's own
+		// procedure, which must not arm the hint (H2/H3).
+		var ie interface{ Internal() bool }
+		if errors.As(err, &ie) && ie.Internal() {
+			env.internalRefusal = true
+		}
 		return errorf("refused: %v", err)
 	}
 	// Stateful-file guard (§10): refuse a SQLite open that would consume a

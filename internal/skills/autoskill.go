@@ -412,6 +412,11 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 				continue
 			}
 			if !old.Pinned && old.HasProv && r.HasProv && !r.Pinned && old.Seen == 1 && r.Seen == 2 && !r.Last.Before(old.Last) {
+				// The bump date is the host clock's too, like a new rule's: a
+				// (×2, <future date>) would pass on the model's word alone.
+				if !allowed[r.Last.Format("2006-01-02")] {
+					return fmt.Errorf("refused: the date %s is not today (%s) — a confirmed rule goes (×1, %s) → (×2, %s)", r.Last.Format("2006-01-02"), today, old.Last.Format("2006-01-02"), today)
+				}
 				continue
 			}
 			return fmt.Errorf("refused: a confirmed rule goes (×1, %s) → (×2, %s) once and then never changes — rewrite its text instead if the rule itself changed", old.Last.Format("2006-01-02"), today)

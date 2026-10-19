@@ -144,9 +144,15 @@ func cmdOf(call llm.ToolCall) string {
 	return a.Command
 }
 
-// verifyingCall reports a shell call that exercises the code.
+// verifyingCall reports a shell call that exercises the code — not a purely
+// mutating one (mkdir/cp/rm/…): the hint's arming and its delivery share this
+// one predicate.
 func verifyingCall(call llm.ToolCall) bool {
-	return call.Name == "shell" && verifies(cmdOf(call))
+	if call.Name != "shell" {
+		return false
+	}
+	c := cmdOf(call)
+	return verifies(c) && !mutatesOnly(c)
 }
 
 // trackFailure counts identical failing calls (tool, normalized input,

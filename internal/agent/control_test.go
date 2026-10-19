@@ -133,7 +133,9 @@ func TestSteeringRequeuesOnAppendFailure(t *testing.T) {
 	if _, err := a.applySteering(); err == nil {
 		t.Fatal("a closed session's append must fail")
 	}
-	if got := a.TakeSteering(); len(got) != 1 || got[0] != "second" {
+	// "first" is the append that failed: it did not land either, so it comes
+	// back too — dropping it would lose text the user typed.
+	if got := a.TakeSteering(); len(got) != 2 || got[0] != "first" || got[1] != "second" {
 		t.Fatalf("the un-appended messages must be back in the queue, got %q", got)
 	}
 }

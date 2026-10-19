@@ -70,7 +70,9 @@ func Embedded(s string) bool {
 // xoxe-… and hooks.slack.com/services/… — with one exclusion the importer
 // must never learn: a matched value that is only a variable reference
 // (`${VAR}`, `$VAR`, `env:VAR`, `$env:VAR`, `%VAR%`, optionally closed by a
-// quote or backtick) is not a credential (H10). ok is false for none.
+// quote or backtick) is not a credential (H10) — nor is URL userinfo whose
+// password part is such a reference, nor a Bearer/Basic match whose value is
+// a plain word (schemeProse). ok is false for none.
 // The token classes are prefix-shaped (sk-, ghp_, AIza, npm_, …) and must
 // start a word: unanchored, `sk-` matches inside prose — "task-scheduler",
 // "risk-assessment" — and a skill naming a hyphenated target would be refused
@@ -82,8 +84,15 @@ func Match(s string) (class string, ok bool) {
 			if c.wordStart && loc[0] > 0 && wordChar(s[loc[0]-1]) {
 				continue // the prefix sits inside a longer word
 			}
-			if onlyVarRef(s[loc[0]:loc[1]]) {
+			m := s[loc[0]:loc[1]]
+			if onlyVarRef(m) {
 				continue
+			}
+			if c.re == userinfo && onlyVarRef(userinfoSecret(m)) {
+				continue // scheme://user:${PASS}@host names the variable, not the secret
+			}
+			if c.re == tokenish && schemeProse(m) {
+				continue // "Basic validation …" is prose, not a scheme credential
 			}
 			return c.name, true
 		}
@@ -108,6 +117,39 @@ var matchClasses = []struct {
 	{"PyPI token", pypiRe, true},
 	{"Slack token", slackRe, true},
 	{"Slack webhook", webhook, false},
+}
+
+// userinfoSecret is the secret part of a userinfo match ("://user:pw@" → "pw").
+// The user part cannot hold a ':' (userinfo excludes it), so the first one
+// splits — the secret may itself contain one ($env:PASS).
+func userinfoSecret(m string) string {
+	_, pw, _ := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(m, "://"), "@"), ":")
+	return pw
+}
+
+// schemeProse reports a Bearer/Basic match whose value is an ordinary word
+// ("Basic validation", "Bearer authentication-free"): a real scheme credential
+// is base64 or a random token — it carries a digit, a +/= character, or mixed
+// case past its first letter. A prefix token after the scheme ("Bearer
+// sk-…") is never prose: the scheme match consumed it (FindAll matches do
+// not overlap), so this is its only check.
+func schemeProse(m string) bool {
+	f := strings.Fields(m)
+	if len(f) != 2 || (f[0] != "Bearer" && f[0] != "Basic") || tokenish.MatchString(f[1]) {
+		return false
+	}
+	upper, lower := false, false
+	for i, c := range f[1] {
+		switch {
+		case c >= '0' && c <= '9', c == '+', c == '/', c == '=':
+			return false
+		case c >= 'A' && c <= 'Z':
+			upper = upper || i > 0
+		case c >= 'a' && c <= 'z':
+			lower = true
+		}
+	}
+	return !(upper && lower)
 }
 
 // wordChar is an ASCII letter or digit: what a token prefix must not follow.

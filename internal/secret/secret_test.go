@@ -126,4 +126,36 @@ func TestMatchIgnoresEnvReferences(t *testing.T) {
 	if class, ok := Match("password=hunter2"); !ok || class != "password" {
 		t.Errorf("Match(password=hunter2) = %q/%v, want password/true", class, ok)
 	}
+	// The user part cannot hold a ':' — the first one after :// splits it, so
+	// a $env:VAR password is still a reference.
+	for _, s := range []string{"DATABASE_URL=postgres://app:${PGPASSWORD}@localhost/db", "DSN=postgres://app:$env:PGPASS@db/x"} {
+		if class, ok := Match(s); ok {
+			t.Errorf("Match(%q): URL userinfo naming a variable = %q, want no match", s, class)
+		}
+	}
+	if class, ok := Match("postgres://app:hunter2@localhost/db"); !ok || class != "URL credentials" {
+		t.Errorf("URL userinfo with a literal password = %q/%v, want URL credentials", class, ok)
+	}
+}
+
+// A Bearer/Basic scheme followed by an ordinary word is prose; a base64 or
+// random-looking value is still a credential.
+func TestMatchSchemeProse(t *testing.T) {
+	for _, s := range []string{
+		"- **ci**: Basic validation runs in make check (×1, 2026-10-19)",
+		"send Bearer authentication-free requests to the mock",
+		"Basic Configuration lives in config.yaml",
+	} {
+		if class, ok := Match(s); ok {
+			t.Errorf("Match(%q) = %q, want no match (prose)", s, class)
+		}
+	}
+	// The scheme match swallows a prefix token after it (matches do not
+	// overlap): "Bearer sk-…" must still be refused, digits or not.
+	for _, s := range []string{"Authorization: Basic dXNlcjpwYXNz", "Bearer abc123def456", "Bearer eyJhbGciOi.x",
+		"Authorization: Bearer sk-abcdefghijklmnop", "Bearer glpat-abcdefghijkl", "Bearer xoxb-abcdefghijkl"} {
+		if class, ok := Match(s); !ok || class != "credential token" {
+			t.Errorf("Match(%q) = %q/%v, want credential token", s, class, ok)
+		}
+	}
 }

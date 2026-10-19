@@ -81,6 +81,12 @@ func Resume(o StartOptions, path string) (*Agent, error) {
 		}
 		return nil, err
 	}
+	// The frozen prompt carries the date the session started: the skill
+	// guard's provenance check must accept that date, not only the resume
+	// day (prepare() stamps time.Now(), which is right for a fresh Start).
+	if !h.StartedAt.IsZero() {
+		st.sessionDate = h.StartedAt
+	}
 	if _, _, err := st.reg.Resolve(model); err != nil {
 		if errors.Is(err, provider.ErrUnknownModel) && o.Model == "" {
 			return nil, fmt.Errorf("resume: the session's model is not configured (%w); pass --model <provider/model> to continue with another", err)

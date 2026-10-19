@@ -261,12 +261,10 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 			(rh != "" || strings.HasPrefix(res.Content, "refused:")) { // both branches guarded (H2)
 			env.SkillHintArmed = true
 		}
-	} else if call.Name == "shell" && env.lastFailedVerify != "" &&
-		verifies(cmdOf(call)) && !mutatesOnly(cmdOf(call)) &&
+	} else if env.lastFailedVerify != "" && verifyingCall(call) &&
 		normCommand(cmdOf(call)) != env.lastFailedVerify {
 		env.SkillHintArmed = true // recovery (H1) — skillHint delivers on this same result
-	} else if env.SkillCold && call.Name == "shell" &&
-		verifies(cmdOf(call)) && !mutatesOnly(cmdOf(call)) {
+	} else if env.SkillCold && verifyingCall(call) {
 		// Cold repo: the first verification that succeeds there is itself the
 		// durable fact ("this is how the repo is checked"), and waiting for a
 		// recovery means the nudge almost never arms in the ordinary flow —

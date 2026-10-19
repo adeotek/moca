@@ -636,6 +636,20 @@ func gitComponent(p string) bool {
 // every Check error.
 const skillWriteRefusal = "skill files are written with write/edit (the skill guard validates them), not the shell — use write or edit on .moca/skills/<dir>/SKILL.md"
 
+// errSkillWrite is the skill-dir refusal as an error. It reports Internal():
+// it is the shell side of the skill guard — moca's own procedure, not a
+// project fact — so the tools layer must not let it arm the skill hint (the
+// guard's own refusals never do, H2/H3). Structural: tools does not import
+// this package.
+var errSkillWrite error = internalErr(skillWriteRefusal)
+
+type internalErr string
+
+func (e internalErr) Error() string { return string(e) }
+
+// Internal marks a refusal that comes from moca's own guards.
+func (internalErr) Internal() bool { return true }
+
 // genericRunners are allowlisted tools whose *arguments* choose code to run:
 // the allow rule names the tool, not whatever its arguments hand it. For
 // `make` the target is a recipe from the repository's own Makefile — exactly
@@ -864,6 +878,44 @@ func (s *Shell) skillTarget(t string) bool {
 	return within(s.skillDir, res)
 }
 
+// skillOperand refuses a known writer's literal operand that lands under the
+// skills dir: a `--opt=PATH` value is checked like a bare operand
+// (`cp --target-directory=.moca/skills/x`), and after a cd — where a relative
+// path cannot be placed against the workdir — a relative operand naming a
+// SKILL.md or a skills component is refused on its spelling alone
+// (`cd .moca/skills && cp x moca-a/SKILL.md`, `cd .moca && cp -r x skills/y`).
+// That spelling also matches a project's own skills/ folder, so its refusal
+// says how to get past it, like the after-cd redirect refusal does.
+func (s *Shell) skillOperand(t string, cwdUnknown bool) error {
+	if s.skillDir == "" {
+		return nil
+	}
+	if strings.HasPrefix(t, "--") {
+		_, v, ok := strings.Cut(t, "=")
+		if !ok {
+			return nil
+		}
+		t = v
+	} else if strings.HasPrefix(t, "-") {
+		return nil
+	}
+	if t == "" {
+		return nil
+	}
+	if cwdUnknown && !filepath.IsAbs(t) && t != "~" && !strings.HasPrefix(t, "~/") {
+		for _, c := range pathComps(t) {
+			if strings.EqualFold(c, "SKILL.md") || strings.EqualFold(c, "skills") {
+				return internalErr(fmt.Sprintf("relative path %q after a cd/pushd/popd cannot be placed and may be in .moca/skills — use a path from the workdir, or run the cd separately (%s)", t, skillWriteRefusal))
+			}
+		}
+		return nil
+	}
+	if s.skillTarget(t) {
+		return errSkillWrite
+	}
+	return nil
+}
+
 // caseFolds reports where the filesystem folds file-name case (darwin,
 // windows) plus one-off child-process probes that force it (the same env var
 // the tools package honors): the shell's skill-write refusal (C1) must see a
@@ -996,7 +1048,7 @@ func (s *Shell) checkWrapperOutputs(ws []Word, idxs []int, cwdUnknown bool, v *v
 				continue
 			}
 			if s.skillTarget(target) {
-				return errors.New(skillWriteRefusal)
+				return errSkillWrite
 			}
 			if err := s.checkTargetText(target, cwdUnknown); err != nil {
 				return err
@@ -1044,7 +1096,7 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 					continue
 				}
 				if t, ok := wordLit(r.Word); ok && s.skillTarget(t) {
-					fail(errors.New(skillWriteRefusal))
+					fail(errSkillWrite)
 				} else if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
 					fail(err)
 				} else if s.auto && s.gitTarget(t) {
@@ -1102,15 +1154,19 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 					cwdUnknown = true
 				case "cp", "mv", "install", "ln", "truncate", "rm", "patch", "rsync":
 					for _, a := range x.Args[idx+1:] {
-						if t, ok := wordLit(a); ok && !strings.HasPrefix(t, "-") && s.skillTarget(t) {
-							fail(errors.New(skillWriteRefusal))
+						if t, ok := wordLit(a); ok {
+							if err := s.skillOperand(t, cwdUnknown); err != nil {
+								fail(err)
+							}
 						}
 					}
 				case "sed":
 					if hasOpt(ws, idx+1, "i", "--in-place") {
 						for _, a := range x.Args[idx+1:] {
-							if t, ok := wordLit(a); ok && !strings.HasPrefix(t, "-") && s.skillTarget(t) {
-								fail(errors.New(skillWriteRefusal))
+							if t, ok := wordLit(a); ok {
+								if err := s.skillOperand(t, cwdUnknown); err != nil {
+									fail(err)
+								}
 							}
 						}
 					}
@@ -1121,7 +1177,7 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 							continue
 						}
 						if s.skillTarget(t) {
-							fail(errors.New(skillWriteRefusal))
+							fail(errSkillWrite)
 						} else if err := s.checkTarget(a, cwdUnknown); err != nil {
 							fail(err)
 						} else if s.auto && s.gitTarget(t) {

@@ -1022,8 +1022,9 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		if m.agent.Plan() {
 			return m.printlnError("error: plan mode is on (writes are confined to docs/plans/) — /plan to turn it off, then /remember")
 		}
+		a := m.agent // captured here, like every other run starter: the closure runs off the UI goroutine
 		return m.startRunWith("/remember "+text, func(ctx context.Context) (agent.Outcome, error) {
-			return m.agent.Remember(ctx, text) // arms the user signal (Decision 11); the transcript keeps the typed command
+			return a.Remember(ctx, text) // arms the user signal (Decision 11); the transcript keeps the typed command
 		})
 	case "execute":
 		if cmd, refused := m.refuseRunning(); refused {

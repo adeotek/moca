@@ -158,6 +158,7 @@ func parseReadWindow(content string) (from, to int, lines map[int]string, ok boo
 func Collect(entries []session.Entry) Metrics {
 	m := Metrics{Calls: map[string]int{}, Residency: map[string]int{}, Nudges: map[string]int{}}
 	callNames := map[string]string{}
+	callInputs := map[string]json.RawMessage{} // the repeated-failure key's input, by call id
 	pending := map[string]readArgs{}
 	elided := map[string]bool{}
 	index := map[string]int{}
@@ -220,6 +221,7 @@ func Collect(entries []session.Entry) Metrics {
 			}
 			c := e.ToolUse.Call
 			callNames[c.ID] = c.Name
+			callInputs[c.ID] = c.Input
 			m.Calls[c.Name]++
 			var in struct {
 				Path   string `json:"path"`
@@ -245,7 +247,7 @@ func Collect(entries []session.Entry) Metrics {
 			tr := e.ToolResult
 			if tr.IsError {
 				m.ToolErrors++
-				key := callNames[tr.CallID] + "\x00" + string(toolInputOf(entries, tr.CallID)) + "\x00" + tr.Content
+				key := callNames[tr.CallID] + "\x00" + string(callInputs[tr.CallID]) + "\x00" + tr.Content
 				if seenFail[key] {
 					m.RepeatedFailures++
 				}
@@ -325,17 +327,6 @@ func Collect(entries []session.Entry) Metrics {
 		}
 	}
 	return m
-}
-
-// toolInputOf returns the recorded input of a call (for the repeated-failure
-// key); an unknown call yields nil.
-func toolInputOf(entries []session.Entry, callID string) json.RawMessage {
-	for _, e := range entries {
-		if e.Type == session.TypeToolUse && e.ToolUse != nil && e.ToolUse.Call.ID == callID {
-			return e.ToolUse.Call.Input
-		}
-	}
-	return nil
 }
 
 // covered reports whether an earlier read window still in the live window
