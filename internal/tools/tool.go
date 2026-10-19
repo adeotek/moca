@@ -189,6 +189,21 @@ type Env struct {
 	// (see Registry.Run), the moment a cold repo's own procedure gets proved.
 	// guardedWrite clears it once this session creates a skill.
 	SkillCold bool
+	// SkillRecordNudge is the §12.1 end-of-run recording nudge's switch
+	// (skills.recordNudge, on by default, resolved by the agent at build).
+	// With it set the mid-run hint is never delivered — one invitation per
+	// run, and it lands at the end where it cannot be scrolled past — while
+	// every arming trigger below still runs: SkillHintArmed is what the agent
+	// reads to decide the record is due.
+	SkillRecordNudge bool
+	// SkillProvenCmd is the verifying command that armed a recording this run
+	// (a recovery or a cold repo's first green check), first line only — the
+	// fact the run actually proved. The end-of-run nudge names it, so the
+	// record starts from something the run established rather than from
+	// whatever the model found most interesting (an injected "NOTE TO AI
+	// CODING AGENTS" got recorded as a rule without this: BASELINE.md,
+	// v0.7.1's injection re-check).
+	SkillProvenCmd string
 	// lastFailedVerify is the recovery trigger's state: the normalized
 	// command of the last failing verifying shell call (shell.go), cleared by
 	// noteChange (an edit in between means the fix was in the code).
@@ -264,12 +279,14 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 	} else if env.lastFailedVerify != "" && verifyingCall(call) &&
 		normCommand(cmdOf(call)) != env.lastFailedVerify {
 		env.SkillHintArmed = true // recovery (H1) — skillHint delivers on this same result
+		env.SkillProvenCmd = callCommand(call)
 	} else if env.SkillCold && verifyingCall(call) {
 		// Cold repo: the first verification that succeeds there is itself the
 		// durable fact ("this is how the repo is checked"), and waiting for a
 		// recovery means the nudge almost never arms in the ordinary flow —
 		// measured at 0/6 in test/evals/skills-cold (BASELINE.md, v0.7.0).
 		env.SkillHintArmed = true
+		env.SkillProvenCmd = callCommand(call)
 	}
 	if h := investigationHint(env); h != "" {
 		res.Content += h
@@ -372,6 +389,12 @@ func skillHint(env *Env, call llm.ToolCall, res Result) string {
 	}
 	if env.skillWrote { // a landed skill write satisfies it before anything else (H4)
 		env.SkillHintDone = true
+		return ""
+	}
+	if env.SkillRecordNudge {
+		// Option A (SPECS §12.1, v0.7.1): the invitation moves to the end of
+		// the run (agent.recordNudge) — nothing is said mid-run, and the
+		// arming flags stay as they are for the agent's end-of-run gate.
 		return ""
 	}
 	if !verifyingCall(call) {

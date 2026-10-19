@@ -265,7 +265,7 @@ auto: true
 
 **Using it.** With the switch on there is nothing to invoke — the agent records when it has something worth keeping, and `/remember <text>` makes it explicit, e.g. `/remember always run make vet before calling a change done`.
 
-**The contract.** 12 rule lines per skill, 240 runes a line, 1500 a body, 8 auto skills per project, 2 new skills per run. Provenance is checked against the host clock, not the model's word: a new line starts `×1`, a line the agent later revisits unchanged bumps once to `×2`, and a `(user, …)` line comes only from `/remember <text>` (the TUI says so when the switch is off) and never expires. Detection is in-turn: a one-shot hint fires at a decision point — a guard refused the agent, a third identical command failure in a row, a steer, or a recovery after a failed verification — and the recording is a `write`/`edit` like any other.
+**The contract.** 12 rule lines per skill, 240 runes a line, 1500 a body, 8 auto skills per project, 2 new skills per run. Provenance is checked against the host clock, not the model's word: a new line starts `×1`, a line the agent later revisits unchanged bumps once to `×2`, and a `(user, …)` line comes only from `/remember <text>` (the TUI says so when the switch is off) and never expires. Detection is in-turn: a one-shot hint fires at a decision point — a guard refused the agent, a third identical command failure in a row, a steer, a recovery after a failed verification, or a cold repository's first green check — and the recording is a `write`/`edit` like any other. Since v0.7.1 the invitation lands at the **end of the run** by default: one nudge before the final answer asks for the record (or for one line saying nothing durable came up), and `"skills": {"recordNudge": false}` — in the user config or a trusted project file — brings back the mid-run hint instead.
 
 **The files are yours.** While the switch is on, `write`/`edit` validate the exact bytes that would land:
 
@@ -308,4 +308,4 @@ make release        # five cross-compiled binaries in dist/
 
 ## Status
 
-Current release: **v0.7.0** (2026-10-18) — self-managed project skills, opt-in via `"skills": {"selfManaged": true}` (see [Self-managed skills](#self-managed-skills) for what it does and how it is guarded). The full release history lives in the [changelog](CHANGELOG.md).
+Current release: **v0.7.1** (2026-10-19) — the end-of-run recording nudge for self-managed skills (opt-in via `"skills": {"selfManaged": true}`; `skills.recordNudge: false` turns the nudge off, see [Self-managed skills](#self-managed-skills)). The full release history lives in the [changelog](CHANGELOG.md).
