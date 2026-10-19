@@ -168,6 +168,11 @@ func (srv *Server) get(id string) (*session, bool) {
 
 func (srv *Server) lookup(id string) (*session, error) {
 	if s, ok := srv.get(id); ok {
+		// A request that names this id proves the client already has it, so
+		// the updates session/new held back (§markReady) may flow now: flush
+		// them before this request's own notifications, or they would queue
+		// behind its response and arrive out of order.
+		s.markReady()
 		return s, nil
 	}
 	return nil, notFound("unknown session %q", id)
