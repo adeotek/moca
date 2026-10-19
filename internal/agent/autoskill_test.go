@@ -18,7 +18,15 @@ import (
 	"github.com/adeotek/moca/internal/tools"
 )
 
-const switchOn = `"skills":{"selfManaged":true}`
+// switchOn is the user opt-in for tests that script exact turn counts: the
+// end-of-run recording nudge is on by default (v0.7.1) and would add a turn to
+// any run whose verification armed it, so those tests opt out explicitly. The
+// nudge's own tests use switchOnDefault.
+const switchOn = `"skills":{"selfManaged":true,"recordNudge":false}`
+
+// switchOnDefault is the shipped default: self-managed skills on, recording
+// nudge on (skills.recordNudge defaults to true).
+const switchOnDefault = `"skills":{"selfManaged":true}`
 
 func today() string { return time.Now().Format("2006-01-02") }
 

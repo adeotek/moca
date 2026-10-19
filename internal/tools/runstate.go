@@ -29,6 +29,7 @@ func (e *Env) BeginRun() {
 	e.copied = nil
 	e.SkillCreations, e.SkillUserSignal, e.SkillTyped = 0, false, nil
 	e.SkillHintArmed, e.SkillHintDone, e.lastFailedVerify = false, false, ""
+	e.SkillProvenCmd = ""
 }
 
 // markCopied records a successful byte copy of abs (the SQLite sidecar guard

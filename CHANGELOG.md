@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.7.1 (2026-10-19)
+
+### The end-of-run recording nudge
+
+v0.7.0 invited a session to record what it learned with a one-shot hint delivered mid-run — and measured poorly: 2/6 cold-repo runs recorded, the rest read it and went on with the task. v0.7.1 keeps the triggers and moves the invitation to the last decision point, where it cannot be scrolled past.
+
+- **The nudge** (`internal/agent/agent.go` `recordNudge`) — a text-only reply that would end a run which armed a recording (a non-internal refusal, a third identical failure, a steer, a verified recovery, a cold repo's first green check) and created no skill gets one persisted turn: write the durable fact as `.moca/skills/moca-<short-name>/SKILL.md`, or say in one line that nothing would save the next session time. Bounded to once per run, ordered after the verification nudge (an unverified change is not a proven fact), and never in plan mode or a `/remember` run.
+- **One invitation per run** — while the nudge is on, the mid-run hint is not delivered at all (`Env.SkillRecordNudge` short-circuits `skillHint`); the arming flags stay, which is exactly what the agent's end-of-run gate reads.
+- **Config** — `skills.recordNudge`, a bool in the user config **and** in the trusted project file, **on by default**; a `false` in either layer turns the nudge off and restores the v0.7.0 mid-run hint (`config.ResolveRecordNudge`, `TestResolveRecordNudgeTable`).
+- **Measured** (`skills-cold`, `glm-5.3-flash`, n=4 per arm, `test/evals/skills-cold/config.hint.jsonc` is the off arm) — **on: 4/4 runs recorded, 31 skill-file writes, 4/4 second sessions listed the skill; off: 0/4 recorded, 0 writes**. The cost is in the same table: 105.8k tokens and 19.2 steps per session-1 run against 34.4k and 7.8 — ~3× the tokens for a run that spends turns on the record, which is why the switch exists. Record: `test/evals/BASELINE.md`, SPECS §15.
+
 ## v0.7.0 (2026-10-18)
 
 ### Self-managed project skills
