@@ -11,6 +11,13 @@ v0.7.0 invited a session to record what it learned with a one-shot hint delivere
 - **Config** — `skills.recordNudge`, a bool in the user config **and** in the trusted project file, **on by default**; a `false` in either layer turns the nudge off and restores the v0.7.0 mid-run hint (`config.ResolveRecordNudge`, `TestResolveRecordNudgeTable`).
 - **Measured** (`skills-cold`, `glm-5.3-flash`, n=4 per arm, `test/evals/skills-cold/config.hint.jsonc` is the off arm) — **on: 4/4 runs recorded, 31 skill-file writes, 4/4 second sessions listed the skill; off: 0/4 recorded, 0 writes**. The cost is in the same table: 105.8k tokens and 19.2 steps per session-1 run against 34.4k and 7.8 — ~3× the tokens for a run that spends turns on the record, which is why the switch exists. Record: `test/evals/BASELINE.md`, SPECS §15.
 
+### ACP: held updates flush before the next request's notifications
+
+`session/new` writes its response and *then* runs the follow-up that flushes the updates held back during start (startup warnings, the mode and config state). A client that sends `session/set_mode`, `session/set_config_option` or `session/prompt` the instant it has the session id could be served inside that window, so its `current_mode_update` / `config_option_update` was queued as "held" and written **after** its own response — a protocol-ordering violation that made `TestSetMode` fail intermittently in CI (`after plan: []`, on a tree that had passed the pull-request run).
+
+- **The fix** — `Server.lookup` flushes the held updates (`session.markReady`, idempotent and mutex-guarded) before returning: a request that names the session id is proof the client already has it, the rule `session/load` already applied. `set_mode`, `set_config_option`, `prompt`, `close` and `delete` all resolve their session through it.
+- **Pinned** — `TestLookupFlushesHeldUpdates` fails with the flush removed (`lookup left the held update queued: ""`); the mode tests that caught it in CI (`TestSetMode`, `TestSetModeViaConfigOption`, `TestSetModeReportsTheConfigOption`) cover the same ordering end to end.
+
 ## v0.7.0 (2026-10-18)
 
 ### Self-managed project skills
