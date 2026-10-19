@@ -186,6 +186,20 @@ func (t Theme) accentStyle(dark bool) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(t.colors(dark).Accent)).Bold(true)
 }
 
+// ruleStyle is the full-width rule that frames the input area: the welcome
+// badge's accent orange — one hue to say "this is where you type". A rule,
+// not a word, so no Bold (accentStyle's weight is for the product name).
+func (t Theme) ruleStyle(dark bool) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(t.colors(dark).Accent))
+}
+
+// separatorStyle is the grey of decorative separator lines — the picker's own
+// opening rule; statusSep is the palette's separator role (the status bar's
+// ` · ` links share it).
+func (t Theme) separatorStyle(dark bool) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(t.colors(dark).StatusSep))
+}
+
 // planStyle is the plan-mode notice color; bold.
 func (t Theme) planStyle(dark bool) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(t.colors(dark).Plan)).Bold(true)

@@ -36,6 +36,11 @@ type Header struct {
 	SystemPrompt string    `json:"systemPrompt"`
 	Yolo         bool      `json:"yolo,omitempty"`
 	Mode         string    `json:"mode,omitempty"` // recorded permission mode ("default" kept implicit for old sessions)
+	// SelfManagedSkills records that the session's system prompt carries the
+	// self-managed skills block. Resume reads it back instead of probing the
+	// stored prompt, whose text embeds an absolute path (a moved repo or a
+	// changed symlink layout would make the probe lie) — M7.
+	SelfManagedSkills bool `json:"selfManagedSkills,omitempty"`
 }
 
 type PermissionMode struct {

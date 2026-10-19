@@ -36,6 +36,12 @@
 
   "yolo": false,                         // true = all permission checks off by default (§7.5); --mode default overrides
 
+  // Self-managed project skills (§12): this user-level key is the only opt-in.
+  // A trusted .moca/config.jsonc may set false to opt a repository out (a true
+  // there is declarative and never enables it alone); a change needs a new
+  // moca process.
+  "skills": { "selfManaged": false },
+
   // Startup mode — user level here, a trusted project's .moca/config.jsonc may set it too (§3/§4) and wins.
   // "permissions": { "defaultMode": "auto" },                              // default | auto | plan | yolo (a project file: default | auto | plan)
 

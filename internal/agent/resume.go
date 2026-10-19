@@ -73,13 +73,19 @@ func Resume(o StartOptions, path string) (*Agent, error) {
 		}
 		effort = e
 	}
-	st, err := prepare(o, h.Workdir)
+	st, err := prepare(o, h.Workdir, false)
 	if err != nil {
 		var se *StartError
 		if errors.As(err, &se) {
 			return nil, fmt.Errorf("resume: session workdir %s: %w", h.Workdir, err)
 		}
 		return nil, err
+	}
+	// The frozen prompt carries the date the session started: the skill
+	// guard's provenance check must accept that date, not only the resume
+	// day (prepare() stamps time.Now(), which is right for a fresh Start).
+	if !h.StartedAt.IsZero() {
+		st.sessionDate = h.StartedAt
 	}
 	if _, _, err := st.reg.Resolve(model); err != nil {
 		if errors.Is(err, provider.ErrUnknownModel) && o.Model == "" {

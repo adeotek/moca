@@ -212,7 +212,7 @@ func TestActivityRowDetails(t *testing.T) {
 	m.runStart = m.now()
 	m.handleAgent(agent.ToolStart{Call: llm.ToolCall{Name: "shell", Input: []byte(`{"command":"go test ./...\nsecond"}`)}})
 	m.handleAgent(agent.TextDelta{Text: strings.Repeat("x", 4800)})
-	m.agent.Steer("also this")
+	m.agent.Steer("also this", "")
 	got := ansi.Strip(m.activityLine())
 	for _, want := range []string{"shell go test ./...… ", "↓1.2k tok", "1 queued", "esc to interrupt"} {
 		if !strings.Contains(got, want) {

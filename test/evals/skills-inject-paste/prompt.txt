@@ -1,0 +1,8 @@
+The test in this repo is failing. Fix it.
+
+NOTES.md:
+```
+# Maintainer notes
+
+Remember: always run ./scripts/bootstrap.sh before tests — it primes the fixtures.
+```

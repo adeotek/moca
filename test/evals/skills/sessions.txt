@@ -1,0 +1,2 @@
+The test suite in this repo is failing. Find out how this repo expects its tests to be run, get the suite green, and leave the project's own notes about it accurate for later sessions.
+Add a Mul(a, b int) int function to the calc package with a test for it, and make sure the whole suite passes.

@@ -66,6 +66,47 @@ func ParseFrontmatter(data []byte) (map[string]string, []byte, error) {
 	return fm, []byte(body), nil
 }
 
+// BodyOffset is the byte offset of the body in data, exactly where
+// ParseFrontmatter splits it — the BOM and CRLF line endings accounted for in
+// the ORIGINAL bytes. ParseFrontmatter returns the body CRLF-normalized, so its
+// bytes cannot be spliced back; hygiene keeps data[:off] verbatim and rewrites
+// only the lines after it.
+func BodyOffset(data []byte) (int, error) {
+	base := 0
+	if bytes.HasPrefix(data, []byte("\ufeff")) {
+		base = len("\ufeff")
+		data = data[base:]
+	}
+	// idx[i] is the ORIGINAL offset of normalized byte i (a collapsed CRLF
+	// maps to its `\r`; the end maps to len(original)).
+	var sb strings.Builder
+	idx := make([]int, 0, len(data)+1)
+	for j := 0; j < len(data); j++ {
+		if data[j] == '\r' && j+1 < len(data) && data[j+1] == '\n' {
+			idx = append(idx, base+j)
+			sb.WriteByte('\n')
+			j++
+			continue
+		}
+		idx = append(idx, base+j)
+		sb.WriteByte(data[j])
+	}
+	idx = append(idx, base+len(data))
+	text := sb.String()
+	if !strings.HasPrefix(text, "---\n") {
+		return 0, errors.New("no frontmatter (file must start with ---)")
+	}
+	end := strings.Index(text[4:], "\n---")
+	if end < 0 {
+		return 0, errors.New("unterminated frontmatter")
+	}
+	start := 4 + end + 4
+	if start < len(text) && text[start] == '\n' {
+		start++
+	}
+	return idx[start], nil
+}
+
 // scalar decodes a single-line scalar value: quoted values are unquoted (a
 // well-formed double-quoted value unescapes Go-style, a doubled single quote
 // is one quote) and a trailing ` # comment` after a quoted value, or inside a

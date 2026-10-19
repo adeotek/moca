@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -33,11 +34,28 @@ func countLines(s string) int {
 	return strings.Count(strings.TrimSuffix(s, "\n"), "\n") + 1
 }
 
-// guardedWrite applies the read guard, snapshot and mode preservation shared
-// by write and edit.
+// guardedWrite applies the read guard, the skill guard, snapshot and mode
+// preservation shared by write and edit.
 func guardedWrite(env *Env, abs string, data []byte) error {
 	if err := env.Reads.Check(abs); err != nil {
 		return err
+	}
+	// SkillGuard enforces the self-managed skill contract (§12) on the exact
+	// bytes that would land — for edit, the post-edit content — and only for
+	// paths under SkillDir. Both are unset when the feature is off.
+	// Only a validated skill file counts as "the model is recording": a resource
+	// file beside a hand-written skill, or a loose file in the skills root, is
+	// the user's business and must not consume the one-shot hint.
+	guarded, created := false, false
+	if rel, ok := skillRel(env, abs); ok && env.SkillGuard != nil {
+		if err := env.SkillGuard(abs, rel, data); err != nil {
+			env.skillRefused = true // Registry.Run: the guard's own refusal never arms the hint
+			return err
+		}
+		if isSkillFile(rel) {
+			_, serr := os.Stat(abs)
+			guarded, created = true, errors.Is(serr, fs.ErrNotExist)
+		}
 	}
 	mode := fs.FileMode(0o644)
 	if fi, err := os.Stat(abs); err == nil {
@@ -58,6 +76,16 @@ func guardedWrite(env *Env, abs string, data []byte) error {
 	if err != nil {
 		return err
 	}
+	if guarded {
+		env.skillWrote = true // Registry.Run: a landed skill write satisfies the hint
+	}
+	if created {
+		env.SkillCreations++ // counted once the file landed, never on a failed write
+		// The repo is not cold any more: under the validating guard a created
+		// SKILL.md is an auto skill, so later runs of this session must not get
+		// the cold-repo nudge again.
+		env.SkillCold = false
+	}
 	return env.Reads.Record(abs)
 }
 
@@ -73,6 +101,7 @@ func (writeTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	if env.Plan && (err != nil || !planAllows(env, abs)) {
 		// Plan mode (rev 20): the ask-write roots stay closed too — only
 		// docs/plans/*.md may change.
+		env.internalRefusal = true
 		return errorf("%s", planWriteRefusal)
 	}
 	if err != nil {
@@ -95,7 +124,9 @@ func (writeTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 	}
 	if env.Plan {
 		env.PlanWrote = true
-	} else {
+	} else if _, ok := skillRel(env, abs); !ok {
+		// A skill write is not a code change (F9): it must not disarm the
+		// failing-test protocol or the repeat counter.
 		noteChange(env, abs)
 	}
 	n := countLines(a.Content)

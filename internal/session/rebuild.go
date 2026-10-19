@@ -54,8 +54,10 @@ func Messages(entries []Entry) []llm.Message { return MessagesWith(entries, nil,
 //     before the latest compaction — replays verbatim, thinking blocks
 //     included. Everywhere else the kept tail's thinking is stripped: the
 //     summary already stands in for that stretch, and replaying its thinking
-//     buys no reasoning. Post-compaction turns keep theirs either way (the
-//     strip is scoped to entries before the compaction boundary).
+//     buys no reasoning. The one exception is the tail's last assistant turn
+//     when it made tool calls (openToolTurn). Post-compaction turns keep
+//     theirs either way (the strip is scoped to entries before the
+//     compaction boundary).
 func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, historyBound bool) []llm.Message {
 	var out []llm.Message
 	start, compactionIdx := 0, -1
@@ -77,6 +79,10 @@ func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, history
 		appendUser(&out, llm.ContentBlock{Type: llm.BlockText, Text: SummaryPrefix + "\n" + c.Summary})
 	}
 	stripThinking := !historyBound && compactionIdx >= 0
+	keepIdx := -1
+	if stripThinking {
+		keepIdx = openToolTurn(entries, start, compactionIdx)
+	}
 	assistantIdx := map[string]int{}
 	elided := ElidedIDs(entries)
 	for i := start; i < len(entries); i++ {
@@ -85,7 +91,7 @@ func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, history
 		case TypeMessage:
 			if e.Message.Role == llm.RoleAssistant {
 				content := e.Message.Content
-				if stripThinking && i < compactionIdx {
+				if stripThinking && i < compactionIdx && i != keepIdx {
 					content = withoutThinking(content)
 				}
 				out = append(out, llm.Message{Role: llm.RoleAssistant, Content: append([]llm.ContentBlock{}, content...)})
@@ -113,6 +119,29 @@ func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, history
 		}
 	}
 	return out
+}
+
+// openToolTurn returns the index of the last assistant message before the
+// compaction boundary when it made tool calls, else -1. A compaction that runs
+// mid-run (after a tool batch, or on overflow) leaves that message as the one
+// the next request's tool results answer, and a thinking-enabled anthropic
+// route rejects a final assistant message that does not start with its
+// thinking block — so it keeps its thinking. The index is fixed once the
+// compaction exists, so every later request renders it identically.
+func openToolTurn(entries []Entry, start, compactionIdx int) int {
+	for j := compactionIdx - 1; j >= start; j-- {
+		e := entries[j]
+		if e.Type != TypeMessage || e.Message == nil || e.Message.Role != llm.RoleAssistant {
+			continue
+		}
+		for k := j + 1; k < compactionIdx; k++ {
+			if entries[k].Type == TypeToolUse && entries[k].ToolUse != nil && entries[k].ToolUse.MessageID == e.ID {
+				return j
+			}
+		}
+		return -1
+	}
+	return -1
 }
 
 // withoutThinking copies the blocks minus thinking: the kept tail's reasoning

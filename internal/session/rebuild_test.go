@@ -143,3 +143,38 @@ func TestMessagesStripKeptTailThinking(t *testing.T) {
 		t.Fatalf("without a compaction nothing is stripped: %+v", plain[0].Content)
 	}
 }
+
+// TestMessagesKeepOpenToolTurnThinking: a compaction that lands mid-run (after
+// a tool batch) leaves the kept tail's last assistant message as the one the
+// next request's tool results answer; a thinking-enabled anthropic route
+// rejects that final assistant message without its leading thinking block, so
+// it keeps its thinking while earlier kept-tail turns are still stripped.
+func TestMessagesKeepOpenToolTurnThinking(t *testing.T) {
+	asst := func(id string) Entry {
+		return Entry{ID: id, Type: TypeMessage, Message: &llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: llm.BlockThinking, Text: "think " + id}, {Type: llm.BlockText, Text: id}}}}
+	}
+	use := func(id, msg, call string) Entry {
+		return Entry{ID: id, Type: TypeToolUse, ToolUse: &ToolUse{MessageID: msg, Call: llm.ToolCall{ID: call, Name: "ls", Input: json.RawMessage(`{}`)}}}
+	}
+	res := func(id, call string) Entry {
+		return Entry{ID: id, Type: TypeToolResult, ToolResult: &llm.ToolResult{CallID: call, Content: "x"}}
+	}
+	es := []Entry{
+		{ID: "u1", Type: TypeMessage, Message: txt(llm.RoleUser, "go")},
+		asst("a1"), use("t1", "a1", "c1"), res("r1", "c1"),
+		asst("a2"), use("t2", "a2", "c2"), res("r2", "c2"),
+		{ID: "c", Type: TypeCompaction, Compaction: &Compaction{Summary: "sum", FirstKeptEntryID: "a1"}},
+	}
+	m := Messages(es)
+	// summary, a1, r1, a2, r2
+	if len(m) != 5 {
+		t.Fatalf("summary, a1, r1, a2, r2: got %d messages", len(m))
+	}
+	if m[1].Content[0].Type == llm.BlockThinking {
+		t.Fatalf("an earlier kept-tail turn is still stripped: %+v", m[1].Content)
+	}
+	if m[3].Content[0].Type != llm.BlockThinking {
+		t.Fatalf("the open tool turn must keep its leading thinking block: %+v", m[3].Content)
+	}
+}

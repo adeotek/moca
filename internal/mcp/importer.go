@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/secret"
 )
 
 // Source is one host config file `moca mcp import` can read.
@@ -142,27 +143,9 @@ func ParseSource(src Source, cwd string) (map[string]config.MCPServer, []string,
 }
 
 var (
-	secretKey   = regexp.MustCompile(`(?i)key|token|secret|password|auth`)
-	secretValue = regexp.MustCompile(`^(?:(?:Bearer|Basic) \S+|(?:sk-|ghp_|gho_|github_pat_|glpat-|xox[abp]-|AKIA)\S+)`)
-	varRef      = regexp.MustCompile(`^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$`)
-	nonAlnum    = regexp.MustCompile(`[^A-Z0-9]+`)
-	// userinfo matches URL credentials like https://user:token@host/mcp.
-	userinfo = regexp.MustCompile(`://[^/@\s:]+:[^/@\s]+@`)
-	// tokenish matches credential-shaped tokens anywhere in a value, with a
-	// length floor so benign strings ("sk-1") do not trip it: the same
-	// prefixes as secretValue plus scheme-style header values.
-	// passwordKV matches key=value connection-string secrets ("password=…").
-	passwordKV = regexp.MustCompile(`(?i)\b(?:password|passwd|pwd)\s*=\s*\S+`)
-	tokenish   = regexp.MustCompile(`(?:(?:sk-|ghp_|gho_|github_pat_|glpat-|xox[abp]-|AKIA)[A-Za-z0-9_-]{8,}|(?:Bearer|Basic)\s+\S{8,})`)
+	varRef   = regexp.MustCompile(`^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$`)
+	nonAlnum = regexp.MustCompile(`[^A-Z0-9]+`)
 )
-
-// embeddedSecret reports a credential inside an env/header value whose key
-// gave nothing away: URL userinfo (postgres://user:pw@host), a
-// credential-shaped token or Bearer/Basic scheme anywhere in the value, or a
-// password=… pair (DSNs, connection strings).
-func embeddedSecret(v string) bool {
-	return userinfo.MatchString(v) || tokenish.MatchString(v) || passwordKV.MatchString(v)
-}
 
 // literalSecretFields lists the fields of a server carrying a
 // credential-shaped literal that RewriteSecrets does not rewrite (it only
@@ -170,15 +153,15 @@ func embeddedSecret(v string) bool {
 // skipped by Plan rather than imported with the secret copied verbatim.
 func literalSecretFields(s config.MCPServer) []string {
 	var fields []string
-	if tokenish.MatchString(s.Command) {
+	if secret.Tokenish(s.Command) {
 		fields = append(fields, "command")
 	}
 	for i, a := range s.Args {
-		if tokenish.MatchString(a) {
+		if secret.Tokenish(a) {
 			fields = append(fields, fmt.Sprintf("args[%d]", i))
 		}
 	}
-	if s.URL != "" && (userinfo.MatchString(s.URL) || tokenish.MatchString(s.URL)) {
+	if s.URL != "" && (secret.Userinfo(s.URL) || secret.Tokenish(s.URL)) {
 		fields = append(fields, "url")
 	}
 	return fields
@@ -231,7 +214,7 @@ func RewriteSecrets(server string, s config.MCPServer) (config.MCPServer, []EnvV
 			switch {
 			case strings.HasPrefix(v, "env:"):
 				out[k] = v
-			case secretKey.MatchString(k) || secretValue.MatchString(v) || embeddedSecret(v):
+			case secret.Key(k) || secret.Value(v) || secret.Embedded(v):
 				name := envName(server, k)
 				out[k] = "env:" + name
 				vars = append(vars, EnvVar{Name: name, Server: server, Field: field, Key: k})

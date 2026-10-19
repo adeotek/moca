@@ -1,0 +1,7 @@
+{
+  // the off variant (-c off): identical to the shared config — no opt-in, so
+  // the scenario's (b) is report-only (recording cannot happen and is not
+  // required; the suite must still go green).
+  "model": "opencode-go/glm-5.3-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_GO_KEY" } }
+}

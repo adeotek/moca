@@ -33,7 +33,7 @@ type Parsed struct {
 }
 
 // BuiltinCommands win over prompt templates on a name collision (§10).
-var BuiltinCommands = []string{"model", "effort", "hard", "mode", "yolo", "plan", "execute", "clear", "resume", "sessions", "compact", "cost", "undo", "copy", "show", "login", "logout", "help", "exit"}
+var BuiltinCommands = []string{"model", "effort", "hard", "mode", "yolo", "plan", "execute", "remember", "clear", "resume", "sessions", "compact", "cost", "undo", "copy", "show", "login", "logout", "help", "exit"}
 
 // builtinAliases resolve to their built-in unless a prompt template already
 // owns the name (`/q`, `/quit` → `/exit`) — only the full built-in names are
@@ -48,6 +48,7 @@ var builtinHelp = map[string]string{
 	"yolo":     "toggle yolo mode: ALL permission checks off (between runs only)",
 	"plan":     "[request]  toggle plan mode (runs write an implementation plan to docs/plans/, change nothing else); with a request, plan it now",
 	"execute":  "<plan.md> [instructions]  execute an implementation plan step by step, ticking its - [ ] boxes",
+	"remember": "<text>  record <text> as a project skill later sessions follow",
 	"clear":    "start a new session (the old one stays resumable)",
 	"resume":   "[id]  pick an earlier session of this directory to continue",
 	"sessions": "list, switch or delete this directory's sessions",
@@ -98,6 +99,16 @@ func ParseInput(s string, prompts []skills.Prompt, sk []skills.Skill) (Parsed, e
 	return Parsed{Kind: KindText, Text: s}, nil
 }
 
+// typedText is the part of a submission the user typed: a plain message is
+// itself, while a template expansion or a skill message carries the user's
+// own words in Args (the body is the template's, not theirs) — Decision 15.
+func typedText(p Parsed) string {
+	if p.Kind != KindText {
+		return p.Args
+	}
+	return p.Text
+}
+
 // promptNamed reports whether a prompt template owns the name (built-in
 // commands > prompts > skills: a shadowed name is listed once, resolved to
 // its winner).
@@ -105,13 +116,28 @@ func promptNamed(prompts []skills.Prompt, name string) bool {
 	return slices.ContainsFunc(prompts, func(p skills.Prompt) bool { return p.Name == name })
 }
 
-// agentSkills is the agent's current skill list (nil without an agent —
-// setup mode has nothing to invoke).
-func (m *model) agentSkills() []skills.Skill {
+// allSkills is the agent's current skill list, unfiltered (nil without an
+// agent — setup mode has nothing to invoke). /help needs it: auto skills are
+// listed on their own line there, just not as commands (H9: /help runs before
+// the unconfigured() gate, so the nil check lives here).
+func (m *model) allSkills() []skills.Skill {
 	if m.agent == nil {
 		return nil
 	}
 	return m.agent.Skills()
+}
+
+// agentSkills is what may be invoked: the hand-written skills. Auto skills are
+// the agent's own notes, never slash commands (SPECS §12).
+func (m *model) agentSkills() []skills.Skill {
+	all := m.allSkills()
+	out := make([]skills.Skill, 0, len(all))
+	for _, s := range all {
+		if !s.Auto {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // HelpText is the /help listing. Descriptions line up in one column per block
@@ -126,7 +152,12 @@ func HelpText(prompts []skills.Prompt, sk []skills.Skill) string {
 		}
 	}
 	var listedSkills []skills.Skill
+	var autoNames []string
 	for _, k := range sk {
+		if k.Auto {
+			autoNames = append(autoNames, k.Name) // never a command; one line below
+			continue
+		}
 		if !slices.Contains(BuiltinCommands, k.Name) && !promptNamed(prompts, k.Name) {
 			listedSkills = append(listedSkills, k)
 		}
@@ -165,6 +196,9 @@ func HelpText(prompts []skills.Prompt, sk []skills.Skill) string {
 		for _, k := range listedSkills {
 			row(sw, "/"+k.Name, k.Description)
 		}
+	}
+	if len(autoNames) > 0 {
+		sb.WriteString("auto skills: " + strings.Join(autoNames, ", ") + "\n")
 	}
 	row(w, "!cmd", "run cmd, output goes to the model   !!cmd  run cmd locally only")
 	sb.WriteString("type / for the command dropdown — ↑/↓ pick · tab completes · enter on an exact name sends\n")

@@ -28,6 +28,16 @@ func TestLoadProject(t *testing.T) {
 	if err != nil || p.Mode() != "auto" || p.Permissions.Allow[0] != "make *" {
 		t.Fatalf("%+v %v", p, err)
 	}
+	// skills.selfManaged decodes in both layers; neither value is an error.
+	for _, body := range []string{`{"skills":{"selfManaged":true}}`, `{"skills":{"selfManaged":false}}`} {
+		write(body)
+		if _, err := LoadProject(wd); err != nil {
+			t.Fatalf("%s: %v", body, err)
+		}
+	}
+	write(`{ // project
+	  "permissions": {"defaultMode": "auto", "allow": ["make *"], "deny": ["git push *"],},
+	}`)
 	for src, want := range map[string]string{
 		`{"model":"x/y"}`:                                 "unknown field",
 		`{"permissions":{"defaultMode":"turbo"}}`:         "defaultMode",

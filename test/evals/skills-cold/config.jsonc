@@ -1,0 +1,7 @@
+{
+  // skills-cold eval — the shared corpus config plus the user-level opt-in
+  // (§3.3: only the user config can enable the feature).
+  "model": "opencode-go/glm-5.3-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_GO_KEY" } },
+  "skills": { "selfManaged": true }
+}

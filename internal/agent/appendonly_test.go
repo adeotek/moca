@@ -28,7 +28,7 @@ func TestRequestsAreAppendOnly(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(work, "a.txt"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	a.Steer("also check README")
+	a.Steer("also check README", "")
 	if _, err := a.Run(context.Background(), "do it"); err != nil {
 		t.Fatal(err)
 	}

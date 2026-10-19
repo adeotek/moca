@@ -56,7 +56,7 @@ func TestShellAnalysisLadder(t *testing.T) {
 		"$CMD args":                      {deny: "non-literal"},
 		"cat a > $OUT":                   {deny: "non-literal"},
 		"if then fi (":                   {deny: "parse"},
-		"cd sub && make":                 {},
+		"cd sub && make test":            {}, // a bare `make` is refused since v0.7.0 (§11: the default recipe is repo code)
 		"mkfs.ext4 /dev/sda":             {deny: "mkfs"},
 		"source env.sh":                  {deny: "source"},
 		". env.sh":                       {deny: "."},

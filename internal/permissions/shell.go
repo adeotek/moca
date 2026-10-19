@@ -3,6 +3,7 @@ package permissions
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -31,14 +32,25 @@ type Shell struct {
 	auto  bool // auto mode: the risk table (auto.go) replaces "needs approval"
 	jail  *Jail
 	goos  string
+	// skillDir is the project's resolved skills dir: a write target under it
+	// is refused (the skill guard in tools validates those writes, and the
+	// shell cannot). "" = no check — the feature is off.
+	skillDir string
 }
+
+// SetSkillDir installs the skill-dir refusal (C1). It belongs to the feature
+// being on: a resumed session whose switch went off does not call it.
+func (s *Shell) SetSkillDir(dir string) { s.skillDir = dir }
 
 // AutoView returns the auto-mode view of s: the same Rules (an allow-always
 // learned in either view applies in both), the jail j (normally
 // s.jail.WithWritable(TempRoots()...)), and the risk table instead of the
 // default "needs approval" class.
 func (s *Shell) AutoView(j *Jail) *Shell {
-	return &Shell{rules: s.rules, auto: true, jail: j, goos: s.goos}
+	// skillDir travels with the copy: auto mode swaps in this view
+	// (agent.New), and losing the field would silently drop the refusal in
+	// the mode that runs the most shell commands.
+	return &Shell{rules: s.rules, auto: true, jail: j, goos: s.goos, skillDir: s.skillDir}
 }
 
 func NewShell(rules *Rules, jail *Jail, goos string) *Shell {
@@ -117,6 +129,11 @@ type verdictAcc struct {
 type cmdState struct {
 	cwdUnknown bool
 	tainted    bool
+	// cwdOut: a cd whose target left the confinement (an unconfined or
+	// non-literal cd, a bare `cd`, pushd/popd without an argument). make then
+	// reads ITS makefile from the new directory — refused by the generic
+	// runner check; a confined cd keeps it inside the workdir's own tree.
+	cwdOut bool
 }
 
 func (v *verdictAcc) add(list *[]string, name string) {
@@ -181,6 +198,15 @@ func (s *Shell) classify(ws []Word, v *verdictAcc, st cmdState) error {
 		v.add(&v.every, name)
 		return nil
 	case Allow:
+		// A bare-name allow rule covers a tool's common forms, not arbitrary
+		// code its arguments pick out of the repository: an injected "run
+		// `make <target>`" must not ride the `make` entry (v0.7.0 §11
+		// follow-up — the probe is TestGenericRunnerAllowRules).
+		if genericRunners[lower] {
+			if err := s.genericRunnerRefusal(base, ws, st, s.rules.AllowsNamed(ws)); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	// A builtin is only a builtin by its bare name: `./echo` runs whatever
@@ -606,6 +632,318 @@ func gitComponent(p string) bool {
 	return false
 }
 
+// skillWriteRefusal carries no "refused:" prefix: the shell tool adds it to
+// every Check error.
+const skillWriteRefusal = "skill files are written with write/edit (the skill guard validates them), not the shell — use write or edit on .moca/skills/<dir>/SKILL.md"
+
+// errSkillWrite is the skill-dir refusal as an error. It reports Internal():
+// it is the shell side of the skill guard — moca's own procedure, not a
+// project fact — so the tools layer must not let it arm the skill hint (the
+// guard's own refusals never do, H2/H3). Structural: tools does not import
+// this package.
+var errSkillWrite error = internalErr(skillWriteRefusal)
+
+type internalErr string
+
+func (e internalErr) Error() string { return string(e) }
+
+// Internal marks a refusal that comes from moca's own guards.
+func (internalErr) Internal() bool { return true }
+
+// genericRunners are allowlisted tools whose *arguments* choose code to run:
+// the allow rule names the tool, not whatever its arguments hand it. For
+// `make` the target is a recipe from the repository's own Makefile — exactly
+// the shape a poisoned checkout would use ("run `make <target>` before
+// testing"), and a bare `make` allow entry would run it without a prompt.
+var genericRunners = map[string]bool{"make": true}
+
+// safeMakeTargets are the recipe names a bare `make` allow rule covers: the
+// workflow targets a repository's own tooling uses (build/check/read shapes).
+var safeMakeTargets = map[string]bool{
+	"all": true, "build": true, "test": true, "tests": true, "check": true,
+	"fmt": true, "vet": true, "lint": true, "cover": true, "coverage": true,
+	"tidy": true, "unit": true, "verify": true,
+}
+
+// safeMakeTargetList is safeMakeTargets for the refusal texts, sorted (one
+// source: the messages cannot drift from the map).
+var safeMakeTargetList = func() string {
+	names := make([]string, 0, len(safeMakeTargets))
+	for n := range safeMakeTargets {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return strings.Join(names, ", ")
+}()
+
+// makeCodeVars are variables whose command-line override picks the code make
+// runs regardless of what the makefile says (the recipe shell, extra
+// makefiles, nested flags).
+var makeCodeVars = map[string]bool{"SHELL": true, ".SHELLFLAGS": true, "MAKEFILES": true,
+	"MAKEFLAGS": true, "MFLAGS": true, "MAKE": true, "MAKESHELL": true}
+
+// makeArgLong are make's long options whose argument may be the next word;
+// makeCountLong take an optional numeric next word. Matched with longIn, so
+// abbreviations count (`--dir sub` is --directory: make resolves a unique
+// prefix and refuses an ambiguous one).
+var (
+	makeArgLong   = []string{"--directory", "--include-dir", "--old-file", "--assume-old", "--new-file", "--assume-new", "--what-if"}
+	makeCountLong = []string{"--jobs", "--load-average", "--max-load"}
+)
+
+// plainMakeValue reports whether a command-line override's value is inert
+// data — a word, number or version (`VAR=1`, `VERSION=1.2.3`). Any variable a
+// recipe runs as a command can be overridden (`make test GORUN=./x.sh` runs
+// ./x.sh in this repo's own Makefile), so paths, command strings, flags
+// (`CFLAGS=-B.`) and expansions are code, not data.
+func plainMakeValue(v string) bool {
+	if strings.HasPrefix(v, "-") {
+		return false
+	}
+	for _, c := range v {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("._,+-", c)) {
+			return false
+		}
+	}
+	return true
+}
+
+// genericRunnerRefusal fails closed on a generic runner driven by arguments,
+// unless an allow rule named that code itself (`make bootstrap` in
+// permissions.allow covers it; `make` alone does not — §11's rule that a rule
+// covers what it names). EVERY target is checked (make runs them all), and
+// the options and overrides that hand make code of their own — another
+// makefile, --eval, -C/--directory outside the workdir (the value would run a
+// different directory's makefile), SHELL=…, an immediate or shell
+// assignment, a value that is not plain data, an option argument that is
+// computed rather than written out (`-C $DIR` would otherwise be skipped
+// unexamined) — are refused, as is a changed environment (envChanged: a
+// prefix assignment, `env NAME=…` or an earlier export — make reads
+// MAKEFILES and MAKEFLAGS from it, and every recipe inherits it).
+func (s *Shell) genericRunnerRefusal(base string, ws []Word, st cmdState, named bool) error {
+	if st.tainted {
+		return fmt.Errorf("`%s` with a changed environment (a NAME=value prefix, env, or an earlier assignment or export) can choose the code it runs — pass plain overrides as arguments (`%s <target> NAME=value`), or add an explicit permissions.allow rule", base, base)
+	}
+	if st.cwdOut {
+		// A cd (or pushd/popd) that left the confinement selects the directory
+		// whose makefile the runner reads — a makefile of its own choosing
+		// that no allowed target list covers. The safe-target names say
+		// nothing about the recipe; the directory is the pick. A confined cd
+		// (still inside the workdir's own tree) does not count.
+		return fmt.Errorf("`%s` after a directory change (an earlier cd, or the wrapper's -C) reads a makefile of the new directory's choosing — run %s from the workdir, or add an explicit permissions.allow rule", base, base)
+	}
+	// A rule that names the target waives only the safe-target-list check
+	// below (the author wrote those exact words after the tool's name). The
+	// option-, override- and environment-level checks stay unconditional: `*`
+	// rides anywhere inside a named rule's own words, and `make -f evil.mk
+	// bootstrap` under an explicit `make bootstrap` entry must still refuse.
+	chdirOutside := func(t string) error {
+		return fmt.Errorf("`%s` with %s points a makefile of its own choosing (outside the workdir) — run %s against the workdir's makefile, or add an explicit permissions.allow rule", base, t, base)
+	}
+	dirOutside := func(val string) bool {
+		if val == "" || st.cwdUnknown {
+			return true
+		}
+		res, err := s.jail.Resolve(val, true)
+		return err != nil || !within(s.jail.Root(), res)
+	}
+	ownMakefile := func(t string) error {
+		return fmt.Errorf("`%s` with %s runs a makefile of its own choosing — add an explicit permissions.allow rule if you want it", base, t)
+	}
+	// computedArg: an option that takes an argument may not be handed a
+	// computed word — `-C $DIR` changes directory to a path nothing here can
+	// see, and the argument would otherwise be skipped unexamined.
+	computedArg := func(t string) error {
+		return fmt.Errorf("`%s` with %s and a computed argument (expansion or glob) is refused — write the argument out, or add an explicit permissions.allow rule", base, t)
+	}
+	// count is a numeric make argument (`-j 4`, `-l 2.5`).
+	count := func(s string) bool {
+		return s != "" && strings.Trim(s, "0123456789.") == "" &&
+			strings.ContainsFunc(s, func(r rune) bool { return r >= '0' && r <= '9' })
+	}
+	var targets []string
+	for i := 1; i < len(ws); i++ {
+		w := ws[i]
+		t := w.Text
+		if !w.Literal {
+			return fmt.Errorf("`%s` with a computed target or option (expansion or glob) is refused — write it out, or add an explicit permissions.allow rule", base)
+		}
+		switch {
+		case t == "--":
+			continue
+		case strings.HasPrefix(t, "--"):
+			name, val, hasVal := strings.Cut(t, "=")
+			if longIs(name, "--file") || longIs(name, "--makefile") || longIs(name, "--eval") {
+				return ownMakefile(t)
+			}
+			switch {
+			case hasVal:
+				if longIs(name, "--directory") && dirOutside(val) {
+					return chdirOutside(t)
+				}
+			case longIs(name, "--directory"):
+				if i+1 >= len(ws) || !ws[i+1].Literal {
+					return computedArg(t)
+				}
+				if dirOutside(ws[i+1].Text) {
+					return chdirOutside(t)
+				}
+				i++ // the option's argument, not a target
+			case longIn(name, makeArgLong):
+				if i+1 < len(ws) && !ws[i+1].Literal {
+					return computedArg(t)
+				}
+				i++ // the option's argument, not a target
+			case longIn(name, makeCountLong):
+				if i+1 < len(ws) && ws[i+1].Literal && count(ws[i+1].Text) {
+					i++ // make takes a numeric next word as the count
+				}
+			}
+		case strings.HasPrefix(t, "-") && len(t) > 1:
+			cluster := t[1:]
+			for k := 0; k < len(cluster); k++ {
+				c, rest := cluster[k], cluster[k+1:]
+				if c == 'f' || c == 'E' {
+					return ownMakefile(t)
+				}
+				if strings.IndexByte("CIoW", c) >= 0 {
+					if rest == "" && i+1 < len(ws) {
+						if !ws[i+1].Literal {
+							return computedArg(t)
+						}
+						if c == 'C' && dirOutside(ws[i+1].Text) {
+							return chdirOutside(t)
+						}
+						i++ // -C dir: the next word is the argument
+					} else if c == 'C' && dirOutside(rest) {
+						return chdirOutside(t) // -Cdir: the value rides the cluster
+					}
+					break
+				}
+				if c == 'j' || c == 'l' {
+					if rest == "" && i+1 < len(ws) && ws[i+1].Literal && count(ws[i+1].Text) {
+						i++
+					}
+					if rest == "" || count(rest) {
+						break
+					}
+				}
+			}
+		case strings.Contains(t, "="):
+			// VAR=value: not a recipe selector, but an override may still pick
+			// the code make runs.
+			name, val, _ := strings.Cut(t, "=")
+			op := name
+			name = strings.TrimRight(name, ":+?!")
+			if makeCodeVars[name] || strings.Contains(op, "!") || !plainMakeValue(val) {
+				return fmt.Errorf("`%s` with the override %s chooses code make runs — add an explicit permissions.allow rule if you want it", base, t)
+			}
+		default:
+			targets = append(targets, t)
+		}
+	}
+	if len(targets) == 0 {
+		if !named {
+			return fmt.Errorf("`%s` with no target runs the makefile's default recipe — name one of: %s", base, safeMakeTargetList)
+		}
+		return nil
+	}
+	for _, target := range targets {
+		if !safeMakeTargets[target] && !named {
+			return fmt.Errorf("`%s %s` runs a recipe from the repository's makefile — allowed recipes are: %s; add an explicit permissions.allow rule to run others", base, target, safeMakeTargetList)
+		}
+	}
+	return nil
+}
+
+// skillTarget reports whether a literal write target lands under the project's
+// skills dir after resolution. Pattern-level only: it knows nothing about
+// approval and is not a sandbox (an interpreter can still write there).
+func (s *Shell) skillTarget(t string) bool {
+	if s.skillDir == "" || t == "" {
+		return false
+	}
+	res, err := s.jail.Resolve(t, true)
+	if err != nil {
+		return false
+	}
+	if caseFolds(s.goos) {
+		// A case-variant spelling (.moca/Skills/…) resolves into the real
+		// skills dir on a case-folding filesystem: the byte-exact prefix
+		// test inside within would let it past this refusal. Compare
+		// component by component (EqualFold per whole component — a fixed
+		// byte-length slice cut a multibyte fold equivalent in half).
+		return foldWithin(res, s.skillDir)
+	}
+	return within(s.skillDir, res)
+}
+
+// skillOperand refuses a known writer's literal operand that lands under the
+// skills dir: a `--opt=PATH` value is checked like a bare operand
+// (`cp --target-directory=.moca/skills/x`), and after a cd — where a relative
+// path cannot be placed against the workdir — a relative operand naming a
+// SKILL.md or a skills component is refused on its spelling alone
+// (`cd .moca/skills && cp x moca-a/SKILL.md`, `cd .moca && cp -r x skills/y`).
+// That spelling also matches a project's own skills/ folder, so its refusal
+// says how to get past it, like the after-cd redirect refusal does.
+func (s *Shell) skillOperand(t string, cwdUnknown bool) error {
+	if s.skillDir == "" {
+		return nil
+	}
+	if strings.HasPrefix(t, "--") {
+		_, v, ok := strings.Cut(t, "=")
+		if !ok {
+			return nil
+		}
+		t = v
+	} else if strings.HasPrefix(t, "-") {
+		return nil
+	}
+	if t == "" {
+		return nil
+	}
+	if cwdUnknown && !filepath.IsAbs(t) && t != "~" && !strings.HasPrefix(t, "~/") {
+		for _, c := range pathComps(t) {
+			if strings.EqualFold(c, "SKILL.md") || strings.EqualFold(c, "skills") {
+				return internalErr(fmt.Sprintf("relative path %q after a cd/pushd/popd cannot be placed and may be in .moca/skills — use a path from the workdir, or run the cd separately (%s)", t, skillWriteRefusal))
+			}
+		}
+		return nil
+	}
+	if s.skillTarget(t) {
+		return errSkillWrite
+	}
+	return nil
+}
+
+// caseFolds reports where the filesystem folds file-name case (darwin,
+// windows) plus one-off child-process probes that force it (the same env var
+// the tools package honors): the shell's skill-write refusal (C1) must see a
+// case-variant skills spelling as the skills dir there. goos is the Shell's
+// own view, set by the runtime at construction.
+func caseFolds(goos string) bool {
+	return goos == "darwin" || goos == "windows" || os.Getenv("MOCA_CASEFOLD_FS") == "1"
+}
+
+// foldWithin reports whether paths p == base or lies under base, EqualFold
+// per path component (both arguments are absolute, symlink-resolved).
+func foldWithin(p, base string) bool {
+	pc, bc := pathComps(p), pathComps(base)
+	if len(pc) < len(bc) {
+		return false
+	}
+	for i, c := range bc {
+		if !strings.EqualFold(pc[i], c) {
+			return false
+		}
+	}
+	return true
+}
+
+func pathComps(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool { return r == '/' || r == '\\' })
+}
+
 // gitTarget reports whether a write target names .git or lands in it after
 // resolution (a symlink to .git).
 func (s *Shell) gitTarget(t string) bool {
@@ -709,6 +1047,9 @@ func (s *Shell) checkWrapperOutputs(ws []Word, idxs []int, cwdUnknown bool, v *v
 			if !has {
 				continue
 			}
+			if s.skillTarget(target) {
+				return errSkillWrite
+			}
 			if err := s.checkTargetText(target, cwdUnknown); err != nil {
 				return err
 			}
@@ -729,7 +1070,7 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 		return nil, nil, nil, fmt.Errorf("cannot parse command (refused, no best-effort guessing): %v", err)
 	}
 	var v verdictAcc
-	var cwdUnknown, tainted bool
+	var cwdUnknown, tainted, cwdOutside bool
 	var firstErr error
 	fail := func(e error) {
 		if firstErr == nil {
@@ -754,9 +1095,11 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 				if !check {
 					continue
 				}
-				if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
+				if t, ok := wordLit(r.Word); ok && s.skillTarget(t) {
+					fail(errSkillWrite)
+				} else if err := s.checkTarget(r.Word, cwdUnknown); err != nil {
 					fail(err)
-				} else if t, _ := wordLit(r.Word); s.auto && s.gitTarget(t) {
+				} else if s.auto && s.gitTarget(t) {
 					v.add(&v.every, stmtLabel(x)) // .git/config, hooks: code that git runs later
 				}
 			}
@@ -782,7 +1125,7 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 					fail(errNonLiteral)
 					return false
 				}
-				st := cmdState{cwdUnknown: cwdUnknown, tainted: tainted || len(x.Assigns) > 0}
+				st := cmdState{cwdUnknown: cwdUnknown, tainted: tainted || len(x.Assigns) > 0, cwdOut: cwdOutside}
 				for _, pw := range ws[:idx] { // wrapper words: env NAME=VALUE, env -C DIR
 					if !strings.HasPrefix(pw.Text, "-") && strings.Contains(pw.Text, "=") {
 						st.tainted = true
@@ -801,23 +1144,43 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 						tainted = true // printf -v PATH …
 					}
 				case "cd", "pushd", "popd":
-					// Relative redirect targets are resolved against the jail
-					// root, which is only correct while the cwd is unchanged;
-					// after a cd only absolute targets can be checked. In auto
-					// mode a cd anywhere but a confined directory also taints
-					// what follows (a bare `ls` would read it).
-					if s.auto && !s.cdConfined(ws[idx:], cwdUnknown) {
+					confined := s.cdConfined(ws[idx:], cwdUnknown)
+					if s.auto && !confined {
 						tainted = true
 					}
+					if !confined {
+						cwdOutside = true
+					}
 					cwdUnknown = true
+				case "cp", "mv", "install", "ln", "truncate", "rm", "patch", "rsync":
+					for _, a := range x.Args[idx+1:] {
+						if t, ok := wordLit(a); ok {
+							if err := s.skillOperand(t, cwdUnknown); err != nil {
+								fail(err)
+							}
+						}
+					}
+				case "sed":
+					if hasOpt(ws, idx+1, "i", "--in-place") {
+						for _, a := range x.Args[idx+1:] {
+							if t, ok := wordLit(a); ok {
+								if err := s.skillOperand(t, cwdUnknown); err != nil {
+									fail(err)
+								}
+							}
+						}
+					}
 				case "tee":
 					for _, a := range x.Args[idx+1:] {
-						if l, ok := wordLit(a); ok && strings.HasPrefix(l, "-") {
+						t, ok := wordLit(a)
+						if ok && strings.HasPrefix(t, "-") {
 							continue
 						}
-						if err := s.checkTarget(a, cwdUnknown); err != nil {
+						if s.skillTarget(t) {
+							fail(errSkillWrite)
+						} else if err := s.checkTarget(a, cwdUnknown); err != nil {
 							fail(err)
-						} else if t, _ := wordLit(a); s.auto && s.gitTarget(t) {
+						} else if s.auto && s.gitTarget(t) {
 							v.add(&v.every, headName(ws[idx].Text))
 						}
 					}

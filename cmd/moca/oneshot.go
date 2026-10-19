@@ -96,6 +96,8 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 			fmt.Fprintf(stderr, "retry %d/%d · %s\n", e.Notice.Attempt, e.Notice.Max, e.Notice.Wait.Round(1e8))
 		case agent.Warning:
 			fmt.Fprintf(stderr, "warning: %s\n", e.Text)
+		case agent.Note:
+			fmt.Fprintf(stderr, "note: %s\n", e.Text)
 		}
 	}
 	trustMode := modeWithoutProject(o, cfg)

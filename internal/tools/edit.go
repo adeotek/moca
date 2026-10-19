@@ -38,6 +38,7 @@ func (editTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result
 	abs, err := env.Paths.Resolve(a.Path, true)
 	if env.Plan && (err != nil || !planAllows(env, abs)) {
 		// Before the ask, like write: the ask-write roots stay closed.
+		env.internalRefusal = true
 		return errorf("%s", planWriteRefusal)
 	}
 	if err != nil {
@@ -54,7 +55,10 @@ func (editTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result
 		return errorf("%v", err)
 	}
 	if msg := investigationRefusal(env); msg != "" {
-		return errorf("%s", msg)
+		if _, inSkills := skillRel(env, abs); !inSkills {
+			env.internalRefusal = true // moca's own protocol: never recorded as project wisdom
+			return errorf("%s", msg)
+		}
 	}
 	out, hunks, err := applyEdit(orig, a.OldString, a.NewString, a.ReplaceAll)
 	if err != nil {
@@ -65,7 +69,7 @@ func (editTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result
 	}
 	if env.Plan {
 		env.PlanWrote = true
-	} else {
+	} else if _, ok := skillRel(env, abs); !ok {
 		noteChange(env, abs)
 	}
 	norm := func(b []byte) []string {

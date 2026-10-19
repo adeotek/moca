@@ -88,7 +88,52 @@ type Config struct {
 	// decoded): its permissions block joins the rule layers, its mcp block
 	// joins the MCP servers (§4, §10.5).
 	Permissions PermissionsConfig `json:"permissions"`
+	Skills      SkillsConfig      `json:"skills"`
 	Project     *ProjectConfig    `json:"-"`
+}
+
+// SkillsConfig is the self-managed project skills switch (SPECS §4/§12). In
+// the user config it is the opt-in; in a trusted project file `false` opts the
+// repository out and `true` is declarative — it never enables the feature on
+// its own (Decisions 2 and 13; ResolveSelfManagedSkills).
+type SkillsConfig struct {
+	SelfManaged *bool `json:"selfManaged,omitempty"`
+}
+
+// SelfManagedState is the resolved skills.selfManaged switch (§3.3). Warning
+// and Note are user-facing texts the agent emits once per start/resume
+// (prepare(), task 3); both are empty for an untrusted workdir, where
+// cfg.Project is nil.
+type SelfManagedState struct {
+	On      bool
+	Warning string
+	Note    string
+}
+
+// ResolveSelfManagedSkills: on only when the user config says true and the
+// trusted project file does not say false. A project true never enables it
+// alone — it warns a user who has not opted in.
+func ResolveSelfManagedSkills(cfg Config) SelfManagedState {
+	user := cfg.Skills.SelfManaged
+	var proj *bool
+	if cfg.Project != nil {
+		proj = cfg.Project.Skills.SelfManaged
+	}
+	userOn := user != nil && *user
+	switch {
+	case userOn && proj != nil && !*proj:
+		return SelfManagedState{Note: "self-managed skills are off in this project: its .moca/config.jsonc sets skills.selfManaged false"}
+	case userOn:
+		return SelfManagedState{On: true}
+	case proj != nil && *proj:
+		how := "does not enable it"
+		if user != nil {
+			how = "sets it false"
+		}
+		return SelfManagedState{Warning: fmt.Sprintf("this project's .moca/config.jsonc sets skills.selfManaged true, but your user config %s — "+
+			"self-managed skills are off; set \"skills\": {\"selfManaged\": true} in %s and restart moca to take part", how, ConfigFile())}
+	}
+	return SelfManagedState{}
 }
 
 // PermissionsConfig is the permissions block of the user config and, with

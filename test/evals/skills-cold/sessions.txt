@@ -1,0 +1,2 @@
+The test suite in this repo is failing. Fix it.
+Add a Mul(a, b int) int function to the calc package with a test for it, and make sure the whole suite passes.

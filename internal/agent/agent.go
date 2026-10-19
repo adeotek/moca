@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -105,7 +106,7 @@ type Agent struct {
 	// is called between runs only.
 	mu            sync.Mutex
 	entries       []session.Entry // full transcript (in-memory mirror)
-	steer         []string
+	steer         []steerMsg
 	anchorTokens  int
 	anchorEntries int
 	anchorValid   bool
@@ -173,9 +174,58 @@ func (a *Agent) Skills() []skills.Skill { return a.skills }
 // refreshes next session (the prompt is frozen per session, §14).
 // Between runs only — same call-site discipline as reloadPrompts.
 func (a *Agent) ReloadSkills() {
-	sk, _ := skills.Discover(a.skillDirs)
+	sk, errs := skills.Discover(a.skillDirs)
+	for _, e := range errs {
+		// Metadata only (§13.5): the path and the reason, never file content.
+		slog.Warn("skills: skipped", "reason", e.Error())
+	}
 	a.skills = filterSkills(sk)
 }
+
+// SelfManagedSkills reports whether this session may learn: the switch, trust
+// and the resume rule as build() resolved them. C5b's refusing guard answers
+// false, so a resumed session with the switch off shows the off notice instead
+// of starting a run that can only be refused.
+func (a *Agent) SelfManagedSkills() bool {
+	return a.opts.Env != nil && a.opts.Env.SkillLearning()
+}
+
+// RememberRequest is what /remember submits (TUI and ACP): an ordinary user
+// request — there is no host-side writer (Decision 8). The request itself
+// asks for the write, so a /remember run arms no hint; the user signal is
+// armed structurally by Agent.Remember (Decision 11: never by word-matching
+// the prompt — C4).
+func RememberRequest(text string) string {
+	return "Remember this project rule: " + text + " — record it in the project skills under .moca/skills " +
+		"(one skill per domain, named moca-<domain>, auto: true) with provenance (user, <today's date>), so later sessions follow it."
+}
+
+// Remember runs a /remember request: the only run in which the guard accepts a
+// new (user, …) rule (Decision 11). The user's text is also the run's typed
+// text, so naming a hand-written skill in it allows changing that skill
+// (Decision 15). Every front end lands here, so the refusals live here too:
+// no rule text (the signal must never arm a run the user stated nothing in)
+// and plan mode (its write confinement would refuse every skill write).
+func (a *Agent) Remember(ctx context.Context, text string) (Outcome, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return Outcome{}, errors.New("/remember needs the rule to record: /remember <text>")
+	}
+	if a.plan {
+		return Outcome{}, errors.New("plan mode is on (writes are confined to docs/plans/) — turn it off to /remember")
+	}
+	if !a.SelfManagedSkills() {
+		return Outcome{}, errors.New("self-managed skills are off for this session — enable `skills.selfManaged` in your user config and restart, or start a session without it")
+	}
+	return a.RunWith(ctx, RememberRequest(text), RunOpts{Typed: text, Remember: true})
+}
+
+// mentionsRemembering is the hint trigger only: a run whose typed text asks
+// the agent to remember something should get the recording nudge. It never
+// sets the user signal.
+var rememberingRe = regexp.MustCompile(`(?i)\b(remember|from now on|keep in mind|going forward)\b`)
+
+func mentionsRemembering(text string) bool { return rememberingRe.MatchString(text) }
 
 // cacheKey is the session's prompt-cache routing key (openai
 // prompt_cache_key): stable for the session, so every request lands on the
@@ -409,12 +459,29 @@ func (a *Agent) wrapUp(ctx context.Context, text string) (Outcome, error) {
 	return Outcome{Text: llm.TextOf(resp.Message)}, nil
 }
 
-// Run runs one prompt to completion (§14) and logs its end.
+// RunOpts carries what the front end knows about a run's prompt (§2.1).
+type RunOpts struct {
+	// Typed is the part of the prompt the user typed: TUI input (not a template
+	// body or a skill message), ACP text blocks (never attached resources), the
+	// /remember text, the /execute extra instructions. "" = nothing typed —
+	// fail-closed for -p prompts, tests, anything not marked.
+	Typed string
+	// Remember marks a /remember run: the only source of Env.SkillUserSignal
+	// (Decision 11). Set only by Agent.Remember.
+	Remember bool
+}
+
+// Run is RunWith with no typed text (unchanged callers: -p, tests).
 func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
+	return a.RunWith(ctx, prompt, RunOpts{})
+}
+
+// RunWith runs one prompt to completion (§14) and logs its end.
+func (a *Agent) RunWith(ctx context.Context, prompt string, o RunOpts) (Outcome, error) {
 	t0 := time.Now()
 	u0, c0 := a.Totals()
 	a.steps = 0
-	out, err := a.run(ctx, prompt)
+	out, err := a.run(ctx, prompt, o)
 	u, c := a.Totals()
 	attrs := []any{"outcome", outcomeKind(out, err), "steps", a.steps, "duration", time.Since(t0).Round(time.Millisecond),
 		slog.Group("usage", "in", u.Input-u0.Input, "out", u.Output-u0.Output,
@@ -427,10 +494,22 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 	return out, err
 }
 
-func (a *Agent) run(ctx context.Context, prompt string) (Outcome, error) {
+func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, error) {
 	// Per-run tool state (plan deliverable, changes awaiting verification,
 	// identical-failure counts): tools/runstate.go.
 	a.opts.Env.BeginRun()
+	// The typed text is what the user typed — never the whole prompt (a -p
+	// prompt, an ACP attachment and a template expansion are not typed). The
+	// user signal is structural: only Agent.Remember sets it.
+	if o.Typed != "" {
+		a.opts.Env.SkillTyped = []string{o.Typed}
+	}
+	a.opts.Env.SkillUserSignal = o.Remember
+	if !o.Remember && mentionsRemembering(o.Typed) {
+		// The hint only, never the signal (C4); a /remember run is already a
+		// recording request and arms no hint.
+		a.opts.Env.SkillHintArmed = true
+	}
 	a.warnedDrop = false
 	nudged, verifyNudged, reserved, execNudged, emptyNudged, progressNudged, actionNudged := false, false, false, false, false, false, false
 	// The §14 progress nudge's threshold (context.progressNudgeAt, default 12;
