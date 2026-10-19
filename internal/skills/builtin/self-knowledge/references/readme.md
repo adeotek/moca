@@ -244,7 +244,10 @@ Self-managed project skills are an opt-in feedback loop: instead of relearning t
 ```jsonc
 // ~/.config/moca/config.jsonc
 {
-  "skills": { "selfManaged": true }   // off by default; the only opt-in
+  "skills": {
+    "selfManaged": true,   // off by default; the only opt-in
+    "recordNudge": true    // default: one end-of-run recording nudge (false = the mid-run hint)
+  }
 }
 ```
 
@@ -265,7 +268,7 @@ auto: true
 
 **Using it.** With the switch on there is nothing to invoke — the agent records when it has something worth keeping, and `/remember <text>` makes it explicit, e.g. `/remember always run make vet before calling a change done`.
 
-**The contract.** 12 rule lines per skill, 240 runes a line, 1500 a body, 8 auto skills per project, 2 new skills per run. Provenance is checked against the host clock, not the model's word: a new line starts `×1`, a line the agent later revisits unchanged bumps once to `×2`, and a `(user, …)` line comes only from `/remember <text>` (the TUI says so when the switch is off) and never expires. Detection is in-turn: a one-shot hint fires at a decision point — a guard refused the agent, a third identical command failure in a row, a steer, or a recovery after a failed verification — and the recording is a `write`/`edit` like any other.
+**The contract.** 12 rule lines per skill, 240 runes a line, 1500 a body, 8 auto skills per project, 2 new skills per run. Provenance is checked against the host clock, not the model's word: a new line starts `×1`, a line the agent later revisits unchanged bumps once to `×2`, and a `(user, …)` line comes only from `/remember <text>` (the TUI says so when the switch is off) and never expires. Detection is in-turn: a one-shot hint fires at a decision point — a guard refused the agent, a third identical command failure in a row, a steer, a recovery after a failed verification, or a cold repository's first green check — and the recording is a `write`/`edit` like any other. Since v0.7.1 the invitation lands at the **end of the run** by default: one nudge before the final answer asks for the record (or for one line saying nothing durable came up), and `"skills": {"recordNudge": false}` — in the user config or a trusted project file — brings back the mid-run hint instead.
 
 **The files are yours.** While the switch is on, `write`/`edit` validate the exact bytes that would land:
 
@@ -274,13 +277,18 @@ auto: true
 - a credential-shaped value is refused, and the caps check what a write *changes*, so an already-over-cap file stays editable;
 - `shell` refuses the common redirect and `tee` targets into that directory — an interpreter can still write there, so the next session re-validates every stored auto skill at load and drops a contract-breaking one from the listing with one warning.
 
-**Per project.** A trusted repository's `.moca/config.jsonc` can opt out, and can never opt in:
+**Per project.** A trusted repository's `.moca/config.jsonc` can opt out — of the feature, of the end-of-run nudge, or of both — and can never opt in:
 
 ```jsonc
 {
-  "skills": { "selfManaged": false }   // this repository takes no part
+  "skills": {
+    "selfManaged": false,   // this repository takes no part
+    "recordNudge": false    // …or keep the feature and the mid-run hint only
+  }
 }
 ```
+
+Both keys come from the project layer only when the repository is trusted, and a user's `recordNudge: false` outranks a project `true`.
 
 A project's `true` is declarative: it warns you when your user config does not enable the feature, and never enables it alone. Project skills load only in a trusted workdir, so `-p` needs `--approve`; `moca acp` trusts by default, which makes an editor the widest learning surface. Plan mode never learns (writes stay in `docs/plans/`); `moca execute` does. In the prompt, auto skills are listed with `(auto)` and a read-only "fallible memory — verify against the repo" framing, and they never become `/name` slash commands.
 
@@ -308,4 +316,4 @@ make release        # five cross-compiled binaries in dist/
 
 ## Status
 
-Current release: **v0.7.0** (2026-10-18) — self-managed project skills, opt-in via `"skills": {"selfManaged": true}` (see [Self-managed skills](#self-managed-skills) for what it does and how it is guarded). The full release history lives in the [changelog](CHANGELOG.md).
+Current release: **v0.7.1** (2026-10-19) — the end-of-run recording nudge for self-managed skills (opt-in via `"skills": {"selfManaged": true}`; `skills.recordNudge: false` turns the nudge off, see [Self-managed skills](#self-managed-skills)). The full release history lives in the [changelog](CHANGELOG.md).
