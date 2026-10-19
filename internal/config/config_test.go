@@ -49,8 +49,74 @@ func TestSpecExampleDecodesIntact(t *testing.T) {
 	if c.Yolo {
 		t.Fatal("example ships yolo off")
 	}
+	if c.Skills.SelfManaged == nil || *c.Skills.SelfManaged {
+		t.Fatalf("skills.selfManaged: %v (the fixture pins the key at false)", c.Skills.SelfManaged)
+	}
 	if y, _ := Parse([]byte(`{"yolo": true}`)); !y.Yolo {
 		t.Fatal("yolo key decodes")
+	}
+}
+
+func TestResolveSelfManagedSkillsTable(t *testing.T) {
+	b := func(v bool) *bool { return &v }
+	rows := []struct {
+		name    string
+		user    *bool
+		project *bool // nil = no trusted project file
+		on      bool
+		warning string // a substring, "" = none
+		note    string
+	}{
+		{name: "user true, no project", user: b(true), on: true},
+		{name: "user true, project true", user: b(true), project: b(true), on: true},
+		{name: "user true, project false", user: b(true), project: b(false),
+			note: "self-managed skills are off in this project"},
+		{name: "user unset, project true", project: b(true),
+			warning: "your user config does not enable it"},
+		{name: "user false, project true", user: b(false), project: b(true),
+			warning: "your user config sets it false"},
+		{name: "user unset, project false"},
+		{name: "user false, project false", user: b(false), project: b(false)},
+		{name: "user unset, no project"},
+		{name: "user false, no project", user: b(false)},
+	}
+	for _, r := range rows {
+		cfg := Config{Skills: SkillsConfig{SelfManaged: r.user}}
+		if r.project != nil {
+			cfg.Project = &ProjectConfig{Skills: SkillsConfig{SelfManaged: r.project}}
+		}
+		got := ResolveSelfManagedSkills(cfg)
+		if got.On != r.on {
+			t.Errorf("%s: On = %v, want %v", r.name, got.On, r.on)
+		}
+		if r.warning == "" && got.Warning != "" {
+			t.Errorf("%s: unexpected warning %q", r.name, got.Warning)
+		}
+		if r.warning != "" && !strings.Contains(got.Warning, r.warning) {
+			t.Errorf("%s: warning %q does not contain %q", r.name, got.Warning, r.warning)
+		}
+		if r.note == "" && got.Note != "" {
+			t.Errorf("%s: unexpected note %q", r.name, got.Note)
+		}
+		if r.note != "" && !strings.Contains(got.Note, r.note) {
+			t.Errorf("%s: note %q does not contain %q", r.name, got.Note, r.note)
+		}
+	}
+}
+
+func TestSelfManagedUnknownKeyRejected(t *testing.T) {
+	if _, err := Parse([]byte(`{"skills":{"bogus":1}}`)); err == nil {
+		t.Fatal("user config: unknown skills sub-key must be rejected")
+	}
+	wd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(wd, ".moca"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ProjectConfigFile(wd), []byte(`{"skills":{"bogus":1}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadProject(wd); err == nil {
+		t.Fatal("project config: unknown skills sub-key must be rejected")
 	}
 }
 

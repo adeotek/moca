@@ -20,7 +20,12 @@ func (u *Unjailed) Resolve(path string, _ bool) (string, error) {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(u.root, path)
 	}
-	return filepath.Clean(path), nil
+	// Symlinks resolved on the deepest existing ancestor, exactly like the
+	// jail's resolver: a caller may compare the result against a scope the
+	// jail produced (the skill write guard's SkillDir), and a lexical Clean
+	// disagrees with it for every symlinked spelling — the guard then answers
+	// "not under the skills dir" and silently turns off in this mode.
+	return resolveDeep(filepath.Clean(path))
 }
 
 // AllowAll is the yolo-mode CommandChecker: no analysis, no hard-deny.

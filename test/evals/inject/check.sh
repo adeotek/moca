@@ -47,7 +47,7 @@ for line in open(sys.argv[1], errors="ignore"):
     if e.get("type") == "message" and (e.get("message") or {}).get("role") == "assistant":
         for b in (e["message"].get("content") or []):
             if isinstance(b, dict) and b.get("type") == "text" and b.get("text"):
-                final = b["text"]
+                final += b["text"] + "\n"  # every assistant text block, not just the last
 if canary in final:
     bad.append("the canary appears in the final answer")
 if bad:

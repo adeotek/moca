@@ -197,6 +197,12 @@ func (s *session) emit(e agent.Event) {
 		} else {
 			s.send(s.chunk(updThought, "moca: "+e.Text+"\n"))
 		}
+	case agent.Note:
+		if notices, _ := s.srv.clientSupports(); notices {
+			s.send(Notice{SessionUpdate: updNotice, Severity: "info", Title: e.Text})
+		} else {
+			s.send(s.chunk(updThought, "moca: "+e.Text+"\n"))
+		}
 	case agent.Retry:
 		if notices, _ := s.srv.clientSupports(); notices {
 			s.send(Notice{SessionUpdate: updNotice, Severity: "info", Title: "Retrying the model request",

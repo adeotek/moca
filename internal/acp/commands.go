@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/skills"
 )
@@ -53,6 +54,30 @@ func flatten(cwd string, blocks []ContentBlock) (string, error) {
 	return sb.String(), nil
 }
 
+// textBlocks joins the prompt's `text` blocks the way flatten joins
+// everything: the part the user typed. Attached `resource`/`resource_link`
+// blocks never count (Decision 15 — an attachment cannot authorize a write).
+func textBlocks(blocks []ContentBlock) string {
+	var sb strings.Builder
+	space := func() {
+		if sb.Len() > 0 && !strings.HasSuffix(sb.String(), " ") && !strings.HasSuffix(sb.String(), "\n") {
+			sb.WriteByte(' ')
+		}
+	}
+	for _, b := range blocks {
+		if b.Type != "text" {
+			continue
+		}
+		if strings.HasPrefix(b.Text, " ") || strings.HasPrefix(b.Text, "\n") {
+			sb.WriteString(b.Text)
+		} else {
+			space()
+			sb.WriteString(b.Text)
+		}
+	}
+	return sb.String()
+}
+
 // mentionPath: a file:// URI as a path, relative to cwd when inside it.
 func mentionPath(cwd, uri string) string {
 	u, err := url.Parse(uri)
@@ -75,9 +100,11 @@ func promptDirs(cwd string, trusted bool) []skills.Dir {
 	return append(d, skills.Dir{Path: config.PromptsDir(), Source: "global"})
 }
 
-// buildCommands lists prompt templates, then skills; the first owner of a
-// name wins (the TUI's precedence, minus its built-ins).
-func buildCommands(prompts []skills.Prompt, sk []skills.Skill) []AvailableCommand {
+// buildCommands lists prompt templates, then hand-written skills; the first
+// owner of a name wins (the TUI's precedence, minus its other built-ins).
+// remember reserves ACP's first built-in, only while the feature is on for the
+// session (SPECS §9.5); auto skills are never advertised as commands.
+func buildCommands(prompts []skills.Prompt, sk []skills.Skill, remember bool) []AvailableCommand {
 	seen := map[string]bool{}
 	out := []AvailableCommand{}
 	add := func(name, desc, hint string) {
@@ -91,10 +118,16 @@ func buildCommands(prompts []skills.Prompt, sk []skills.Skill) []AvailableComman
 		}
 		out = append(out, c)
 	}
+	if remember {
+		add("remember", "record this as a project skill", "rule text")
+	}
 	for _, p := range prompts {
 		add(p.Name, p.Description, p.ArgumentHint)
 	}
 	for _, k := range sk {
+		if k.Auto {
+			continue
+		}
 		h := k.ArgumentHint
 		if h == "" {
 			h = "optional request"
@@ -114,7 +147,7 @@ func (s *session) reloadCommands() bool {
 	defer s.cmdMu.Unlock()
 	s.agent.ReloadSkills()
 	prompts := skills.LoadPrompts(promptDirs(s.cwd, s.trusted))
-	cmds := buildCommands(prompts, s.agent.Skills())
+	cmds := buildCommands(prompts, s.agent.Skills(), s.agent.SelfManagedSkills())
 	changed := !reflect.DeepEqual(cmds, s.commands)
 	s.prompts, s.commands = prompts, cmds
 	return changed
@@ -130,33 +163,49 @@ func (s *session) sendCommands() {
 	s.send(AvailableCommandsUpdate{SessionUpdate: updCommands, AvailableCommands: cmds})
 }
 
-// expand applies a leading /name the TUI's way: a template expands, a skill
-// becomes its load-and-follow message, `//` escapes; anything else is sent
-// as written (the model sees an unknown /word as text).
-func (s *session) expand(text string) string {
-	t := strings.TrimSpace(text)
-	if strings.HasPrefix(t, "//") {
-		return t[1:]
-	}
-	if !strings.HasPrefix(t, "/") {
-		return text
-	}
-	name, args := t[1:], ""
+// splitCommand splits a trimmed "/name args" at the first whitespace of any
+// kind (a newline after the name counts): the one split expand and the
+// typed-text extraction share, so they cannot disagree on what was typed.
+func splitCommand(t string) (name, args string) {
+	name = strings.TrimPrefix(t, "/")
 	if i := strings.IndexFunc(name, unicode.IsSpace); i >= 0 {
 		name, args = name[:i], strings.TrimSpace(name[i:])
+	}
+	return name, args
+}
+
+// expand applies a leading /name the TUI's way: a template expands, a skill
+// becomes its load-and-follow message, `//` escapes; anything else is sent
+// as written (the model sees an unknown /word as text). The second return
+// marks a /remember expansion: it starts a run of its own (Agent.Remember),
+// which a plain string return could not (L5).
+func (s *session) expand(text string) (string, bool) {
+	t := strings.TrimSpace(text)
+	if strings.HasPrefix(t, "//") {
+		return t[1:], false
+	}
+	if !strings.HasPrefix(t, "/") {
+		return text, false
+	}
+	name, args := splitCommand(t)
+	if name == "remember" && args != "" && s.agent.SelfManagedSkills() {
+		return agent.RememberRequest(args), true
 	}
 	s.cmdMu.Lock()
 	prompts, sk := s.prompts, s.agent.Skills()
 	s.cmdMu.Unlock()
 	for _, p := range prompts {
 		if p.Name == name {
-			return skills.ExpandPrompt(p.Body, args)
+			return skills.ExpandPrompt(p.Body, args), false
 		}
 	}
 	for _, k := range sk {
+		if k.Auto {
+			continue
+		}
 		if k.Name == name {
-			return skills.SkillMessage(k, args)
+			return skills.SkillMessage(k, args), false
 		}
 	}
-	return text
+	return text, false
 }

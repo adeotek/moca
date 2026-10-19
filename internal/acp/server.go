@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/adeotek/moca/internal/agent"
@@ -286,8 +287,26 @@ func (srv *Server) prompt(ctx context.Context, params json.RawMessage) (any, err
 	if err != nil {
 		return nil, err
 	}
-	expanded := s.expand(text)
-	out, err := s.agent.Run(runCtx, expanded)
+	// The typed text is the prompt's `text` blocks only: flatten inlines
+	// `resource` blocks as fenced text, so the joined string cannot serve
+	// (Decision 15).
+	typedSrc := textBlocks(req.Prompt)
+	expanded, rem := s.expand(text)
+	var out agent.Outcome
+	if rem {
+		// "/remember <args>" — the rule is the user's own text blocks, split the
+		// way expand split it; an attachment never supplies it, so text blocks
+		// holding only "/remember" leave nothing to record (Agent.Remember refuses).
+		_, args := splitCommand(strings.TrimSpace(typedSrc))
+		expanded = agent.RememberRequest(args)
+		out, err = s.agent.Remember(runCtx, args) // the run STARTS here; the signal is structural (C4)
+	} else {
+		typed := strings.TrimSpace(typedSrc)
+		if strings.HasPrefix(typed, "/") && !strings.HasPrefix(typed, "//") && expanded != text {
+			_, typed = splitCommand(typed) // a template/skill expansion: only its args were typed (a `//` escape is plain text)
+		}
+		out, err = s.agent.RunWith(runCtx, expanded, agent.RunOpts{Typed: typed})
+	}
 	if s.reloadCommands() {
 		s.sendCommands()
 	}

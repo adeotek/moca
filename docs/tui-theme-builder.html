@@ -92,7 +92,7 @@
   }
   @keyframes blink{50%{opacity:0}}
 
-  .rule{height:1px; background:var(--termFg); opacity:.3; margin:2px 0}
+  .rule{height:1px; background:var(--accent); margin:2px 0}
 
   .status{font-family:var(--mono); font-size:13.5px; line-height:1.5}
   /* normal (not pre-wrap): the markup puts each line's first span on the row
@@ -363,7 +363,7 @@ const GROUPS = [
   { title:"Terminal & welcome", note:"page chrome · app.go", fields:[
     {k:"termBg", label:"Terminal background — not themable", role:null},
     {k:"termFg", label:"Terminal default text — not themable", role:null},
-    {k:"accent", label:"Welcome accent “moca”", role:"accent"},
+    {k:"accent", label:"Accent — welcome “moca” + the input-area rules", role:"accent"},
   ]},
   { title:"Message bands", note:"message_style.go", fields:[
     {k:"userBg", label:"User band background", role:"userBg"},
