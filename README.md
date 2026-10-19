@@ -224,7 +224,7 @@ Sessions are append-only files under `~/.local/share/moca/sessions/`, keyed by w
 
 **Slash commands**: `/model` · `/effort` · `/mode` · `/hard` · `/yolo` · `/plan` · `/execute` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/remember <text>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`). Typing `/` opens a dropdown of every command, loaded template (`prompt:`) and skill (`skill:`) as you type — `↑`/`↓` pick, `tab` completes, `enter` on an exact name runs it, and the command echoes into the transcript like your messages before its output.
 
-Prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`) and skills (any skill is invokable as `/name`) join the same dropdown. **`/create-command`** is a built-in skill (nothing is dropped into your config dir): run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands and skills are usable the moment the run that wrote them finishes — no restart.
+Prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`) and skills (every skill you add is invokable as `/name`) join the same dropdown. **`/create-command`** is a built-in skill (nothing is dropped into your config dir): run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir, once, never persistently) or project ones in `.moca/prompts/`. New commands and skills are usable the moment the run that wrote them finishes — no restart.
 
 `!cmd` runs a command and feeds its output to the model; `!!cmd` runs it locally without telling the model. Typing during a run steers it after the current tool results.
 
@@ -232,11 +232,59 @@ Prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`) and skills
 
 ## Extend
 
-- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged, and every discovered skill is invokable from the TUI as `/name` (the `/` picker tags skills `skill:`). moca ships three built-in skills that update with the binary: `create-command`, `self-knowledge` (answers questions about moca itself from embedded copies of these docs) and `self-configure` (edits your config, commands and skills when you ask — config writes raise the approval prompt, and `auth.json` stays out of reach). It also plants two standard skills, `rtk` and `graphify`, in `~/.config/moca/skills/` on start when they are missing — they are yours from then on: edit or replace them (moca never rewrites an existing one), or keep an empty `~/.config/moca/skills/<name>/` to opt out. A seeded skill is hidden from the model on a host where its CLI is not installed. See [docs/specs/external-tools.md](docs/specs/external-tools.md).
+- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged, and every skill you add is invokable from the TUI as `/name` (the `/` picker tags skills `skill:`). moca ships three built-in skills that update with the binary: `create-command`, `self-knowledge` (answers questions about moca itself from embedded copies of these docs) and `self-configure` (edits your config, commands and skills when you ask — config writes raise the approval prompt, and `auth.json` stays out of reach). It also plants two standard skills, `rtk` and `graphify`, in `~/.config/moca/skills/` on start when they are missing — they are yours from then on: edit or replace them (moca never rewrites an existing one), or keep an empty `~/.config/moca/skills/<name>/` to opt out. A seeded skill is hidden from the model on a host where its CLI is not installed. See [docs/specs/external-tools.md](docs/specs/external-tools.md).
 - **MCP** — `mcp.servers` in the config (stdio + streamable HTTP), plus `mcp.servers` in a trusted project's `.moca/config.jsonc` and the project's own Claude Code / OpenCode / Pi files (`.mcp.json`, `opencode.json[c]`, `.pi/mcp.json`) — a project server starts only while that workdir is trusted, your config wins a name both define, and a duplicate warns with both file paths. Lazy by design: one fixed ~200-token `mcp` proxy tool, server tool lists never enter the prompt, servers start on first use and stop when idle. `moca mcp import` imports Claude Code / OpenCode / Pi server configs; `moca mcp index` prebuilds the discovery index from the CLI.
-- **Self-managed project skills** (opt-in, v0.7.0) — set `"skills": {"selfManaged": true}` in your user config and a session may record a reusable rule as `<repo>/.moca/skills/moca-<domain>/SKILL.md` (frontmatter `auto: true`, one `- **when**: rule (×1, <date>)` per line). It records only what the project's own tooling proved by running or what you stated; `/remember <text>` is the explicit path for your own rules (a `(user, <date>)` line never expires). The files are yours: the agent cannot edit a skill you hand-wrote without your typed text naming it, cannot strip the marker or blow the caps, and a secret-shaped value is refused; `skills.selfManaged: false` in a project's `.moca/config.jsonc` opts that repository out (a project cannot enable it for you). Rules dated `×1` that nobody confirms for 90 days are dropped at an interactive start — a `-p` run only reports them — and turning the switch off deletes nothing.
 - **Project instructions** — `AGENTS.md` / `CLAUDE.md`, loaded only in trusted projects (`--approve`).
 - **External tools** — `rtk` (token-compressed CLI output) and `graphify` (codebase knowledge graph) are allowlisted, and a skill teaching each is seeded into your skills dir on start (see Skills above). See [docs/specs/external-tools.md](docs/specs/external-tools.md).
+
+### Self-managed skills
+
+Self-managed project skills are an opt-in feedback loop: instead of relearning the same thing every session, moca can record a reusable working rule as an ordinary project file that later sessions read from their prompt. It writes them in-turn with the existing `write`/`edit` tools — no ninth tool, no session-end pass, no second model call — into `<repo>/.moca/skills/moca-<domain>/SKILL.md`, so a lesson learned once (the command that actually verifies a change, a build quirk, a convention you stated) lands in the repository with your code: `0644`, visible in `git status`, reviewable in a diff.
+
+```jsonc
+// ~/.config/moca/config.jsonc
+{
+  "skills": { "selfManaged": true }   // off by default; the only opt-in
+}
+```
+
+**What it records.** A rule the project's own tooling proved by running, a repeated pattern, or something you stated — never a statement about the code, a file inventory or one-off task detail. `auto: true` in the frontmatter marks the file as agent-maintained; the body is one rule per line:
+
+```markdown
+---
+name: moca-build
+description: Build and verify this repository
+auto: true
+---
+
+# Build
+
+- **when** verifying a change: `make test` is the gate — `go test ./...` misses the generated fixtures (×1, 2026-10-18)
+- **when** touching the CLI contract: update docs/specs/SPECS.md in the same change (user, 2026-10-18)
+```
+
+**Using it.** With the switch on there is nothing to invoke — the agent records when it has something worth keeping, and `/remember <text>` makes it explicit, e.g. `/remember always run make vet before calling a change done`.
+
+**The contract.** 12 rule lines per skill, 240 runes a line, 1500 a body, 8 auto skills per project, 2 new skills per run. Provenance is checked against the host clock, not the model's word: a new line starts `×1`, a line the agent later revisits unchanged bumps once to `×2`, and a `(user, …)` line comes only from `/remember <text>` (the TUI says so when the switch is off) and never expires. Detection is in-turn: a one-shot hint fires at a decision point — a guard refused the agent, a third identical command failure in a row, a steer, or a recovery after a failed verification — and the recording is a `write`/`edit` like any other.
+
+**The files are yours.** While the switch is on, `write`/`edit` validate the exact bytes that would land:
+
+- a skill you hand-wrote has no `auto: true`, and the agent cannot edit it unless your own typed text in that run names it — `/remember` counts, a `-p` prompt does not;
+- the marker cannot be stripped, a skill the agent creates must be an auto skill, and a case-variant spelling of a path inside the skills dir is refused;
+- a credential-shaped value is refused, and the caps check what a write *changes*, so an already-over-cap file stays editable;
+- `shell` refuses the common redirect and `tee` targets into that directory — an interpreter can still write there, so the next session re-validates every stored auto skill at load and drops a contract-breaking one from the listing with one warning.
+
+**Per project.** A trusted repository's `.moca/config.jsonc` can opt out, and can never opt in:
+
+```jsonc
+{
+  "skills": { "selfManaged": false }   // this repository takes no part
+}
+```
+
+A project's `true` is declarative: it warns you when your user config does not enable the feature, and never enables it alone. Project skills load only in a trusted workdir, so `-p` needs `--approve`; `moca acp` trusts by default, which makes an editor the widest learning surface. Plan mode never learns (writes stay in `docs/plans/`); `moca execute` does. In the prompt, auto skills are listed with `(auto)` and a read-only "fallible memory — verify against the repo" framing, and they never become `/name` slash commands.
+
+**Expiry.** At an interactive start (TUI, ACP) a `×1` rule nobody confirmed for 90 days is dropped, and an auto skill left with only headings loses its `SKILL.md`; a `-p` run only reports what it would remove, and `(user, …)` rules never expire. Turning the switch off deletes nothing and takes effect in a new process — a resumed session keeps the prompt it started with, so one that began while the switch was on refuses auto-skill writes for its whole life. A committed `skills` block is a config error for moca older than v0.7.0 (strict decoding), so a team upgrades before committing `.moca/config.jsonc`.
 
 ## Non-goals (v1, probably forever)
 
@@ -260,4 +308,4 @@ make release        # five cross-compiled binaries in dist/
 
 ## Status
 
-Current release: **v0.7.0** (2026-10-18) — self-managed project skills, opt-in via `"skills": {"selfManaged": true}` (see [Extend](#extend) for what it does and how it is guarded). The full release history lives in the [changelog](CHANGELOG.md).
+Current release: **v0.7.0** (2026-10-18) — self-managed project skills, opt-in via `"skills": {"selfManaged": true}` (see [Self-managed skills](#self-managed-skills) for what it does and how it is guarded). The full release history lives in the [changelog](CHANGELOG.md).
