@@ -214,6 +214,9 @@ func (a *Agent) Remember(ctx context.Context, text string) (Outcome, error) {
 	if a.plan {
 		return Outcome{}, errors.New("plan mode is on (writes are confined to docs/plans/) — turn it off to /remember")
 	}
+	if !a.SelfManagedSkills() {
+		return Outcome{}, errors.New("self-managed skills are off for this session — enable `skills.selfManaged` in your user config and restart, or start a session without it")
+	}
 	return a.RunWith(ctx, RememberRequest(text), RunOpts{Typed: text, Remember: true})
 }
 

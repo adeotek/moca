@@ -361,6 +361,22 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 	}
 
 	rules := parseRules(body)
+	if stored {
+		// The load-time re-validation is the state check: a hand edit or an
+		// interpreter write can leave a contentless rule or ×N outside {1,2}
+		// (§12.1's grammar), and the skill must not reach a later session's
+		// listing. The write path checks CHANGES instead (H6): its added-line
+		// branch below refuses the same shapes only when the write introduces
+		// or rewrites them, so a stored file with a bad line stays editable.
+		for _, r := range rules {
+			if r.Text == "" {
+				return fmt.Errorf("refused: a rule line needs text besides its provenance — write \"- **<when>**: <rule> (×N, YYYY-MM-DD)\"")
+			}
+			if r.HasProv && !r.Pinned && (r.Seen < 1 || r.Seen > 2) {
+				return fmt.Errorf("refused: a rule's provenance count is ×1 or ×2 (got ×%d) — a ×2 line is final; rewrite the rule's text if the rule itself changed", r.Seen)
+			}
+		}
+	}
 	if !stored {
 		if !havePrev && len(rules) == 0 {
 			return fmt.Errorf("refused: a new auto skill needs at least one rule line — a skill with no rules is a placeholder and still takes a listing line; record the rule you have, or skip it")
@@ -389,6 +405,9 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 		for _, r := range rules {
 			old, known := prevRules[ruleKey(r)]
 			if lineIn(added, r.Line) {
+				if r.Text == "" {
+					return fmt.Errorf("refused: a rule line needs text besides its provenance — write \"- **<when>**: <rule> (×N, YYYY-MM-DD)\"")
+				}
 				if n := utf8.RuneCountInString(r.Line); n > SkillRuleLineCap {
 					return fmt.Errorf("refused: a rule line is %d chars (cap %d) — a rule is one line: \"- **<when>**: <rule> (×N, YYYY-MM-DD)\"", n, SkillRuleLineCap)
 				}

@@ -149,33 +149,50 @@ one() {
   # points at the run's data dir, so the logs land under it (moca writes
   # <state>/logs, and without it they would escape both the scan and the
   # cleanup into the host's real state dir).
+  local leaked=false
   if [ -n "${OPENCODE_GO_KEY:-}" ]; then
     local f
     for f in "$data"/moca/sessions/*.jsonl "$data"/moca/logs/* "$data"/stdout.*.txt "$data"/stderr.*.txt; do
       [ -f "$f" ] || continue
       if grep -qF -- "$OPENCODE_GO_KEY" "$f"; then
         pass=false
-        why="secret leaked into transcript"
+        leaked=true
+        why="secret leaked into $(basename "$f")" # the file, never the value
       fi
     done
+    # The workdir too: a run that echoed the key into a file leaked it just as
+    # badly, and that copy would otherwise survive the data-dir cleanup.
+    if grep -rqF -- "$OPENCODE_GO_KEY" "$work" 2>/dev/null; then
+      pass=false
+      leaked=true
+      why="secret leaked into the workdir"
+    fi
   fi
   if [ -n "$sess" ]; then
     # Keep every session transcript: a passing run's data dir is deleted below,
     # and a regression inside a passing run is undiagnosable after that
-    # (session 1's transcript is the one the skills scenarios measure).
+    # (session 1's transcript is the one the skills scenarios measure). A run
+    # that LEAKED the provider key keeps its metrics row and nothing else.
     mkdir -p "$RESULTS_DIR"
     local j=0
     for f in $(ls -tr "$data"/moca/sessions/*.jsonl 2>/dev/null); do
       j=$((j + 1))
-      cp "$f" "$RESULTS_DIR/$s.$j-$n.jsonl"
       local args=(-session "$f" -scenario "$s.$j" -label "$LABEL" -run "$n" -exit "$code")
       [ "$pass" = true ] && args+=(-pass)
       "$STATS" "${args[@]}" >> "$OUT"
+      if [ "$leaked" = false ]; then
+        cp "$f" "$RESULTS_DIR/$s.$j-$n.jsonl"
+      fi
     done
   fi
   if [ "$pass" = true ]; then
     echo "pass $s#$n (exit $code)"
     rm -rf "$work" "$data" "$cfg"
+  elif [ "$leaked" = true ]; then
+    # Never leave the key on disk for a post-mortem: the checker's reason and
+    # the metrics row are all a leaking run should leave behind.
+    rm -rf "$work" "$data" "$cfg"
+    echo "FAIL $s#$n (exit $code): $why — removed the run's files"
   else
     echo "FAIL $s#$n (exit $code): ${why:-no session} — kept $work $data"
   fi

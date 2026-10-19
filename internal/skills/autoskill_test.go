@@ -126,6 +126,8 @@ func TestValidateSkillRefusals(t *testing.T) {
 		{name: "no rule", data: string(autoSkill("moca-x", "d", "# Only a heading\n")), dir: "moca-x", want: []string{"needs at least one rule line"}},
 		{name: "new rule without provenance", data: string(autoSkill("moca-x", "d", "- **a**: b\n")), dir: "moca-x", want: []string{"a new rule starts at (×1, 2026-10-18)"}},
 		{name: "new rule at x2", data: string(autoSkill("moca-x", "d", "- **a**: b (×2, 2026-10-18)\n")), dir: "moca-x", want: []string{"a new rule starts at (×1, 2026-10-18)"}},
+		{name: "contentless rule", data: string(autoSkill("moca-x", "d", "- **deploy**: (×1, 2026-10-18)\n")), dir: "moca-x", want: []string{"besides its provenance"}},
+		{name: "multiplier out of grammar", data: string(autoSkill("moca-x", "d", "- **a**: b (×5, 2026-10-18)\n")), dir: "moca-x", want: []string{"a new rule starts at (×1, 2026-10-18)"}},
 		{name: "future date", data: string(autoSkill("moca-x", "d", "- **a**: b (×1, 2099-01-01)\n")), dir: "moca-x", want: []string{"is not today (2026-10-18)"}},
 		{name: "stale date", data: string(autoSkill("moca-x", "d", "- **a**: b (×1, 2026-01-01)\n")), dir: "moca-x", want: []string{"is not today"}},
 		{name: "new user rule without a signal", data: string(autoSkill("moca-x", "d", "- **a**: b (user, 2026-10-18)\n")), dir: "moca-x", want: []string{"via /remember"}},
@@ -458,8 +460,14 @@ func TestValidateStoredDropsBrokenAutoSkills(t *testing.T) {
 	write("moca-name", string(autoSkill("moca-other", "d", body)))
 	write("moca-extra", string(autoSkill("moca-extra", "d", body)), "references.md")
 	write("moca-prose", string(autoSkill("moca-prose", "d", "just prose\n")))
+	// A hand edit or an interpreter write can also put a contentless rule or an
+	// out-of-grammar ×N in: the load-time re-validation refuses both, so the
+	// skill never reaches a later session's listing.
+	write("moca-emptyrule", string(autoSkill("moca-emptyrule", "d", "- **deploy**: (×2, 2026-01-01)\n")))
+	write("moca-x5", string(autoSkill("moca-x5", "d", "- **a**: b (×5, 2026-01-01)\n")))
 	for name, wantErr := range map[string]bool{
 		"moca-ok": false, "moca-cred": true, "moca-big": true, "moca-name": true, "moca-extra": true, "moca-prose": true,
+		"moca-emptyrule": true, "moca-x5": true,
 	} {
 		err := ValidateStored(dir, name)
 		if wantErr && err == nil {

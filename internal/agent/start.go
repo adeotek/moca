@@ -358,6 +358,11 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	resumed := prior != nil
 	switchOn := st.smOn && (!resumed || hadBlock)
 	switch {
+	case hadBlock && st.skillDirErr != nil && o.Emit != nil:
+		// The frozen prompt still invites writes, but the dir cannot resolve
+		// right now (a broken symlink, .moca/skills replaced by a file): name
+		// the real cause — the switch may well be on.
+		o.Emit(Warning{Text: fmt.Sprintf("this resumed session's instructions still describe project skills, but the skills dir cannot be resolved now (%v) — auto-skill writes are refused; /clear starts a session without them", st.skillDirErr)})
 	case st.skillDirErr != nil && st.sm.On && o.Trusted && o.Emit != nil:
 		o.Emit(Warning{Text: fmt.Sprintf("self-managed skills are off for this session: %v", st.skillDirErr)}) // switch-gated (H7)
 	case st.smOn && !hadBlock && resumed && o.Emit != nil: // resumed from a session started with the feature off
@@ -373,17 +378,23 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 			cs.SetSkillDir(st.skillDir) // the shell refusal (C1)
 		}
 		env.SkillGuard = skillGuard(env, st.skillDir, st.sessionDate)
-	} else if hadBlock && st.skillDirErr == nil {
+	} else if hadBlock { // the frozen prompt still invites writes: block ⇒ guard
 		// C5b: the frozen prompt still invites writes the absent guard would
 		// not check — install a refusing one instead of going nil (§2.1's
-		// invariant: block present ⇒ guard installed, validating or refusing,
-		// whenever the dir resolves; when it cannot, no write into it can
-		// either — the same resolver refuses both — so there is nothing to
-		// route and the resolution error warns).
+		// invariant: block present ⇒ guard installed, validating or refusing).
+		// When the dir cannot resolve, route writes at the lexical location
+		// anyway: while the structure is broken every write into it fails in
+		// the same resolver first, but a model that REPAIRS it mid-session
+		// (rm .moca/skills && mkdir …) must not get unvalidated writes — the
+		// prompt it is following still advertises the block.
 		// The shell check is not installed here: it belongs to the feature
 		// being on, and a shell write in this state is caught at load.
-		env.SkillDir = st.skillDir
-		env.SkillGuard = refusingAutoGuard(st.skillDir)
+		dir := st.skillDir
+		if st.skillDirErr != nil {
+			dir = filepath.Join(jail.Root(), ".moca", "skills")
+		}
+		env.SkillDir = dir
+		env.SkillGuard = refusingAutoGuard(dir)
 		env.SkillGuardRefusing = true
 	}
 	reg := tools.NewRegistry(tools.Builtins()...)

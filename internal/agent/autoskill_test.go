@@ -240,6 +240,31 @@ func TestGuardScopeOnSymlinkedMoca(t *testing.T) {
 	}
 }
 
+func TestGuardHoldsInYoloThroughASymlinkedSpelling(t *testing.T) {
+	// yolo swaps in permissions.Unjailed, whose resolver must resolve symlinks
+	// exactly like the jail's: a guard scope built from the jail (SkillDir is
+	// symlink-resolved) and a write path only filepath.Clean'ed disagree on the
+	// prefix, skillRel answers "not under the skills dir", and the guard is
+	// silently off in the mode that asks no questions.
+	a, work, _ := startManaged(t, newScript(t))
+	defer a.Session().Close()
+	link := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(work, link); err != nil {
+		t.Fatal(err)
+	}
+	a.SetMode(ModeYolo)
+	// A hand-written skill cannot be created by the agent, so a file that
+	// lands through the symlinked spelling proves the guard was bypassed.
+	abs := filepath.Join(link, ".moca", "skills", "moca-x", "SKILL.md")
+	r := runTool(t, a, "write", writeArgs(abs, "---\nname: moca-x\ndescription: d\n---\nprose\n"))
+	if !r.IsError || !strings.Contains(r.Content, "must be an auto skill") {
+		t.Fatalf("the guard must refuse through the symlinked spelling: %q", r.Content)
+	}
+	if _, err := os.Stat(filepath.Join(work, ".moca", "skills", "moca-x", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatal("nothing may land")
+	}
+}
+
 func TestGuardScopeOnSymlinkedWorkdir(t *testing.T) {
 	var link string
 	a, work, _ := startManaged(t, newScript(t), func(o *StartOptions) {
@@ -681,6 +706,58 @@ func TestResumeKeepsOrRefusesTheGuard(t *testing.T) {
 	}
 }
 
+// A session resumed while .moca/skills cannot resolve (a broken symlink, the
+// path replaced by a file) still carries the block in its frozen prompt: the
+// block ⇒ guard invariant must hold, and a model that repairs the structure
+// mid-session must not get unvalidated writes.
+func TestResumeWithABrokenSkillsDirStillRefuses(t *testing.T) {
+	s := newScript(t, textTurn("ok"))
+	a, work, _ := startManaged(t, s)
+	path := a.Session().Path()
+	cfg := a.opts.Config
+	a.Session().Close()
+
+	// .moca/skills as a symlink pointing OUTSIDE the workdir: the jail refuses
+	// to resolve it (the same resolver a write goes through).
+	sk := filepath.Join(work, ".moca", "skills")
+	if err := os.MkdirAll(filepath.Dir(sk), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, sk); err != nil {
+		t.Fatal(err)
+	}
+
+	var evs []Event
+	b, err := Resume(StartOptions{Config: cfg, Workdir: session.WorkdirOf(path), Trusted: true,
+		Emit: func(e Event) { evs = append(evs, e) }, HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Session().Close()
+	if b.opts.Env.SkillDir == "" || b.opts.Env.SkillGuard == nil || !b.opts.Env.SkillGuardRefusing {
+		t.Fatalf("block ⇒ guard must hold with a broken dir: dir=%q guard=%v refusing=%v",
+			b.opts.Env.SkillDir, b.opts.Env.SkillGuard != nil, b.opts.Env.SkillGuardRefusing)
+	}
+	if !slices.ContainsFunc(warningTexts(&evs), func(x string) bool { return strings.Contains(x, "cannot be resolved") }) {
+		t.Fatalf("the resume warning must name the real cause: %v", warningTexts(&evs))
+	}
+	// The model repairs the structure mid-session; the guard must still fire.
+	if err := os.Remove(sk); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sk, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := runTool(t, b, "write", writeArgs(".moca/skills/moca-x/SKILL.md", autoFile("moca-x", "d", autoBody("rule"))))
+	if !r.IsError || !strings.Contains(r.Content, "turned off after this session started") {
+		t.Fatalf("a repaired structure must still refuse: %q", r.Content)
+	}
+	if _, err := os.Stat(filepath.Join(sk, "moca-x", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatal("nothing may land")
+	}
+}
+
 // A session resumed days after it started still carries its start date in
 // the frozen prompt: the provenance check must accept that date (the guard's
 // SessionDate is the header's StartedAt, not the resume time).
@@ -787,6 +864,14 @@ func TestRememberRefusesEmptyTextAndPlanMode(t *testing.T) {
 	}
 	if a.opts.Env.SkillUserSignal {
 		t.Fatal("a refused /remember never arms the signal")
+	}
+	// The switch is the structural gate: a caller that skipped the front end's
+	// check must not start an unguarded recording run (the request asks for a
+	// write the absent guard would not validate).
+	off, _, _ := startWith(t, newScript(t), 40, "", "", func(o *StartOptions) { o.Trusted = true })
+	defer off.Session().Close()
+	if _, err := off.Remember(context.Background(), "use make test"); err == nil || !strings.Contains(err.Error(), "self-managed skills are off") {
+		t.Fatalf("an off session must refuse /remember itself: %v", err)
 	}
 }
 
