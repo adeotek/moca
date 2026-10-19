@@ -104,6 +104,33 @@ func TestResolveSelfManagedSkillsTable(t *testing.T) {
 	}
 }
 
+func TestResolveRecordNudgeTable(t *testing.T) {
+	b := func(v bool) *bool { return &v }
+	rows := []struct {
+		name    string
+		user    *bool
+		project *bool // nil = no trusted project file
+		want    bool
+	}{
+		{name: "default: no key anywhere", want: true},
+		{name: "user true", user: b(true), want: true},
+		{name: "user false", user: b(false)},
+		{name: "project false, user unset", project: b(false)},
+		{name: "project true, user unset", project: b(true), want: true},
+		{name: "user true, project false", user: b(true), project: b(false)},
+		{name: "user false, project true", user: b(false), project: b(true)},
+	}
+	for _, r := range rows {
+		cfg := Config{Skills: SkillsConfig{RecordNudge: r.user}}
+		if r.project != nil {
+			cfg.Project = &ProjectConfig{Skills: SkillsConfig{RecordNudge: r.project}}
+		}
+		if got := ResolveRecordNudge(cfg); got != r.want {
+			t.Errorf("%s: ResolveRecordNudge = %v, want %v", r.name, got, r.want)
+		}
+	}
+}
+
 func TestSelfManagedUnknownKeyRejected(t *testing.T) {
 	if _, err := Parse([]byte(`{"skills":{"bogus":1}}`)); err == nil {
 		t.Fatal("user config: unknown skills sub-key must be rejected")

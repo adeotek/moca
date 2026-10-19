@@ -98,6 +98,10 @@ type Config struct {
 // its own (Decisions 2 and 13; ResolveSelfManagedSkills).
 type SkillsConfig struct {
 	SelfManaged *bool `json:"selfManaged,omitempty"`
+	// RecordNudge is the end-of-run recording nudge (SPECS §12.1, v0.7.1). It
+	// is on by default; either layer can turn it off with false and no layer
+	// needs to turn it on — a project true is declarative, like SelfManaged's.
+	RecordNudge *bool `json:"recordNudge,omitempty"`
 }
 
 // SelfManagedState is the resolved skills.selfManaged switch (§3.3). Warning
@@ -134,6 +138,21 @@ func ResolveSelfManagedSkills(cfg Config) SelfManagedState {
 			"self-managed skills are off; set \"skills\": {\"selfManaged\": true} in %s and restart moca to take part", how, ConfigFile())}
 	}
 	return SelfManagedState{}
+}
+
+// ResolveRecordNudge: the end-of-run recording nudge is on unless a layer sets
+// skills.recordNudge false. Unlike selfManaged it needs no opt-in — the
+// default is on — so a false is the only value that decides anything, and
+// either the user config or the trusted project file can supply it (a project
+// true never overrides a user's false).
+func ResolveRecordNudge(cfg Config) bool {
+	if cfg.Skills.RecordNudge != nil && !*cfg.Skills.RecordNudge {
+		return false
+	}
+	if cfg.Project != nil && cfg.Project.Skills.RecordNudge != nil && !*cfg.Project.Skills.RecordNudge {
+		return false
+	}
+	return true
 }
 
 // PermissionsConfig is the permissions block of the user config and, with

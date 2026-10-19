@@ -1,0 +1,9 @@
+{
+  // skills-cold, feature ON with the v0.7.1 end-of-run nudge OFF — the
+  // "option D" arm: the mid-run hint behaves exactly as it did in v0.7.0.
+  // (`config.jsonc` is the default arm: nudge on. `config.off.jsonc` is the
+  // feature off entirely.)
+  "model": "opencode-go/glm-5.3-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_GO_KEY" } },
+  "skills": { "selfManaged": true, "recordNudge": false }
+}

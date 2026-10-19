@@ -374,6 +374,7 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 		env.SkillDir = st.skillDir
 		env.SkillCold = !hasAutoSkill(st.skills) // no recorded skills yet: the first
 		// successful verification here is the durable fact (see tools' arming)
+		env.SkillRecordNudge = config.ResolveRecordNudge(cfg) // §12.1: on unless a layer says false
 		if cs, ok := env.Commands.(interface{ SetSkillDir(string) }); ok {
 			cs.SetSkillDir(st.skillDir) // the shell refusal (C1)
 		}

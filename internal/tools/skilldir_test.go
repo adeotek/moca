@@ -359,6 +359,27 @@ func TestSkillHintNotDeliveredOnMutatingCommand(t *testing.T) {
 	}
 }
 
+// TestSkillHintSuppressedByRecordNudge: with the end-of-run nudge on
+// (skills.recordNudge, the default since v0.7.1) the mid-run hint is never
+// delivered — one invitation per run, at the end — while the arming flags stay
+// untouched for the agent's end-of-run gate (SPECS §12.1).
+func TestSkillHintSuppressedByRecordNudge(t *testing.T) {
+	env, root := testEnv(t)
+	setSkillDir(t, env, root)
+	env.SkillGuard = func(abs, rel string, data []byte) error { return nil }
+	env.Commands = &fakeCmds{}
+	env.SkillHintArmed = true
+	env.SkillRecordNudge = true
+	reg := NewRegistry(shellTool{})
+	m := reg.Run(t.Context(), env, llm.ToolCall{ID: "1", Name: "shell", Input: []byte(`{"command":"go version"}`)})
+	if m.IsError || strings.Contains(m.Content, skillHintMark) {
+		t.Fatalf("no mid-run hint when the end-of-run nudge is on: %q", m.Content)
+	}
+	if !env.SkillHintArmed || env.SkillHintDone {
+		t.Fatalf("arming must stay for the agent's gate: armed=%v done=%v", env.SkillHintArmed, env.SkillHintDone)
+	}
+}
+
 // internalCheckErr mimics the permissions package's skill-dir refusal: an
 // error reporting Internal() (the shell side of the skill guard).
 type internalCheckErr struct{}
