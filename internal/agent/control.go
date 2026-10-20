@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/adeotek/moca/internal/compact"
 	"github.com/adeotek/moca/internal/llm"
@@ -59,6 +60,26 @@ func (a *Agent) History() []llm.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return session.Messages(a.entries)
+}
+
+// NudgeTexts maps each user message a bounded nudge produced (§14) to the
+// nudge's name. A front end replaying History() gets plain user messages, so a
+// resumed session showed "record what this run proved …" as if the user had
+// typed it — the marker lives on the entry, not in llm.Message, because the
+// message is what goes on the wire (P3.8).
+func (a *Agent) NudgeTexts() map[string]string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make(map[string]string)
+	for _, e := range a.entries {
+		if e.Type != session.TypeMessage || e.Nudge == "" || e.Message == nil {
+			continue
+		}
+		if t := strings.TrimSpace(llm.TextOf(*e.Message)); t != "" {
+			out[t] = e.Nudge
+		}
+	}
+	return out
 }
 
 // recordModel persists a model_change entry and drops the usage anchor: after

@@ -166,12 +166,12 @@ func (srv *Server) deleteSession(params json.RawMessage) (any, error) {
 // replay streams the whole conversation as the model sees it (after any
 // compaction summary): user and agent text, thinking, and each tool call
 // with its recorded result. ACP clients rebuild their view from it.
-func (s *session) replay() { s.replayMessages(s.agent.History()) }
+func (s *session) replay() { s.replayMessages(s.agent.History(), s.agent.NudgeTexts()) }
 
 // replayMessages streams msgs (see replay): user and agent text, thinking,
 // tool calls with their results; the compaction summary as a compaction
 // (client extension) or as one summarized-note chunk.
-func (s *session) replayMessages(msgs []llm.Message) {
+func (s *session) replayMessages(msgs []llm.Message, nudges map[string]string) {
 	results := map[string]llm.ToolResult{}
 	for _, m := range msgs {
 		for _, b := range m.Content {
@@ -190,6 +190,12 @@ func (s *session) replayMessages(msgs []llm.Message) {
 					} else {
 						s.send(s.chunk(updAgentMessage, "_(earlier conversation was summarized)_\n\n"))
 					}
+				} else if _, ok := nudges[strings.TrimSpace(b.Text)]; ok {
+					// A nudge is moca's own text (§14): replaying it as a user
+					// message put words in the user's mouth in the client's
+					// transcript. It is internal, so it is not replayed at all
+					// (P3.8).
+					continue
 				} else {
 					s.send(s.chunk(updUserMessage, b.Text))
 				}
