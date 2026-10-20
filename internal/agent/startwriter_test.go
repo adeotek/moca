@@ -6,8 +6,8 @@ package agent
 // easy to reach: an environment-referenced web key that does not resolve.
 
 import (
-	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -50,5 +50,19 @@ func TestFailedStartDoesNotLeakTheSessionWriter(t *testing.T) {
 	if after := countFDs(t); after > before {
 		t.Fatalf("failed Start leaked file descriptors: %d → %d over 5 attempts (want no growth)", before, after)
 	}
-	_ = fmt.Sprint()
+
+	// The half-written session file is gone too: a header-only session in
+	// /resume's list is a run that never happened.
+	dir := filepath.Join(os.Getenv("XDG_DATA_HOME"), "moca", "sessions")
+	ents, err := os.ReadDir(dir)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(ents) != 0 {
+		names := make([]string, len(ents))
+		for i, e := range ents {
+			names[i] = e.Name()
+		}
+		t.Fatalf("failed Start left %d session file(s) behind: %v", len(ents), names)
+	}
 }
