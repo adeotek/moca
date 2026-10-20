@@ -288,7 +288,7 @@ func TestReplayLimitsTurnsAndShowsItems(t *testing.T) {
 		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "a3"}}},
 		user("turn four"),
 	}
-	out, _ := simulate(m, m.replay(msgs, 2))
+	out, _ := simulate(m, m.replay(msgs, 2, nil))
 	out = ansi.Strip(out)
 	for _, want := range []string{"2 earlier turns not shown", "› turn three", "⋯ #1 thinking 1 line", "▸ #2 read x.go", " a3", "› turn four"} {
 		if !strings.Contains(out, want) {
@@ -469,5 +469,32 @@ func TestResumeLastIsNewestOtherHere(t *testing.T) {
 	out, _ := simulate(m, m.runResume("last"))
 	if !strings.Contains(out, "no other sessions for this directory") || m.agent.Session().ID8() != old {
 		t.Fatalf("nothing else to resume: %q (session %s)", out, m.agent.Session().ID8())
+	}
+}
+
+// P3.8: a nudge is moca's own text, so a resumed session does not show it as
+// something the user typed.
+func TestReplayMarksANudge(t *testing.T) {
+	m := newTestModel()
+	user := func(s string) llm.Message {
+		return llm.Message{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: s}}}
+	}
+	nudge := "Record it now as a project skill."
+	msgs := []llm.Message{
+		user("fix the failing test"),
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "done"}}},
+		user(nudge),
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "all green"}}},
+	}
+	out, _ := simulate(m, m.replay(msgs, 3, map[string]string{nudge: "record"}))
+	out = ansi.Strip(out)
+	if strings.Contains(out, "› "+nudge) {
+		t.Fatalf("the nudge was replayed as a user turn:\n%s", out)
+	}
+	if !strings.Contains(out, "moca's record nudge") {
+		t.Fatalf("the nudge must be shown as moca's own:\n%s", out)
+	}
+	if !strings.Contains(out, "› fix the failing test") {
+		t.Fatalf("the real user turn must stay a user turn:\n%s", out)
 	}
 }
