@@ -84,12 +84,16 @@ type Metrics struct {
 	// non-zero means a preserved-thinking route saw history that no longer
 	// matched the prefix its thinking was produced against.
 	ThinkingDropped int `json:"thinkingDropped,omitempty"`
-	// SkillWrites counts write/edit calls targeting .moca/skills/ (the
+	// SkillWrites counts write/edit calls targeting .moca/skills/ that
+	// LANDED; SkillWriteRefused counts the calls the guard refused. Counting
+	// calls alone sold a refusal as a write (v0.7.1's "31 skill-file writes"
+	// was 4 landed and 27 refused). (the
 	// self-managed skills feature, §12); SkillListed reports that this
 	// session's stored prompt lists a moca-* skill — the skills.2 row is the
 	// one that matters (session 1 wrote it, session 2 reads it).
-	SkillWrites int  `json:"skillWrites,omitempty"`
-	SkillListed bool `json:"skillListed,omitempty"`
+	SkillWrites       int  `json:"skillWrites,omitempty"`
+	SkillWriteRefused int  `json:"skillWriteRefused,omitempty"`
+	SkillListed       bool `json:"skillListed,omitempty"`
 }
 
 // skillListedRe matches a moca-* skill line in the system prompt's listing.
@@ -160,6 +164,9 @@ func Collect(entries []session.Entry) Metrics {
 	callNames := map[string]string{}
 	callInputs := map[string]json.RawMessage{} // the repeated-failure key's input, by call id
 	pending := map[string]readArgs{}
+	// skillWrite marks call ids whose write/edit targets .moca/skills/: the
+	// landing (or refusal) is decided by the result, not by the call.
+	skillWrite := map[string]bool{}
 	elided := map[string]bool{}
 	index := map[string]int{}
 	windows := map[string][]*readWindow{}
@@ -237,7 +244,7 @@ func Collect(entries []session.Entry) Metrics {
 					editAt[in.Path] = i
 				}
 				if strings.Contains(filepath.ToSlash(in.Path), ".moca/skills/") {
-					m.SkillWrites++
+					skillWrite[c.ID] = true
 				}
 			}
 		case session.TypeToolResult:
@@ -245,6 +252,15 @@ func Collect(entries []session.Entry) Metrics {
 				continue
 			}
 			tr := e.ToolResult
+			if skillWrite[tr.CallID] {
+				// A refused skill write is not a write: the guard said no.
+				if tr.IsError {
+					m.SkillWriteRefused++
+				} else {
+					m.SkillWrites++
+				}
+				delete(skillWrite, tr.CallID)
+			}
 			if tr.IsError {
 				m.ToolErrors++
 				key := callNames[tr.CallID] + "\x00" + string(callInputs[tr.CallID]) + "\x00" + tr.Content
