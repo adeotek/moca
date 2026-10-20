@@ -100,12 +100,12 @@ func TestReplayCompactionNeedsCapability(t *testing.T) {
 		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "hi"}}},
 	}
 	s, ups := bareSession(t, false, true)
-	s.replayMessages(msgs)
+	s.replayMessages(msgs, nil)
 	if got := ups(); len(got) != 3 || got[0]["sessionUpdate"] != updCompactionChunk || got[1]["sessionUpdate"] != updCompaction || got[2]["sessionUpdate"] != updAgentMessage {
 		t.Fatalf("with capability: %v", got)
 	}
 	s2, ups2 := bareSession(t, false, false)
-	s2.replayMessages(msgs)
+	s2.replayMessages(msgs, nil)
 	if got := ups2(); len(got) != 2 || !strings.Contains(mustJSON(got[0]), "earlier conversation was summarized") {
 		t.Fatalf("without capability: %v", got)
 	}
