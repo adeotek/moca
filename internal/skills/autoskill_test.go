@@ -211,8 +211,10 @@ func TestValidateSkillUpdatesAndTransitions(t *testing.T) {
 	// ×2 → ×3 is refused
 	prev2 := autoSkill("moca-x", "d", "- **a**: b (×2, 2026-10-15)\n")
 	c.Prev = prev2
-	if err := ValidateSkill(autoSkill("moca-x", "d", "- **a**: b (×3, 2026-10-18)\n"), c); err == nil || !strings.Contains(err.Error(), "never changes") {
-		t.Fatalf("×2 is final: %v", err)
+	if err := ValidateSkill(autoSkill("moca-x", "d", "- **a**: b (×3, 2026-10-18)\n"), c); err == nil ||
+		!strings.Contains(err.Error(), "not an allowed provenance change") ||
+		!strings.Contains(err.Error(), "(×2, 2026-10-15) → (×3, 2026-10-18)") {
+		t.Fatalf("×2 is final, and the refusal names the attempt: %v", err)
 	}
 	// ×1 → ×2 with an earlier date is refused
 	c.Prev = autoSkill("moca-x", "d", "- **a**: b (×1, 2026-10-18)\n")
