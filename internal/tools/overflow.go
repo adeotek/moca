@@ -42,6 +42,9 @@ func Spill(env *Env, kind, full string) string {
 	if full != "" && !strings.HasSuffix(full, "\n") {
 		lines++
 	}
-	return fmt.Sprintf("[full output (%d lines, %s) saved to %s — read it with offset/limit or search it; do not re-run the command to see it]",
-		lines, webSize(len(full)), f.Name())
+	// T-4: not "the full output" — the capture keeps head and tail up to 64K
+	// and marks what it dropped, so the file can be missing a middle. The
+	// description and this note now say what the file actually holds.
+	return fmt.Sprintf("[output saved to %s — read it with offset/limit or search it; do not re-run the command to see it (%d lines, %s; the capture keeps head and tail)]",
+		f.Name(), lines, webSize(len(full)))
 }

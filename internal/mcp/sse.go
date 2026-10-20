@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"strings"
 )
@@ -12,14 +13,15 @@ import (
 // MCP needs no stall timeout (ctx bounds it).
 func readEvents(r io.Reader, fn func(data string) error) error {
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64<<10), 64<<20)
+	sc.Buffer(make([]byte, 64<<10), maxMCPMessage)
 	var data []string
+	size := 0
 	flush := func() error {
 		if len(data) == 0 {
 			return nil
 		}
 		d := strings.Join(data, "\n")
-		data = nil
+		data, size = nil, 0
 		return fn(d)
 	}
 	for sc.Scan() {
@@ -31,6 +33,12 @@ func readEvents(r io.Reader, fn func(data string) error) error {
 			continue
 		}
 		if v, ok := strings.CutPrefix(line, "data:"); ok {
+			// F-4: an event that never ends (no blank line) accumulated
+			// without limit — the scanner's per-line cap did not bound it.
+			size += len(v)
+			if size > maxMCPMessage {
+				return fmt.Errorf("event exceeds %d MB", maxMCPMessage>>20)
+			}
 			data = append(data, strings.TrimPrefix(v, " "))
 		}
 	}

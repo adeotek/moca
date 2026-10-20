@@ -183,6 +183,12 @@ func (a *anthropicAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
 			return fmt.Errorf("anthropic: bad event: %w", err)
 		}
+		// F-3: a negative index is not a block position in any protocol, and
+		// the slices built from it (order, the assembled content) would not
+		// survive it — refuse the stream while it is still cheap.
+		if ev.Index < 0 {
+			return fmt.Errorf("anthropic: stream corruption: content block index %d", ev.Index)
+		}
 		switch ev.Type {
 		case "message_start":
 			u := ev.Message.Usage
@@ -223,11 +229,20 @@ func (a *anthropicAdapter) Stream(ctx context.Context, req llm.Request, emit fun
 			case "signature_delta":
 				cb.Signature += ev.Delta.Signature
 			case "input_json_delta":
-				partial[ev.Index].WriteString(ev.Delta.PartialJSON)
+				// F-3: partial exists only for a tool_use block. Deltas for
+				// anything else used to dereference a nil builder.
+				b, ok := partial[ev.Index]
+				if !ok || b == nil {
+					return fmt.Errorf("anthropic: stream corruption: input_json_delta for block %d, which is not a tool_use", ev.Index)
+				}
+				b.WriteString(ev.Delta.PartialJSON)
 			}
 		case "content_block_stop":
 			if cb := blocks[ev.Index]; cb != nil && cb.Type == llm.BlockToolUse {
-				in := partial[ev.Index].String()
+				var in string
+				if b := partial[ev.Index]; b != nil {
+					in = b.String()
+				}
 				if in == "" {
 					in = "{}"
 				}
