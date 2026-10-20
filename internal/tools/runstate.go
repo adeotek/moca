@@ -156,6 +156,36 @@ func verifyingCall(call llm.ToolCall) bool {
 	return verifies(c) && !mutatesOnly(c)
 }
 
+// setupShaped are the first sub-words that install, inspect or explain a
+// toolchain rather than verify a repository. A cold repo's first `go version`
+// or `npm install` used to count as "how this repo is checked" and armed the
+// hint with a fact the run never established (open item 8).
+var setupShaped = map[string]bool{
+	"version": true, "--version": true, "help": true, "--help": true,
+	"install": true, "i": true, "ci": true, "add": true, "init": true, "create": true,
+	"env": true, "mod": true, "get": true, "fetch": true, "download": true,
+	"update": true, "upgrade": true, "list": true, "ls": true, "info": true,
+	"show": true, "config": true, "doc": true, "clean": true, "prune": true, "cache": true,
+}
+
+// verificationShaped reports whether a call verifies *and* names work rather
+// than a toolchain's own setup or inspection sub-word (`go version`,
+// `npm install`, `cargo fetch`). Cold-repo arming uses this stricter predicate;
+// the recovery path keeps the original one.
+func verificationShaped(call llm.ToolCall) bool {
+	if !verifyingCall(call) {
+		return false
+	}
+	fields := strings.Fields(cmdOf(call))
+	for _, w := range fields[1:] {
+		if strings.HasPrefix(w, "-") {
+			continue // a flag is not the sub-word
+		}
+		return !setupShaped[strings.ToLower(w)]
+	}
+	return true
+}
+
 // trackFailure counts identical failing calls (tool, normalized input,
 // output) and returns the hint for a repeat.
 func trackFailure(env *Env, name string, input json.RawMessage, content string) string {

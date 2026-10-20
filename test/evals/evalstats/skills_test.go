@@ -23,6 +23,9 @@ func TestCollectSkillMetrics(t *testing.T) {
 		b, _ := json.Marshal(map[string]string{"path": path, "content": "x"})
 		return session.Entry{Type: session.TypeToolUse, ToolUse: &session.ToolUse{Call: llm.ToolCall{ID: id, Name: "write", Input: b}}}
 	}
+	result := func(id string, isErr bool) session.Entry {
+		return session.Entry{Type: session.TypeToolResult, ToolResult: &llm.ToolResult{CallID: id, IsError: isErr, Content: "ok"}}
+	}
 	edit := func(id, path string) session.Entry {
 		b, _ := json.Marshal(map[string]string{"path": path, "old_string": "a", "new_string": "b"})
 		return session.Entry{Type: session.TypeToolUse, ToolUse: &session.ToolUse{Call: llm.ToolCall{ID: id, Name: "edit", Input: b}}}
@@ -30,13 +33,23 @@ func TestCollectSkillMetrics(t *testing.T) {
 	entries := []session.Entry{
 		{Type: session.TypeSession, Session: &session.Header{SystemPrompt: prompt}},
 		write("c1", ".moca/skills/moca-testing/SKILL.md"),
+		result("c1", false),
 		write("c2", "pkg/x.go"),
+		result("c2", false),
 		edit("c3", ".moca/skills/moca-testing/SKILL.md"),
+		result("c3", false),
 		edit("c4", ".moca/skills/deploy/references/x.md"),
+		result("c4", false),
+		// A refused skill write is not a write: the guard said no.
+		write("c5", ".moca/skills/moca-testing/SKILL.md"),
+		result("c5", true),
 	}
 	m := Collect(entries)
 	if m.SkillWrites != 3 {
-		t.Fatalf("skill writes = %d, want 3", m.SkillWrites)
+		t.Fatalf("landed skill writes = %d, want 3", m.SkillWrites)
+	}
+	if m.SkillWriteRefused != 1 {
+		t.Fatalf("refused skill writes = %d, want 1 — a refusal must not be sold as a write", m.SkillWriteRefused)
 	}
 	if !m.SkillListed {
 		t.Fatal("the stored prompt lists a moca-* skill")

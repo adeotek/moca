@@ -909,8 +909,8 @@ func TestStartOmitsBlockOnResolveError(t *testing.T) {
 // --- run options: typed text and the user signal ---------------------------
 
 func TestRememberSetsSignalAndTyped(t *testing.T) {
-	s := newScript(t, toolTurn([2]string{"shell", `{"command":"go version"}`}), textTurn("ok"),
-		toolTurn([2]string{"shell", `{"command":"go version"}`}), textTurn("ok"))
+	s := newScript(t, toolTurn([2]string{"shell", `{"command":"go test ./..."}`}), textTurn("ok"),
+		toolTurn([2]string{"shell", `{"command":"go test ./..."}`}), textTurn("ok"))
 	a, _, _ := startManaged(t, s)
 	defer a.Session().Close()
 	// A plain run carries neither.

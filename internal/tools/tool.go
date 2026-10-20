@@ -278,15 +278,19 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 		}
 	} else if env.lastFailedVerify != "" && verifyingCall(call) &&
 		normCommand(cmdOf(call)) != env.lastFailedVerify {
-		env.SkillHintArmed = true // recovery (H1) — skillHint delivers on this same result
-		env.SkillProvenCmd = callCommand(call)
-	} else if env.SkillCold && verifyingCall(call) {
+		env.SkillHintArmed = true     // recovery (H1) — skillHint delivers on this same result
+		if env.SkillProvenCmd == "" { // first proof wins: a later call cannot overwrite it
+			env.SkillProvenCmd = callCommand(call)
+		}
+	} else if env.SkillCold && verificationShaped(call) {
 		// Cold repo: the first verification that succeeds there is itself the
 		// durable fact ("this is how the repo is checked"), and waiting for a
 		// recovery means the nudge almost never arms in the ordinary flow —
 		// measured at 0/6 in test/evals/skills-cold (BASELINE.md, v0.7.0).
 		env.SkillHintArmed = true
-		env.SkillProvenCmd = callCommand(call)
+		if env.SkillProvenCmd == "" {
+			env.SkillProvenCmd = callCommand(call)
+		}
 	}
 	if h := investigationHint(env); h != "" {
 		res.Content += h
