@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"reflect"
@@ -533,6 +534,11 @@ func Parse(data []byte) (Config, error) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&c); err != nil {
 		return Config{}, withPosition(data, err)
+	}
+	// T-7: Decode reads one value and stops — `{...} {...}` or `{...} junk`
+	// used to parse as the first object with the rest silently dropped.
+	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+		return Config{}, fmt.Errorf("%s: trailing content after the config object", "config")
 	}
 	c.applyDefaults()
 	if err := c.Validate(); err != nil {

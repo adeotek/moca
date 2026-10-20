@@ -599,7 +599,15 @@ func Start(o StartOptions) (*Agent, error) {
 	if err != nil {
 		return nil, &StartError{err}
 	}
-	return build(o, st, w, system, cfg.Model, effort, nil, filepath.Join(config.DataDir(), "snapshot"))
+	a, err := build(o, st, w, system, cfg.Model, effort, nil, filepath.Join(config.DataDir(), "snapshot"))
+	if err != nil {
+		// F-5: the writer holds the session file's lock. Returning without
+		// closing it left the lock held for the life of the process, so a
+		// retry saw ErrInUse on a session nobody was using.
+		_ = w.Close()
+		return nil, &StartError{err}
+	}
+	return a, nil
 }
 
 // headerTimeout bounds the wait for provider response headers: the SSE stall
