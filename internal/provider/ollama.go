@@ -163,7 +163,7 @@ func (r *Registry) DiscoverOllama(ctx context.Context) (Discovery, error) {
 	ctx, cancel := context.WithTimeout(ctx, ollamaDiscoverTimeout)
 	defer cancel()
 	hdr := http.Header{}
-	if cred, err := r.credential("ollama")(ctx); err == nil && cred.Token != "" {
+	if cred, err := r.credential("ollama")(ctx, llm.Request{}); err == nil && cred.Token != "" {
 		hdr.Set("Authorization", "Bearer "+cred.Token)
 	}
 	var tags ollamaTags

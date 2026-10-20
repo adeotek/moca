@@ -115,7 +115,7 @@ type completionsChunk struct {
 }
 
 func (a *completionsAdapter) Stream(ctx context.Context, req llm.Request, emit func(llm.Event)) (llm.Response, error) {
-	cred, err := a.cred(ctx)
+	cred, err := a.cred(ctx, req)
 	if err != nil {
 		return llm.Response{}, err
 	}

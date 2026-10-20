@@ -94,6 +94,12 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if o.Model != "" {
 		cfg.Model = o.Model
+		// F-1: after the override, before Validate. `--model ollama/qwen3` is
+		// the opt-in for a local provider that has no config entry, and
+		// validating first rejected the very model the user asked for.
+		if pn, _, err := config.SplitModel(cfg.Model); err == nil {
+			cfg.UseProvider(pn)
+		}
 		if err := cfg.Validate(); err != nil {
 			fmt.Fprintln(stderr, "moca:", err)
 			return exitUsage

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -78,7 +79,12 @@ func (p *ProxyTool) Run(ctx context.Context, env *tools.Env, input json.RawMessa
 		Args   json.RawMessage `json:"args"`
 		Query  string          `json:"query"`
 	}
-	if err := json.Unmarshal(input, &a); err != nil {
+	// T-8: strict on the outer object. A misspelled field ("arguments" for
+	// "args") was silently dropped and the server was called with {} — a write
+	// tool ran with no arguments instead of telling the model it guessed wrong.
+	dec := json.NewDecoder(bytes.NewReader(input))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&a); err != nil {
 		return errResult("invalid arguments: %v", err)
 	}
 	switch a.Action {
@@ -135,7 +141,9 @@ func (p *ProxyTool) Run(ctx context.Context, env *tools.Env, input json.RawMessa
 		if !p.Allowed(a.Server, a.Tool, t.Annotations) {
 			ans := tools.Deny
 			if env.Ask != nil {
-				ans = env.Ask(ctx, tools.Question{Kind: "mcp", Subject: a.Server + "/" + a.Tool, Detail: string(a.Args), CanAlways: true})
+				// The approval shows the whole call as the model sent it: the
+				// arguments alone hid which server and tool would run (T-8).
+				ans = env.Ask(ctx, tools.Question{Kind: "mcp", Subject: a.Server + "/" + a.Tool, Detail: string(input), CanAlways: true})
 			}
 			switch ans {
 			case tools.Deny:

@@ -31,11 +31,16 @@ func managedOptions(t *testing.T, s *scriptServer) Options {
 	return o
 }
 
-func TestACPCommandsReserveRememberOnlyWhenOn(t *testing.T) {
-	// Off: nothing reserved, even for a user template named remember.
+func TestACPCommandsReserveRememberAlways(t *testing.T) {
+	// N-10/N-17: reserved either way. With the feature off the command is still
+	// listed (it is refused when typed), and a user template named `remember`
+	// can never shadow it.
 	off := buildCommands([]skills.Prompt{{Name: "remember", Description: "my own"}}, nil, false)
-	if len(off) != 1 || off[0].Description != "my own" {
-		t.Fatalf("off: %+v", off)
+	if len(off) != 1 || off[0].Description == "my own" {
+		t.Fatalf("off: a prompt template named remember must not be advertised: %+v", off)
+	}
+	if !strings.Contains(off[0].Description, "off") {
+		t.Fatalf("off: the description must say the feature is off: %+v", off[0])
 	}
 	// On: reserved first, before prompts and skills.
 	on := buildCommands(
@@ -123,22 +128,105 @@ func TestACPRememberIntercepted(t *testing.T) {
 	}
 }
 
-func TestACPRememberFallsThroughWhenOff(t *testing.T) {
+// Inverted by N-16/N-17: with the feature off, /remember is still a reserved
+// command — it is answered with a notice (not sent to the model, not answered
+// with -32603 "internal error"), and a user prompt template named `remember`
+// can never shadow it.
+func TestACPRememberIsReservedWhenOff(t *testing.T) {
 	s := newScript(t, textTurn("ok"))
 	c := startClient(t, testOptions(t, s))
 	sid := c.newSession(t.TempDir())
-	if _, err := c.prompt(sid, "/remember use -count=1"); err != nil {
-		t.Fatalf("prompt: %v", err.Message)
+	stop, err := c.prompt(sid, "/remember use -count=1")
+	if err != nil {
+		t.Fatalf("/remember with the feature off must not be a protocol error: %v (code %d)", err.Message, err.Code)
 	}
-	if txt := lastUserText(t, s); !strings.Contains(txt, "/remember use -count=1") {
-		t.Fatalf("with the feature off the text falls through verbatim, got %s", txt)
+	if stop != "end_turn" {
+		t.Fatalf("stop reason = %q, want end_turn", stop)
 	}
+	s.mu.Lock()
+	n := len(s.bodies)
+	s.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("a reserved command reached the model (%d request(s))", n)
+	}
+	found := false
+	for _, u := range c.updates {
+		if strings.Contains(mustJSON(u), "self-managed skills are off") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the refusal must arrive as a message update: %v", c.updates)
+	}
+	// It is still advertised: typing it is meaningful (a refusal the user can
+	// read), so the command list must not hide it.
+	advertised := ""
 	for _, u := range c.updatesOf(updCommands) {
 		for _, cm := range u["availableCommands"].([]any) {
-			if cm.(map[string]any)["name"] == "remember" {
-				t.Fatal("remember must not be advertised with the feature off")
+			if m := cm.(map[string]any); m["name"] == "remember" {
+				advertised, _ = m["description"].(string)
 			}
 		}
+	}
+	if advertised == "" {
+		t.Fatal("remember must stay advertised with the feature off")
+	}
+}
+
+// A bare /remember is still reserved: with the feature on there is no rule to
+// record, so it is answered as a notice instead of reaching the model as text.
+func TestACPBareRememberIsAnsweredNotForwarded(t *testing.T) {
+	s := newScript(t, textTurn("ok"))
+	c := startClient(t, managedOptions(t, s))
+	sid := c.newSession(t.TempDir())
+	stop, err := c.prompt(sid, "/remember")
+	if err != nil {
+		t.Fatalf("bare /remember must not be a protocol error: %v (code %d)", err.Message, err.Code)
+	}
+	if stop != "end_turn" {
+		t.Fatalf("stop reason = %q", stop)
+	}
+	s.mu.Lock()
+	n := len(s.bodies)
+	s.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("bare /remember reached the model (%d request(s))", n)
+	}
+	found := false
+	for _, u := range c.updates {
+		if strings.Contains(mustJSON(u), "needs the rule to record") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the refusal must arrive as a message update: %v", c.updates)
+	}
+}
+
+// A user prompt template named `remember` can never shadow the command.
+func TestACPRememberTemplateNeverRuns(t *testing.T) {
+	s := newScript(t, textTurn("ok"))
+	opts := managedOptions(t, s)
+	c := startClient(t, opts)
+	cwd := t.TempDir()
+	sid := c.newSession(cwd)
+	stop, err := c.prompt(sid, "/remember keep the suite green")
+	if err != nil {
+		t.Fatalf("prompt: %v", err.Message)
+	}
+	if stop != "end_turn" && stop != "max_turns" {
+		t.Fatalf("stop reason = %q", stop)
+	}
+	// The run that started is the /remember run: its typed text is the rule,
+	// never a template body borrowed from a prompt named `remember`.
+	s.mu.Lock()
+	first := ""
+	if len(s.bodies) > 0 {
+		first = mustJSON(s.bodies[0])
+	}
+	s.mu.Unlock()
+	if strings.Contains(first, "template body") {
+		t.Fatal("a prompt template named remember ran")
 	}
 }
 

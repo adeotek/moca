@@ -373,6 +373,7 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	}
 	if switchOn {
 		env.SkillDir = st.skillDir
+		snaps.RefuseUnder(st.skillDir)           // N-18: undo never rolls a skill file back
 		env.SkillCold = !hasAutoSkill(st.skills) // no recorded skills yet: the first
 		// successful verification here is the durable fact (see tools' arming)
 		env.SkillRecordNudge = config.ResolveRecordNudge(cfg) // §12.1: on unless a layer says false
@@ -396,6 +397,7 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 			dir = filepath.Join(jail.Root(), ".moca", "skills")
 		}
 		env.SkillDir = dir
+		snaps.RefuseUnder(dir) // N-18: the refusing guard's scope is the undo bound too
 		env.SkillGuard = refusingAutoGuard(dir)
 		env.SkillGuardRefusing = true
 	}

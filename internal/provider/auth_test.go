@@ -13,6 +13,7 @@ import (
 
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/flock"
+	"github.com/adeotek/moca/internal/llm"
 )
 
 func TestStoreRoundTripAndMode(t *testing.T) {
@@ -81,7 +82,7 @@ func TestConcurrentRefreshOnce(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			// separate Store values simulate separate processes sharing the file + lock
-			c, err := NewStore(p).CredentialFor("x", ref)(context.Background())
+			c, err := NewStore(p).CredentialFor("x", ref)(context.Background(), llm.Request{})
 			if err == nil && c.Token != "new" {
 				err = errors.New("got " + c.Token)
 			}
@@ -105,7 +106,7 @@ func TestRevokedAndCorrupt(t *testing.T) {
 	if err := s.Put("x", Token{Access: "old", Refresh: "dead", Expiry: time.Now().Add(-time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.CredentialFor("x", func(context.Context, Token) (Token, error) { return Token{}, ErrInvalidGrant })(context.Background())
+	_, err := s.CredentialFor("x", func(context.Context, Token) (Token, error) { return Token{}, ErrInvalidGrant })(context.Background(), llm.Request{})
 	if !errors.Is(err, ErrInvalidGrant) || !strings.Contains(err.Error(), "moca login x") {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func TestInvalidClient(t *testing.T) {
 	if err := s.Put("x", Token{Access: "old", Refresh: "r", Expiry: time.Now().Add(-time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.CredentialFor("x", func(context.Context, Token) (Token, error) { return Token{}, ErrInvalidClient })(context.Background())
+	_, err := s.CredentialFor("x", func(context.Context, Token) (Token, error) { return Token{}, ErrInvalidClient })(context.Background(), llm.Request{})
 	if !errors.Is(err, ErrInvalidClient) || !strings.Contains(err.Error(), "moca logout x") {
 		t.Fatal(err)
 	}
@@ -132,7 +133,7 @@ func TestInvalidClient(t *testing.T) {
 
 func TestNotLoggedIn(t *testing.T) {
 	s := NewStore(filepath.Join(t.TempDir(), "auth.json"))
-	_, err := s.CredentialFor("openai", nil)(context.Background())
+	_, err := s.CredentialFor("openai", nil)(context.Background(), llm.Request{})
 	if err == nil || !strings.Contains(err.Error(), "moca login openai") {
 		t.Fatal(err)
 	}
@@ -186,7 +187,7 @@ func TestRefreshKeepsExtrasWhenNotEchoed(t *testing.T) {
 		// a refresh response without rotation and without echoed extras
 		return Token{Access: "new", Expiry: time.Now().Add(time.Hour)}, nil
 	}
-	c, err := s.CredentialFor("openai", ref)(context.Background())
+	c, err := s.CredentialFor("openai", ref)(context.Background(), llm.Request{})
 	if err != nil || c.Token != "new" || !c.OAuth {
 		t.Fatal(c, err)
 	}
@@ -208,7 +209,7 @@ func TestRefreshRotates(t *testing.T) {
 		}
 		return Token{Access: "new", Refresh: "r2", IDToken: "idt2", Expiry: time.Now().Add(time.Hour)}, nil
 	}
-	if _, err := s.CredentialFor("openai", ref)(context.Background()); err != nil {
+	if _, err := s.CredentialFor("openai", ref)(context.Background(), llm.Request{}); err != nil {
 		t.Fatal(err)
 	}
 	tok, _, _ := s.Get("openai")
@@ -234,7 +235,7 @@ func TestCredentialForLockWaitHonoursContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	res := make(chan error, 1)
-	go func() { _, err := s.CredentialFor("x", nil)(ctx); res <- err }()
+	go func() { _, err := s.CredentialFor("x", nil)(ctx, llm.Request{}); res <- err }()
 	select {
 	case err := <-res:
 		if !errors.Is(err, context.DeadlineExceeded) {
@@ -257,7 +258,7 @@ func TestRefreshIsTimeBounded(t *testing.T) {
 	}
 	stall := func(ctx context.Context, _ Token) (Token, error) { <-ctx.Done(); return Token{}, ctx.Err() }
 	start := time.Now()
-	_, err := s.CredentialFor("x", stall)(context.Background())
+	_, err := s.CredentialFor("x", stall)(context.Background(), llm.Request{})
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 2*time.Second {
 		t.Fatalf("stalled refresh must fail at the timeout: %v after %v", err, time.Since(start))
 	}
@@ -272,21 +273,21 @@ func TestTransientRefreshFailureFallsBack(t *testing.T) {
 	if err := s.Put("x", Token{Access: "still-valid", Refresh: "r", Expiry: time.Now().Add(30 * time.Second)}); err != nil {
 		t.Fatal(err)
 	}
-	c, err := s.CredentialFor("x", boom)(context.Background())
+	c, err := s.CredentialFor("x", boom)(context.Background(), llm.Request{})
 	if err != nil || c.Token != "still-valid" {
 		t.Fatalf("valid token must serve through a transient refresh failure: %v %v", c, err)
 	}
 	if err := s.Put("x", Token{Access: "dead", Refresh: "r", Expiry: time.Now().Add(-time.Second)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CredentialFor("x", boom)(context.Background()); err == nil || !strings.Contains(err.Error(), "refreshing x token") {
+	if _, err := s.CredentialFor("x", boom)(context.Background(), llm.Request{}); err == nil || !strings.Contains(err.Error(), "refreshing x token") {
 		t.Fatalf("expired token + failed refresh must error: %v", err)
 	}
 	if err := s.Put("x", Token{Access: "still-valid", Refresh: "r", Expiry: time.Now().Add(30 * time.Second)}); err != nil {
 		t.Fatal(err)
 	}
 	revoked := func(context.Context, Token) (Token, error) { return Token{}, ErrInvalidGrant }
-	if _, err := s.CredentialFor("x", revoked)(context.Background()); !errors.Is(err, ErrInvalidGrant) {
+	if _, err := s.CredentialFor("x", revoked)(context.Background(), llm.Request{}); !errors.Is(err, ErrInvalidGrant) {
 		t.Fatalf("a revoked session must not fall back to the old token: %v", err)
 	}
 }

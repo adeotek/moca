@@ -14,6 +14,8 @@ import (
 
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/flock"
+
+	"github.com/adeotek/moca/internal/llm"
 )
 
 // Token is one provider registration's credentials. The store keeps one
@@ -303,7 +305,7 @@ var refreshTimeout = 30 * time.Second
 // credential is returned, so a crash after the exchange never loses a
 // rotated refresh token.
 func (s *Store) CredentialFor(p string, refresh Refresher) CredentialFunc {
-	return func(ctx context.Context) (Credential, error) {
+	return func(ctx context.Context, _ llm.Request) (Credential, error) {
 		var tok Token
 		err := s.withLock(ctx, func() error {
 			f, err := s.read()

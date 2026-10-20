@@ -239,7 +239,9 @@ func TestResponsesOAuthRouteShaping(t *testing.T) {
 	srv := sseServer(t, 200, responsesStream, &body, nil)
 	defer srv.Close()
 	m := Model{Provider: "openai", ID: "gpt", ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning}
-	cred := func(context.Context) (Credential, error) { return Credential{Token: "AT", OAuth: true}, nil }
+	cred := func(context.Context, llm.Request) (Credential, error) {
+		return Credential{Token: "AT", OAuth: true}, nil
+	}
 	a := newOpenAIResponses(m, srv.URL, cred, srv.Client())
 	_, err := a.Stream(context.Background(), llm.Request{Model: "gpt", System: "sys", MaxTokens: 500, Effort: llm.EffortLow,
 		Tools:    []llm.ToolSpec{{Name: "read", Description: "d", Schema: json.RawMessage(`{"type":"object"}`)}},
@@ -275,7 +277,7 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 
 `, nil, &hdr)
 	defer srv.Close()
-	cred := func(context.Context) (Credential, error) {
+	cred := func(context.Context, llm.Request) (Credential, error) {
 		return Credential{Token: "K", Headers: map[string]string{"x-opencode-session": "s1"}}, nil
 	}
 	a := newOpenAIResponses(Model{ID: "m", ThinkingMode: "none"}, srv.URL, cred, srv.Client())

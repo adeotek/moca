@@ -381,6 +381,13 @@ func (s *session) stopReason(ctx context.Context, out agent.Outcome, err error) 
 	switch {
 	case ctx.Err() != nil || errors.Is(err, context.Canceled):
 		return PromptResponse{StopReason: stopCancelled}, nil
+	case errors.As(err, new(agent.UserRefusal)):
+		// N-16: a refusal the user can act on is a message, not an internal
+		// error. The prompt ends normally with the reason in the transcript.
+		var r agent.UserRefusal
+		errors.As(err, &r)
+		s.send(s.chunk(updAgentMessage, r.Msg))
+		return PromptResponse{StopReason: stopEndTurn}, nil
 	case err != nil:
 		slog.Info("acp prompt failed", "session", s.id)
 		return nil, &RPCError{Code: codeInternal, Message: err.Error()}

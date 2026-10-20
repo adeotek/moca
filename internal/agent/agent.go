@@ -243,16 +243,24 @@ func RememberRequest(text string) string {
 // (Decision 15). Every front end lands here, so the refusals live here too:
 // no rule text (the signal must never arm a run the user stated nothing in)
 // and plan mode (its write confinement would refuse every skill write).
+// UserRefusal is a refusal the user caused and can fix (an empty rule, plan
+// mode, the feature switched off). Front ends show it as a notice, not as a
+// protocol failure: ACP used to answer -32603 "internal error" to a bare
+// /remember, which reads as a moca bug rather than an instruction (N-16).
+type UserRefusal struct{ Msg string }
+
+func (r UserRefusal) Error() string { return r.Msg }
+
 func (a *Agent) Remember(ctx context.Context, text string) (Outcome, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return Outcome{}, errors.New("/remember needs the rule to record: /remember <text>")
+		return Outcome{}, UserRefusal{Msg: "/remember needs the rule to record: /remember <text>"}
 	}
 	if a.plan {
-		return Outcome{}, errors.New("plan mode is on (writes are confined to docs/plans/) — turn it off to /remember")
+		return Outcome{}, UserRefusal{Msg: "plan mode is on (writes are confined to docs/plans/) — turn it off to /remember"}
 	}
 	if !a.SelfManagedSkills() {
-		return Outcome{}, errors.New("self-managed skills are off for this session — enable `skills.selfManaged` in your user config and restart, or start a session without it")
+		return Outcome{}, UserRefusal{Msg: "self-managed skills are off for this session — enable `skills.selfManaged` in your user config and restart, or start a session without it"}
 	}
 	return a.RunWith(ctx, RememberRequest(text), RunOpts{Typed: text, Remember: true})
 }
