@@ -49,7 +49,12 @@ func approve(ctx context.Context, env *Env, names []string, command string, canA
 			}
 			return fmt.Errorf("refused: `%s` needs explicit user approval for every call and it was not given", n)
 		case AllowAlways:
-			env.Commands.Allow(n)
+			// T-3: the answer is only offered when the checker will honour it
+			// (CanAlways) — a non-conforming asker returning it anyway must not
+			// persist a permanent allow the rules ignore.
+			if always {
+				env.Commands.Allow(n)
+			}
 		}
 	}
 	return nil

@@ -218,6 +218,12 @@ func (j *Jail) Resolve(path string, write bool) (string, error) {
 // resolve expands ~, joins relative paths to the root and resolves symlinks
 // on the deepest existing ancestor (see resolveDeep).
 func (j *Jail) resolve(path string) (string, error) {
+	// T-9: `~user/x` and `~+/x` are host shell expansions moca does not perform;
+	// joining them to the workdir would silently address a directory literally
+	// named `~user`, while the analyser refuses the same form. Refuse here too.
+	if strings.HasPrefix(path, "~") && path != "~" && !strings.HasPrefix(path, "~/") {
+		return "", fmt.Errorf("%s: only ~ and ~/… are expanded; moca does not resolve this form", path)
+	}
 	if path == "~" || strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {

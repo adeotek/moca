@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/flock"
 )
 
 func TestStoreRoundTripAndMode(t *testing.T) {
@@ -225,7 +226,7 @@ func TestCredentialForLockWaitHonoursContext(t *testing.T) {
 	if err := s.Put("x", Token{Access: "a", Refresh: "r", Expiry: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	unlock, err := lockFile(context.Background(), p+".lock") // another moca process, mid-refresh
+	unlock, err := flock.Lock(context.Background(), p+".lock") // another moca process, mid-refresh
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,38 +242,6 @@ func TestCredentialForLockWaitHonoursContext(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("CredentialFor stayed blocked on the store lock after its context ended")
-	}
-}
-
-// The lock is released and re-acquirable once the holder lets go.
-func TestLockFileWaitsThenAcquires(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "x.lock")
-	unlock, err := lockFile(context.Background(), p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := make(chan error, 1)
-	go func() {
-		u, err := lockFile(context.Background(), p)
-		if err == nil {
-			u()
-		}
-		got <- err
-	}()
-	time.Sleep(60 * time.Millisecond)
-	select {
-	case <-got:
-		t.Fatal("second locker must wait while the lock is held")
-	default:
-	}
-	unlock()
-	select {
-	case err := <-got:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("second locker never acquired the released lock")
 	}
 }
 

@@ -47,11 +47,13 @@ func (searchTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resu
 	if r := decode(input, &a); r != nil {
 		return *r
 	}
-	env.Searched = true
 	re, err := regexp.Compile(a.Pattern)
 	if err != nil {
+		// T-5: an invalid pattern searched nothing — setting Searched here
+		// cleared the "look before you read" gate for the rest of the run.
 		return errorf("invalid pattern (Go RE2 syntax — no lookaround or backreferences): %v", err)
 	}
+	env.Searched = true
 	if a.Path == "" {
 		a.Path = "."
 	}

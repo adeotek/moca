@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +11,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
+
+	"github.com/adeotek/moca/internal/flock"
 )
 
 // span is a JSON value's byte range in the (standardized) document.
@@ -150,7 +155,28 @@ func prepEdit(path string) (string, os.FileMode) {
 }
 
 // writeEdited replaces the file atomically after a .bak copy of src.
+//
+// Two moca processes can edit the same config (a TUI saving a permanent
+// approval while a `-p` run edits the same file), and the transform was
+// computed against `src` — writing `out` over a file another process changed
+// since loses that process's edit silently (the trust store's T-2 class). The
+// write is serialised on the file's lock and refuses a base that is no longer
+// what is on disk; the caller re-reads and re-applies, which is visible.
 func writeEdited(path string, src, out []byte, mode os.FileMode) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	unlock, err := flock.Lock(ctx, path+".lock")
+	if err != nil {
+		return fmt.Errorf("%s is busy: %w", path, err)
+	}
+	defer unlock()
+	if cur, err := os.ReadFile(path); err == nil {
+		if !bytes.Equal(cur, src) {
+			return fmt.Errorf("%s changed on disk since it was read; re-read it and retry", path)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	if err := os.WriteFile(path+".bak", src, 0o600); err != nil {
 		return err
 	}
