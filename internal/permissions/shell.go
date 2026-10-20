@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -691,12 +692,29 @@ var (
 	makeCountLong = []string{"--jobs", "--load-average", "--max-load"}
 )
 
+// makeValueDeny are override values that run code when a recipe expands them,
+// whether or not this host happens to have them installed (fetch-and-run and
+// shell words that may live only on the Makefile's own PATH).
+var makeValueDeny = map[string]bool{
+	"sh": true, "bash": true, "dash": true, "zsh": true, "ksh": true,
+	"curl": true, "wget": true, "nc": true, "netcat": true, "socat": true,
+	"ssh": true, "scp": true, "rsync": true, "base64": true, "eval": true,
+	"xargs": true, "perl": true, "ruby": true, "php": true,
+}
+
 // plainMakeValue reports whether a command-line override's value is inert
-// data — a word, number or version (`VAR=1`, `VERSION=1.2.3`). Any variable a
-// recipe runs as a command can be overridden (`make test GORUN=./x.sh` runs
-// ./x.sh in this repo's own Makefile), so paths, command strings, flags
-// (`CFLAGS=-B.`) and expansions are code, not data.
-func plainMakeValue(v string) bool {
+// data — a number or version (`VAR=1`, `VERSION=1.2.3`). Any variable a recipe
+// runs as a command can be overridden (`make test GORUN=./x.sh` runs ./x.sh in
+// this repo's own Makefile), so paths, command strings, flags (`CFLAGS=-B.`)
+// and expansions are code, not data. A word that resolves on PATH is code
+// too (`GORUN=bash`), and the denylist covers words that are executable
+// somewhere the analyser cannot see.
+//
+// named waives **only** this arm: a rule that wrote the exact command line
+// (`make test CC=gcc`) says the value is intended — otherwise the PATH arm
+// refuses legitimate overrides like `CC=gcc` and `GORUN=go`. The remaining
+// checks (a flag-shaped value, a non-word value) are unconditional.
+func plainMakeValue(v string, named bool) bool {
 	if strings.HasPrefix(v, "-") {
 		return false
 	}
@@ -704,6 +722,15 @@ func plainMakeValue(v string) bool {
 		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("._,+-", c)) {
 			return false
 		}
+	}
+	if named {
+		return true
+	}
+	if makeValueDeny[strings.ToLower(v)] {
+		return false
+	}
+	if p, err := exec.LookPath(v); err == nil && p != "" {
+		return false
 	}
 	return true
 }
@@ -839,7 +866,7 @@ func (s *Shell) genericRunnerRefusal(base string, ws []Word, st cmdState, named 
 			name, val, _ := strings.Cut(t, "=")
 			op := name
 			name = strings.TrimSpace(strings.TrimRight(strings.TrimSpace(name), ":+?!"))
-			if makeCodeVars[name] || strings.Contains(op, "!") || !plainMakeValue(val) {
+			if makeCodeVars[name] || strings.Contains(op, "!") || !plainMakeValue(val, named) {
 				return fmt.Errorf("`%s` with the override %s chooses code make runs — add an explicit permissions.allow rule if you want it", base, t)
 			}
 		default:
@@ -922,6 +949,73 @@ func (s *Shell) skillOperand(t string, cwdUnknown, afterDash bool) error {
 		return errSkillWrite
 	}
 	return nil
+}
+
+// skillsAncestor reports whether a literal path resolves to a directory that
+// *contains* the skills dir — `rm -rf .moca`, or the workdir itself. The skills
+// dir and everything below it are skillTarget's business; this is the parent
+// whose removal discards every recorded skill.
+func (s *Shell) skillsAncestor(t string) bool {
+	if s.skillDir == "" || t == "" {
+		return false
+	}
+	res, err := s.jail.Resolve(t, true)
+	if err != nil {
+		return false
+	}
+	return res != s.skillDir && within(res, s.skillDir)
+}
+
+// writeOperands returns the operands of a known writer that the tool may
+// actually write. `cp`/`install`/`ln` write only their destination (the last
+// operand, or every `-t`/`--target-directory` value) — a source is read, so
+// `cp .moca/skills/x/SKILL.md /tmp/review.md` must stay allowed. Everything
+// else in the caller's list may write any operand: `mv` and `rsync
+// --remove-source-files` delete sources, `rm`/`rmdir`/`truncate`/`patch` name
+// their targets directly. A wrong table here is a bypass, so the exception
+// is narrow and fails open only for the documented read-only direction:
+// `cp -b`/`--backup` writes beside every source, so it keeps every operand.
+func writeOperands(cmd string, args []Word) []Word {
+	destOnly := cmd == "cp" || cmd == "install" || cmd == "ln"
+	var operands, dests []Word
+	afterDash, backup := false, false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		t, ok := a.Text, a.Literal
+		if ok && t == "--" {
+			afterDash = true
+			continue
+		}
+		if !ok {
+			operands = append(operands, a)
+			continue
+		}
+		if !afterDash && strings.HasPrefix(t, "-") && len(t) > 1 {
+			switch {
+			case strings.HasPrefix(t, "--target-directory="):
+				dests = append(dests, Word{Text: strings.TrimPrefix(t, "--target-directory="), Literal: true})
+			case t == "-t" || t == "--target-directory":
+				if i+1 < len(args) {
+					dests = append(dests, args[i+1])
+					i++
+				}
+			case strings.HasPrefix(t, "-t") && len(t) > 2:
+				dests = append(dests, Word{Text: t[2:], Literal: true})
+			case t == "-b" || t == "--backup" || strings.Contains(t, "backup"):
+				backup = true
+			}
+			continue
+		}
+		operands = append(operands, a)
+	}
+	if !destOnly || backup {
+		return append(operands, dests...)
+	}
+	out := dests
+	if len(operands) > 0 {
+		out = append(out, operands[len(operands)-1])
+	}
+	return out
 }
 
 // wrapperDirOutside reports whether a wrapper's -C/--chdir argument cannot be
@@ -1194,15 +1288,25 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 						cwdOutside = true
 					}
 					cwdUnknown = true
-				case "cp", "mv", "install", "ln", "truncate", "rm", "patch", "rsync":
-					afterDash := false
-					for _, a := range x.Args[idx+1:] {
-						if t, ok := wordLit(a); ok {
-							if t == "--" {
-								afterDash = true
-								continue
+				case "cp", "mv", "install", "ln", "truncate", "rm", "rmdir", "patch", "rsync":
+					cmd := filepath.Base(ws[idx].Text)
+					// Auto mode: a removal whose operand contains the skills
+					// dir (`rm -rf .moca`) takes every recorded skill with it
+					// in one command. Ask every time.
+					if s.auto && (cmd == "rm" || cmd == "rmdir") {
+						for _, a := range x.Args[idx+1:] {
+							if t, ok := wordLit(a); ok && s.skillsAncestor(t) {
+								v.add(&v.every, cmd)
+								break
 							}
-							if err := s.skillOperand(t, st.cwdUnknown, afterDash); err != nil {
+						}
+					}
+					// Only the operands a tool may write are candidates: a
+					// source is read for cp/install/ln, so `cp <skill> /tmp`
+					// is a legitimate read.
+					for _, a := range writeOperands(cmd, toWords(x.Args[idx+1:])) {
+						if a.Literal {
+							if err := s.skillOperand(a.Text, st.cwdUnknown, true); err != nil {
 								fail(err)
 							}
 						}
