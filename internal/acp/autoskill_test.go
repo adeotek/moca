@@ -150,25 +150,29 @@ func TestACPRememberIsReservedWhenOff(t *testing.T) {
 		t.Fatalf("a reserved command reached the model (%d request(s))", n)
 	}
 	found := false
-	for _, u := range c.updates {
+	for _, u := range c.allUpdates() {
 		if strings.Contains(mustJSON(u), "self-managed skills are off") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("the refusal must arrive as a message update: %v", c.updates)
+		t.Fatalf("the refusal must arrive as a message update: %v", c.allUpdates())
 	}
 	// It is still advertised: typing it is meaningful (a refusal the user can
 	// read), so the command list must not hide it.
-	advertised := ""
-	for _, u := range c.updatesOf(updCommands) {
-		for _, cm := range u["availableCommands"].([]any) {
-			if m := cm.(map[string]any); m["name"] == "remember" {
-				advertised, _ = m["description"].(string)
+	advertised := func() string {
+		out := ""
+		for _, u := range c.updatesOf(updCommands) {
+			for _, cm := range u["availableCommands"].([]any) {
+				if m := cm.(map[string]any); m["name"] == "remember" {
+					out, _ = m["description"].(string)
+				}
 			}
 		}
+		return out
 	}
-	if advertised == "" {
+	c.eventually(t, "the advertised command list", func() bool { return advertised() != "" })
+	if advertised() == "" {
 		t.Fatal("remember must stay advertised with the feature off")
 	}
 }
@@ -193,13 +197,13 @@ func TestACPBareRememberIsAnsweredNotForwarded(t *testing.T) {
 		t.Fatalf("bare /remember reached the model (%d request(s))", n)
 	}
 	found := false
-	for _, u := range c.updates {
+	for _, u := range c.allUpdates() {
 		if strings.Contains(mustJSON(u), "needs the rule to record") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("the refusal must arrive as a message update: %v", c.updates)
+		t.Fatalf("the refusal must arrive as a message update: %v", c.allUpdates())
 	}
 }
 
@@ -242,12 +246,12 @@ func TestACPStartupNoteArrivesAsAnUpdate(t *testing.T) {
 	// The startup note arrives as a session update (a notice when the client
 	// advertises the extension, a thought line otherwise).
 	found := false
-	for _, u := range c.updates {
+	for _, u := range c.allUpdates() {
 		if strings.Contains(mustJSON(u), "self-managed skills: 1 skill") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("the startup note must reach the client: %v", c.updates)
+		t.Fatalf("the startup note must reach the client: %v", c.allUpdates())
 	}
 }

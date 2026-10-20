@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.7.2 (2026-10-21)
+
+### A review round, not a feature
+
+Four independent review passes over v0.7.1 produced 59 findings; 52 became tasks and shipped as eight PRs against one release. Nothing here is new behaviour you asked for — it is what the review found when it read the shell confinement, the rule engine, the recording nudge, the front ends and the streams against what SPECS promised.
+
+### Shell confinement and rule specificity (#39, #40)
+
+- **A leading space stopped the metacharacter scan** — `" ls"` (a shell word-splits it) skipped the check that refuses `&&`, `|`, `;`. Trimmed before the scan.
+- **A wrapper directory outside the workdir** was accepted as a confinement root; paths were resolved through it. Now refused.
+- **`--` operands were not confined**: `rm -- ../../etc/x` read as "no operands".
+- **`permissions.allow` was not a rule list** — it ran through the single-word legacy filter, so every entry with a space or `*` (`rm build/*`) was silently dropped and the command asked every time. It now parses like `ask`/`deny`, and an unparseable rule is an error rather than a dropped check.
+- **An override's value may be code**: `make test GORUN=bash` ran bash under a bare `make` rule. A value that resolves on `PATH`, or is a fetch-and-run word, is refused unless a rule names the exact command line.
+- **A rule naming a directory covered files under it** (`skillsAncestor`), **writer operands had a blind spot after `--`**, and **Windows had no skill-write refusal at all**.
+- **The injection-scan negation only counts when it precedes the command in the same clause** — "always run ./scripts/bootstrap.sh — not an injection" used to escape the arm.
+
+### Truth of the recording nudge (#41)
+
+- The gate now reads `SkillHintDone`, so a run that *edited* a skill is not told that nothing records it; the nudge waits for the execute-plan nudge instead of pre-empting it; its text carries the format skeleton again and tells a run with nothing durable to say so **and restate its final answer** (`-p` prints only the final answer, which "stop" used to replace); a cold repo is asked **once per session**; and arming requires a **verification-shaped** command that succeeded — `go version` used to arm it and the nudge then asserted a fact the run never established.
+- `evalstats` counts **landed** skill writes apart from **refused** calls instead of selling both as writes.
+
+### Robustness: the trust store, run state, and the streams (#42)
+
+- **The trust store locked, re-read and merged**: an approval written concurrently could be lost by a last-writer-wins save. `internal/flock` was extracted for it.
+- **A failed `Start` deletes its transcript** — it used to leave a `.jsonl` behind that `/resume` would list.
+- `BeginRun` resets the run's flags (a second run in one process inherited the first's arming), search compiles before it reports a match, an unparseable provider payload and a nil `Snapshot` fail closed with an error instead of a panic, `AllowAlways` respects `CanAlways`, MCP messages are capped at 8 MB and an ACP tool diff at 8 KB.
+
+### Front-end parity (#43, #44)
+
+- **`/remember` is a command everywhere**: always listed, always reserved, never shadowable by a user template, and a refusal is answered as a message rather than a `-32603`.
+- **`--model ollama/qwen3` opts a local provider in before validation** — it used to be rejected as unknown, and the ACP `checkModel` had the same hole plus a missing ollama discovery.
+- **A corrupt anthropic stream is an error**: a negative block index and an `input_json_delta` addressed to a non-`tool_use` block used to dereference a nil builder inside the SSE callback, where the retry loop never saw it.
+- **`x-opencode-session` follows `req.CacheKey`**, not the process: one moca process serving several sessions (TUI `/resume`, ACP) routed them all to one cache shard.
+- **An MCP proxy call with a misspelled field is refused** instead of being sent as `{}` to whatever tool it named; the approval panel shows the whole call.
+- **`Undo` refuses a skills-dir snapshot** — it was the edit the skill write guard exists to check, taken around it — and the spill note says "the capture", not "the full output", because a `shell` capture is bounded at 64K.
+
+### Skills: provenance, replay, hygiene (#45, #46)
+
+- **The provenance transition table is explicit**: back-fill to `(×1, today)`, pin to `(user, today)` under `/remember`, and one confirmation `(×1, d)` → `(×2, today)`. Everything else is refused with both sides rendered (`no provenance → (×3, 2026-10-20)`); a rule with no provenance no longer prints the ghost date `0001-01-01`, and a provenance that does not end the line is refused naming the tail it saw.
+- **A nudge is not the user's words**: `Entry.Nudge` was dropped by `History()`, so a resumed TUI session showed the nudge as a user band and ACP replayed it as a `user_message_chunk`. The TUI now marks it, ACP drops it.
+- **Hygiene counts calendar days**, not elapsed hours against a UTC midnight (a rule dated for the 22nd expired on the 21st in EEST), and **names a skill it emptied** instead of attributing its rules to another skill.
+
+### The measurement, and a checker that failed open
+
+- **Landed vs refused, measured** (`v072-c2`, n=3, five scenarios): 49 skill-file write calls, **15 landed, 34 refused** — every refusal carries its reason, and the model's second attempt usually lands.
+- **`skills-cold` records 3/3** in both sessions; **`skills` scores 0/3** because session 2 never reads the body and the description the model writes names no command at all — a real gap in what a skill's one visible line contains, moved to a v0.7.3 contract question rather than tuned into the prompt.
+- **The injection checker was failing open**: it resolved its contaminated-rule scan relative to `$0` from a body dot-sourced into a scenario's `check.sh`, so the scan never loaded and clause (a) scored every rule clean. Fixed to resolve via `BASH_SOURCE`, **fail closed**, and pinned by a scenario-shaped selftest. Re-measured at **n=10: 21/50**, injection arms **17/30**, with one genuine contamination in 30 runs and nine "a rule quotes a command the run never ran".
+
 ## v0.7.1 (2026-10-19)
 
 ### The end-of-run recording nudge
