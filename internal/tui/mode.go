@@ -9,20 +9,20 @@ import (
 	"github.com/adeotek/moca/internal/agent"
 )
 
-// nextMode is the Shift+Tab cycle: default → auto → plan → yolo → default.
-// Plan rides only on default (the agent keeps plan out of auto/yolo), so
-// the plan stop toggles the plan flag and lands at the default mode, the
-// stop after plan is yolo (plan drops first), and yolo wraps to default.
+// nextMode is the Shift+Tab cycle: ask → auto → plan → yolo → ask.
+// Plan rides only on ask (the agent keeps plan out of auto/yolo), so the plan
+// stop toggles the plan flag and lands at the ask mode, the stop after plan is
+// yolo (plan drops first), and yolo wraps to ask.
 func nextMode(m agent.PermMode, plan bool) (agent.PermMode, bool) {
 	switch {
 	case plan:
 		return agent.ModeYolo, false
-	case m == agent.ModeDefault:
+	case m == agent.ModeAsk:
 		return agent.ModeAuto, false
 	case m == agent.ModeAuto:
-		return agent.ModeDefault, true // auto → plan
+		return agent.ModeAsk, true // auto → plan
 	}
-	return agent.ModeDefault, false // yolo → default
+	return agent.ModeAsk, false // yolo → ask
 }
 
 // cycleMode is shift+tab: the next stop of the permission-mode cycle
@@ -48,9 +48,9 @@ func (m *model) cycleMode() tea.Cmd {
 	return nil
 }
 
-// modeBadgeText is the plain badge text for a mode (styled in Task 10): a
-// Title-Case word per state — `Default` reads as a word, `Auto`/`Yolo`/`Plan`
-// stand out; plan is its own badge (a default run under the plan scope).
+// modeBadgeText is the plain badge text for a mode: a Title-Case word per
+// state — `Ask` (v0.7.2's name for the old `Default`), `Auto`, `Yolo`; plan is
+// its own badge (an ask run under the plan scope).
 func modeBadgeText(mode agent.PermMode, plan bool) string {
 	if plan {
 		return "Plan"
@@ -61,7 +61,7 @@ func modeBadgeText(mode agent.PermMode, plan bool) string {
 	case agent.ModeYolo:
 		return "Yolo"
 	}
-	return "Default"
+	return "Ask"
 }
 
 // modeNotice is the one-line ModeChanged notice for a state.
@@ -75,7 +75,7 @@ func modeNotice(mode agent.PermMode, plan bool) (string, bool) {
 	case mode == agent.ModeAuto:
 		return "mode: Auto — safe actions run, risky ones ask (workdir + temp only)", false
 	default:
-		return "mode: Default — every non-allowlisted command asks", false
+		return "mode: Ask — every non-allowlisted command asks", false
 	}
 }
 
@@ -87,13 +87,16 @@ func modeCycleHelp(m agent.PermMode, plan bool) string {
 }
 
 // modeNames lists the words /mode accepts — the same set as the --mode flag
-// (plan is the scope; it lands at default, the agent's rule).
-var modeNames = []string{string(agent.ModeDefault), string(agent.ModeAuto), string(agent.ModeYolo), "plan"}
+// (plan is the scope; it lands at ask, the agent's rule). The legacy "default"
+// is accepted too: it is what every earlier release printed, and a muscle
+// memory should not get a usage line.
+var modeNames = []string{string(agent.ModeAsk), string(agent.ModeAuto), string(agent.ModeYolo), "plan", agent.LegacyModeName}
 
 // runMode is the /mode built-in: no args → the current mode + the cycle;
-// `default|auto|yolo|plan` → set it (between runs). `plan` enters the plan
-// scope (landing at default, even from a wider mode); `default` exits plan;
-// auto/yolo drop it through SetMode.
+// `ask|auto|yolo|plan` → set it (between runs); the legacy `default` is
+// accepted as `ask`. `plan` enters the plan scope (landing at ask, even from a
+// wider mode); `ask` (or `default`) exits plan; auto/yolo drop it through
+// SetMode.
 func (m *model) runMode(args string) tea.Cmd {
 	st := m.agent.Status()
 	if args == "" {
@@ -106,14 +109,14 @@ func (m *model) runMode(args string) tea.Cmd {
 		return cmd
 	}
 	if !slices.Contains(modeNames, args) {
-		return m.println("usage: /mode default|auto|yolo|plan — no args shows the current mode")
+		return m.println("usage: /mode ask|auto|yolo|plan — no args shows the current mode")
 	}
 	if args == "plan" {
 		m.agent.SetPlan(true) // ModeChanged prints + refreshes
 		return nil
 	}
-	if m.agent.Plan() && args == "default" {
-		m.agent.SetPlan(false) // /mode default exits plan; auto/yolo drop it in SetMode
+	if m.agent.Plan() && (args == string(agent.ModeAsk) || args == agent.LegacyModeName) {
+		m.agent.SetPlan(false) // /mode ask exits plan; auto/yolo drop it in SetMode
 	}
 	m.agent.SetMode(agent.PermMode(args)) // ModeChanged prints + refreshes
 	return nil

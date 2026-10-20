@@ -28,14 +28,15 @@ func TestResolveMode(t *testing.T) {
 	}{
 		{"--mode auto", []string{"--mode", "auto", "-p", "x"}, config.Config{}, "auto", false},
 		{"--mode yolo", []string{"--mode", "yolo", "-p", "x"}, config.Config{}, "yolo", false},
-		{"--mode default beats cfg auto", []string{"--mode", "default", "-p", "x"}, cfgAuto, "default", false},
-		{"--mode plan", []string{"--mode", "plan", "-p", "x"}, config.Config{}, "default", true},
-		{"--mode plan over cfg yolo", []string{"--mode", "plan", "-p", "x"}, config.Config{Yolo: true}, "default", true},
-		{"--mode plan over cfg defaultMode auto", []string{"--mode", "plan", "-p", "x"}, cfgAuto, "default", true},
-		{"--mode default over cfg yolo", []string{"--mode", "default", "-p", "x"}, config.Config{Yolo: true}, "default", false},
+		// `default` is v0.7.1's name for ask: still parsed, resolved as ask.
+		{"--mode default beats cfg auto", []string{"--mode", "default", "-p", "x"}, cfgAuto, "ask", false},
+		{"--mode plan", []string{"--mode", "plan", "-p", "x"}, config.Config{}, "ask", true},
+		{"--mode plan over cfg yolo", []string{"--mode", "plan", "-p", "x"}, config.Config{Yolo: true}, "ask", true},
+		{"--mode plan over cfg defaultMode auto", []string{"--mode", "plan", "-p", "x"}, cfgAuto, "ask", true},
+		{"--mode ask over cfg yolo", []string{"--mode", "ask", "-p", "x"}, config.Config{Yolo: true}, "ask", false},
 		{"cfg defaultMode wins", []string{"-p", "x"}, cfgAuto, "auto", false},
 		{"cfg yolo flag wins", []string{"-p", "x"}, config.Config{Yolo: true}, "yolo", false},
-		{"defaults to default", []string{"-p", "x"}, config.Config{}, "default", false},
+		{"unset defaults to auto", []string{"-p", "x"}, config.Config{}, "auto", false},
 	}
 	for _, c := range cases {
 		o, err := parseArgs(c.args, nil)
@@ -54,28 +55,28 @@ func TestResolveMode(t *testing.T) {
 // only when no flag overrode it, and plan still rides on default.
 func TestResolveModeProjectReceipts(t *testing.T) {
 	proj := &config.ProjectConfig{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}
-	if mode, plan := (Options{}).ResolveMode(config.Config{}); mode != "default" || plan {
+	if mode, plan := (Options{}).ResolveMode(config.Config{}); mode != "auto" || plan {
 		t.Errorf("no project: (%q, %v)", mode, plan)
 	}
 	if mode, plan := (Options{}).ResolveMode(config.Config{Project: proj}); mode != "auto" || plan {
 		t.Errorf("defaultMode auto overrides cfg default: (%q, %v)", mode, plan)
 	}
-	if mode, _ := (Options{Mode: ptr("default")}).ResolveMode(config.Config{Project: proj}); mode != "default" {
+	if mode, _ := (Options{Mode: ptr("default")}).ResolveMode(config.Config{Project: proj}); mode != "ask" {
 		t.Errorf("--mode default overrides project auto: %q", mode)
 	}
-	if mode, plan := (Options{Mode: ptr("plan")}).ResolveMode(config.Config{Project: proj}); mode != "default" || !plan {
-		t.Errorf("--mode plan over project auto: (%q, %v), want (default, true)", mode, plan)
+	if mode, plan := (Options{Mode: ptr("plan")}).ResolveMode(config.Config{Project: proj}); mode != "ask" || !plan {
+		t.Errorf("--mode plan over project auto: (%q, %v), want (ask, true)", mode, plan)
 	}
-	// The project layer may set `default`, `auto` or `plan` (a project `yolo`
+	// The project layer may set `ask`, `auto` or `plan` (a project `yolo`
 	// is capped off by LoadProject, §4); plan resolves to the plan scope
-	// (default + plan), never yolo for trust.
-	if mode, plan := (Options{}).ResolveMode(config.Config{Project: &config.ProjectConfig{Permissions: config.PermissionsConfig{DefaultMode: "plan"}}}); mode != "default" || !plan {
-		t.Errorf("project plan: (%q, %v), want (default, true)", mode, plan)
+	// (ask + plan), never yolo for trust.
+	if mode, plan := (Options{}).ResolveMode(config.Config{Project: &config.ProjectConfig{Permissions: config.PermissionsConfig{DefaultMode: "plan"}}}); mode != "ask" || !plan {
+		t.Errorf("project plan: (%q, %v), want (ask, true)", mode, plan)
 	}
 	// The user layer's configured plan applies when the project is silent,
 	// and the project still beats it.
-	if mode, plan := (Options{}).ResolveMode(config.Config{Permissions: config.PermissionsConfig{DefaultMode: "plan"}}); mode != "default" || !plan {
-		t.Errorf("user plan: (%q, %v), want (default, true)", mode, plan)
+	if mode, plan := (Options{}).ResolveMode(config.Config{Permissions: config.PermissionsConfig{DefaultMode: "plan"}}); mode != "ask" || !plan {
+		t.Errorf("user plan: (%q, %v), want (ask, true)", mode, plan)
 	}
 	beats := config.Config{Permissions: config.PermissionsConfig{DefaultMode: "plan"},
 		Project: &config.ProjectConfig{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}}
@@ -93,8 +94,8 @@ func TestExecuteIgnoresConfiguredPlan(t *testing.T) {
 		cfg  config.Config
 		want string
 	}{
-		{config.Config{Permissions: perm("plan")}, "default"},
-		{config.Config{Project: &config.ProjectConfig{Permissions: perm("plan")}}, "default"},
+		{config.Config{Permissions: perm("plan")}, "auto"},
+		{config.Config{Project: &config.ProjectConfig{Permissions: perm("plan")}}, "auto"},
 		// Two layers: the project's plan is skipped, the user's auto decides.
 		{config.Config{Permissions: perm("auto"), Project: &config.ProjectConfig{Permissions: perm("plan")}}, "auto"},
 	} {
@@ -170,8 +171,8 @@ func TestPlanNeverResolvesWider(t *testing.T) {
 		{Project: &config.ProjectConfig{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}},
 	} {
 		mode, plan := (Options{Mode: ptr("plan")}).ResolveMode(cfg)
-		if mode != "default" || !plan {
-			t.Fatalf("--mode plan over %+v → (%q, %v), want (default, true)", cfg.Permissions, mode, plan)
+		if mode != "ask" || !plan {
+			t.Fatalf("--mode plan over %+v → (%q, %v), want (ask, true)", cfg.Permissions, mode, plan)
 		}
 	}
 }

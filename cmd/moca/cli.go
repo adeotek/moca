@@ -76,10 +76,10 @@ type Options struct {
 type usageError struct{ error }
 
 // cliModes are the --mode values — the permission modes plus plan (the plan
-// scope, which rides on default; the agent enforces the pairing). The set is
-// config.PermModes: the flag and both config layers' defaultMode accept the
-// same four values (§3, §4).
-var cliModes = slices.Clone(config.PermModes)
+// scope, which rides on ask; the agent enforces the pairing). The set is
+// config.PermModes plus the legacy `default`, which v0.7.1 and earlier printed
+// as the ask mode's name: a script that passes it keeps working (§3, §4).
+var cliModes = append(slices.Clone(config.PermModes), config.LegacyPermMode)
 
 // ResolveMode resolves the run's permission mode and plan scope (§3): an
 // explicit --mode wins — plan maps to the plan scope at the default mode —
@@ -149,7 +149,7 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 	}
 	if *mode != "" {
 		if !slices.Contains(cliModes, *mode) {
-			return o, usageError{fmt.Errorf("--mode must be one of %s, got %q", strings.Join(cliModes, ", "), *mode)}
+			return o, usageError{fmt.Errorf("--mode must be one of %s, got %q", strings.Join(config.PermModes, ", "), *mode)}
 		}
 		o.Mode = mode
 	}

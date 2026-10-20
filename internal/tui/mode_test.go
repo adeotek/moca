@@ -18,7 +18,7 @@ func TestNextMode(t *testing.T) {
 		m    agent.PermMode
 		plan bool
 	}
-	seq := []st{{agent.ModeDefault, false}, {agent.ModeAuto, false}, {agent.ModeDefault, true}, {agent.ModeYolo, false}, {agent.ModeDefault, false}}
+	seq := []st{{agent.ModeAsk, false}, {agent.ModeAuto, false}, {agent.ModeAsk, true}, {agent.ModeYolo, false}, {agent.ModeAsk, false}}
 	for i := 0; i+1 < len(seq); i++ {
 		if m, p := nextMode(seq[i].m, seq[i].plan); m != seq[i+1].m || p != seq[i+1].plan {
 			t.Errorf("from %+v → %v/%v, want %+v", seq[i], m, p, seq[i+1])
@@ -31,30 +31,33 @@ func TestNextMode(t *testing.T) {
 // TestCtrlTCyclesEffort.
 func TestShiftTabCyclesMode(t *testing.T) {
 	m := newAgentModel(t)
-	m.Update(keyMsg("shift+tab"))
+	// v0.7.2: a fresh session starts at auto, so the first stop is plan.
 	if m.agent.Mode() != agent.ModeAuto {
-		t.Fatalf("shift+tab → auto, got %v", m.agent.Mode())
+		t.Fatalf("a fresh session must start at auto, got %v", m.agent.Mode())
+	}
+	m.Update(keyMsg("shift+tab"))
+	if m.agent.Mode() != agent.ModeAsk || !m.agent.Plan() {
+		t.Fatalf("shift+tab from auto → plan (ask+plan), got %v plan=%v", m.agent.Mode(), m.agent.Plan())
 	}
 	// shift+tab must not touch effort any more (and it walks the mode, so
-	// the next stop is plan from here).
+	// the next stop is yolo from here — plan drops first).
 	start := m.agent.Status().Effort
 	m.Update(keyMsg("shift+tab"))
 	if got := m.agent.Status().Effort; got != start {
 		t.Fatalf("shift+tab must not cycle effort: %v → %v", start, got)
 	}
-	// auto → plan: the mode lands at default — plan rides only on default.
-	if m.agent.Mode() != agent.ModeDefault || !m.agent.Plan() {
-		t.Fatalf("auto → plan (mode default), got %v plan=%v", m.agent.Mode(), m.agent.Plan())
-	}
-	// Continue the walk on real keys: plan → yolo (plan drops first, so the
-	// two never hold together) → default.
-	m.Update(keyMsg("shift+tab"))
+	// plan → yolo: plan rides only on ask, and leaving it drops the flag.
 	if m.agent.Mode() != agent.ModeYolo || m.agent.Plan() {
 		t.Fatalf("plan → yolo, got %v plan=%v", m.agent.Mode(), m.agent.Plan())
 	}
+	// Continue the walk on real keys: yolo → ask → auto.
 	m.Update(keyMsg("shift+tab"))
-	if m.agent.Mode() != agent.ModeDefault || m.agent.Plan() {
-		t.Fatalf("yolo → default, got %v plan=%v", m.agent.Mode(), m.agent.Plan())
+	if m.agent.Mode() != agent.ModeAsk || m.agent.Plan() {
+		t.Fatalf("yolo → ask, got %v plan=%v", m.agent.Mode(), m.agent.Plan())
+	}
+	m.Update(keyMsg("shift+tab"))
+	if m.agent.Mode() != agent.ModeAuto || m.agent.Plan() {
+		t.Fatalf("ask → auto, got %v plan=%v", m.agent.Mode(), m.agent.Plan())
 	}
 }
 
@@ -125,17 +128,18 @@ func TestYoloNeverCarriesPlan(t *testing.T) {
 	}
 	// The other way round: /plan in yolo leaves yolo for default.
 	m2.runCommand(Parsed{Kind: KindCommand, Name: "plan"})
-	if !m2.agent.Plan() || m2.agent.Mode() != agent.ModeDefault {
+	if !m2.agent.Plan() || m2.agent.Mode() != agent.ModeAsk {
 		t.Fatalf("/plan in yolo: mode %v plan %v, want default + plan", m2.agent.Mode(), m2.agent.Plan())
 	}
 }
 
 func TestShiftTabRefusedWhileRunning(t *testing.T) {
 	m := newAgentModel(t)
+	before := m.agent.Mode()
 	m.running = true
 	_, cmd := m.Update(keyMsg("shift+tab"))
 	out := drained(m, cmd)
-	if m.agent.Mode() != agent.ModeDefault {
+	if m.agent.Mode() != before {
 		t.Fatalf("mode changed mid-run: %v", m.agent.Mode())
 	}
 	if !strings.Contains(out, "finish or interrupt the run first") {
@@ -146,8 +150,8 @@ func TestShiftTabRefusedWhileRunning(t *testing.T) {
 func TestModeCommandShowsAndSets(t *testing.T) {
 	m := newAgentModel(t)
 	out := drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode"}))
-	if !strings.Contains(out, "mode: Default") {
-		t.Fatalf("no-arg /mode prints the current mode: %q", out)
+	if !strings.Contains(out, "mode: Auto") {
+		t.Fatalf("no-arg /mode prints the current mode (auto by default): %q", out)
 	}
 	out = drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "auto"}))
 	if m.agent.Mode() != agent.ModeAuto {
@@ -162,7 +166,7 @@ func TestModeCommandShowsAndSets(t *testing.T) {
 	if m.agent.Mode() != agent.ModeAuto {
 		t.Fatalf("bad arg must not change the mode: %v", m.agent.Mode())
 	}
-	if !strings.Contains(out, "usage: /mode default|auto|yolo|plan") {
+	if !strings.Contains(out, "usage: /mode ask|auto|yolo|plan") {
 		t.Fatalf("bad arg names the modes: %q", out)
 	}
 	m.running = true
@@ -187,17 +191,17 @@ func TestModeCommandShowsAndSets(t *testing.T) {
 func TestModeCommandPlanSymmetry(t *testing.T) {
 	m := newAgentModel(t)
 	out := drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "plan"}))
-	if !m.agent.Plan() || m.agent.Mode() != agent.ModeDefault {
+	if !m.agent.Plan() || m.agent.Mode() != agent.ModeAsk {
 		t.Fatalf("/mode plan: mode %v plan %v, want default + plan (%q)", m.agent.Mode(), m.agent.Plan(), out)
 	}
 	// From a wider mode, plan still lands at default.
 	m.agent.SetMode(agent.ModeAuto)
 	m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "plan"})
-	if !m.agent.Plan() || m.agent.Mode() != agent.ModeDefault {
+	if !m.agent.Plan() || m.agent.Mode() != agent.ModeAsk {
 		t.Fatalf("/mode plan from auto: mode %v plan %v, want default + plan", m.agent.Mode(), m.agent.Plan())
 	}
 	out = drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "default"}))
-	if m.agent.Plan() || m.agent.Mode() != agent.ModeDefault {
+	if m.agent.Plan() || m.agent.Mode() != agent.ModeAsk {
 		t.Fatalf("/mode default must exit plan: mode %v plan %v (%q)", m.agent.Mode(), m.agent.Plan(), out)
 	}
 	// auto/yolo drop plan through SetMode's own rule.
@@ -212,9 +216,9 @@ func TestModeCommandPlanSymmetry(t *testing.T) {
 		t.Fatalf("/mode yolo must drop plan: mode %v plan %v", m.agent.Mode(), m.agent.Plan())
 	}
 	// The usage line names all four values.
-	m.agent.SetMode(agent.ModeDefault)
+	m.agent.SetMode(agent.ModeAsk)
 	out = drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "bogus"}))
-	if !strings.Contains(out, "usage: /mode default|auto|yolo|plan") {
+	if !strings.Contains(out, "usage: /mode ask|auto|yolo|plan") {
 		t.Fatalf("usage must list four values: %q", out)
 	}
 }
@@ -236,7 +240,11 @@ func TestStatusAlwaysShowsMode(t *testing.T) {
 			t.Fatalf("line 1 must not carry the badge %q: %q", want, l1)
 		}
 	}
-	check("Default")
+	// v0.7.2: a fresh session runs at auto, so that is the badge the status
+	// bar opens with; `ask` (the old `default`) is one shift+tab away.
+	check("Auto")
+	m.agent.SetMode(agent.ModeAsk)
+	check("Ask")
 	m.agent.SetPlan(true)
 	check("Plan")
 	m.agent.SetPlan(false)
@@ -282,9 +290,9 @@ func TestModeChangedNotices(t *testing.T) {
 		}
 	}
 	check(agent.ModeChanged{Mode: agent.ModeAuto}, "mode: Auto — safe actions run, risky ones ask")
-	check(agent.ModeChanged{Mode: agent.ModeDefault}, "mode: Default — every non-allowlisted command asks")
+	check(agent.ModeChanged{Mode: agent.ModeAsk}, "mode: Ask — every non-allowlisted command asks")
 	check(agent.ModeChanged{Mode: agent.ModeYolo}, "mode: Yolo — all permission checks are off")
-	check(agent.ModeChanged{Mode: agent.ModeDefault, Plan: true}, "mode: Plan — runs write a plan to docs/plans/")
+	check(agent.ModeChanged{Mode: agent.ModeAsk, Plan: true}, "mode: Plan — runs write a plan to docs/plans/")
 }
 
 // TestStatusBadgeReservesLine2Only: the badge's width comes off line 2

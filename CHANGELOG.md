@@ -42,6 +42,21 @@ Four independent review passes over v0.7.1 produced 59 findings; 52 became tasks
 - **A nudge is not the user's words**: `Entry.Nudge` was dropped by `History()`, so a resumed TUI session showed the nudge as a user band and ACP replayed it as a `user_message_chunk`. The TUI now marks it, ACP drops it.
 - **Hygiene counts calendar days**, not elapsed hours against a UTC midnight (a rule dated for the 22nd expired on the 21st in EEST), and **names a skill it emptied** instead of attributing its rules to another skill.
 
+### Auto by default, and the strict mode is called `ask` (2026-10-21)
+
+- **`auto` is the default permission mode.** A fresh install, an unset `permissions.defaultMode`, or a session with no recorded mode now starts at auto — safe actions run, risky ones ask, and a command the risk table cannot judge gets the classifier's one-shot opinion. The classifier is an extra model call only in that last case, and `"auto": {"classifier": false}` turns it off (unsure commands then ask).
+- **The old `default` mode is now `ask`** — same behaviour, honest name: every non-allowlisted command asks. The badge reads `Ask`, `/mode` lists `ask|auto|yolo|plan`, and ACP advertises `ask`.
+- **Nothing breaks**: the legacy spelling `default` is still accepted everywhere a mode is named — `permissions.defaultMode` in either config layer, `--mode default`, `/mode default`, ACP `session/set_mode` — and normalizes to `ask` (`agent.CanonicalMode`, `config.CanonicalMode`). It is no longer listed in help or error text.
+- **Plan rides on `ask`, not on the default**: `--mode plan` resolves to `ask` + the plan scope, so entering plan never silently widens what runs without asking.
+
+### DeepSeek's thinking mode round trip
+
+`opencode-go/deepseek-*` runs on the chat-completions route, which is DeepSeek's thinking mode: the API requires the `reasoning_content` it produced to be **passed back** on the assistant turn. moca captured that text as a thinking block and then dropped every thinking block when building the request, so the second turn of a run died with
+
+> HTTP 400 … The `reasoning_content` in the thinking mode must be passed back to the API.
+
+The completions adapter now echoes it (`provider.Model.ReplayReasoning`, set on the four DeepSeek catalog rows) for assistant messages, and only for blocks the model being asked produced — a `/model` switch mid-session does not ship one model's reasoning to another (`TestCompletionsReplaysReasoningContent`, `TestCompletionsDropsForeignReasoning`, `TestCompletionsDoesNotSendReasoningWhereUnwanted`).
+
 ### The measurement, and a checker that failed open
 
 - **Landed vs refused, measured** (`v072-c2`, n=3, five scenarios): 49 skill-file write calls, **15 landed, 34 refused** — every refusal carries its reason, and the model's second attempt usually lands.
