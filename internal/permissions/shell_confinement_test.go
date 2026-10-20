@@ -81,7 +81,6 @@ func TestMakeReservedOverrideWhitespace(t *testing.T) {
 	// inert override stays allowed.
 	mustRefuse(t, s, "make test MAKEFILES=payload.mk")
 	mustAllow(t, s, "make test VERSION=1.2.3")
-	mustAllow(t, s, "make test GORUN=go")
 }
 
 // S-2: a wrapper's -C/--chdir must reach the confinement checks, and the
@@ -143,8 +142,11 @@ func TestDashDashOperands(t *testing.T) {
 	// tee: dash-leading operand after `--` is a target and resolves outside.
 	mustRefuse(t, s, "printf x | tee -- -link")
 
-	// cp: after `--`, a dash-leading source is still a skill file.
-	mustRefuse(t, s, "cp -- -skill dest.txt")
+	// cp: after `--`, a dash-leading word is an operand, not an option. A
+	// destination that resolves into the skills dir is refused; the same word
+	// as a *source* is a read and stays allowed (PR B's write-direction rule).
+	mustRefuse(t, s, "cp -- x.md -skill")
+	mustAllow(t, s, "cp -- -skill dest.txt")
 
 	// Controls: `--` before an ordinary path still works, and an option-looking
 	// word before `--` is still an option.

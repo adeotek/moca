@@ -456,13 +456,23 @@ func rules(cfg config.Config, trusted bool) (*permissions.Rules, error) {
 		layers = append(layers, proj)
 	}
 	var user permissions.RuleSet
-	for _, n := range permissions.LegacyAllowNames(append(slices.Clone(cfg.Shell.Allow), cfg.Permissions.Allow...)) {
+	// shell.allow is the legacy list: bare command names only, filtered.
+	for _, n := range permissions.LegacyAllowNames(slices.Clone(cfg.Shell.Allow)) {
 		r, err := permissions.ParseRule(n)
 		if err != nil {
 			return nil, err
 		}
 		user.Allow = append(user.Allow, r)
 	}
+	// permissions.allow carries full rules (wildcards, named arguments) and
+	// goes through the same parser as ask/deny — running it through the
+	// legacy name filter silently dropped every `rm build/*`-shaped entry.
+	// A rule that does not parse is an error here, never a dropped check.
+	allowed, err := permissions.ParseRuleSet("user", cfg.Permissions.Allow, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	user.Allow = append(user.Allow, allowed.Allow...)
 	user.Name = "user"
 	rs, err := permissions.ParseRuleSet("user", nil, cfg.Permissions.Ask, cfg.Permissions.Deny)
 	if err != nil {

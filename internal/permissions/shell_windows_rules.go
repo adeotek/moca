@@ -66,6 +66,28 @@ func winPathCheck(inner pathFunc) pathFunc {
 // no option tables, so a later `--shell <cmd-string>` shape is only
 // approximated, never analysed (review F1/M4). Documented as weaker than
 // Unix.
+// winSkillWriters are the cmdlets whose literal argument names a file they
+// write. The Windows parser is a word model by design (§7: no PowerShell
+// parser, no quoting model), so the skills-dir test is textual on the
+// normalised path rather than a filesystem resolution — the same class of
+// check the Unix walk does, at the same (pattern-level) strength.
+var winSkillWriters = map[string]bool{
+	"set-content": true, "add-content": true, "out-file": true, "new-item": true,
+	"set-item": true, "copy-item": true, "move-item": true, "rename-item": true,
+	"tee-object": true,
+}
+
+// winSkillPath reports whether a normalised Windows path names the project's
+// skills dir. Backslashes fold to slashes and case is ignored, as the
+// filesystem does; a bare SKILL.md under a skills/ component counts too.
+func winSkillPath(p string) bool {
+	f := strings.ToLower(strings.ReplaceAll(strings.Trim(p, `"'`), `\`, "/"))
+	if strings.Contains(f, ".moca/skills") {
+		return true
+	}
+	return strings.HasSuffix(f, "skill.md") && strings.Contains(f, "skills/")
+}
+
 func (s *Shell) checkWindows(command string) ([]string, []string, []string, error) {
 	var v verdictAcc
 	var st cmdState
@@ -79,6 +101,19 @@ func (s *Shell) checkWindows(command string) ([]string, []string, []string, erro
 			ws[i] = Word{Text: f, Literal: i == 0 || !strings.ContainsAny(f, nonLit)}
 		}
 		ws[0].Text = winName(fields[0])
+		// Skill writes: the cmdlets that write a path never touch the
+		// skills dir, same rule as the Unix walk (owner: the tool-side
+		// guard, which re-validates on load).
+		if winSkillWriters[ws[0].Text] {
+			for _, w := range ws[1:] {
+				if !w.Literal || strings.HasPrefix(strings.Trim(w.Text, `"'`), "-") {
+					continue
+				}
+				if winSkillPath(w.Text) {
+					return errSkillWrite
+				}
+			}
+		}
 		asked := len(v.need) + len(v.every) + len(v.unsure)
 		if err := s.classify(ws, &v, st); err != nil {
 			return err
