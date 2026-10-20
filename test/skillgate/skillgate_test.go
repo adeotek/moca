@@ -421,6 +421,7 @@ func TestSkillGate(t *testing.T) {
 	t.Run("14_case_variant", legCaseVariant)
 	t.Run("15_caps_check_changes", legCapsCheckChanges)
 	t.Run("16_naming_and_pins", legNamingAndPins)
+	t.Run("17_nudge_end_to_end", legNudgeEndToEnd)
 }
 
 func legOffIsInert(t *testing.T) {
@@ -1178,4 +1179,57 @@ func legNamingAndPins(t *testing.T) {
 		t.Fatal("/remember must let the pin land")
 	}
 	t.Logf("leg 16: hand-written skills need the typed naming request; pins need /remember")
+}
+
+// legNudgeEndToEnd (P3.11 / N-11) drives the §12.1 end-of-run recording nudge
+// on the built binary: a run that proves something with a verification-shaped
+// command and then answers is asked once to record it, the ask is a nudge
+// entry in the transcript (never a user turn), and -p prints the model's
+// answer — not moca's internal text.
+func legNudgeEndToEnd(t *testing.T) {
+	g := newGate(t,
+		toolTurn(shellCall("go test ./...")),
+		textTurn("all green"),
+		textTurn("all green — nothing new to record"),
+	)
+	g.user(`"skills":{"selfManaged":true}`)
+	// A real, green verification target: the cold-arm gate wants a command
+	// that is verification-shaped AND succeeds, so the module must build.
+	for name, body := range map[string]string{
+		"go.mod":    "module example.com/g\n\ngo 1.21\n",
+		"x_test.go": "package g\n\nimport \"testing\"\n\nfunc TestOK(t *testing.T) {}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(g.work, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(t, g.work, "add", "-A")
+	git(t, g.work, "commit", "-qm", "a green module")
+
+	out, errOut, code := g.run("run the tests and tell me how they went", "--approve")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	sessions := g.readSessions()
+	if !strings.Contains(sessions, `"nudge":"record"`) {
+		t.Fatalf("the nudge must be in the transcript as a nudge entry; sessions:\n%s", sessions)
+	}
+	if !strings.Contains(sessions, "is how this repository is checked") {
+		t.Fatalf("the nudge must name the proved command; sessions:\n%s", sessions)
+	}
+	if strings.Contains(sessions, `"text":"refused: `) {
+		t.Fatalf("the leg proves nothing if the command never ran; sessions:\n%s", sessions)
+	}
+	// -p prints the final answer: the nudge is internal, and the run's answer
+	// must be restated after it (N-3).
+	if strings.Contains(out, "record only what this run established") {
+		t.Fatalf("-p leaked the nudge into stdout: %q", out)
+	}
+	if !strings.Contains(out, "all green — nothing new to record") {
+		t.Fatalf("the restated answer must be the printed one: %q", out)
+	}
+	if strings.Contains(errOut, "record only what this run established") {
+		t.Fatalf("the nudge must not go to stderr either: %q", errOut)
+	}
+	t.Logf("leg 17: one nudge, as a nudge entry, with the proved command named; -p printed the restated answer")
 }

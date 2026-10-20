@@ -415,6 +415,14 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 					return fmt.Errorf("refused: a rule's <when> is %d chars (cap %d) — name the situation in a few words and put the detail in the rule", n, SkillWhenCap)
 				}
 			}
+			if !r.HasProv {
+				// N-7: a provenance the model meant to write but did not end the
+				// line with ("… (×1, 2026-10-20) extra words") parsed as no
+				// provenance at all, and the refusal never said what it saw.
+				if tail, ok := provAttempt(r.Text); ok {
+					return fmt.Errorf("refused: the provenance must end the rule line — found %q; write \"- **<when>**: <rule> (×N, YYYY-MM-DD)\" with nothing after the closing parenthesis", tail)
+				}
+			}
 			if !known {
 				if !r.HasProv || r.Seen != 1 && !r.Pinned {
 					return fmt.Errorf("refused: a new rule starts at (×1, %s) — the count records separate sessions that confirmed it, and the date is the day you observed it", today)
@@ -430,15 +438,27 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 			if r.Line == old.Line || r.Pinned && old.Pinned && r.Last.Equal(old.Last) && old.HasProv {
 				continue
 			}
-			if !old.Pinned && old.HasProv && r.HasProv && !r.Pinned && old.Seen == 1 && r.Seen == 2 && !r.Last.Before(old.Last) {
-				// The bump date is the host clock's too, like a new rule's: a
-				// (×2, <future date>) would pass on the model's word alone.
+			// D6: a known rule (its text is unchanged — ruleKey includes it) may
+			// change its provenance in exactly these ways. Everything else is a
+			// refusal that names the attempt, with no zero date on either side.
+			switch {
+			case !old.HasProv && r.HasProv && !r.Pinned && r.Seen == 1,
+				!old.HasProv && r.HasProv && r.Pinned && wc.UserSignal,
+				old.HasProv && !old.Pinned && r.Pinned && wc.UserSignal:
+				// Back-fill to (×1, today), or pin to (user, today) under
+				// /remember. The date is the host clock's: a (×1, <future>) would
+				// pass on the model's word alone.
 				if !allowed[r.Last.Format("2006-01-02")] {
-					return fmt.Errorf("refused: the date %s is not today (%s) — a confirmed rule goes (×1, %s) → (×2, %s)", r.Last.Format("2006-01-02"), today, old.Last.Format("2006-01-02"), today)
+					return fmt.Errorf("refused: the date %s is not today (%s) — %s goes %s → (×1, %s)", r.Last.Format("2006-01-02"), today, provLabel(old), provLabel(old), today)
+				}
+				continue
+			case old.HasProv && !old.Pinned && old.Seen == 1 && r.HasProv && !r.Pinned && r.Seen == 2 && !r.Last.Before(old.Last):
+				if !allowed[r.Last.Format("2006-01-02")] {
+					return fmt.Errorf("refused: the date %s is not today (%s) — a confirmed rule goes %s → (×2, %s)", r.Last.Format("2006-01-02"), today, provLabel(old), today)
 				}
 				continue
 			}
-			return fmt.Errorf("refused: a confirmed rule goes (×1, %s) → (×2, %s) once and then never changes — rewrite its text instead if the rule itself changed", old.Last.Format("2006-01-02"), today)
+			return fmt.Errorf("refused: %s → %s is not an allowed provenance change — a rule may be back-filled to (×1, %s) once, confirmed as (×2, %s) once, or pinned to (user, %s) by /remember; a ×2 rule is final and a (user, …) rule is the user's — rewrite the rule's text instead if the rule itself changed", provLabel(old), provLabel(r), today, today, today)
 		}
 	}
 
@@ -483,6 +503,31 @@ func parseRules(body []byte) []Rule {
 // ruleKey identifies a rule by its text without its provenance: a provenance
 // bump keeps the key, a rewritten text is a new rule.
 func ruleKey(r Rule) string { return r.When + "\x00" + r.Text }
+
+// provLabel renders a rule's provenance for a refusal. A rule with none says
+// so: formatting a zero time printed "0001-01-01", which named a date no rule
+// was ever on (N-7).
+func provLabel(r Rule) string {
+	switch {
+	case !r.HasProv:
+		return "no provenance"
+	case r.Pinned:
+		return "(user, " + r.Last.Format("2006-01-02") + ")"
+	default:
+		return fmt.Sprintf("(×%d, %s)", r.Seen, r.Last.Format("2006-01-02"))
+	}
+}
+
+// provAttempt finds a provenance marker that did not parse at the end of the
+// line, and returns it with whatever trails it — the text the refusal quotes.
+func provAttempt(text string) (string, bool) {
+	for _, marker := range []string{"(×", "(x", "(user,"} {
+		if i := strings.LastIndex(text, marker); i >= 0 {
+			return strings.TrimSpace(text[i:]), true
+		}
+	}
+	return "", false
+}
 
 // lineIn reports whether line is in the added-lines list.
 func lineIn(lines []string, line string) bool {
