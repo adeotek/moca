@@ -41,8 +41,8 @@ func TestBuildCommandsPrecedence(t *testing.T) {
 		[]skills.Skill{{Name: "review", Description: "shadowed"}, {Name: "deploy", Description: "Deploy"}},
 		false,
 	)
-	if len(got) != 2 || got[0].Name != "review" || got[0].Input.Hint != "<file>" ||
-		got[1].Name != "deploy" || got[1].Input.Hint != "optional request" {
+	if len(got) != 3 || got[0].Name != "remember" || got[1].Name != "review" || got[1].Input.Hint != "<file>" ||
+		got[2].Name != "deploy" || got[2].Input.Hint != "optional request" {
 		t.Fatalf("%+v", got)
 	}
 }

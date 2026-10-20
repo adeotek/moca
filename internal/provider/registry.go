@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/llm"
 )
 
 // ErrUnknownModel: the qualified model is not in the catalog or the config.
@@ -174,7 +175,7 @@ func (r *Registry) CheckCredential(qualified string) error {
 			return nil
 		}
 	}
-	_, err = r.credential(pname)(context.Background())
+	_, err = r.credential(pname)(context.Background(), llm.Request{})
 	return err
 }
 
@@ -196,13 +197,20 @@ func (r *Registry) credential(provider string) CredentialFunc {
 	p := r.cfg.Providers[provider]
 	// OpenCode Go requires a stable per-conversation routing header
 	// (https://opencode.ai/docs/go/#where-can-i-use-it) and rejects requests
-	// without it (HTTP 400 MissingSessionID). One process is one conversation
-	// today; phase 3+ sessions must rebind it per conversation.
+	// without it (HTTP 400 MissingSessionID).
+	// F-8: the header follows the *conversation*, not the process. One moca
+	// process can serve several sessions (TUI /resume, ACP sessions); a single
+	// process-wide id routed them all to one shard, mixing prompt-cache
+	// prefixes. req.CacheKey is the session's stable cache-routing key; the
+	// process id is only the fallback for a request that carries none.
 	var extra map[string]string
 	if provider == "opencode-go" {
 		extra = map[string]string{"x-opencode-session": r.sessionID}
 	}
-	withExtra := func(c Credential) Credential {
+	withExtra := func(c Credential, req llm.Request) Credential {
+		if provider == "opencode-go" && req.CacheKey != "" {
+			extra["x-opencode-session"] = req.CacheKey
+		}
 		if len(extra) == 0 {
 			return c
 		}
@@ -216,27 +224,27 @@ func (r *Registry) credential(provider string) CredentialFunc {
 	}
 	if p.Auth == "oauth" {
 		if fn := r.oauth[provider]; fn != nil {
-			return func(ctx context.Context) (Credential, error) {
-				c, err := fn(ctx)
+			return func(ctx context.Context, req llm.Request) (Credential, error) {
+				c, err := fn(ctx, req)
 				if err != nil {
 					return Credential{}, err
 				}
-				return withExtra(c), nil
+				return withExtra(c, req), nil
 			}
 		}
 		if oc, ok := oauthProviders[provider]; ok {
 			// Store-backed subscription credentials: read auth.json (0600),
 			// refresh under the cross-process lock near expiry.
 			fn := NewDefaultStore().CredentialFor(provider, oc.refresher(r.hc))
-			return func(ctx context.Context) (Credential, error) {
-				c, err := fn(ctx)
+			return func(ctx context.Context, req llm.Request) (Credential, error) {
+				c, err := fn(ctx, req)
 				if err != nil {
 					return Credential{}, err
 				}
-				return withExtra(c), nil
+				return withExtra(c, req), nil
 			}
 		}
-		return func(context.Context) (Credential, error) {
+		return func(context.Context, llm.Request) (Credential, error) {
 			return Credential{}, fmt.Errorf("provider %s: OAuth is not available; set auth \"api_key\"", provider)
 		}
 	}
@@ -246,15 +254,15 @@ func (r *Registry) credential(provider string) CredentialFunc {
 	// The store is read per request, so a key stored mid-session is used by
 	// the next request without restarting anything.
 	store := NewDefaultStore()
-	return func(context.Context) (Credential, error) {
+	return func(_ context.Context, req llm.Request) (Credential, error) {
 		key, found, serr := store.GetAPIKey(provider)
 		if serr == nil && found {
-			return withExtra(Credential{Token: key}), nil
+			return withExtra(Credential{Token: key}, req), nil
 		}
 		var eerr error
 		if p.APIKey != "" {
 			if v, err := config.ResolveEnv(p.APIKey); err == nil {
-				return withExtra(Credential{Token: v}), nil
+				return withExtra(Credential{Token: v}, req), nil
 			} else {
 				eerr = err
 			}

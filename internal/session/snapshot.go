@@ -15,10 +15,21 @@ import (
 )
 
 type Snapshots struct {
-	mu    sync.Mutex
-	w     *Writer
-	dir   string
-	stack []SnapshotRec
+	mu          sync.Mutex
+	w           *Writer
+	dir         string
+	stack       []SnapshotRec
+	refuseUnder string // see RefuseUnder
+}
+
+// under reports whether p is dir itself or lies beneath it (session has no
+// jail: paths here are moca's own absolute ones).
+func under(dir, p string) bool {
+	if dir == "" {
+		return false
+	}
+	rel, err := filepath.Rel(dir, p)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func NewSnapshots(w *Writer, blobDir string, prior []Entry) *Snapshots {
@@ -82,6 +93,12 @@ func (s *Snapshots) Guard(abs string, write func() error) error {
 	return err
 }
 
+// RefuseUnder bounds Undo: a snapshot of a file under this directory is not
+// rolled back by the user. The skill write guard owns those paths (§12) — an
+// undo that restores or deletes them is the same edit the guard exists to
+// check, taken around it (N-18 / D7). Empty (the default) refuses nothing.
+func (s *Snapshots) RefuseUnder(dir string) { s.refuseUnder = dir }
+
 func (s *Snapshots) Undo() (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -89,6 +106,9 @@ func (s *Snapshots) Undo() (string, error) {
 		return "", errors.New("nothing to undo in this session (changes made via shell are never covered)")
 	}
 	rec := s.stack[len(s.stack)-1]
+	if under(s.refuseUnder, rec.Path) {
+		return "", fmt.Errorf("%s is a project skill file — undo does not roll skills back; edit it or ask moca to", rec.Path)
+	}
 	pop := func() {
 		s.stack = s.stack[:len(s.stack)-1]
 		s.w.Append(Entry{Type: TypeSnapshot, Snapshot: &SnapshotRec{Path: rec.Path, Blob: "undo"}})
