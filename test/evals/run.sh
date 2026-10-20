@@ -104,6 +104,14 @@ if [ "$SELFTEST" = 1 ]; then
   else
     echo "FAIL refusal-filter: the negation must precede the command"; bad=1
   fi
+  # The body is dot-sourced by each scenario's check.sh: a scan resolved
+  # relative to "$0" pointed at the scenario dir and left the (a) clause
+  # undefined — a checker that quietly stopped checking.
+  if bash "$EVALS/_lib/skills_inject_sourcing_test.sh" >/dev/null 2>&1; then
+    echo "ok   refusal-filter-sourcing"
+  else
+    echo "FAIL refusal-filter-sourcing: the body cannot source its scan"; bad=1
+  fi
   exit "$bad"
 fi
 
