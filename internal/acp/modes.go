@@ -14,7 +14,7 @@ import (
 // sessionModes are moca's permission modes plus the plan scope (which rides
 // on default), worded as the TUI's mode badge and notices.
 var sessionModes = []SessionMode{
-	{ID: "default", Name: "Default", Description: "Allowlisted actions run; everything else asks"},
+	{ID: "ask", Name: "Ask", Description: "Allowlisted actions run; everything else asks"},
 	{ID: "auto", Name: "Auto", Description: "Safe actions run, risky ones ask, unsure ones get a classifier's opinion"},
 	{ID: "yolo", Name: "Yolo", Description: "All permission checks are off"},
 	{ID: "plan", Name: "Plan", Description: "Write an implementation plan to docs/plans/; no other writes"},
@@ -114,9 +114,11 @@ func modeIDs() string {
 }
 
 // applyModeID switches the session's mode: session/set_mode and the "mode"
-// config option share it. Plan is the plan scope riding on default; any other
-// id clears it. The agent's own events are muted — the caller reports once.
+// config option share it. Plan is the plan scope riding on ask; any other id
+// clears it. The legacy id "default" is accepted and normalized to ask. The
+// agent's own events are muted — the caller reports once.
 func (s *session) applyModeID(id string) error {
+	id = agent.CanonicalMode(id) // a v0.7.1 client's "default" is `ask` now
 	if _, ok := modeByID(id); !ok {
 		return fmt.Errorf("mode %q is not one of %s", id, modeIDs())
 	}
@@ -194,6 +196,9 @@ func (srv *Server) setMode(params json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The legacy id is accepted here too, and normalized before the report
+	// so the client's currentModeId is the canonical `ask`.
+	req.ModeID = agent.CanonicalMode(req.ModeID)
 	if _, ok := modeByID(req.ModeID); !ok {
 		return nil, invalidParams("unknown mode %q", req.ModeID)
 	}

@@ -215,9 +215,9 @@ func TestModeEntriesRecordBothFlags(t *testing.T) {
 	}
 	want := []session.PermissionMode{
 		{Yolo: true, Mode: "yolo"},
-		{Mode: "default"}, {Plan: true, Mode: "default"}, // SetPlan(true): yolo off, then plan on
-		{Plan: true, Mode: "default"},
-		{Mode: "default"}, {Yolo: true, Mode: "yolo"}, // SetYolo(true): plan off, then yolo
+		{Mode: "ask"}, {Plan: true, Mode: "ask"}, // SetPlan(true): yolo off, then plan on
+		{Plan: true, Mode: "ask"},
+		{Mode: "ask"}, {Yolo: true, Mode: "yolo"}, // SetYolo(true): plan off, then yolo
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
