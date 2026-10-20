@@ -832,9 +832,13 @@ func (s *Shell) genericRunnerRefusal(base string, ws []Word, st cmdState, named 
 		case strings.Contains(t, "="):
 			// VAR=value: not a recipe selector, but an override may still pick
 			// the code make runs.
+			// GNU make strips whitespace around the variable name, so
+			// `MAKEFILES =x` sets MAKEFILES: trim it before the exact-name
+			// lookup, or the override falls through to plainMakeValue and
+			// names another makefile.
 			name, val, _ := strings.Cut(t, "=")
 			op := name
-			name = strings.TrimRight(name, ":+?!")
+			name = strings.TrimSpace(strings.TrimRight(strings.TrimSpace(name), ":+?!"))
 			if makeCodeVars[name] || strings.Contains(op, "!") || !plainMakeValue(val) {
 				return fmt.Errorf("`%s` with the override %s chooses code make runs — add an explicit permissions.allow rule if you want it", base, t)
 			}
@@ -886,18 +890,22 @@ func (s *Shell) skillTarget(t string) bool {
 // (`cd .moca/skills && cp x moca-a/SKILL.md`, `cd .moca && cp -r x skills/y`).
 // That spelling also matches a project's own skills/ folder, so its refusal
 // says how to get past it, like the after-cd redirect refusal does.
-func (s *Shell) skillOperand(t string, cwdUnknown bool) error {
+func (s *Shell) skillOperand(t string, cwdUnknown, afterDash bool) error {
 	if s.skillDir == "" {
 		return nil
 	}
-	if strings.HasPrefix(t, "--") {
-		_, v, ok := strings.Cut(t, "=")
-		if !ok {
+	// After `--` every word is an operand, including a dash-leading one
+	// (`cp -- -skill dest` reads the file named -skill).
+	if !afterDash {
+		if strings.HasPrefix(t, "--") {
+			_, v, ok := strings.Cut(t, "=")
+			if !ok {
+				return nil
+			}
+			t = v
+		} else if strings.HasPrefix(t, "-") {
 			return nil
 		}
-		t = v
-	} else if strings.HasPrefix(t, "-") {
-		return nil
 	}
 	if t == "" {
 		return nil
@@ -914,6 +922,21 @@ func (s *Shell) skillOperand(t string, cwdUnknown bool) error {
 		return errSkillWrite
 	}
 	return nil
+}
+
+// wrapperDirOutside reports whether a wrapper's -C/--chdir argument cannot be
+// placed inside the workdir. An empty argument (missing, or a computed word the
+// walk cannot read) counts as outside: fail closed, like a cd that leaves the
+// confinement.
+func (s *Shell) wrapperDirOutside(dir string) bool {
+	if dir == "" || dir == "-" {
+		return true
+	}
+	res, err := s.jail.Resolve(dir, true)
+	if err != nil {
+		return true
+	}
+	return !within(s.jail.Root(), res)
 }
 
 // caseFolds reports where the filesystem folds file-name case (darwin,
@@ -1126,12 +1149,31 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 					return false
 				}
 				st := cmdState{cwdUnknown: cwdUnknown, tainted: tainted || len(x.Assigns) > 0, cwdOut: cwdOutside}
-				for _, pw := range ws[:idx] { // wrapper words: env NAME=VALUE, env -C DIR
+				for k := 0; k < idx; k++ { // wrapper words: env NAME=VALUE, env -C DIR
+					pw := ws[k]
 					if !strings.HasPrefix(pw.Text, "-") && strings.Contains(pw.Text, "=") {
 						st.tainted = true
 					}
-					if pw.Text == "-C" || strings.HasPrefix(pw.Text, "--chdir") {
+					dir, hasDir := "", false
+					switch {
+					case pw.Text == "-C" || pw.Text == "--chdir":
+						hasDir = true
+						if k+1 < idx && ws[k+1].Literal {
+							dir = ws[k+1].Text
+						}
+					case strings.HasPrefix(pw.Text, "--chdir="):
+						hasDir, dir = true, strings.TrimPrefix(pw.Text, "--chdir=")
+					}
+					if hasDir {
+						// The wrapper runs the command in DIR: every operand
+						// of that command resolves there (a relative one can
+						// no longer be placed), and a directory that does not
+						// resolve inside the workdir is an outside cwd — the
+						// same rule an earlier cd has.
 						st.cwdUnknown, st.tainted = true, true
+						if s.wrapperDirOutside(dir) {
+							st.cwdOut = true
+						}
 					}
 				}
 				if err := s.classify(ws[idx:], &v, st); err != nil {
@@ -1153,32 +1195,47 @@ func (s *Shell) Check(command string) (need, every, unsure []string, err error) 
 					}
 					cwdUnknown = true
 				case "cp", "mv", "install", "ln", "truncate", "rm", "patch", "rsync":
+					afterDash := false
 					for _, a := range x.Args[idx+1:] {
 						if t, ok := wordLit(a); ok {
-							if err := s.skillOperand(t, cwdUnknown); err != nil {
+							if t == "--" {
+								afterDash = true
+								continue
+							}
+							if err := s.skillOperand(t, st.cwdUnknown, afterDash); err != nil {
 								fail(err)
 							}
 						}
 					}
 				case "sed":
 					if hasOpt(ws, idx+1, "i", "--in-place") {
+						afterDash := false
 						for _, a := range x.Args[idx+1:] {
 							if t, ok := wordLit(a); ok {
-								if err := s.skillOperand(t, cwdUnknown); err != nil {
+								if t == "--" {
+									afterDash = true
+									continue
+								}
+								if err := s.skillOperand(t, st.cwdUnknown, afterDash); err != nil {
 									fail(err)
 								}
 							}
 						}
 					}
 				case "tee":
+					afterDash := false
 					for _, a := range x.Args[idx+1:] {
 						t, ok := wordLit(a)
-						if ok && strings.HasPrefix(t, "-") {
+						if ok && t == "--" {
+							afterDash = true
+							continue
+						}
+						if ok && !afterDash && strings.HasPrefix(t, "-") {
 							continue
 						}
 						if s.skillTarget(t) {
 							fail(errSkillWrite)
-						} else if err := s.checkTarget(a, cwdUnknown); err != nil {
+						} else if err := s.checkTarget(a, st.cwdUnknown); err != nil {
 							fail(err)
 						} else if s.auto && s.gitTarget(t) {
 							v.add(&v.every, headName(ws[idx].Text))
