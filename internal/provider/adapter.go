@@ -25,7 +25,7 @@ type Credential struct {
 	Headers map[string]string // provider-specific request extras (e.g. OpenCode Go session routing)
 }
 
-type CredentialFunc func(ctx context.Context) (Credential, error)
+type CredentialFunc func(ctx context.Context, req llm.Request) (Credential, error)
 
 // post sends a JSON body and returns the response on 2xx; non-2xx becomes *HTTPError.
 func post(ctx context.Context, hc *http.Client, url string, hdr http.Header, body any) (*http.Response, error) {

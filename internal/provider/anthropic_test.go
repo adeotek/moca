@@ -32,7 +32,7 @@ func sseServer(t *testing.T, status int, body string, got *map[string]any, hdr *
 }
 
 func keyCred(k string) CredentialFunc {
-	return func(context.Context) (Credential, error) { return Credential{Token: k}, nil }
+	return func(context.Context, llm.Request) (Credential, error) { return Credential{Token: k}, nil }
 }
 
 const anthropicToolStream = `event: message_start
@@ -503,7 +503,7 @@ func TestAnthropicCredentialHeaders(t *testing.T) {
 	var hdr http.Header
 	srv := sseServer(t, 200, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", nil, &hdr)
 	defer srv.Close()
-	cred := func(context.Context) (Credential, error) {
+	cred := func(context.Context, llm.Request) (Credential, error) {
 		return Credential{Token: "K", Headers: map[string]string{"x-opencode-session": "s1"}}, nil
 	}
 	a := newAnthropic(Model{ID: "m", ThinkingMode: "none"}, srv.URL, cred, srv.Client())

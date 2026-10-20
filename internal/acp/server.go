@@ -223,9 +223,25 @@ func (srv *Server) sessionConfig(cwd string, requireModel bool) (config.Config, 
 // whose every prompt fails. A stored session uses its own model, which
 // agent.Resume checks.
 func (srv *Server) checkModel(cfg config.Config) error {
+	// F-1 (ACP side): the --model flag is applied, and a local provider it
+	// names is added, before anything validates the model.
+	if srv.opts.Model != "" {
+		cfg.Model = srv.opts.Model
+	}
+	if pn, _, err := config.SplitModel(cfg.Model); err == nil {
+		cfg.UseProvider(pn)
+	}
 	reg, err := provider.NewRegistry(cfg, srv.opts.HTTP, nil)
 	if err != nil {
 		return &RPCError{Code: codeAuthRequired, Message: err.Error()}
+	}
+	// F-2: a configured ollama is discovered first. Without this, a local
+	// model that is running right now was reported as "unknown model" and the
+	// editor showed an authentication error for a server that needs no key.
+	if _, configured := cfg.Providers["ollama"]; configured || strings.HasPrefix(cfg.Model, "ollama/") {
+		if _, err := reg.DiscoverOllama(context.Background()); err != nil {
+			slog.Debug("acp: ollama discovery failed", "err", err)
+		}
 	}
 	if err := reg.CheckCredential(cfg.Model); err != nil {
 		return &RPCError{Code: codeAuthRequired, Message: err.Error()}

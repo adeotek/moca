@@ -160,6 +160,55 @@ func TestOpenCodeGoSessionHeader(t *testing.T) {
 	}
 }
 
+// F-8: the routing header follows the conversation, not the process. One moca
+// process serves several sessions (TUI /resume, ACP), and a single process-wide
+// id put them all on one cache shard.
+func TestOpencodeSessionHeaderFollowsCacheKey(t *testing.T) {
+	t.Setenv("OPENCODE_API_KEY", "K")
+	var hdrs []http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hdrs = append(hdrs, r.Header.Clone())
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	r, err := NewRegistry(mustCfg(t, fmt.Sprintf(
+		`{"model":"opencode-go/glm-5.3-flash","providers":{"opencode-go":{"baseUrls":{"openai-completions":%q}}}}`, srv.URL)),
+		srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, a, err := r.Resolve("opencode-go/glm-5.3-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := llm.Request{Model: m.ID, MaxTokens: 64, Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "hi"}}}}}
+	for _, key := range []string{"sess-a", "sess-b", "sess-a"} {
+		req := base
+		req.CacheKey = key
+		if _, err := a.Stream(context.Background(), req, func(llm.Event) {}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(hdrs) != 3 {
+		t.Fatalf("requests: %d", len(hdrs))
+	}
+	for i, want := range []string{"sess-a", "sess-b", "sess-a"} {
+		if got := hdrs[i].Get("x-opencode-session"); got != want {
+			t.Fatalf("request %d: session header %q, want %q", i, got, want)
+		}
+	}
+	// A request with no cache key falls back to the process id (never empty:
+	// the tier rejects a request without the header).
+	req := base
+	if _, err := a.Stream(context.Background(), req, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if got := hdrs[3].Get("x-opencode-session"); got == "" {
+		t.Fatal("the fallback header must never be empty")
+	}
+}
+
 func TestNoSessionHeaderOutsideOpenCodeGo(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "K")
 	var hdr http.Header

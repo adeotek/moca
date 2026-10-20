@@ -118,9 +118,15 @@ func buildCommands(prompts []skills.Prompt, sk []skills.Skill, remember bool) []
 		}
 		out = append(out, c)
 	}
-	if remember {
-		add("remember", "record this as a project skill", "rule text")
+	// N-10/N-17: reserved always, and added first so no prompt or skill named
+	// `remember` can shadow it. It is advertised whether or not the feature is
+	// on because typing it always does something the user can see: with the
+	// feature off it is a refusal, never a template.
+	desc := "record this as a project skill"
+	if !remember {
+		desc = "record this as a project skill (self-managed skills are off)"
 	}
+	add("remember", desc, "rule text")
 	for _, p := range prompts {
 		add(p.Name, p.Description, p.ArgumentHint)
 	}
@@ -188,7 +194,12 @@ func (s *session) expand(text string) (string, bool) {
 		return text, false
 	}
 	name, args := splitCommand(t)
-	if name == "remember" && args != "" && s.agent.SelfManagedSkills() {
+	if name == "remember" {
+		// N-10/N-17: reserved on ACP unconditionally. It used to fall through
+		// when the feature was off or no rule was typed, so a user prompt named
+		// `remember` ran instead — or the raw "/remember" went to the model.
+		// Agent.Remember owns every refusal (empty rule, plan, feature off) and
+		// returns them as UserRefusal.
 		return agent.RememberRequest(args), true
 	}
 	s.cmdMu.Lock()
