@@ -181,6 +181,33 @@ func (c *testClient) notify(method string, params any) {
 	c.write(wireMsg{JSONRPC: "2.0", Method: method, Params: p})
 }
 
+// eventually polls cond for up to 2 s: an update the server sent before a
+// response can still be in the reader goroutine's queue when the test reads,
+// so a test that must observe it cannot assume it has already landed.
+func (c *testClient) eventually(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !cond() {
+		t.Fatalf("timed out waiting for %s", what)
+	}
+}
+
+// allUpdates is a copy of every update received so far. The reader goroutine
+// appends under c.mu, so a test must never range over the field itself — that
+// is a data race the detector reports against whichever test happens to be
+// running when it lands (it caught one in TestACPRememberTemplateNeverRuns).
+func (c *testClient) allUpdates() []map[string]any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]map[string]any(nil), c.updates...)
+}
+
 func (c *testClient) updatesOf(kind string) []map[string]any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
