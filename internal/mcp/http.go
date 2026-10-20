@@ -114,9 +114,14 @@ func (t *httpTransport) Call(ctx context.Context, method string, params any) (js
 			return nil, fmt.Errorf("mcp server %s: %w (%w)", t.name, err, errTransportDead)
 		}
 	} else {
-		b, err := io.ReadAll(resp.Body)
+		// F-4: bounded. A server that answers with a gigabyte (broken, or
+		// hostile) used to be read into memory whole.
+		b, err := io.ReadAll(io.LimitReader(resp.Body, maxMCPMessage+1))
 		if err != nil {
 			return nil, fmt.Errorf("mcp server %s: %w (%w)", t.name, err, errTransportDead)
+		}
+		if len(b) > maxMCPMessage {
+			return nil, fmt.Errorf("mcp server %s: response exceeds %d MB", t.name, maxMCPMessage>>20)
 		}
 		match(string(b))
 	}
@@ -143,6 +148,10 @@ func (t *httpTransport) Call(ctx context.Context, method string, params any) (js
 // Notify posts a notification (no id). The status is checked: a session
 // dropped between initialize and notifications/initialized must not read as
 // success.
+// maxMCPMessage bounds one JSON-RPC message on the wire: the HTTP body, an SSE
+// event, and the scanner's per-line buffer (F-4).
+const maxMCPMessage = 8 << 20
+
 func (t *httpTransport) Notify(ctx context.Context, method string, params any) error {
 	resp, err := t.post(ctx, request{JSONRPC: "2.0", Method: method, Params: params})
 	if err != nil {
