@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -60,6 +61,10 @@ func LoadProject(workdir string) (*ProjectConfig, error) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&f); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, withPosition(data, err))
+	}
+	// T-7: one object only — trailing content is a config error, not ignored.
+	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+		return nil, fmt.Errorf("%s: trailing content after the config object", path)
 	}
 	p := f.Permissions
 	if err := p.validate("permissions"); err != nil {

@@ -89,6 +89,9 @@ func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, history
 		e := entries[i]
 		switch e.Type {
 		case TypeMessage:
+			if e.Message == nil { // T-6: a payload-less entry is skipped, not a panic
+				continue
+			}
 			if e.Message.Role == llm.RoleAssistant {
 				content := e.Message.Content
 				if stripThinking && i < compactionIdx && i != keepIdx {
@@ -106,11 +109,17 @@ func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, history
 			}
 			appendUser(&out, content...)
 		case TypeToolUse:
+			if e.ToolUse == nil {
+				continue
+			}
 			if i, ok := assistantIdx[e.ToolUse.MessageID]; ok {
 				call := e.ToolUse.Call
 				out[i].Content = append(out[i].Content, llm.ContentBlock{Type: llm.BlockToolUse, ToolCall: &call})
 			}
 		case TypeToolResult:
+			if e.ToolResult == nil {
+				continue
+			}
 			r := *e.ToolResult
 			if elided[e.ID] {
 				r.Content = ElidedStub
@@ -172,12 +181,15 @@ func Repair(entries []Entry, reason string) []Entry {
 	answered := map[string]bool{}
 	for _, e := range entries {
 		if e.Type == TypeToolResult {
+			if e.ToolResult == nil {
+				continue
+			}
 			answered[e.ToolResult.CallID] = true
 		}
 	}
 	var fix []Entry
 	for _, e := range entries {
-		if e.Type == TypeToolUse && !answered[e.ToolUse.Call.ID] {
+		if e.Type == TypeToolUse && e.ToolUse != nil && !answered[e.ToolUse.Call.ID] {
 			fix = append(fix, Entry{Type: TypeToolResult, ToolResult: &llm.ToolResult{CallID: e.ToolUse.Call.ID, Content: reason, IsError: true}})
 		}
 	}

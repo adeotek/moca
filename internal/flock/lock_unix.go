@@ -1,6 +1,6 @@
 //go:build !windows
 
-package provider
+package flock
 
 import (
 	"context"
@@ -10,11 +10,11 @@ import (
 	"time"
 )
 
-// lockFile takes an exclusive advisory lock, waiting until it is available or
+// Lock takes an exclusive advisory lock, waiting until it is available or
 // ctx is done (a blocking flock cannot be interrupted, so it polls). The
 // returned func releases it. flock releases automatically when the process
 // dies, so a crashed moca never wedges the store.
-func lockFile(ctx context.Context, path string) (func(), error) {
+func Lock(ctx context.Context, path string) (func(), error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err

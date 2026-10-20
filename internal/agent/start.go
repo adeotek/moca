@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -599,7 +600,21 @@ func Start(o StartOptions) (*Agent, error) {
 	if err != nil {
 		return nil, &StartError{err}
 	}
-	return build(o, st, w, system, cfg.Model, effort, nil, filepath.Join(config.DataDir(), "snapshot"))
+	a, err := build(o, st, w, system, cfg.Model, effort, nil, filepath.Join(config.DataDir(), "snapshot"))
+	if err != nil {
+		// F-5: the writer holds the session file's lock and the file itself is
+		// a half-written session (a header, nothing else) that no run will ever
+		// append to. Close it, then delete it: leaving it behind both held the
+		// lock (a retry saw ErrInUse on a session nobody was using) and put an
+		// empty session in /resume's list. Close precedes Remove — Windows
+		// refuses to delete an open file.
+		_ = w.Close()
+		if rmErr := os.Remove(w.Path()); rmErr != nil {
+			slog.Debug("failed start: session file remains", "path", w.Path(), "err", rmErr)
+		}
+		return nil, &StartError{err}
+	}
+	return a, nil
 }
 
 // headerTimeout bounds the wait for provider response headers: the SSE stall

@@ -1,6 +1,6 @@
 //go:build windows
 
-package provider
+package flock
 
 import (
 	"context"
@@ -22,11 +22,11 @@ const (
 	errorLockViolation      = syscall.Errno(33)
 )
 
-// lockFile takes an exclusive lock (LockFileEx), waiting until it is
+// Lock takes an exclusive lock (LockFileEx), waiting until it is
 // available or ctx is done (it polls with LOCKFILE_FAIL_IMMEDIATELY so the
 // wait can be cancelled). The returned func releases it. The OS releases the
 // lock when the handle closes, so a crashed moca never wedges the store.
-func lockFile(ctx context.Context, path string) (func(), error) {
+func Lock(ctx context.Context, path string) (func(), error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
