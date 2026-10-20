@@ -30,6 +30,11 @@ func (e *Env) BeginRun() {
 	e.SkillCreations, e.SkillUserSignal, e.SkillTyped = 0, false, nil
 	e.SkillHintArmed, e.SkillHintDone, e.lastFailedVerify = false, false, ""
 	e.SkillProvenCmd = ""
+	// T-1: the investigation hints are per run. A search or a test read in run
+	// 1 used to satisfy run 2's "you have not looked yet" gate, so the hint
+	// never fired in a resumed session.
+	e.TestSeen, e.TestFailed, e.Searched = false, false, false
+	e.FailingTest = ""
 }
 
 // markCopied records a successful byte copy of abs (the SQLite sidecar guard

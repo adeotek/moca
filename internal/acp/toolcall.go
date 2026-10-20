@@ -125,9 +125,11 @@ func endUpdate(id, cwd string, call llm.ToolCall, r tools.Result) ToolCall {
 	in, ok := parseInput(call.Input)
 	switch {
 	case call.Name == "edit" && ok:
-		u.Content = []ToolCallContent{{Type: "diff", Path: absPath(cwd, in.Path), OldText: strp(in.OldString), NewText: strp(in.NewString)}}
+		// F-7: both sides are bounded — a 1 MB file became a 1 MB JSON-RPC
+		// frame on every edit, and the editor has to parse it.
+		u.Content = []ToolCallContent{{Type: "diff", Path: absPath(cwd, in.Path), OldText: strp(capHead(in.OldString, outputCap)), NewText: strp(capHead(in.NewString, outputCap))}}
 	case call.Name == "write" && ok && in.Content != nil:
-		u.Content = []ToolCallContent{{Type: "diff", Path: absPath(cwd, in.Path), NewText: strp(*in.Content)}}
+		u.Content = []ToolCallContent{{Type: "diff", Path: absPath(cwd, in.Path), NewText: strp(capHead(*in.Content, outputCap))}}
 	case call.Name == "read":
 		u.Content = textContent(r.Summary)
 	case call.Name == "shell":

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/flock"
 )
 
 // Token is one provider registration's credentials. The store keeps one
@@ -166,7 +167,7 @@ func (s *Store) withLock(ctx context.Context, fn func() error) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return err
 	}
-	unlock, err := lockFile(ctx, s.path+".lock")
+	unlock, err := flock.Lock(ctx, s.path+".lock")
 	if err != nil {
 		return err
 	}
