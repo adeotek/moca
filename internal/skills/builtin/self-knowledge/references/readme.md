@@ -315,4 +315,4 @@ make release        # five cross-compiled binaries in dist/
 
 ## Status
 
-Current release: **v0.7.1** (2026-10-19) — the end-of-run recording nudge for self-managed skills (opt-in via `"skills": {"selfManaged": true}`; `skills.recordNudge: false` turns the nudge off, see [Self-managed skills](#self-managed-skills)). The full release history lives in the [changelog](CHANGELOG.md).
+Current release: **v0.7.2** (2026-10-21) — a review-round release: no new feature, but the shell confinement, the permission rules, the recording nudge, the front ends and the provider streams now do what the spec says they do (a leading space no longer disables the metacharacter scan, `permissions.allow` is a rule list again, `/remember` works on every surface, a corrupt stream is an error rather than a crash, and self-managed skills gained an explicit provenance table). The full release history lives in the [changelog](CHANGELOG.md).
