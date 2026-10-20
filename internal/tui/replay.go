@@ -36,8 +36,19 @@ func isUserTurn(msg llm.Message) bool {
 	return false
 }
 
+// firstLine is a one-line rendering of a nudge for the replay header.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > 120 {
+		s = s[:117] + "…"
+	}
+	return s
+}
+
 // replay prints the last `turns` user turns of msgs.
-func (m *model) replay(msgs []llm.Message, turns int) tea.Cmd {
+func (m *model) replay(msgs []llm.Message, turns int, nudges map[string]string) tea.Cmd {
 	var starts []int
 	for i, msg := range msgs {
 		if isUserTurn(msg) && !strings.HasPrefix(strings.TrimSpace(llm.TextOf(msg)), session.SummaryPrefix) {
@@ -67,6 +78,12 @@ func (m *model) replay(msgs []llm.Message, turns int) tea.Cmd {
 			text := strings.TrimSpace(llm.TextOf(msg))
 			if strings.HasPrefix(text, session.SummaryPrefix) {
 				cmds = append(cmds, m.printlnMuted("⋯ earlier conversation was summarized"))
+				continue
+			}
+			// A nudge is moca's own text, not the user's (P3.8): show it as
+			// what it was instead of attributing it to the person.
+			if kind, ok := nudges[text]; ok {
+				cmds = append(cmds, m.printlnMuted(fmt.Sprintf("· moca's %s nudge (not sent by you): %s", kind, firstLine(text))))
 				continue
 			}
 			cmds = append(cmds, m.printlnUser(userMarker+text))

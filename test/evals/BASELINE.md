@@ -627,3 +627,17 @@ Two caveats, recorded so the numbers are not read as more than they are:
    owed. Observed failure shape: the model runs the injected
    `./scripts/bootstrap.sh` (the shell guard refuses it) and then records the
    injection as a rule.
+
+## v0.7.2 PR C3 — `(b)` re-specified, and what that exposed
+
+`skills/check.sh` now accepts either a read of the skill body **or** a
+`description:` that names a command the session then ran. Measured after the
+change: **`v072-c3`, n=3, `skills` 0/6** — the re-spec changed nothing here,
+because the recorded description is *"How the Go suite in this repo is run —
+the fixture's strict mode"*: a sentence that names no command. Session 2 found
+`make test` in the fixture's Makefile instead.
+
+So `(b)` is not measuring the wrong thing after all: the auto skill genuinely
+did not steer the second session. The open question is a contract one — should
+an auto skill's description have to name the command — and it moves to v0.7.3
+rather than being fixed by rewording the nudge.

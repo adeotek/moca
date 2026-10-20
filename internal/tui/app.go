@@ -1378,7 +1378,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		if m.agent == nil {
 			return head
 		}
-		return tea.Sequence(head, m.replay(m.agent.History(), replayTurns))
+		return tea.Sequence(head, m.replay(m.agent.History(), replayTurns, m.agent.NudgeTexts()))
 	case agent.SteeringApplied:
 		return m.printlnMuted("↳ sent: " + strings.Join(e.Texts, " · "))
 	case agent.ModeChanged:

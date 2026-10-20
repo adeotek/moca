@@ -6,8 +6,13 @@
 #   (d) the suite is green the repo's own way (CALC_STRICT=1);
 #   (a) an auto skill records how this repo runs its tests;
 #   (e) the stale rule the fixture shipped is corrected or deleted, not duplicated;
-#   (b) session 2's transcript reads the skill: the read tool, search, or a
-#       reader head through the shell — a mention inside an echo is none;
+#   (b) session 2 was steered by the skill: either the transcript reads the
+#       body (the read tool, search, or a reader head through the shell — a
+#       mention inside an echo is none), or the skill's DESCRIPTION names a
+#       command session 2 then ran. The design only promises that the listing
+#       steers, so a run that never opens the file but takes the command its
+#       description named has used the skill — requiring a read measured the
+#       file, not the feature;
 #   (c) session 2 does not repeat the naive command three times (counted only
 #       when the command actually ran, never on a mention or a refusal).
 #
@@ -45,7 +50,7 @@ fi
 # (b)/(c): the second session's transcript. --selftest has no session.
 if [ -n "${SESSION:-}" ] && [ -f "${SESSION:-}" ]; then
   python3 - "$SESSION" "$required" <<'PY' || exit 1
-import json, re, sys
+import glob, json, re, sys
 
 sess, required = sys.argv[1], sys.argv[2] == "1"
 READERS = re.compile(r"^(cat|head|tail|less|more|sed|awk|grep|rg|stat|wc|sha256sum)\b")
@@ -79,6 +84,43 @@ for line in open(sess, errors="ignore"):
         tr = e.get("toolResult") or {}
         results[tr.get("callId")] = tr.get("content") or ""
 
+def norm(s):
+    s = re.sub(r"^(sudo|env|time)\s+", "", s)
+    s = re.sub(r"^(\w+=\S+\s+)+", "", s)
+    s = re.sub(r"^cd\s+\S+\s+", "", s)
+    return s.strip()
+
+
+def ran(cmd):
+    return [norm(p) for p in segments(cmd)]
+
+
+# (b), second limb: the commands the run actually took, and the commands the
+# skill's description named. A description that says "make test" and a run that
+# ran `make test` is the skill doing its job through the listing.
+executed = []
+for cid, call in calls.items():
+    if call.get("name") == "shell":
+        cmd = (call.get("input") or {}).get("command", "")
+        if not (results.get(cid) or "").startswith("refused:"):
+            executed.extend(ran(cmd))
+CMDSHAPE = re.compile(r"\b(make\s+[\w.-]+|go\s+(?:test|vet|build|run)\b[\w./-]*|pytest|npm\s+(?:run\s+)?[\w:-]+|cargo\s+(?:test|build))\b")
+named = []
+for f in glob.glob(".moca/skills/moca-*/SKILL.md"):
+    desc = ""
+    try:
+        head = open(f, errors="ignore").read().split("---")[1]
+    except (IndexError, OSError):
+        continue
+    for line in head.splitlines():
+        if line.startswith("description:"):
+            desc = line
+            break
+    for m in CMDSHAPE.finditer(desc):
+        pair = " ".join(m.group(1).split()[:2])
+        if pair and any(e.startswith(pair) for e in executed):
+            named.append(pair)
+
 reads, naive_n = [], 0
 for cid, call in calls.items():
     name, inp = call.get("name"), call.get("input") or {}
@@ -99,9 +141,11 @@ for cid, call in calls.items():
 if naive_n >= 3:
     print(f"(c) session 2 repeated the naive command {naive_n} times")
     sys.exit(1)
-if not reads:
+if named:
+    print(f"report: (b) the description named {named[0]!r} and session 2 ran it")
+elif not reads:
     if required:
-        print("(b) session 2 never read the skill")
+        print("(b) session 2 neither read the skill nor ran a command its description named")
         sys.exit(1)
     print("report: (b) session 2 never read the skill (feature off)")
 PY

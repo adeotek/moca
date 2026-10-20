@@ -65,15 +65,21 @@ func PruneAutoSkills(dir string, now time.Time, dryRun bool) (PrunedSkills, erro
 		removed := 0
 		for _, line := range splitBodyLines(body) {
 			if r, ok := ParseRule(strings.TrimRight(line, "\r\n")); ok && r.HasProv {
-				age := now.Sub(r.Last)
+				// Calendar days, not elapsed hours (N-14): a rule is dated by
+				// the host's calendar day and parses as UTC midnight, so
+				// now.Sub(r.Last) made a rule written on 2026-09-20 expire at
+				// 00:00 UTC on the 20th — 21:00 on the 19th for a reader in
+				// EEST — and the same rule aged differently at noon and at
+				// midnight. The dates the file and the clock show are compared.
+				age := dayDiff(r.Last, now)
 				switch {
 				case r.Pinned:
-					if age > time.Duration(SkillPinAgeNoticeDays)*24*time.Hour {
+					if age > SkillPinAgeNoticeDays {
 						if !containsStr(rep.PinnedAged, name) {
 							rep.PinnedAged = append(rep.PinnedAged, name)
 						}
 					}
-				case r.Seen <= 1 && age > time.Duration(SkillExpiryDays)*24*time.Hour:
+				case r.Seen <= 1 && age > SkillExpiryDays:
 					removed++
 					continue
 				}
@@ -94,6 +100,15 @@ func PruneAutoSkills(dir string, now time.Time, dryRun bool) (PrunedSkills, erro
 				os.Remove(filepath.Join(dir, dirName))
 			}
 			rep.RulesRemoved += removed
+			// N-13: a skill that lost rules here goes in Touched as well.
+			// Without it the summary counted them under "removed N stale rules
+			// from <others>" — or dropped the count entirely when no other
+			// skill was touched, leaving "removed empty X" for a skill that
+			// lost two. A skill that was already empty (removed == 0) was not
+			// touched by this pass and is named only by "removed empty X".
+			if removed > 0 {
+				rep.Touched = append(rep.Touched, name)
+			}
 			rep.SkillsRemoved = append(rep.SkillsRemoved, name)
 			continue
 		}
@@ -174,4 +189,16 @@ func containsStr(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// dayDiff is the calendar-day distance between the days two instants fall on,
+// ignoring their times and zones: a rule dated 2026-09-20 and a clock reading
+// 2026-10-20T23:30+03:00 are 30 days apart, whatever the UTC offset does to
+// the elapsed hours.
+func dayDiff(from, to time.Time) int {
+	fy, fm, fd := from.Date()
+	ty, tm, td := to.Date()
+	a := time.Date(fy, fm, fd, 0, 0, 0, 0, time.UTC)
+	b := time.Date(ty, tm, td, 0, 0, 0, 0, time.UTC)
+	return int(b.Sub(a) / (24 * time.Hour))
 }
