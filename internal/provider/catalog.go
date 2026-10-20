@@ -12,13 +12,22 @@ import (
 // (budget mode: values unused — the budget comes from MaxTokens and effort); a missing key means
 // the level is unsupported. EffortOff present means thinking can be disabled.
 type Model struct {
-	Provider         string
-	ID               string
-	Protocol         string
-	ContextWindow    int
-	MaxOutput        int
-	Cost             config.CostConfig
-	ThinkingMode     string
+	Provider      string
+	ID            string
+	Protocol      string
+	ContextWindow int
+	MaxOutput     int
+	Cost          config.CostConfig
+	ThinkingMode  string
+	// ReplayReasoning echoes a stored thinking block back as the OpenAI
+	// chat-completions `reasoning_content` field on the assistant message that
+	// produced it. DeepSeek's thinking mode requires it — replaying such a turn
+	// without it fails with "The `reasoning_content` in the thinking mode must
+	// be passed back to the API" — and is where it came from in the first
+	// place. Only blocks the model being asked produced are echoed: another
+	// model's reasoning is foreign to the route and is dropped, as everywhere
+	// else (§14).
+	ReplayReasoning  bool
 	ThinkingLevelMap map[llm.Effort]string
 }
 
@@ -154,16 +163,16 @@ var builtinCatalog = []Model{
 
 	{Provider: "opencode-go", ID: "deepseek-v4.1-flash", Protocol: "openai-completions",
 		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.15, 0.6, 0.003, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: deepseekThinking},
+		ThinkingMode: "openai", ReplayReasoning: true, ThinkingLevelMap: deepseekThinking},
 	{Provider: "opencode-go", ID: "deepseek-v4-flash", Protocol: "openai-completions",
 		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.15, 0.6, 0.003, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: deepseekThinking},
+		ThinkingMode: "openai", ReplayReasoning: true, ThinkingLevelMap: deepseekThinking},
 	{Provider: "opencode-go", ID: "deepseek-v4-pro", Protocol: "openai-completions",
 		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.66, 1.98, 0.022, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: deepseekProThinking},
+		ThinkingMode: "openai", ReplayReasoning: true, ThinkingLevelMap: deepseekProThinking},
 	{Provider: "opencode-go", ID: "deepseek-v4-flash-vision-exp", Protocol: "openai-completions",
 		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.15, 0.6, 0.003, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: deepseekThinking},
+		ThinkingMode: "openai", ReplayReasoning: true, ThinkingLevelMap: deepseekThinking},
 	{Provider: "opencode-go", ID: "kimi-k2.7-code", Protocol: "openai-completions",
 		ContextWindow: 262144, MaxOutput: 262144, Cost: costM(0.95, 4, 0.19, 0),
 		ThinkingMode: "openai", ThinkingLevelMap: basicThinking},

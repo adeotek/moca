@@ -20,10 +20,29 @@ import (
 type PermMode string
 
 const (
-	ModeDefault PermMode = "default"
-	ModeAuto    PermMode = "auto"
-	ModeYolo    PermMode = "yolo"
+	// ModeAsk is what every release before v0.7.2 called "default": the
+	// allowlisted set runs, everything else asks.
+	ModeAsk  PermMode = "ask"
+	ModeAuto PermMode = "auto"
+	ModeYolo PermMode = "yolo"
 )
+
+// LegacyModeName is the pre-v0.7.2 spelling of ModeAsk. It is still accepted
+// wherever a mode is named — config `permissions.defaultMode`, `--mode`,
+// `/mode`, ACP `session/set_mode` — so an existing config or script keeps
+// working; everything internal and every message uses ModeAsk.
+const LegacyModeName = "default"
+
+// CanonicalMode maps a user-supplied mode name to the one moca uses. "default"
+// is the legacy spelling of "ask"; "" stays "" (an unset config layer, which
+// the resolver treats as "no opinion"). Unknown values pass through so the
+// caller's validation can name them.
+func CanonicalMode(mode string) string {
+	if mode == LegacyModeName {
+		return string(ModeAsk)
+	}
+	return mode
+}
 
 // ModeChanged replaces YoloChanged: the TUI refreshes its badge and prints
 // the mode's one-line notice. Plan is the plan flag at emission time (the
@@ -75,11 +94,13 @@ func (a *Agent) applyMode(m PermMode) {
 }
 
 // SetMode switches the permission mode between runs (never during Run) and
-// records the decision in the session. Moving to a non-default mode drops
-// plan mode first (its own PlanChanged): plan rides only on default, so
-// auto and yolo never hold together with it — previously only yolo did.
+// records the decision in the session. A legacy "default" is normalized to
+// ModeAsk. Moving to a mode other than ask drops plan mode first (its own
+// PlanChanged): plan rides only on ask, so auto and yolo never hold together
+// with it — previously only yolo did.
 func (a *Agent) SetMode(m PermMode) {
-	if m != ModeDefault && a.plan {
+	m = PermMode(CanonicalMode(string(m)))
+	if m != ModeAsk && a.plan {
 		a.SetPlan(false)
 	}
 	a.applyMode(m)
@@ -91,7 +112,7 @@ func (a *Agent) SetMode(m PermMode) {
 // SetYolo toggles yolo mode between runs (never during Run): the /yolo
 // command's shorthand for SetMode(ModeYolo) / SetMode(ModeDefault).
 func (a *Agent) SetYolo(on bool) {
-	m := ModeDefault
+	m := ModeAsk
 	if on {
 		m = ModeYolo
 	}

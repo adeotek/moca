@@ -137,6 +137,11 @@ one() {
   fresh_repo "$s" "$work"
   [ -f "$EVALS/$s/flags" ] && read -r -a flags < "$EVALS/$s/flags"
   [ -n "$MODEL" ] && flags+=(--model "$MODEL")
+  # Pin the permission mode: v0.7.2 made `auto` the product default, and a
+  # corpus measured across that change would not be comparable run to run
+  # (auto lets commands run that ask-mode denies headless). BASELINE.md's
+  # numbers are all ask-mode numbers.
+  flags+=(--mode "${MODE:-ask}")
   local prompts=()
   if [ -f "$EVALS/$s/sessions.txt" ]; then
     while IFS= read -r line || [ -n "$line" ]; do

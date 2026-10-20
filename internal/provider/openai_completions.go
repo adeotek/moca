@@ -39,12 +39,23 @@ func (a *completionsAdapter) body(req llm.Request) map[string]any {
 		msgs = append(msgs, map[string]any{"role": "system", "content": req.System})
 	}
 	for _, m := range req.Messages {
-		var text strings.Builder
+		var text, reasoning strings.Builder
 		var calls []map[string]any
 		for _, c := range m.Content {
 			switch c.Type {
 			case llm.BlockText:
 				text.WriteString(c.Text)
+			case llm.BlockThinking:
+				// DeepSeek's thinking mode refuses a replayed assistant turn
+				// that drops the reasoning_content it produced ("… must be
+				// passed back to the API", a 400 that kills the run), so it
+				// goes back on the message it came from. Only when the catalog
+				// says the route wants it, and only for this model's own
+				// blocks: another model's reasoning is foreign here (§14).
+				if a.m.ReplayReasoning && m.Role == llm.RoleAssistant &&
+					c.Model == req.Model && !c.Redacted && c.Text != "" {
+					reasoning.WriteString(c.Text)
+				}
 			case llm.BlockToolUse:
 				calls = append(calls, map[string]any{"id": c.ToolCall.ID, "type": "function",
 					"function": map[string]any{"name": c.ToolCall.Name, "arguments": string(toolInput(c.ToolCall.Input))}})
@@ -56,6 +67,9 @@ func (a *completionsAdapter) body(req llm.Request) map[string]any {
 			continue
 		}
 		msg := map[string]any{"role": string(m.Role), "content": text.String()}
+		if reasoning.Len() > 0 {
+			msg["reasoning_content"] = reasoning.String()
+		}
 		if calls != nil {
 			msg["tool_calls"] = calls
 		}

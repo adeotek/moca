@@ -145,17 +145,19 @@ Every shell command the agent proposes runs through a permission ladder. Three m
 
 | Mode | Behavior |
 |---|---|
-| `default` | every non-allowlisted command asks (once / always / deny) |
-| `auto` | safe actions (reads, builds, tests, confined edits) just run; risky ones (`git push`, installs…) ask every time; commands the tables can't judge get a one-shot classifier opinion — allow or ask |
+| `ask` | every non-allowlisted command asks (once / always / deny) — this was called `default` before v0.7.2, and `default` still works as its name |
+| `auto` | **the default since v0.7.2**: safe actions (reads, builds, tests, confined edits) just run; risky ones (`git push`, installs…) ask every time; commands the tables can't judge get a one-shot classifier opinion — allow or ask |
 | `yolo` | no permission checks |
 
-Pick per run with `moca --mode default|auto|yolo|plan` — `plan` is **plan mode** as a flag value (the plan scope: the run writes `docs/plans/`, nothing else; the v0.4.0-beta dev builds spelled these `--plan`, `--yolo` and `--no-yolo`, which now map to `--mode plan`, `--mode yolo` and `--mode default`) — or in the config with `"permissions": { "defaultMode": "auto" }` (user level; a trusted project's `.moca/config.jsonc` can pin it too and wins) — or in the TUI with **shift+tab** (`default → auto → plan → yolo`; `/mode` for the same, and plan rides only on `default`).
+A fresh install starts at `auto`; `--mode ask`, `/mode ask` or `"defaultMode": "ask"` in the config switches to the strictest interactive mode. Auto mode's classifier is one extra model call only when the risk table cannot decide a command, and `"auto": {"classifier": false}` turns it off (unsure commands then ask).
+
+Pick per run with `moca --mode ask|auto|yolo|plan` (`default` is still accepted — it is what earlier releases called `ask`) — `plan` is **plan mode** as a flag value (the plan scope: the run writes `docs/plans/`, nothing else; the v0.4.0-beta dev builds spelled these `--plan`, `--yolo` and `--no-yolo`, which now map to `--mode plan`, `--mode yolo` and `--mode default`) — or in the config with `"permissions": { "defaultMode": "auto" }` (user level; a trusted project's `.moca/config.jsonc` can pin it too and wins) — or in the TUI with **shift+tab** (`default → auto → plan → yolo`; `/mode` for the same, and plan rides only on `default`).
 
 ```jsonc
 // ~/.config/moca/config.jsonc
 {
   "permissions": {
-    "defaultMode": "default",             // default | auto | plan | yolo
+    "defaultMode": "auto",                // ask | auto | plan | yolo (default: auto)
     "allow": ["rtk *", "make *", "git log *"],
     "ask":   ["git commit *"],
     "deny":  ["rm -rf *", "git push --force*"],
@@ -187,7 +189,7 @@ Pick per run with `moca --mode default|auto|yolo|plan` — `plan` is **plan mode
 
 Rules are whitespace-separated words with bash-style wildcards: `git push *` (prefix), `*.go` in a word, `rm *` beats `rm` on 100 spellings, and `mkfs*` style names still hard-deny no matter what the rules say. Project rules win over user rules; within one list, deny wins over ask, ask over allow. `shell.allow` keeps working and folds into the same user list (the approval prompt's *allow always* now writes a `permissions.allow` rule into the trusted project's `.moca/config.jsonc`, not `shell.allow`) — except for `rm`, which always asks unless a real `permissions.allow` rule covers the exact command. Safe things (reads, builds, tests, confined file edits, plain downloads) need no rule in auto mode; the risk table covers them.
 
-**In the TUI** the mode badge always leads status line 2, directly before the model (`Default` / green `Auto` / red `Yolo`, plus blue `Plan` when plan mode is on) — and the model field renders in that same plan blue. An approval prompt is a picker: `↑`/`↓` and `enter` alongside the classic `a` / `ctrl+a` / `d` — with text in the input box, keys go to the draft as usual.
+**In the TUI** the mode badge always leads status line 2, directly before the model (`Ask` / green `Auto` / red `Yolo`, plus blue `Plan` when plan mode is on) — and the model field renders in that same plan blue. An approval prompt is a picker: `↑`/`↓` and `enter` alongside the classic `a` / `ctrl+a` / `d` — with text in the input box, keys go to the draft as usual.
 
 ## Use
 
@@ -214,7 +216,7 @@ Sessions are append-only files under `~/.local/share/moca/sessions/`, keyed by w
 | `alt+t` | pager on the latest thinking block (the whole reasoning chain) |
 | `alt+p` | paste chips (large pastes collapsed, buffer intact) |
 | `ctrl+r` | search prompt history (type to filter · `enter` uses the match, doesn't send) |
-| `shift+tab` | cycle the permission mode (default → auto → plan → yolo) |
+| `shift+tab` | cycle the permission mode (ask → auto → plan → yolo) |
 | `ctrl+t` | cycle the effort level |
 | `@` + path | complete a workdir file (`tab`/`enter` inserts it) |
 | `ctrl+c` ×2 | quit (or `/exit`) |
