@@ -28,8 +28,8 @@ func (a *Agent) applyPlan(on bool) {
 // previously only yolo did.
 func (a *Agent) SetPlan(on bool) {
 	was := a.plan
-	if on && a.mode != ModeDefault {
-		a.SetMode(ModeDefault)
+	if on && a.mode != ModeAsk {
+		a.SetMode(ModeAsk)
 	}
 	a.applyPlan(on)
 	a.append(session.Entry{Type: session.TypePermissionMode,

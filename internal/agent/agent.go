@@ -172,7 +172,10 @@ func New(o Options) (*Agent, error) {
 		aj, _ := o.Env.AutoJail.(*permissions.Jail)
 		a.checkers.autoCmds = s.AutoView(aj)
 	}
-	a.applyMode(ModeDefault)
+	// New is the bare constructor (resume, tests); Start applies the mode the
+	// run resolved. The v0.7.2 default is auto, and a resumed session's own
+	// mode entry overrides it a moment later.
+	a.applyMode(ModeAuto)
 	if err := a.setModel(o.Model, o.Effort); err != nil {
 		return nil, err
 	}

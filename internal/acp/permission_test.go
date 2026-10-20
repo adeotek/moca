@@ -15,7 +15,7 @@ func rmScript(t *testing.T) (*scriptServer, string) {
 
 func TestPermissionAllowOnce(t *testing.T) {
 	s, work := rmScript(t)
-	c := startClient(t, testOptions(t, s))
+	c := startClient(t, askOptions(t, s))
 	sid := c.newSession(work)
 	if stop, err := c.prompt(sid, "delete x"); err != nil || stop != stopEndTurn {
 		t.Fatalf("stop %q err %+v", stop, err)
@@ -42,7 +42,7 @@ func TestPermissionAllowOnce(t *testing.T) {
 
 func TestPermissionDeny(t *testing.T) {
 	s, work := rmScript(t)
-	c := startClient(t, testOptions(t, s))
+	c := startClient(t, askOptions(t, s))
 	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse { return selected(optReject) }
 	sid := c.newSession(work)
 	c.prompt(sid, "delete x")
@@ -56,7 +56,7 @@ func TestPermissionDeny(t *testing.T) {
 
 func TestCancelDuringPermission(t *testing.T) {
 	s, work := rmScript(t)
-	c := startClient(t, testOptions(t, s))
+	c := startClient(t, askOptions(t, s))
 	sid := c.newSession(work)
 	second := make(chan *RPCError, 1)
 	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse {
@@ -80,7 +80,7 @@ func TestCancelDuringPermission(t *testing.T) {
 
 func TestEOFDuringPermissionDenies(t *testing.T) {
 	s, work := rmScript(t)
-	c := startClient(t, testOptions(t, s))
+	c := startClient(t, askOptions(t, s))
 	sid := c.newSession(work)
 	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse {
 		c.in.Close() // the editor goes away mid-approval
@@ -101,7 +101,7 @@ func TestEOFDuringPermissionDenies(t *testing.T) {
 // must not wait for the answer, and must tell the client to drop the prompt.
 func TestSessionCancelCascadesToPermission(t *testing.T) {
 	s, work := rmScript(t)
-	c := startClient(t, testOptions(t, s))
+	c := startClient(t, askOptions(t, s))
 	sid := c.newSession(work)
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })

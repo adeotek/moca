@@ -174,7 +174,7 @@ func TestLogNeverTouchesRealState(t *testing.T) {
 func TestLogModeAfterResolution(t *testing.T) {
 	_, _, state := logRunCfg(t, `"permissions":{"defaultMode":"plan"},`, "hi")
 	log := readLog(t, state)
-	if !strings.Contains(log, "msg=mode mode=default plan=true") {
+	if !strings.Contains(log, "msg=mode mode=ask plan=true") {
 		t.Fatalf("resolved mode line missing:\n%s", log)
 	}
 	for _, l := range strings.Split(log, "\n") {

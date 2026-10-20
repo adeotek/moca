@@ -430,15 +430,18 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	return a, nil
 }
 
-// mode is the starting permission mode: default when unset, and always
-// default under plan (plan rides only on default, so the TUI's plan
-// toggle lands there too — this guards every caller).
+// mode is the starting permission mode: **auto** when unset (v0.7.2 — the
+// allowlist-only mode is now `ask`, and a fresh install runs at auto), and
+// always ask under plan (plan rides only on ask, so the TUI's plan toggle
+// lands there too — this guards every caller). A legacy "default" normalizes.
 func (o StartOptions) mode() PermMode {
 	switch {
-	case o.Mode == "", o.Plan:
-		return ModeDefault
+	case o.Plan:
+		return ModeAsk
+	case o.Mode == "":
+		return ModeAuto
 	}
-	return o.Mode
+	return PermMode(CanonicalMode(string(o.Mode)))
 }
 
 // rules builds the permission rules once for both shell views: the trusted

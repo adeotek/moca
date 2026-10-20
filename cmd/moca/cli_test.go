@@ -42,21 +42,26 @@ func TestParseArgs(t *testing.T) {
 	if _, err := parseArgs([]string{"--resume", "last", "--continue", "-p", "x"}, nil); err == nil {
 		t.Fatal("resume/continue are exclusive")
 	}
-	// --mode default replaces --no-yolo: it suppresses a configured yolo.
+	// --mode ask replaces --no-yolo: it suppresses a configured yolo. The
+	// legacy spelling `default` is the same mode and still parses.
+	o, _ = parseArgs([]string{"--mode", "ask", "-p", "x"}, nil)
+	if m, plan := o.ResolveMode(config.Config{Yolo: true}); m != "ask" || plan {
+		t.Fatal("--mode ask overrides config yolo")
+	}
 	o, _ = parseArgs([]string{"--mode", "default", "-p", "x"}, nil)
-	if m, plan := o.ResolveMode(config.Config{Yolo: true}); m != "default" || plan {
-		t.Fatal("--mode default overrides config yolo")
+	if m, _ := o.ResolveMode(config.Config{Yolo: true}); m != "ask" {
+		t.Fatalf("--mode default must still parse as ask, got %q", m)
 	}
 	o, _ = parseArgs([]string{"--mode", "plan", "-p", "x"}, nil)
 	if o.Mode == nil || *o.Mode != "plan" || !o.OneShot {
 		t.Fatalf("--mode plan: %+v", o)
 	}
-	if mode, plan := o.ResolveMode(config.Config{}); mode != "default" || !plan {
-		t.Fatal("--mode plan resolves to default + the plan scope")
+	if mode, plan := o.ResolveMode(config.Config{}); mode != "ask" || !plan {
+		t.Fatal("--mode plan resolves to ask + the plan scope")
 	}
 	o, _ = parseArgs([]string{"-p", "x"}, nil)
-	if mode, plan := o.ResolveMode(config.Config{}); mode != "default" || plan {
-		t.Fatal("no flag → default without plan")
+	if mode, plan := o.ResolveMode(config.Config{}); mode != "auto" || plan {
+		t.Fatal("no flag → auto without plan")
 	}
 	if m, _ := o.ResolveMode(config.Config{Yolo: true}); m != "yolo" {
 		t.Fatal("no flag → config yolo decides")

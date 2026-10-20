@@ -396,8 +396,12 @@ func TestPermissionsValidation(t *testing.T) {
 	if c, _ := Parse([]byte(`{"yolo":true}`)); c.Mode() != "yolo" {
 		t.Error("legacy yolo:true must resolve to mode yolo")
 	}
-	if c, _ := Parse([]byte(`{}`)); c.Mode() != "default" {
-		t.Error("default mode")
+	if c, _ := Parse([]byte(`{}`)); c.Mode() != "auto" {
+		t.Error("an unset permissions.defaultMode must resolve to auto (v0.7.2)")
+	}
+	// The legacy spelling is still accepted and normalizes to ask.
+	if c, _ := Parse([]byte(`{"permissions":{"defaultMode":"default"}}`)); c.Mode() != "ask" {
+		t.Errorf(`"defaultMode":"default" must resolve to ask, got %q`, c.Mode())
 	}
 }
 
@@ -442,8 +446,11 @@ func TestResolveExecuteMode(t *testing.T) {
 		want string
 	}{
 		{"project plan over user auto", "", Config{Permissions: user("auto"), Project: &ProjectConfig{Permissions: user("plan")}}, "auto"},
-		{"user plan alone", "", Config{Permissions: user("plan")}, "default"},
-		{"project plan, user unset", "", Config{Project: &ProjectConfig{Permissions: user("plan")}}, "default"},
+		// v0.7.2: a plan layer resolves to the ask mode (the old "default"),
+		// and an unset config to auto — so `moca execute` on a plan-only
+		// config runs at auto unless the run itself sets a mode.
+		{"user plan alone", "", Config{Permissions: user("plan")}, "auto"},
+		{"project plan, user unset", "", Config{Project: &ProjectConfig{Permissions: user("plan")}}, "auto"},
 		{"project auto over user plan", "", Config{Permissions: user("plan"), Project: &ProjectConfig{Permissions: user("auto")}}, "auto"},
 		{"flag wins over project plan", "auto", Config{Project: &ProjectConfig{Permissions: user("plan")}}, "auto"},
 		{"legacy yolo", "", Config{Yolo: true}, "yolo"},
@@ -469,16 +476,18 @@ func TestResolveMode(t *testing.T) {
 		mode string
 		plan bool
 	}{
-		{"", base, base.Mode(), false},
+		{"", base, "auto", false}, // v0.7.2: an unset config starts at auto
 		{"", proj, "auto", false},
 		{"yolo", proj, "yolo", false},
-		{"plan", proj, "default", true},
+		{"plan", proj, "ask", true},
 		// A configured plan (either layer) is the plan scope: never yolo for
 		// the trust decision; the project layer still wins over the user's.
-		{"", planCfg, "default", true},
-		{"", planProj, "default", true},
+		{"", planCfg, "ask", true},
+		{"", planProj, "ask", true},
 		{"", projBeatsUserPlan, "auto", false},
-		{"default", planProj, "default", false},
+		// The legacy name still selects ask, and still leaves plan.
+		{"default", planProj, "ask", false},
+		{"ask", planProj, "ask", false},
 	}
 	for _, c := range cases {
 		m, p := ResolveMode(c.flag, c.cfg)

@@ -22,7 +22,7 @@ func TestInitializeAdvertisesLifecycle(t *testing.T) {
 // session/close mid-prompt: the prompt ends as cancelled, the session is gone.
 func TestCloseCancelsAndFrees(t *testing.T) {
 	s, work := rmScript(t)
-	c := startClient(t, testOptions(t, s))
+	c := startClient(t, askOptions(t, s))
 	sid := c.newSession(work)
 	closed := make(chan *RPCError, 1)
 	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse {
@@ -167,7 +167,7 @@ func TestDeleteSession(t *testing.T) {
 
 func TestDeleteRunningSessionRefused(t *testing.T) {
 	s, work := rmScript(t)
-	c := startClient(t, testOptions(t, s))
+	c := startClient(t, askOptions(t, s))
 	sid := c.newSession(work)
 	got := make(chan *RPCError, 1)
 	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse {
@@ -186,7 +186,7 @@ func TestDeleteRunningSessionRefused(t *testing.T) {
 // and works again once the turn ended.
 func TestLoadOpenSessionWhileRunningIsBusy(t *testing.T) {
 	s, work := rmScript(t)
-	c := startClient(t, testOptions(t, s))
+	c := startClient(t, askOptions(t, s))
 	sid := c.newSession(work)
 	got := make(chan *RPCError, 1)
 	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse {

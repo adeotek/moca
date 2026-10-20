@@ -25,13 +25,13 @@ func TestSetModeSwapsCheckers(t *testing.T) {
 	if _, ok := a.opts.Env.Commands.(permissions.AllowAll); !ok || a.opts.Env.Judge != nil {
 		t.Fatal("yolo: AllowAll, no judge")
 	}
-	a.SetMode(ModeDefault)
+	a.SetMode(ModeAsk)
 	if a.opts.Env.Judge != nil || a.Yolo() {
 		t.Fatal("default")
 	}
-	// session entries record both flags and the mode
+	// session entries record both flags and the mode (ask since v0.7.2)
 	last := a.entries[len(a.entries)-1].PermissionMode
-	if last.Mode != "default" || last.Yolo || last.Plan {
+	if last.Mode != "ask" || last.Yolo || last.Plan {
 		t.Fatalf("entry %+v", last)
 	}
 }
@@ -76,9 +76,9 @@ func TestStatusYoloFollowsMode(t *testing.T) {
 	if !a.Status().Yolo {
 		t.Fatal("Status().Yolo is false after SetMode(ModeYolo)")
 	}
-	a.SetMode(ModeDefault)
+	a.SetMode(ModeAsk)
 	if a.Status().Yolo {
-		t.Fatal("Status().Yolo is true after SetMode(ModeDefault)")
+		t.Fatal("Status().Yolo is true after SetMode(ModeAsk)")
 	}
 }
 
@@ -89,7 +89,7 @@ func TestSetPlanKeepsMode(t *testing.T) {
 	a, _, _ := startTest(t, newScript(t), 40)
 	a.SetMode(ModeAuto)
 	a.SetPlan(true)
-	if got := a.Mode(); got != ModeDefault {
+	if got := a.Mode(); got != ModeAsk {
 		t.Fatalf("SetPlan(auto) must land on default, got %v", got)
 	}
 	var got []session.PermissionMode
@@ -100,8 +100,8 @@ func TestSetPlanKeepsMode(t *testing.T) {
 	}
 	want := []session.PermissionMode{
 		{Mode: "auto"},
-		{Mode: "default"},             // SetPlan leaves auto first
-		{Plan: true, Mode: "default"}, // then the plan entry
+		{Mode: "ask"},             // SetPlan leaves auto first
+		{Plan: true, Mode: "ask"}, // then the plan entry
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
@@ -183,20 +183,58 @@ func TestYoloTurnsEveryCheckOff(t *testing.T) {
 }
 
 // A start with plan and a wider mode together (a caller that bypassed
-// cmd's usage check) starts in default + plan: plan rides only on default.
+// cmd's usage check) starts in ask + plan: plan rides only on ask. A start
+// with no mode at all is **auto** (v0.7.2), and a legacy "default" still
+// means ask.
 func TestStartModeNeverWiderThanPlan(t *testing.T) {
 	cases := []struct {
 		o    StartOptions
 		want PermMode
 	}{
-		{StartOptions{}, ModeDefault},
+		{StartOptions{}, ModeAuto},
+		{StartOptions{Mode: "ask"}, ModeAsk},
+		{StartOptions{Mode: ModeAsk}, ModeAsk},
 		{StartOptions{Mode: ModeYolo}, ModeYolo},
-		{StartOptions{Mode: ModeYolo, Plan: true}, ModeDefault},
-		{StartOptions{Mode: ModeAuto, Plan: true}, ModeDefault},
+		{StartOptions{Mode: ModeYolo, Plan: true}, ModeAsk},
+		{StartOptions{Mode: ModeAuto, Plan: true}, ModeAsk},
+		{StartOptions{Plan: true}, ModeAsk},
 	}
 	for _, c := range cases {
 		if got := c.o.mode(); got != c.want {
 			t.Errorf("%+v → %v, want %v", c.o, got, c.want)
 		}
+	}
+}
+
+// Pins the v0.7.2 mode rename: `ask` is the mode, `default` its old name, and
+// a legacy spelling is normalized on the way in — so a /mode default, an ACP
+// session/set_mode "default" or a config left over from v0.7.1 lands on ask
+// rather than on an unknown value the agent would apply as the fallback.
+func TestCanonicalModeAndLegacySetMode(t *testing.T) {
+	for in, want := range map[string]string{
+		"default": "ask",
+		"ask":     "ask",
+		"auto":    "auto",
+		"yolo":    "yolo",
+		"":        "",
+	} {
+		if got := CanonicalMode(in); got != want {
+			t.Errorf("CanonicalMode(%q) = %q, want %q", in, got, want)
+		}
+	}
+	a, _, _ := startTest(t, newScript(t), 40)
+	a.SetMode(ModeAuto)
+	a.SetMode(PermMode(LegacyModeName))
+	if got := a.Mode(); got != ModeAsk {
+		t.Fatalf("SetMode(\"default\") landed on %q, want ask", got)
+	}
+	// And the legacy name drops plan like ask does (SetMode's rule keys on ask).
+	// SetMode(ask) keeps plan (ask is the plan-riding mode) — the surfaces
+	// clear the flag themselves: the TUI's /mode and ACP's applyModeID both
+	// do it before the switch, and the legacy spelling takes the same path.
+	a.SetPlan(true)
+	a.SetMode(PermMode(LegacyModeName))
+	if !a.Plan() {
+		t.Fatal("SetMode(ask) keeps plan; the front ends clear it explicitly")
 	}
 }

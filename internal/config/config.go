@@ -174,11 +174,26 @@ type AutoConfig struct {
 
 // PermModes are the valid permission modes — the `--mode` flag's values and
 // permissions.defaultMode in both config layers (§3, §4). "plan" is the plan
-// scope: wherever a mode is consumed it resolves to (default, plan=true).
-var PermModes = []string{"default", "auto", "yolo", "plan"}
+// scope: wherever a mode is consumed it resolves to (ask, plan=true). The
+// legacy "default" normalizes to "ask" (CanonicalMode).
+var PermModes = []string{"ask", "auto", "yolo", "plan"}
+
+// LegacyPermMode is v0.7.1's name for "ask". Accepted in a config so an
+// existing `"defaultMode": "default"` keeps working; never emitted, and never
+// listed in an error message.
+const LegacyPermMode = "default"
+
+// CanonicalMode maps a mode name to the one moca runs with: the legacy
+// "default" is "ask", and "" stays "" (an unset layer has no opinion).
+func CanonicalMode(mode string) string {
+	if mode == LegacyPermMode {
+		return "ask"
+	}
+	return mode
+}
 
 func (p PermissionsConfig) validate(key string) error {
-	if p.DefaultMode != "" && !slices.Contains(PermModes, p.DefaultMode) {
+	if p.DefaultMode != "" && !slices.Contains(PermModes, CanonicalMode(p.DefaultMode)) {
 		return fmt.Errorf("%s.defaultMode must be one of %s, got %q", key, strings.Join(PermModes, ", "), p.DefaultMode)
 	}
 	for _, l := range []struct {
@@ -195,19 +210,20 @@ func (p PermissionsConfig) validate(key string) error {
 }
 
 // Mode is the user-level default permission mode (§11): permissions.defaultMode,
-// else the legacy yolo flag, else "default". A configured "plan" is the plan
-// scope — ResolveMode maps any "plan" to (default, plan=true). CLI flags and
+// else the legacy yolo flag, else **auto** (v0.7.2 — the allowlist-only mode is
+// `ask` now, and a fresh install starts at auto). A configured "plan" is the
+// plan scope — ResolveMode maps any "plan" to (ask, plan=true). CLI flags and
 // a trusted project file are applied on top by cmd. It may return "plan",
 // which is not an agent.PermMode — resolve through ResolveMode/
 // ResolveExecuteMode, never cast.
 func (c Config) Mode() string {
 	switch {
 	case c.Permissions.DefaultMode != "":
-		return c.Permissions.DefaultMode
+		return CanonicalMode(c.Permissions.DefaultMode)
 	case c.Yolo:
 		return "yolo"
 	}
-	return "default"
+	return "auto"
 }
 
 // ResolveMode resolves a run's permission mode and plan scope (§3): an
@@ -237,11 +253,11 @@ func resolveMode(flag string, c Config, skipPlan bool) (string, bool) {
 			continue
 		}
 		if mode == "plan" {
-			return "default", true
+			return "ask", true
 		}
-		return mode, false
+		return CanonicalMode(mode), false
 	}
-	return "default", false
+	return "auto", false
 }
 
 // ClassifierOn reports whether auto mode consults the classifier (default on).

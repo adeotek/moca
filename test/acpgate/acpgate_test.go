@@ -75,7 +75,10 @@ type proc struct {
 
 func start(t *testing.T, env []string) *proc {
 	p := &proc{t: t, lines: make(chan map[string]any, 1024), readDone: make(chan struct{})}
-	p.cmd = exec.Command(*mocaBin, "acp")
+	// --mode ask: the approval leg needs a command that ASKS, and v0.7.2 made
+	// auto the product default (auto runs a confined `rm` without a prompt, so
+	// the permission request this gate exists to see never arrived).
+	p.cmd = exec.Command(*mocaBin, "acp", "--mode", "ask")
 	p.cmd.Env = env
 	p.cmd.Stderr = &p.stderr
 	p.in, _ = p.cmd.StdinPipe()

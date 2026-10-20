@@ -33,15 +33,15 @@ func TestNewSessionAdvertisesModesAndModels(t *testing.T) {
 	c := startClient(t, testOptions(t, newScript(t)))
 	r := newSessionFull(t, c, t.TempDir())
 	conform(t, "NewSessionResponse", r)
-	if r.Modes == nil || r.Modes.CurrentModeID != "default" || len(r.Modes.AvailableModes) != 4 {
+	if r.Modes == nil || r.Modes.CurrentModeID != "auto" || len(r.Modes.AvailableModes) != 4 {
 		t.Fatalf("modes %+v", r.Modes)
 	}
 	if len(r.ConfigOptions) != 2 {
 		t.Fatalf("config options %+v", r.ConfigOptions)
 	}
 	// The modes API and the "mode" config option carry the same state.
-	if m := optionOf(t, r.ConfigOptions, "mode"); m.Category != "mode" || m.CurrentValue != "default" ||
-		len(m.Options) != 4 || m.Options[0].Value != "default" || m.Options[3].Value != "plan" {
+	if m := optionOf(t, r.ConfigOptions, "mode"); m.Category != "mode" || m.CurrentValue != "auto" ||
+		len(m.Options) != 4 || m.Options[0].Value != "ask" || m.Options[3].Value != "plan" {
 		t.Fatalf("mode option %+v", m)
 	}
 	model := optionOf(t, r.ConfigOptions, "model")
@@ -62,12 +62,17 @@ func TestModeFlagSetsInitialMode(t *testing.T) {
 func TestSetMode(t *testing.T) {
 	c := startClient(t, testOptions(t, newScript(t)))
 	sid := newSessionFull(t, c, t.TempDir()).SessionID
-	for _, m := range []string{"plan", "auto", "yolo", "default"} {
+	for _, m := range []string{"plan", "auto", "yolo", "ask", "default"} {
 		if _, err := c.call("session/set_mode", SetModeRequest{SessionID: sid, ModeID: m}); err != nil {
 			t.Fatalf("%s: %v", m, err.Message)
 		}
+		// "default" is v0.7.1's name for ask: accepted, reported canonically.
+		want := "ask"
+		if m != "default" {
+			want = m
+		}
 		ups := c.updatesOf(updCurrentMode)
-		if len(ups) == 0 || ups[len(ups)-1]["currentModeId"] != m {
+		if len(ups) == 0 || ups[len(ups)-1]["currentModeId"] != want {
 			t.Fatalf("after %s: %v", m, ups)
 		}
 	}
@@ -117,7 +122,7 @@ func TestSetModeSendsOneUpdate(t *testing.T) {
 
 func TestSetModeRefusedWhileRunning(t *testing.T) {
 	s, work := rmScript(t)
-	c := startClient(t, testOptions(t, s))
+	c := startClient(t, askOptions(t, s))
 	sid := c.newSession(work)
 	got := make(chan *RPCError, 1)
 	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse {

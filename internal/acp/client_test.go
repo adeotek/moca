@@ -42,6 +42,18 @@ func testOptions(t *testing.T, s *scriptServer) Options {
 	return Options{Config: cfg, Version: "test", HTTP: s.srv.Client()} // Trust nil: trusted
 }
 
+// askOptions is testOptions at the ask mode. The permission and lifecycle
+// tests need a command that ASKS — they hook session/request_permission — and
+// v0.7.2 made auto the product default, which runs `rm <file in the workdir>`
+// without a prompt. Pinned here rather than in testOptions so the rest of the
+// suite exercises the real default.
+func askOptions(t *testing.T, s *scriptServer) Options {
+	t.Helper()
+	o := testOptions(t, s)
+	o.Mode = "ask"
+	return o
+}
+
 // testClient drives Serve over pipes, records session/update payloads and
 // answers session/request_permission through onPermission.
 type testClient struct {

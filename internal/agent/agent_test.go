@@ -113,7 +113,12 @@ func startWith(t *testing.T, s *scriptServer, maxSteps int, extraTop, extraModel
 		t.Fatal(err)
 	}
 	var evs []Event
-	o := StartOptions{Config: cfg, Workdir: work, Emit: func(e Event) { evs = append(evs, e) }, HTTP: s.srv.Client(), Slug: "t"}
+	// Mode ask: v0.7.2 made auto the product default, and these tests assert
+	// the permission ladder itself — what asks, what is refused, what the jail
+	// confines. A run under auto executes what ask would prompt for, so the
+	// ladder is pinned here; the default itself is covered by
+	// TestStartModeNeverWiderThanPlan and the mode tests.
+	o := StartOptions{Config: cfg, Workdir: work, Mode: ModeAsk, Emit: func(e Event) { evs = append(evs, e) }, HTTP: s.srv.Client(), Slug: "t"}
 	for _, mod := range mods {
 		mod(&o)
 	}

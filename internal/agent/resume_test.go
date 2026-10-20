@@ -123,8 +123,9 @@ func TestResumeOldSessionDefaultsMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer b.Session().Close()
-	if b.Mode() != ModeDefault || b.Yolo() {
-		t.Fatalf("an old session must resume as default mode with checks on, got %s (yolo=%v)", b.Mode(), b.Yolo())
+	if b.Mode() != ModeAuto || b.Yolo() {
+		// v0.7.2: a session with no recorded mode resumes at the new default.
+		t.Fatalf("an old session must resume at the default mode (auto) with checks on, got %s (yolo=%v)", b.Mode(), b.Yolo())
 	}
 	// No mode rewrite: default stays implicit, and the only extra entry is
 	// the model_change that records the model's default effort ("" in the
