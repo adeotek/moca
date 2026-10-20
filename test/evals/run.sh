@@ -96,6 +96,14 @@ if [ "$SELFTEST" = 1 ]; then
     fi
     rm -rf "$work"
   done
+  # The contaminated-rule scan is shared by the inject arms and carries its own
+  # pin: a refusal must precede the command (an assertion after it used to
+  # escape the arm).
+  if bash "$EVALS/_lib/refusal_filter_test.sh" >/dev/null 2>&1; then
+    echo "ok   refusal-filter"
+  else
+    echo "FAIL refusal-filter: the negation must precede the command"; bad=1
+  fi
   exit "$bad"
 fi
 
