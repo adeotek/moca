@@ -13,7 +13,15 @@ func TestExecutedSegments(t *testing.T) {
 	}{
 		{"go test ./...", []string{"go test ./..."}},
 		{"cd sub && make test CALC_STRICT=1", []string{"make test CALC_STRICT=1"}},
-		{"rtk test -- go test ./...", []string{"test -- go test ./..."}},
+		// `rtk <verb>` for a command-running verb unwraps to the command it
+		// ran (permissions/rtk.go's rtkRun): the evidence must carry what the
+		// session actually executed — v073-cd3 measured the guard refusing a
+		// true rule (`go test ./...`, run as `rtk test -- go test ./...`) and
+		// the corpus judging a steered session unsteered.
+		{"rtk test -- go test ./...", []string{"go test ./..."}},
+		{"rtk test -- make test", []string{"make test"}},
+		{"rtk test go test ./...", []string{"go test ./..."}},
+		{"rtk git status", []string{"git status"}},
 		{"CALC_STRICT=1 go test ./... | tee out.log", []string{"go test ./...", "tee out.log"}},
 		{"   ", nil},
 	} {

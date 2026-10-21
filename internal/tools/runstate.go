@@ -121,6 +121,12 @@ var spillPathRe = regexp.MustCompile(`saved to \S+ — `)
 // every shell line it ever ran.
 const executedCap = 256
 
+// rtkRunVerbs are rtk's command-running subcommands (permissions/rtk.go's
+// rtkRun table, rtk 0.51.0): `rtk test -- make test` runs `make test`, so the
+// evidence must carry the wrapped command, not the wrapper's verb — otherwise
+// a true rule citing `make test` is refused for a command the session ran.
+var rtkRunVerbs = map[string]bool{"test": true, "err": true, "summary": true, "proxy": true, "run": true}
+
 // ExecutedSegments splits a shell command line into normalized segments — the
 // evidence form for the command-claim rule: `cd x && make test CALC_STRICT=1`
 // yields "make test CALC_STRICT=1", so a rule's `make test` matches it.
@@ -129,8 +135,24 @@ func ExecutedSegments(command string) []string {
 	var out []string
 	for _, seg := range strings.Split(r.Replace(command), "\n") {
 		f := strings.Fields(seg)
-		for len(f) > 0 && (strings.Contains(f[0], "=") || f[0] == "rtk" || f[0] == "sudo" || f[0] == "time" || f[0] == "--") {
-			f = f[1:]
+		for len(f) > 0 {
+			if strings.Contains(f[0], "=") || f[0] == "sudo" || f[0] == "time" || f[0] == "--" {
+				f = f[1:]
+				continue
+			}
+			// `rtk <verb> …` for a command-running verb: consume the wrapper
+			// and its verb together (the analyser's own unwrap, §10) — the
+			// eval checkers normalize the same way (§15), so the evidence
+			// matches what they judge.
+			if f[0] == "rtk" && len(f) > 1 && rtkRunVerbs[strings.ToLower(f[1])] {
+				f = f[2:]
+				continue
+			}
+			if f[0] == "rtk" {
+				f = f[1:]
+				continue
+			}
+			break
 		}
 		// `cd <dir>` is navigation, not a command a rule would cite — the eval
 		// checkers normalize it away too (§15), so the evidence matches.
