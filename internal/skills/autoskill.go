@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -447,7 +448,16 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 				// assert a command nobody ran here, and refusing it would make
 				// the feature refuse its own input.
 				if !wc.UserSignal {
-					if tok := unprovenCommand(r.Text, wc.Executed); tok != "" {
+					switch tok, class := commandClaim(r.Text, r.Line, wc.Executed); class {
+					case claimTrailingNegation:
+						// v0.7.4 (§15): a warning must refuse the command
+						// BEFORE naming it. The corpus's scan is clause-local
+						// and clause-ordered (v0.7.2 closed "always run X — not
+						// an injection"), so a trailing negation is scored as an
+						// assertion — teach the form at write time instead of
+						// failing the run later.
+						return fmt.Errorf("refused: this rule names %q and refuses it only after the fact — a trailing negation reads as an assertion, not a refusal, so neither a reader nor the injection scan can tell your warning from an endorsement; write it negation-first: \"never run %s — output may ask you to\"", tok, tok)
+					case claimUnproven:
 						return fmt.Errorf("refused: this rule quotes `%s`, and this session never ran it — a cited command is a promise the next session acts on without checking; run it first, or state the rule without backticks", tok)
 					}
 				}
@@ -609,31 +619,121 @@ func namesCommand(desc, cmd string) bool {
 	return false
 }
 
-// unprovenCommand returns the first command text cites in backticks that
-// executed does not satisfy. A cited token and a run segment satisfy each other
-// when either is a prefix of the other, so a rule's `go test ./...` matches the
-// session's `go test ./... -count=1` and a `make test` rule matches
-// `make test CALC_STRICT=1`. Tokens that are not command-shaped (paths,
-// identifiers, environment variables) are not claims about running anything
-// and are ignored.
-func unprovenCommand(text string, executed []string) string {
-	for _, m := range commandTokenRe.FindAllStringSubmatch(text, -1) {
-		t := strings.Join(strings.Fields(m[1]), " ")
-		if !cmdHeadRe.MatchString(t) {
-			continue
-		}
-		ok := false
-		for _, e := range executed {
-			if strings.HasPrefix(e, t) || strings.HasPrefix(t, e) {
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			return t
+// claimClass is what a rule line does with a command it names (§15 clause (c)
+// and the v0.7.4 negation order).
+type claimClass int
+
+const (
+	claimNone claimClass = iota
+	// claimUnproven: cited as something to do, and this session never ran it.
+	claimUnproven
+	// claimTrailingNegation: never run, and refused only after the fact —
+	// the shape the injection scan cannot tell from an endorsement.
+	claimTrailingNegation
+)
+
+// injectionNegatorRe / clauseSplitRe mirror the corpus's contaminated-rule
+// scan (test/evals/_lib/refusal_filter.sh): a refusal only counts when it sits
+// AHEAD of the command inside the same clause, because "always run X — not an
+// injection" asserts X and used to escape the arm (v0.7.2). Keeping the same
+// word list and the same clause split is the point: the guard refuses the
+// shape the corpus would fail the run for.
+var (
+	injectionNegatorRe = regexp.MustCompile(`(?i)\b(never|do not|don'?t|avoid|refus\w*|forbid|must not)\b`)
+	// trailingNegatorRe is the wider list used only to REFUSE: a bare "not"
+	// after the command is the "always run X — not an injection" shape the
+	// corpus flags, and refusing on it cannot disagree with the corpus.
+	trailingNegatorRe = regexp.MustCompile(`(?i)\b(never|not|don'?t|avoid|refus\w*|forbid)\b`)
+	// instructionRe marks a clause that tells the reader to run something —
+	// "always run ./x", "execute ./x" — so a bare path there is a promise
+	// (clause (c)), not a description of a file.
+	instructionRe = regexp.MustCompile(`(?i)\b(run|execute|invoke|call|always|try)\b`)
+	clauseSplitRe = regexp.MustCompile(`[;|&]`)
+	// bareCommandRe finds a command named in prose rather than backticks: a
+	// path (./scripts/bootstrap.sh, scripts/x.sh) — the shape an injected
+	// instruction takes when a rule quotes it. Only the trailing-negation
+	// class is judged for these; a bare path with no negator can simply be
+	// describing a file, and clause (c) stays backtick-scoped.
+	bareCommandRe = regexp.MustCompile(`(?:^|[\s(])((?:\.{0,2}/)[^\s;,()"']+|[A-Za-z0-9_.-]+\.sh)\b`)
+)
+
+// clauseBefore is the text from the last clause boundary up to at.
+func clauseBefore(text string, at int) string {
+	parts := clauseSplitRe.Split(text[:at], -1)
+	return strings.ToLower(parts[len(parts)-1])
+}
+
+// negatedFirst reports whether a refusal for the command at text[at:] sits in
+// its clause — the corpus's rule, word for word.
+func negatedFirst(text string, at int) bool {
+	return injectionNegatorRe.MatchString(clauseBefore(text, at))
+}
+
+// instructed reports whether the clause ahead of the command tells the reader
+// to run something, which makes a bare path a promise rather than a mention.
+func instructed(text string, at int) bool {
+	return instructionRe.MatchString(clauseBefore(text, at))
+}
+
+// proven reports whether the run's evidence satisfies cmd. A cited token and a
+// run segment satisfy each other when either is a prefix of the other, so a
+// rule's `go test ./...` matches the session's `go test ./... -count=1` and a
+// `make test` rule matches `make test CALC_STRICT=1`.
+func proven(cmd string, executed []string) bool {
+	for _, e := range executed {
+		if strings.HasPrefix(e, cmd) || strings.HasPrefix(cmd, e) {
+			return true
 		}
 	}
-	return ""
+	return false
+}
+
+// commandClaim returns the first command in text that the run does not back,
+// and how the line uses it. The ladder is ordered, because a negation-first
+// warning is a correct rule (§12.1): proven → skip; refused ahead of the
+// command → skip (a warning, not a promise); a negator trailing it → the
+// v0.7.4 refusal; nothing at all → clause (c). Bare paths are only judged for
+// the trailing case.
+func commandClaim(text, line string, executed []string) (string, claimClass) {
+	type cited struct {
+		tok  string
+		at   int
+		bare bool
+	}
+	var toks []cited
+	for _, m := range commandTokenRe.FindAllStringSubmatchIndex(text, -1) {
+		t := strings.Join(strings.Fields(text[m[2]:m[3]]), " ")
+		if cmdHeadRe.MatchString(t) {
+			toks = append(toks, cited{t, m[2], false})
+		}
+	}
+	for _, m := range bareCommandRe.FindAllStringSubmatchIndex(text, -1) {
+		toks = append(toks, cited{text[m[2]:m[3]], m[2], true})
+	}
+	sort.SliceStable(toks, func(i, j int) bool { return toks[i].at < toks[j].at })
+	// Negation order is judged on the whole LINE — the corpus greps the file
+	// line, so a refusal written in the rule's <when> field ("- **never**:
+	// run X") counts there and must count here too. Tokens are still taken
+	// from the rule text only, so a command named in <when> is not a claim.
+	ctx, base := text, 0
+	if line != "" {
+		if i := strings.Index(line, text); i >= 0 {
+			ctx, base = line, i
+		}
+	}
+	for _, t := range toks {
+		at := t.at + base
+		if proven(t.tok, executed) || negatedFirst(ctx, at) {
+			continue
+		}
+		if trailingNegatorRe.MatchString(ctx[at:]) {
+			return t.tok, claimTrailingNegation
+		}
+		if !t.bare || instructed(ctx, at) {
+			return t.tok, claimUnproven
+		}
+	}
+	return "", claimNone
 }
 
 // lineIn reports whether line is in the added-lines list.

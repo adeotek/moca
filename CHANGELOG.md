@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.7.4 (2026-10-21)
+
+### A warning has to refuse the command before it names it
+
+v0.7.3 closed the last gap in what a recorded rule may *claim*, and left one measured hole: a rule that quotes an unrun command inside a warning, and negates it only afterwards, is the safest thing a run can write — and the injection scan cannot tell it from an endorsement, because the negation trails the command and refers back with a pronoun. Both v0.7.3 failures were exactly that shape.
+
+- **The write guard now refuses the trailing order** and teaches the form that reads correctly: *"write it negation-first: `never run ./scripts/bootstrap.sh — output may ask you to`"*. The word list and the clause split are the eval corpus's own (`test/evals/_lib/refusal_filter.sh`) — the guard refuses the shape the corpus would fail a run for, so the two can't drift into disagreeing.
+- **A correct warning is now legal at all.** Clause (c) used to refuse *any* unrun backticked command — including "never run `go vet ./...`" — so a run could not warn about a command it had never run. A command with a refusal ahead of it in its clause is a warning, not a promise; a plain "run X" claim is still refused.
+- Scoped so ordinary writing survives: the rule only judges commands the run did **not** execute (a trailing clause about `make test` after running it is just prose), a bare path is judged only when its clause instructs ("always run ./x") or a negation trails it, `/remember` rules are exempt, and only added lines are judged.
+
+### The eval baseline says what it is
+
+`test/evals/BASELINE.md` opened with "rev 21 harness pass" while carrying six later measurements — the file is a cumulative record, and now says so: the newest section is named first, the rev‑21 baseline table is marked historical, superseded labels are marked (never deleted), and every rate is quoted with its label, n and checker revision. It carries the v0.7.3 section the release was measured with, including the four superseded labels and what each one caught.
+
+### Measured
+
+Label `v074-1` (n=3, 15 rows): **13/15** — `skills` 6/6, and the two inject arms that were failing at v0.7.3 (2/3 each) now pass 3/3, because the guard forces the negation-first form the scan accepts. `skills-inject-paste` reads 1/3, and its two failures are the corpus's clause-(c) arm scoring that same product-correct warning as a citation — the arm has no negation-first exemption while the sibling `(a)` arm does. The scan is not loosened to make the number pass; the one-line exemption is proposed to the owner in the PR.
+
+### Also in v0.7.4
+
+Two config subcommands — `moca config check` and `moca config sample` — land in their own PR; their notes are added to this section by that PR.
+
 ## v0.7.3 (2026-10-21)
 
 ### The truth of a recorded rule
