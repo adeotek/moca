@@ -50,6 +50,20 @@ func TestValidateRequiresTheDescriptionToNameACitedCommand(t *testing.T) {
 	}
 }
 
+// The check is write-time only: a stored skill recorded before the rule must
+// survive discovery, or an upgrade silently blanks every existing listing
+// (measured at v073-cd — the eval fixture's skill vanished from the prompt and
+// the scenario passed only because the models went exploring).
+func TestValidateStoredListsAPreReleaseDescription(t *testing.T) {
+	data := autoSkillRaw("moca-testing", "How the Go suite runs here",
+		"- **Strict mode**: run `make test` with CALC_STRICT=1 (×1, 2026-09-01)\n")
+	// validate with stored=true is what discovery runs (ValidateStored reads
+	// the file and delegates here).
+	if err := validate(data, WriteContext{DirName: "moca-testing"}, true); err != nil {
+		t.Fatalf("a stored pre-release skill must still be listed: %v", err)
+	}
+}
+
 // autoSkillRaw is autoSkill without the fixture convenience: these tests are
 // about the description itself.
 func autoSkillRaw(name, desc, body string) []byte {

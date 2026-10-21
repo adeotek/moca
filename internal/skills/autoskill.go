@@ -318,8 +318,14 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 		// command must say which one, or the listing steers nothing and the
 		// run re-derives the command from the Makefile. Measured: `skills`
 		// scored 0/6 with descriptions like "How the Go suite runs here".
-		if cmd, ok := citedCommand(string(body)); ok && !namesCommand(desc, cmd) {
-			return fmt.Errorf("refused: %s's description names no command, and it is the only line the next session sees — say how this repo is checked (e.g. \"... with %s\"), or state the rule without a backticked command", name, cmd)
+		// Write-time only (never `stored`): a skill recorded before this rule
+		// must still be listed — dropping it at discovery would silently
+		// blank every pre-release listing (measured at v073-cd), and the
+		// next session can fix the description in the ordinary flow.
+		if !stored {
+			if cmd, ok := citedCommand(string(body)); ok && !namesCommand(desc, cmd) {
+				return fmt.Errorf("refused: %s's description names no command, and it is the only line the next session sees — say how this repo is checked (e.g. \"... with %s\"), or state the rule without a backticked command", name, cmd)
+			}
 		}
 	}
 	if class, ok := newContentSecret(data, wc.Prev); ok {
