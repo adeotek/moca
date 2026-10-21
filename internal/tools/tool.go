@@ -179,6 +179,11 @@ type Env struct {
 	// signal gates new (user, …) rules (Decision 11 — set ONLY by
 	// Agent.Remember); SkillTyped is the run's typed texts (Decision 15);
 	// the hint fields drive the one-shot nudge.
+	// Executed is the run's own shell segments (ExecutedSegments), appended by
+	// Registry.Run for every call that actually ran — the guard's evidence for
+	// the command-claim rule (a recorded rule may only cite a command this
+	// session ran). Per-run (runstate.go, reset by BeginRun).
+	Executed        []string
 	SkillCreations  int
 	SkillUserSignal bool
 	SkillTyped      []string
@@ -264,6 +269,15 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 	env.skillRefused, env.skillWrote, env.internalRefusal = false, false, false // per-call flags
 	start := time.Now()
 	res := runRecovered(ctx, t, env, call)
+	// A shell call that ran is evidence for the command-claim rule. A refusal
+	// (permission, guard, plan-mode) proves nothing about the command and must
+	// not count — the model may not cite what it was not allowed to run.
+	if call.Name == "shell" && !strings.HasPrefix(res.Content, "refused:") {
+		env.Executed = append(env.Executed, ExecutedFromCall(call)...)
+		if len(env.Executed) > executedCap {
+			env.Executed = env.Executed[:executedCap]
+		}
+	}
 	slog.Debug("tool", "name", call.Name, "duration", time.Since(start).Round(time.Millisecond),
 		"is_error", res.IsError, "bytes", len(res.Content))
 	if env.skillWrote {
