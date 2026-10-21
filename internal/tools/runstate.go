@@ -28,6 +28,10 @@ func (e *Env) BeginRun() {
 	e.failures, e.MaxRepeat = nil, 0
 	e.copied = nil
 	e.SkillCreations, e.SkillUserSignal, e.SkillTyped = 0, false, nil
+	// The executed set is per run: a resumed session's earlier commands are not
+	// in this process's history, and claiming otherwise would let a rule cite
+	// a command nobody ran here.
+	e.Executed = nil
 	e.SkillHintArmed, e.SkillHintDone, e.lastFailedVerify = false, false, ""
 	e.SkillProvenCmd = ""
 	// T-1: the investigation hints are per run. A search or a test read in run
@@ -111,6 +115,73 @@ func verifies(command string) bool {
 // spillPathRe matches the overflow file named in a Spill note: its name is
 // random per call, so it must not make identical failures look different.
 var spillPathRe = regexp.MustCompile(`saved to \S+ — `)
+
+// executedCap bounds the per-run executed list: the evidence only has to cover
+// commands a rule is likely to cite, and a long run must not grow a slice of
+// every shell line it ever ran.
+const executedCap = 256
+
+// rtkRunVerbs are rtk's command-running subcommands (permissions/rtk.go's
+// rtkRun table, rtk 0.51.0): `rtk test -- make test` runs `make test`, so the
+// evidence must carry the wrapped command, not the wrapper's verb — otherwise
+// a true rule citing `make test` is refused for a command the session ran.
+var rtkRunVerbs = map[string]bool{"test": true, "err": true, "summary": true, "proxy": true, "run": true}
+
+// ExecutedSegments splits a shell command line into normalized segments — the
+// evidence form for the command-claim rule: `cd x && make test CALC_STRICT=1`
+// yields "make test CALC_STRICT=1", so a rule's `make test` matches it.
+func ExecutedSegments(command string) []string {
+	r := strings.NewReplacer("&&", "\n", "||", "\n", ";", "\n", "|", "\n")
+	var out []string
+	for _, seg := range strings.Split(r.Replace(command), "\n") {
+		f := strings.Fields(seg)
+		for len(f) > 0 {
+			if strings.Contains(f[0], "=") || f[0] == "sudo" || f[0] == "time" || f[0] == "--" {
+				f = f[1:]
+				continue
+			}
+			// `rtk <verb> …` for a command-running verb: consume the wrapper
+			// and its verb together (the analyser's own unwrap, §10) — the
+			// eval checkers normalize the same way (§15), so the evidence
+			// matches what they judge.
+			if f[0] == "rtk" && len(f) > 1 && rtkRunVerbs[strings.ToLower(f[1])] {
+				f = f[2:]
+				continue
+			}
+			if f[0] == "rtk" {
+				f = f[1:]
+				continue
+			}
+			break
+		}
+		// `cd <dir>` is navigation, not a command a rule would cite — the eval
+		// checkers normalize it away too (§15), so the evidence matches.
+		if len(f) > 1 && f[0] == "cd" {
+			f = f[2:]
+		}
+		if len(f) > 0 {
+			out = append(out, strings.Join(f, " "))
+		}
+	}
+	return out
+}
+
+// ExecutedFromCall returns a shell call's command split into evidence
+// segments — nil for any other tool, and for input that does not parse. The
+// agent seeds a resumed session's evidence with it; Registry.Run appends the
+// same shape for every call that ran.
+func ExecutedFromCall(call llm.ToolCall) []string {
+	if call.Name != "shell" {
+		return nil
+	}
+	var in struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(call.Input, &in); err != nil {
+		return nil
+	}
+	return ExecutedSegments(in.Command)
+}
 
 // normCommand is the whitespace-collapsed form of a command line — the
 // comparison form for "did the command change?" (verifies() applies the same

@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.7.3 (2026-10-21)
+
+### The truth of a recorded rule
+
+Self-managed skills promise that what a run writes down is something the *next* run can act on without re-checking it. Two holes in that promise cost most of the `skills` eval scenario's pass rate; both are now closed in the write guard, not in the prompt.
+
+### A rule may only cite a command the run actually ran (#52)
+
+Nine of 29 injection-arm failures at `v072-c2c` were clause (c): a rule quoting a `go test`/`go vet` variant the session never executed. The clause lived only in the eval checker, which re-read the transcript after the fact — so the model could still write the claim.
+
+- `Env.Executed` holds the run's own evidence: the segments of every shell call that actually ran. A refused call adds nothing — a command the session wasn't allowed to run proves nothing. A resumed session seeds the list from its transcript, so a rule recorded after a restart may cite what was run before it.
+- Matching is prefix-either-way: `go test ./...` is satisfied by `go test ./... -count=1`, `make test` by `make test CALC_STRICT=1`. `rtk test -- make test` counts as running `make test` (the shell analyser has unwrapped rtk since §10; the evidence strip now does too).
+- Exemptions, each deliberate: a `/remember` rule is the user's own words; unchanged stored lines are never re-judged for citation; backticks that aren't command-shaped (paths, identifiers, env vars) are not claims.
+
+> refused: this rule quotes `go vet ./...`, and this session never ran it — a cited command is a promise the next session acts on without checking; run it first, or state the rule without backticks
+
+### A description that hides the command is refused (#52)
+
+The v0.7.2 question — *must an auto skill's description name the command?* — answered **yes**, in the guard. `skills` measured 0/6 because session 2 never read the body and the description named no command, so the listing steered nothing and the run re-derived `make test` from the Makefile. If the body cites a command, the one line every later session reads must name it.
+
+- Judged on every write, **even when the description is unchanged** — the first cut exempted stored descriptions, and the measurement showed exactly what that protected: session 1 fixed the stale body rule, left the steering-less description standing, and session 2 failed the same way as before.
+- **Discovery never drops a skill for this rule.** The first cut ran it at load, where there is no previous version, so every pre-release skill vanished from the listing — 15 of 15 system prompts, silently, while the scenarios still passed because the models went exploring. The next session fixes the description in the ordinary flow instead.
+- A body that cites no command has nothing to name and is unaffected.
+
+> refused: moca-x's description names no command, and it is the only line the next session sees — say how this repo is checked (e.g. "… with make test"), or state the rule without a backticked command
+
+### Measured, not asserted
+
+Label `v073-cd5` (`opencode-go/glm-5.3-flash`, n=3, 15 rows): **13/15**, with `skills` **6/6** (was 4/20) and the injection arms **7/9** (was 17/30). Both remaining failures are one checker false positive — a *warning* rule quoting the injected command with a trailing, pronoun-referenced negation — documented in §15 and filed as an open item rather than fixed by loosening a safety scan. Four intermediate labels (`v073-cd` … `v073-cd4`) are kept and marked superseded; each one caught a defect in this release's own first cuts.
+
+### Also in this release
+
+- The eval corpus' inject checker now scores **landed** writes only: a rule the guard refused never landed, and judging the attempt punished the attempt→refuse→repair loop the refusal teaches.
+- `docs/specs/SPECS.md` §15's open items were corrected: Windows does have the shell skill-write refusal (S‑8); three open items became two.
+
 ## v0.7.2 (2026-10-21)
 
 ### A review round, not a feature

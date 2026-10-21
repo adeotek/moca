@@ -381,6 +381,21 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 			cs.SetSkillDir(st.skillDir) // the shell refusal (C1)
 		}
 		env.SkillGuard = skillGuard(env, st.skillDir, st.sessionDate)
+		// The executed set (§11.4's command-claim rule) is evidence of what
+		// this session ran. On resume the transcript IS this session's own
+		// history, so its shell calls are evidence too — a rule recorded after
+		// a restart may cite the command that was run before it, and refusing
+		// that would read as a bug.
+		for _, e := range prior {
+			if e.Type != session.TypeToolUse || e.ToolUse == nil || e.ToolUse.Call.Name != "shell" {
+				continue
+			}
+			env.Executed = append(env.Executed, tools.ExecutedFromCall(e.ToolUse.Call)...)
+			if len(env.Executed) > 256 {
+				env.Executed = env.Executed[:256]
+				break
+			}
+		}
 	} else if hadBlock { // the frozen prompt still invites writes: block ⇒ guard
 		// C5b: the frozen prompt still invites writes the absent guard would
 		// not check — install a refusing one instead of going nil (§2.1's
@@ -700,7 +715,8 @@ func skillGuard(env *tools.Env, dir string, sessionDate time.Time) func(abs, rel
 		}
 		if err := skills.ValidateSkill(data, skills.WriteContext{DirName: parts[0], Prev: prev,
 			Others: others, UserSignal: env.SkillUserSignal, Named: named,
-			Today: time.Now(), SessionDate: sessionDate}); err != nil {
+			Today: time.Now(), SessionDate: sessionDate,
+			Executed: env.Executed}); err != nil {
 			return err
 		}
 		if prev == nil && env.SkillCreations >= skills.SkillCreationsPerRun {

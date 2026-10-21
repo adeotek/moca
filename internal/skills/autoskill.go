@@ -57,10 +57,21 @@ type WriteContext struct {
 	Named       bool      // the run's typed text names this skill (Decision 15; skills.Named)
 	Today       time.Time // the host clock at write time (the provenance check, C3)
 	SessionDate time.Time // the session's start date (long-running sessions)
+	// Executed is the session's own shell calls, split into normalized
+	// segments (tools.ExecutedSegments), for the command-claim rule: a rule
+	// that cites a command in backticks is a promise the next session acts on
+	// without checking, so a line this write ADDS may only cite a command the
+	// session actually ran. Nil in ValidateStored (a stored file has no run).
+	Executed []string
 }
 
 var (
 	ruleLineRe = regexp.MustCompile(`^- \*\*(.+?)\*\*:\s*(.+)$`)
+	// commandTokenRe/cmdHeadRe find a rule's cited commands (§15 clause (c)
+	// mirrored in the guard): the same shape list the eval checkers score, so
+	// the guard and the corpus agree on what counts as a command claim.
+	commandTokenRe = regexp.MustCompile("`([^`]+)`")
+	cmdHeadRe      = regexp.MustCompile(`^(\./|make |go |pytest|npm |cargo |dotnet |bash |sh |docker |python3? |node |yarn |pnpm |mvn |gradle )`)
 	// An ASCII x is accepted for × — weaker models type it, and refusing
 	// over the glyph teaches nothing.
 	provRe = regexp.MustCompile(`\(([×x][0-9]+|user), ([0-9]{4}-[0-9]{2}-[0-9]{2})\)\s*$`)
@@ -303,6 +314,23 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 			return fmt.Errorf("refused: %s's description is %d chars (cap %d) — make it one short sentence", name, n, SkillDescriptionCap)
 		}
 	}
+	// The description is the one line a later session sees before choosing to
+	// read the body (SPECS §12.1/§15): a skill whose rule cites a command must
+	// say which one, or the listing steers nothing and the run re-derives the
+	// command from the Makefile. Measured: `skills` scored 0/6 with
+	// descriptions like "How the Go suite runs here" — and when the first cut
+	// exempted an unchanged description, session 1 fixed the stale body rule
+	// and left the steering-less description standing, so session 2 failed (b)
+	// exactly as before (v073-cd2). The check is write-time only (never
+	// `stored`): at discovery a pre-release skill must still be listed —
+	// dropping it would silently blank every existing listing — but a write
+	// that keeps a description that hides the body's command is refused, and
+	// fixing both in one write is the way out.
+	if auto && !stored {
+		if cmd, ok := citedCommand(string(body)); ok && !namesCommand(desc, cmd) {
+			return fmt.Errorf("refused: %s's description names no command, and it is the only line the next session sees — say how this repo is checked (e.g. \"... with %s\"), or state the rule without a backticked command", name, cmd)
+		}
+	}
 	if class, ok := newContentSecret(data, wc.Prev); ok {
 		return fmt.Errorf("refused: the content looks like a credential (%s) — never record secrets, tokens or URLs with credentials in a skill; name the environment variable instead; the file is plain text in the repository", class)
 	}
@@ -413,6 +441,15 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 				}
 				if n := utf8.RuneCountInString(r.When); n > SkillWhenCap {
 					return fmt.Errorf("refused: a rule's <when> is %d chars (cap %d) — name the situation in a few words and put the detail in the rule", n, SkillWhenCap)
+				}
+				// Clause (c): a rule may only cite a command this session ran.
+				// A `/remember` rule is the user's own words — the user may
+				// assert a command nobody ran here, and refusing it would make
+				// the feature refuse its own input.
+				if !wc.UserSignal {
+					if tok := unprovenCommand(r.Text, wc.Executed); tok != "" {
+						return fmt.Errorf("refused: this rule quotes `%s`, and this session never ran it — a cited command is a promise the next session acts on without checking; run it first, or state the rule without backticks", tok)
+					}
 				}
 			}
 			if !r.HasProv {
@@ -527,6 +564,76 @@ func provAttempt(text string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// citedCommand returns the first command-shaped backticked token in body,
+// reduced to the first two words — the form a description is expected to name
+// (`make test`, `go test`, `./scripts/bootstrap.sh`), and the same pair the
+// eval corpus compares (SPECS §15 clause (b)).
+func citedCommand(body string) (string, bool) {
+	for _, m := range commandTokenRe.FindAllStringSubmatch(body, -1) {
+		f := strings.Fields(m[1])
+		if len(f) == 0 || !cmdHeadRe.MatchString(strings.Join(f, " ")) {
+			continue
+		}
+		if len(f) > 2 {
+			f = f[:2]
+		}
+		return strings.Join(f, " "), true
+	}
+	return "", false
+}
+
+// namesCommand reports whether desc names cmd, whitespace- and case-insensitive:
+// "How the suite runs — make test with CALC_STRICT=1" names "make test".
+func namesCommand(desc, cmd string) bool {
+	d := strings.ToLower(strings.Join(strings.Fields(desc), " "))
+	c := strings.ToLower(strings.Join(strings.Fields(cmd), " "))
+	if c == "" {
+		return true
+	}
+	if strings.Contains(d, c) {
+		return true
+	}
+	// Single-word commands (`pytest`) may be written with a trailing
+	// call form: "run pytest" contains it; "pytests" must not.
+	if !strings.Contains(c, " ") {
+		for _, w := range strings.FieldsFunc(d, func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '/' || r == '-' || r == '_')
+		}) {
+			if w == c {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// unprovenCommand returns the first command text cites in backticks that
+// executed does not satisfy. A cited token and a run segment satisfy each other
+// when either is a prefix of the other, so a rule's `go test ./...` matches the
+// session's `go test ./... -count=1` and a `make test` rule matches
+// `make test CALC_STRICT=1`. Tokens that are not command-shaped (paths,
+// identifiers, environment variables) are not claims about running anything
+// and are ignored.
+func unprovenCommand(text string, executed []string) string {
+	for _, m := range commandTokenRe.FindAllStringSubmatch(text, -1) {
+		t := strings.Join(strings.Fields(m[1]), " ")
+		if !cmdHeadRe.MatchString(t) {
+			continue
+		}
+		ok := false
+		for _, e := range executed {
+			if strings.HasPrefix(e, t) || strings.HasPrefix(t, e) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return t
+		}
+	}
+	return ""
 }
 
 // lineIn reports whether line is in the added-lines list.
