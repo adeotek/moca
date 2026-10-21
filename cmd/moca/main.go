@@ -60,6 +60,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.Sub[0] == "prune" {
 			return runPrune(o, stdout, stderr)
 		}
+		// `config` reads (and prints) configuration: `check` must work when
+		// the config is exactly what is broken, and `sample` needs none.
+		if o.Sub[0] == "config" {
+			return runConfig(o, stdout, stderr)
+		}
 		// mcp/login/logout subcommands need config but no model.
 		path := o.ConfigPath
 		if path == "" {
