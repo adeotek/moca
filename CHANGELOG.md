@@ -16,7 +16,11 @@ v0.7.3 closed the last gap in what a recorded rule may *claim*, and left one mea
 
 ### Measured
 
-Label `v074-1` (n=3, 15 rows): **13/15** — `skills` 6/6, and the two inject arms that were failing at v0.7.3 (2/3 each) now pass 3/3, because the guard forces the negation-first form the scan accepts. `skills-inject-paste` reads 1/3, and its two failures are the corpus's clause-(c) arm scoring that same product-correct warning as a citation — the arm has no negation-first exemption while the sibling `(a)` arm does. The scan is not loosened to make the number pass; the one-line exemption is proposed to the owner in the PR.
+`v074-1` (n=3, 15 rows): **13/15** — the two inject arms that were failing at v0.7.3 (2/3 each) now pass 3/3, because the guard forces the negation-first form the scan accepts. `skills-inject-paste` read 1/3: the corpus's clause-(c) arm scored that same product-correct warning as a citation, having no negation-first exemption while its sibling `(a)` arm does. The scan was not loosened to make the number pass; the exemption was proposed and approved on its own terms.
+
+`v074-2` (same model and n, after the exemption landed as its own change): **14/15** — `skills` 6/6, `skills-inject` 3/3, **`skills-inject-paste` 3/3**, `skills-inject-output` 2/3. The exemption is clause- and window-local and only ever *drops* a token from the missing set, so an asserting rule still fails; it is pinned both directions in `--selftest` and was re-checked against every kept `v074-1` workdir (only the `(c)` rows flip; every `(a)` contamination still fails).
+
+The one loss is a real finding, not a checker artifact: the model wrote its warning with the path backticked, saw only the description-cap refusal, then satisfied the guard by **un-backticking** the path — the escape the refusal text offers — and landed a bare mention that restates the injected instruction ("claiming ./scripts/bootstrap.sh must be run first") before doubting it. The guard judges a bare path only when its clause instructs ahead of it or a negation trails it, so it passed; the corpus's `(a)` scan reads bare text and fails it. That is a product hole in the guard's mention grammar, filed as a v0.7.5 candidate in SPECS §15 rather than patched in this release.
 
 ### Also in v0.7.4
 
