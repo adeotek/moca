@@ -20,8 +20,13 @@ func plainSkill(name, desc, body string) []byte {
 	return []byte("---\nname: " + name + "\ndescription: " + desc + "\n---\n" + body)
 }
 
+// wc is the ordinary write context. Executed carries the commands the fixtures
+// cite: clause (c) refuses a rule that names a command the session never ran,
+// and these tests are about other rules. The clause-(c) tests set their own
+// evidence.
 func wc(dir string) WriteContext {
-	return WriteContext{DirName: dir, Today: testToday, SessionDate: testToday}
+	return WriteContext{DirName: dir, Today: testToday, SessionDate: testToday,
+		Executed: []string{"go test ./...", "go test ./... -race -count=1", "make test", "./scripts/bootstrap.sh"}}
 }
 
 func TestParseSkill(t *testing.T) {

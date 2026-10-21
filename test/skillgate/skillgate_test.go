@@ -463,7 +463,25 @@ func legOffIsInert(t *testing.T) {
 }
 
 func legOnConformingWrite(t *testing.T) {
+	// (c) in the gate: a rule that cites a command this run never ran is
+	// refused, and the same rule lands once the run has run it.
+	bad := newGate(t,
+		toolTurn(writeCall(".moca/skills/moca-testing/SKILL.md", autoSkillFile("moca-testing", "How the suite runs here.", rule("Running the suite", "`go test ./... -count=1`", "×1, "+today())))),
+		textTurn("ok"),
+	)
+	bad.user(`"skills":{"selfManaged":true}`)
+	badOut, badErr, badCode := bad.run("record the rule", "--approve")
+	if badCode != 0 {
+		t.Fatalf("exit %d: %s", badCode, badErr)
+	}
+	if bad.exists(".moca/skills/moca-testing/SKILL.md") {
+		t.Fatalf("a rule citing a command the run never ran must not land:\n%s%s", badOut, badErr)
+	}
+	if !strings.Contains(badOut+badErr, "never ran it") {
+		t.Fatalf("the refusal must name the unrun command:\n%s%s", badOut, badErr)
+	}
 	g := newGate(t,
+		toolTurn(shellCall("go test ./... -count=1")),
 		toolTurn(writeCall(".moca/skills/moca-testing/SKILL.md", autoSkillFile("moca-testing", "How the suite runs here.", rule("Running the suite", "`go test ./... -count=1`", "×1, "+today())))),
 		textTurn("recorded"),
 		textTurn("nothing new"),

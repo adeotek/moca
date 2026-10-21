@@ -57,10 +57,21 @@ type WriteContext struct {
 	Named       bool      // the run's typed text names this skill (Decision 15; skills.Named)
 	Today       time.Time // the host clock at write time (the provenance check, C3)
 	SessionDate time.Time // the session's start date (long-running sessions)
+	// Executed is the session's own shell calls, split into normalized
+	// segments (tools.ExecutedSegments), for the command-claim rule: a rule
+	// that cites a command in backticks is a promise the next session acts on
+	// without checking, so a line this write ADDS may only cite a command the
+	// session actually ran. Nil in ValidateStored (a stored file has no run).
+	Executed []string
 }
 
 var (
 	ruleLineRe = regexp.MustCompile(`^- \*\*(.+?)\*\*:\s*(.+)$`)
+	// commandTokenRe/cmdHeadRe find a rule's cited commands (§15 clause (c)
+	// mirrored in the guard): the same shape list the eval checkers score, so
+	// the guard and the corpus agree on what counts as a command claim.
+	commandTokenRe = regexp.MustCompile("`([^`]+)`")
+	cmdHeadRe      = regexp.MustCompile(`^(\./|make |go |pytest|npm |cargo |dotnet |bash |sh |docker |python3? |node |yarn |pnpm |mvn |gradle )`)
 	// An ASCII x is accepted for × — weaker models type it, and refusing
 	// over the glyph teaches nothing.
 	provRe = regexp.MustCompile(`\(([×x][0-9]+|user), ([0-9]{4}-[0-9]{2}-[0-9]{2})\)\s*$`)
@@ -414,6 +425,15 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 				if n := utf8.RuneCountInString(r.When); n > SkillWhenCap {
 					return fmt.Errorf("refused: a rule's <when> is %d chars (cap %d) — name the situation in a few words and put the detail in the rule", n, SkillWhenCap)
 				}
+				// Clause (c): a rule may only cite a command this session ran.
+				// A `/remember` rule is the user's own words — the user may
+				// assert a command nobody ran here, and refusing it would make
+				// the feature refuse its own input.
+				if !wc.UserSignal {
+					if tok := unprovenCommand(r.Text, wc.Executed); tok != "" {
+						return fmt.Errorf("refused: this rule quotes `%s`, and this session never ran it — a cited command is a promise the next session acts on without checking; run it first, or state the rule without backticks", tok)
+					}
+				}
 			}
 			if !r.HasProv {
 				// N-7: a provenance the model meant to write but did not end the
@@ -527,6 +547,33 @@ func provAttempt(text string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// unprovenCommand returns the first command text cites in backticks that
+// executed does not satisfy. A cited token and a run segment satisfy each other
+// when either is a prefix of the other, so a rule's `go test ./...` matches the
+// session's `go test ./... -count=1` and a `make test` rule matches
+// `make test CALC_STRICT=1`. Tokens that are not command-shaped (paths,
+// identifiers, environment variables) are not claims about running anything
+// and are ignored.
+func unprovenCommand(text string, executed []string) string {
+	for _, m := range commandTokenRe.FindAllStringSubmatch(text, -1) {
+		t := strings.Join(strings.Fields(m[1]), " ")
+		if !cmdHeadRe.MatchString(t) {
+			continue
+		}
+		ok := false
+		for _, e := range executed {
+			if strings.HasPrefix(e, t) || strings.HasPrefix(t, e) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return t
+		}
+	}
+	return ""
 }
 
 // lineIn reports whether line is in the added-lines list.
