@@ -14,7 +14,7 @@ func TestValidateRefusesACitedCommandTheSessionNeverRan(t *testing.T) {
 	ctx.Executed = []string{"go test ./...", "make test CALC_STRICT=1"}
 
 	// The trap: a rule citing a command the session never ran.
-	err := ValidateSkill(autoSkill("moca-x", "How the suite runs", "- **Before commit**: run `go vet ./...` (×1, 2026-10-18)\n"), ctx)
+	err := ValidateSkill(autoSkill("moca-x", "What to check first — go vet ./...", "- **Before commit**: run `go vet ./...` (×1, 2026-10-18)\n"), ctx)
 	if err == nil || !strings.Contains(err.Error(), "never ran it") || !strings.Contains(err.Error(), "`go vet ./...`") {
 		t.Fatalf("an unrun cited command must be refused naming it: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestValidateRefusesACitedCommandTheSessionNeverRan(t *testing.T) {
 		"- **Before commit**: run `go test ./... -count=1` (×1, 2026-10-18)\n",
 		"- **Before commit**: run `make test` (×1, 2026-10-18)\n",
 	} {
-		if err := ValidateSkill(autoSkill("moca-x", "How the suite runs", rule), ctx); err != nil {
+		if err := ValidateSkill(autoSkill("moca-x", "How the suite runs — go test ./...", rule), ctx); err != nil {
 			t.Fatalf("%q must pass against %v: %v", strings.TrimSpace(rule), ctx.Executed, err)
 		}
 	}
@@ -46,7 +46,7 @@ func TestValidateRefusesACitedCommandTheSessionNeverRan(t *testing.T) {
 func TestValidateTrustsUserRulesForCitedCommands(t *testing.T) {
 	ctx := wc("moca-x")
 	ctx.UserSignal = true
-	if err := ValidateSkill(autoSkill("moca-x", "How the suite runs", "- **Deploy**: run `make release` (user, 2026-10-18)\n"), ctx); err != nil {
+	if err := ValidateSkill(autoSkill("moca-x", "Deploys with make release", "- **Deploy**: run `make release` (user, 2026-10-18)\n"), ctx); err != nil {
 		t.Fatalf("a user rule may cite an unrun command: %v", err)
 	}
 }

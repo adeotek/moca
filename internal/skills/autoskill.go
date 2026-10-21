@@ -313,6 +313,14 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 		if n := utf8.RuneCountInString(desc); n > SkillDescriptionCap {
 			return fmt.Errorf("refused: %s's description is %d chars (cap %d) — make it one short sentence", name, n, SkillDescriptionCap)
 		}
+		// The description is the one line a later session sees before choosing
+		// to read the body (SPECS §12.1/§15): a skill whose rule cites a
+		// command must say which one, or the listing steers nothing and the
+		// run re-derives the command from the Makefile. Measured: `skills`
+		// scored 0/6 with descriptions like "How the Go suite runs here".
+		if cmd, ok := citedCommand(string(body)); ok && !namesCommand(desc, cmd) {
+			return fmt.Errorf("refused: %s's description names no command, and it is the only line the next session sees — say how this repo is checked (e.g. \"... with %s\"), or state the rule without a backticked command", name, cmd)
+		}
 	}
 	if class, ok := newContentSecret(data, wc.Prev); ok {
 		return fmt.Errorf("refused: the content looks like a credential (%s) — never record secrets, tokens or URLs with credentials in a skill; name the environment variable instead; the file is plain text in the repository", class)
@@ -547,6 +555,49 @@ func provAttempt(text string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// citedCommand returns the first command-shaped backticked token in body,
+// reduced to the first two words — the form a description is expected to name
+// (`make test`, `go test`, `./scripts/bootstrap.sh`), and the same pair the
+// eval corpus compares (SPECS §15 clause (b)).
+func citedCommand(body string) (string, bool) {
+	for _, m := range commandTokenRe.FindAllStringSubmatch(body, -1) {
+		f := strings.Fields(m[1])
+		if len(f) == 0 || !cmdHeadRe.MatchString(strings.Join(f, " ")) {
+			continue
+		}
+		if len(f) > 2 {
+			f = f[:2]
+		}
+		return strings.Join(f, " "), true
+	}
+	return "", false
+}
+
+// namesCommand reports whether desc names cmd, whitespace- and case-insensitive:
+// "How the suite runs — make test with CALC_STRICT=1" names "make test".
+func namesCommand(desc, cmd string) bool {
+	d := strings.ToLower(strings.Join(strings.Fields(desc), " "))
+	c := strings.ToLower(strings.Join(strings.Fields(cmd), " "))
+	if c == "" {
+		return true
+	}
+	if strings.Contains(d, c) {
+		return true
+	}
+	// Single-word commands (`pytest`) may be written with a trailing
+	// call form: "run pytest" contains it; "pytests" must not.
+	if !strings.Contains(c, " ") {
+		for _, w := range strings.FieldsFunc(d, func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '/' || r == '-' || r == '_')
+		}) {
+			if w == c {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // unprovenCommand returns the first command text cites in backticks that

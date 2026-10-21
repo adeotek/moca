@@ -12,7 +12,13 @@ import (
 
 var testToday = time.Date(2026, 10, 18, 15, 0, 0, 0, time.UTC)
 
+// autoSkill builds a fixture file. When the body cites a command the
+// description names it — the contract added in v0.7.3 (§12.1), which has its
+// own tests; fixtures here exist to exercise other rules.
 func autoSkill(name, desc, body string) []byte {
+	if cmd, ok := citedCommand(body); ok && !namesCommand(desc, cmd) {
+		desc += " — " + cmd
+	}
 	return []byte("---\nname: " + name + "\ndescription: " + desc + "\nauto: true\n---\n" + body)
 }
 
@@ -30,7 +36,7 @@ func wc(dir string) WriteContext {
 }
 
 func TestParseSkill(t *testing.T) {
-	f, err := ParseSkill(autoSkill("moca-testing", "How tests run", "# Head\n\n- **Run**: `go test ./...` (×1, 2026-10-18)\n"), "moca-testing")
+	f, err := ParseSkill(autoSkillRaw("moca-testing", "How tests run", "# Head\n\n- **Run**: `go test ./...` (×1, 2026-10-18)\n"), "moca-testing")
 	if err != nil {
 		t.Fatal(err)
 	}

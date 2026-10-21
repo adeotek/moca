@@ -466,7 +466,7 @@ func legOnConformingWrite(t *testing.T) {
 	// (c) in the gate: a rule that cites a command this run never ran is
 	// refused, and the same rule lands once the run has run it.
 	bad := newGate(t,
-		toolTurn(writeCall(".moca/skills/moca-testing/SKILL.md", autoSkillFile("moca-testing", "How the suite runs here.", rule("Running the suite", "`go test ./... -count=1`", "×1, "+today())))),
+		toolTurn(writeCall(".moca/skills/moca-testing/SKILL.md", autoSkillFile("moca-testing", "How the suite runs here — go test ./... -count=1", rule("Running the suite", "`go test ./... -count=1`", "×1, "+today())))),
 		textTurn("ok"),
 	)
 	bad.user(`"skills":{"selfManaged":true}`)
@@ -482,7 +482,7 @@ func legOnConformingWrite(t *testing.T) {
 	}
 	g := newGate(t,
 		toolTurn(shellCall("go test ./... -count=1")),
-		toolTurn(writeCall(".moca/skills/moca-testing/SKILL.md", autoSkillFile("moca-testing", "How the suite runs here.", rule("Running the suite", "`go test ./... -count=1`", "×1, "+today())))),
+		toolTurn(writeCall(".moca/skills/moca-testing/SKILL.md", autoSkillFile("moca-testing", "How the suite runs here — go test ./... -count=1", rule("Running the suite", "`go test ./... -count=1`", "×1, "+today())))),
 		textTurn("recorded"),
 		textTurn("nothing new"),
 	)
