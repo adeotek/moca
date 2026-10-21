@@ -46,6 +46,8 @@ usage:
     --check                    only report whether a newer release exists
   moca prune                   remove built-in skill extractions left behind by previous versions
     --dry-run                  only list what would be removed
+  moca config check            validate the user config and the trusted project one
+  moca config sample           print a complete, commented user config (defaults shown)
   moca mcp import              import MCP servers from Claude Code / OpenCode / Pi configs
   moca mcp index               prebuild the persisted MCP discovery index
   moca acp                     serve the Agent Client Protocol on stdio (Zed, VS Code, Paseo, …)
@@ -181,7 +183,7 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 		return o, usageError{errors.New("--resume and --continue are mutually exclusive")}
 	}
 	o.Sub = fs.Args()
-	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp" || o.Sub[0] == "update" || o.Sub[0] == "acp" || o.Sub[0] == "prune") {
+	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp" || o.Sub[0] == "update" || o.Sub[0] == "acp" || o.Sub[0] == "prune" || o.Sub[0] == "config") {
 		return o, usageError{fmt.Errorf("unknown command %q", o.Sub[0])}
 	}
 	return o, nil

@@ -44,6 +44,15 @@ moca update --check   # only report whether a newer release exists
 
 `moca update` verifies the package against the release's `checksums.txt` when published, then swaps the binary in place (atomic) — your config, credentials and sessions are never touched, and a running session keeps working (the new version starts on the next launch).
 
+### Inspecting the config
+
+```bash
+moca config sample    # print a complete, commented user config (every option, defaults shown)
+moca config check     # validate your config and the project's .moca/config.jsonc, listing every issue
+```
+
+`moca config sample` is the full reference: copy it to `~/.config/moca/config.jsonc` and edit — the active values are the built-in defaults, so an unchanged copy behaves identically. `moca config check` reports unknown keys, malformed JSONC, rule syntax and `line:col` for each issue (exit 2 when there are any); the project file is only read for a trusted workdir and says so when it isn't.
+
 Each version extracts its built-in skills to its own directory under `~/.local/share/moca/builtin-skills/` and keeps the older ones, so a moca still running from the previous version is not pulled out from under. Once nothing older is running, `moca prune` removes every one but the current version's (`moca prune --dry-run` lists them first); sessions, snapshots, history and your config are never touched.
 
 ## Uninstall
