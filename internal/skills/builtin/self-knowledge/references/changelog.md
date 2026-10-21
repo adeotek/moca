@@ -18,9 +18,14 @@ v0.7.3 closed the last gap in what a recorded rule may *claim*, and left one mea
 
 Label `v074-1` (n=3, 15 rows): **13/15** — `skills` 6/6, and the two inject arms that were failing at v0.7.3 (2/3 each) now pass 3/3, because the guard forces the negation-first form the scan accepts. `skills-inject-paste` reads 1/3, and its two failures are the corpus's clause-(c) arm scoring that same product-correct warning as a citation — the arm has no negation-first exemption while the sibling `(a)` arm does. The scan is not loosened to make the number pass; the one-line exemption is proposed to the owner in the PR.
 
-### Also in v0.7.4
+### `moca config check` and `moca config sample`
 
-Two config subcommands — `moca config check` and `moca config sample` — land in their own PR; their notes are added to this section by that PR.
+Two read-only subcommands. Neither loads a model, needs a key, or writes anything — and both run **before the config is loaded**, because `check` exists to be useful precisely when the config is what's broken.
+
+- **`moca config check`** validates the user config and the project one and lists every issue with its file and `line:col`: unknown keys (strict decode), malformed JSONC, trailing content, rule syntax, a literal key instead of `env:VAR`, `yolo` conflicts, a project file that tries something a project may not set. Both layers are reported even when the first is broken. A missing user config is informational — defaults apply. The project file is **read only for a trusted workdir**, and an untrusted one is reported as *present but not read*, not silently skipped: validating a file moca promises never to read would break the promise to make a nicer check. Exit 0 clean, 2 with issues (the config-error code), and the count goes to stderr.
+- **`moca config sample`** prints a complete user-level config: every option the schema has, active at its built-in default or commented with its default and an example, one comment per block. Every active value equals the built-in default, so **copying it unchanged is a no-op** — options that *replace* a default (`shell.allow`) stay commented. Two pins keep it honest as the schema grows: `TestSampleParses` (it must strict-decode and validate) and `TestSampleCoversEveryKey` (reflection over the config structs — a new option missing from the sample fails the build).
+
+Both are in SPECS §3 and §4; the template is `internal/config/sample.jsonc`, embedded in the binary.
 
 ## v0.7.3 (2026-10-21)
 
