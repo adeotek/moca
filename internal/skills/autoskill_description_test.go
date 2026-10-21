@@ -37,16 +37,33 @@ func TestValidateRequiresTheDescriptionToNameACitedCommand(t *testing.T) {
 		t.Fatalf("a non-command skill is unaffected: %v", err)
 	}
 
-	// An unchanged description is not re-judged, or a stored skill from an
-	// earlier release could never be edited again.
+	// An unchanged description IS re-judged on a write (v073-cd2): session 1
+	// fixed the stale body rule, left the steering-less description standing,
+	// and session 2 failed (b) exactly as before. The way out is one write
+	// that fixes both.
 	prev := autoSkillRaw("moca-x", "How the Go suite runs here",
 		"- **Strict mode**: run `make test` with CALC_STRICT=1 (×1, 2026-10-01)\n")
 	ctx2 := wc("moca-x")
 	ctx2.Prev = prev
 	ctx2.Executed = []string{"make test CALC_STRICT=1"}
-	if err := ValidateSkill(autoSkillRaw("moca-x", "How the Go suite runs here",
+	err2 := ValidateSkill(autoSkillRaw("moca-x", "How the Go suite runs here",
+		"- **Strict mode**: run `make test` with CALC_STRICT=1 (×1, 2026-10-01)\n- **Env**: `CALC_STRICT=1` is required (×1, 2026-10-18)\n"), ctx2)
+	if err2 == nil || !strings.Contains(err2.Error(), "names no command") {
+		t.Fatalf("a stored description that hides the command must be re-judged on a write: %v", err2)
+	}
+	if err := ValidateSkill(autoSkillRaw("moca-x", "How the Go suite runs — make test with CALC_STRICT=1",
 		"- **Strict mode**: run `make test` with CALC_STRICT=1 (×1, 2026-10-01)\n- **Env**: `CALC_STRICT=1` is required (×1, 2026-10-18)\n"), ctx2); err != nil {
-		t.Fatalf("an unchanged description must not be re-judged: %v", err)
+		t.Fatalf("fixing the description in the same write lands: %v", err)
+	}
+	// A body that cites no command never trips the check, even unchanged.
+	prev2 := autoSkillRaw("moca-y", "Where the schema lives",
+		"- **Schema**: the tables are declared in `internal/store/schema.go` (×1, 2026-10-01)\n")
+	ctx3 := wc("moca-y")
+	ctx3.Prev = prev2
+	ctx3.Executed = []string{"make test"}
+	if err := ValidateSkill(autoSkillRaw("moca-y", "Where the schema lives",
+		"- **Schema**: the tables are declared in `internal/store/schema.go` (×1, 2026-10-01)\n- **Migrations**: run them before first boot (×1, 2026-10-18)\n"), ctx3); err != nil {
+		t.Fatalf("a non-command skill with an unchanged description is unaffected: %v", err)
 	}
 }
 

@@ -313,19 +313,22 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 		if n := utf8.RuneCountInString(desc); n > SkillDescriptionCap {
 			return fmt.Errorf("refused: %s's description is %d chars (cap %d) — make it one short sentence", name, n, SkillDescriptionCap)
 		}
-		// The description is the one line a later session sees before choosing
-		// to read the body (SPECS §12.1/§15): a skill whose rule cites a
-		// command must say which one, or the listing steers nothing and the
-		// run re-derives the command from the Makefile. Measured: `skills`
-		// scored 0/6 with descriptions like "How the Go suite runs here".
-		// Write-time only (never `stored`): a skill recorded before this rule
-		// must still be listed — dropping it at discovery would silently
-		// blank every pre-release listing (measured at v073-cd), and the
-		// next session can fix the description in the ordinary flow.
-		if !stored {
-			if cmd, ok := citedCommand(string(body)); ok && !namesCommand(desc, cmd) {
-				return fmt.Errorf("refused: %s's description names no command, and it is the only line the next session sees — say how this repo is checked (e.g. \"... with %s\"), or state the rule without a backticked command", name, cmd)
-			}
+	}
+	// The description is the one line a later session sees before choosing to
+	// read the body (SPECS §12.1/§15): a skill whose rule cites a command must
+	// say which one, or the listing steers nothing and the run re-derives the
+	// command from the Makefile. Measured: `skills` scored 0/6 with
+	// descriptions like "How the Go suite runs here" — and when the first cut
+	// exempted an unchanged description, session 1 fixed the stale body rule
+	// and left the steering-less description standing, so session 2 failed (b)
+	// exactly as before (v073-cd2). The check is write-time only (never
+	// `stored`): at discovery a pre-release skill must still be listed —
+	// dropping it would silently blank every existing listing — but a write
+	// that keeps a description that hides the body's command is refused, and
+	// fixing both in one write is the way out.
+	if auto && !stored {
+		if cmd, ok := citedCommand(string(body)); ok && !namesCommand(desc, cmd) {
+			return fmt.Errorf("refused: %s's description names no command, and it is the only line the next session sees — say how this repo is checked (e.g. \"... with %s\"), or state the rule without a backticked command", name, cmd)
 		}
 	}
 	if class, ok := newContentSecret(data, wc.Prev); ok {
