@@ -56,8 +56,21 @@ sess, required = sys.argv[1], sys.argv[2] == "1"
 READERS = re.compile(r"^(cat|head|tail|less|more|sed|awk|grep|rg|stat|wc|sha256sum)\b")
 
 
+RTK_RUN = ("test", "err", "summary", "proxy", "run")  # permissions/rtk.go's rtkRun
+
+
 def segments(cmd):
-    return [p.strip() for p in re.split(r"&&|\|\||;|\||\n", cmd) if p.strip()]
+    # `rtk <verb> -- make test` runs `make test` (§10's unwrap): the verb goes
+    # with the wrapper, or a steered session reads as unsteered (v073-cd3).
+    out = []
+    for p in re.split(r"&&|\|\||;|\||\n", cmd):
+        p = p.strip()
+        m = re.match(r"^rtk\s+(\w+)\s+(?:--\s+)?(.*)$", p)
+        if m and m.group(1).lower() in RTK_RUN:
+            p = m.group(2)
+        if p:
+            out.append(p)
+    return out
 
 
 def naive(cmd):
