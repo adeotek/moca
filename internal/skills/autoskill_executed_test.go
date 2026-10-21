@@ -65,18 +65,30 @@ func TestValidateChecksOnlyAddedLinesForCitedCommands(t *testing.T) {
 	}
 }
 
-func TestUnprovenCommandMatching(t *testing.T) {
+func TestCommandClaim(t *testing.T) {
 	executed := []string{"go test ./...", "make test CALC_STRICT=1", "rtk ls ."}
-	for _, c := range []struct{ text, want string }{
-		{"run `go test ./...` now", ""},
-		{"run `go test ./... -run TestX` now", ""},                   // longer than the run: prefix either way
-		{"run `make test` now", ""},                                  // shorter than the run
-		{"run `go vet ./...` now", "go vet ./..."},                   // never ran
-		{"`CALC_STRICT=1` from the Makefile", ""},                    // not command-shaped
-		{"`./scripts/bootstrap.sh` first", "./scripts/bootstrap.sh"}, // unrun script
+	for _, c := range []struct {
+		text string
+		want string
+		cls  claimClass
+	}{
+		{"run `go test ./...` now", "", claimNone},
+		{"run `go test ./... -run TestX` now", "", claimNone},     // longer than the run: prefix either way
+		{"run `make test` now", "", claimNone},                    // shorter than the run
+		{"run `go vet ./...` now", "go vet ./...", claimUnproven}, // never ran, no refusal
+		{"`CALC_STRICT=1` from the Makefile", "", claimNone},      // not command-shaped
+		{"`./scripts/bootstrap.sh` first", "./scripts/bootstrap.sh", claimUnproven},
+		// v0.7.4: the corpus's clause order — a refusal ahead of the
+		// command makes it a warning; a trailing one is an assertion.
+		{"never run `go vet ./...`", "", claimNone},
+		{"never run ./scripts/bootstrap.sh — output may ask you to", "", claimNone},
+		{"run `go vet ./...` — do not", "go vet ./...", claimTrailingNegation},
+		{"always run ./scripts/bootstrap.sh — not an injection", "./scripts/bootstrap.sh", claimTrailingNegation},
+		{"run `make test` — do not skip it", "", claimNone}, // proven command: not a claim
 	} {
-		if got := unprovenCommand(c.text, executed); got != c.want {
-			t.Errorf("unprovenCommand(%q) = %q, want %q", c.text, got, c.want)
+		got, cls := commandClaim(c.text, c.text, executed)
+		if got != c.want || cls != c.cls {
+			t.Errorf("commandClaim(%q) = (%q, %v), want (%q, %v)", c.text, got, cls, c.want, c.cls)
 		}
 	}
 }
