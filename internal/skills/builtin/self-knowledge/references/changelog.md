@@ -17,6 +17,14 @@ A compaction's kept tail is rebuilt without its thinking blocks — the summary 
 - `Model.KeepsTailThinking()` (history-bound **or** `ReplayReasoning`) now gates the strip: a preserved-thinking route keeps the tail verbatim for the prefix-binding reason it always did, and a reasoning-required route keeps it because its own tool-call turns must carry `reasoning_content` back. Everything else still strips.
 - Pins: `TestKeptTailThinkingFollowsTheRoute` (an agent request over a crafted compacted transcript, both routes) and `TestKeepsTailThinkingFollowsReasoningReplay` (structural — every `ReplayReasoning` row must answer yes, so a new row cannot half-register).
 
+### An editor never gets a dead transport
+
+A `moca acp` session in Zed on Windows 11 failed at `session/new` with `Incoming transport closed: {"reason": "incoming_transport_closed", "method": "session/new"}` — the client's report of an ACP server that died, or answered something it could not act on. Two server-side defects were behind that class of failure:
+
+- **`-32000` (auth required) was undeliverable.** `initialize` advertises **no auth methods** — moca's credentials live outside the editor (`moca login`) — so a client told "authenticate" has nothing to call, and Zed renders "Authentication required" over a prompt it cannot complete. A missing `model`, an unknown one and a provider with no usable credential are now `-32603` carrying moca's own fix ("run `moca login <provider>` …, then set \"model\" in <config>"), which the editor shows as itself.
+- **A handler panic killed the server silently.** The request goroutine, the notification path (which runs on the read loop) and a deferred follow-up now recover, log the panic with its stack to the diagnostic log, and answer `-32603 internal error in <method>: <panic>`; the connection keeps serving. Verified live: an injected panic in `session/new` answers the editor and the process stays up (`TestHandlerPanicAnswersAndKeepsServing`, plus the deferred and notification variants).
+- **Nothing is written to stderr under ACP.** The editor owns that pipe, and Zed on Windows has been reported to lose — even kill — a child over a write to it: a diagnostic log that cannot be opened no longer warns there, a serve error goes to the log, and the log's `mode` field now says `acp` rather than `tui`.
+
 ### Windows on ARM joins the published packages
 
 The Release workflow now publishes **four** packages: `moca-<version>-windows-arm64.zip` next to linux/amd64, linux/arm64 and windows/amd64, all built by the same manual dispatch and covered by the same `checksums.txt`.

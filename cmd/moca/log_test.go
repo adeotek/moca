@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/adeotek/moca/internal/config"
 )
 
 const okStream = "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n" +
@@ -180,6 +182,61 @@ func TestLogModeAfterResolution(t *testing.T) {
 	for _, l := range strings.Split(log, "\n") {
 		if strings.Contains(l, "msg=start") && strings.Contains(l, "plan=") {
 			t.Fatalf("start line reports plan before the project layer loads: %s", l)
+		}
+	}
+}
+
+// TestStartLogNoStderrUnderACP: the editor owns an external agent's stderr, and
+// Zed on Windows has been reported to lose — even kill — a child over a write
+// to it. A log that cannot be opened must therefore warn on stderr for the TUI
+// and -p, and stay silent under ACP (where stdout is JSON-RPC and the contract
+// is "diagnostics go to the log file", §9.5).
+func TestStartLogNoStderrUnderACP(t *testing.T) {
+	for _, tc := range []struct {
+		opts     Options
+		wantWarn bool
+	}{
+		{Options{Sub: []string{"acp"}}, false},
+		{Options{}, true},
+		{Options{OneShot: true}, true},
+	} {
+		isolate(t)
+		// A state path that is a file: applog.Open cannot create <state>/logs.
+		state := filepath.Join(t.TempDir(), "not-a-dir")
+		if err := os.WriteFile(state, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("XDG_STATE_HOME", state)
+		t.Setenv("MOCA_LOG", "")
+		cfg, err := config.Parse([]byte(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stderr bytes.Buffer
+		closeLog, err := startLog(cfg, "/cfg/config.jsonc", tc.opts, &stderr)
+		if err != nil {
+			t.Fatalf("a log that cannot be opened is a warning, not an error: %v", err)
+		}
+		closeLog()
+		if got := strings.Contains(stderr.String(), "diagnostic log disabled"); got != tc.wantWarn {
+			t.Fatalf("stderr warning = %v, want %v (stderr %q)", got, tc.wantWarn, stderr.String())
+		}
+	}
+}
+
+// TestLogModeNamesTheRun covers the label the diagnostic log carries.
+func TestLogModeNamesTheRun(t *testing.T) {
+	for _, tc := range []struct {
+		opts Options
+		want string
+	}{
+		{Options{Sub: []string{"acp"}}, "acp"},
+		{Options{OneShot: true}, "oneshot"},
+		{Options{Execute: "docs/plans/x.md"}, "oneshot"},
+		{Options{}, "tui"},
+	} {
+		if got := tc.opts.logMode(); got != tc.want {
+			t.Fatalf("logMode(%+v) = %q, want %q", tc.opts, got, tc.want)
 		}
 	}
 }
