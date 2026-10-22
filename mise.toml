@@ -43,7 +43,7 @@ description = "Cross-compile release binaries into dist/"
 run = '''
 VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)}"
 mkdir -p dist
-for p in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; do
+for p in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64 windows/arm64; do
   os="${p%/*}"; arch="${p#*/}"
   ext=""
   if [ "$os" = "windows" ]; then ext=".exe"; fi

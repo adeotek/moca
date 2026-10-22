@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.6 (2026-10-22)
+
+### Windows on ARM joins the published packages
+
+The Release workflow now publishes **four** packages: `moca-<version>-windows-arm64.zip` next to linux/amd64, linux/arm64 and windows/amd64, all built by the same manual dispatch and covered by the same `checksums.txt`.
+
+- **No code change was needed to install it.** The asset name is the contract `internal/update` composes from `runtime.GOOS`/`GOARCH` — it builds the suffix rather than whitelisting platforms — so `moca update` on a Windows on ARM machine finds the new package the moment it exists. `install.ps1` already mapped `PROCESSOR_ARCHITECTURE=ARM64` to `arm64`; only its unsupported-architecture message still claimed amd64 was the only published package, and that is corrected.
+- **The build job proves the package is what it says.** A Windows binary cannot be executed on the linux runner, so the windows/arm64 leg checks the PE machine type with `file` before zipping — the same reasoning as the linux/arm64 `aarch64` check: a mislabelled package installs cleanly, then refuses to start.
+- `make release` and `mise run release` cross-compile the same six targets (windows/arm64 added; darwin stays local-only, as before).
+
 ## v0.7.5 (2026-10-22)
 
 ### Every panel opens with its own rule
