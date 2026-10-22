@@ -52,8 +52,15 @@ func (a *completionsAdapter) body(req llm.Request) map[string]any {
 				// goes back on the message it came from. Only when the catalog
 				// says the route wants it, and only for this model's own
 				// blocks: another model's reasoning is foreign here (§14).
+				//
+				// Compared by qualified id, like the other two adapters: the
+				// agent stamps a persisted thinking block with the qualified
+				// model (agent.go, §3), while req.Model is the bare one — a
+				// bare comparison here silently matched nothing and dropped
+				// every echo on the floor (v0.7.2's echo was inert until
+				// v0.7.6).
 				if a.m.ReplayReasoning && m.Role == llm.RoleAssistant &&
-					c.Model == req.Model && !c.Redacted && c.Text != "" {
+					c.Model == a.m.Qualified() && !c.Redacted && c.Text != "" {
 					reasoning.WriteString(c.Text)
 				}
 			case llm.BlockToolUse:

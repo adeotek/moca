@@ -32,6 +32,12 @@ func glmModel() Model {
 }
 
 // assistantMsg is one assistant turn carrying a thinking block plus text.
+//
+// The thinking block's Model is the *qualified* id, exactly what the agent
+// persists (agent.go stamps a captured block with a.model.Qualified()); the
+// adapter compares against its own qualified model, so a test that stamped the
+// bare id here would pass while the production request carried no
+// reasoning_content at all — which is what v0.7.2's echo did.
 func assistantMsg(model, thinking, text string) llm.Message {
 	blocks := []llm.ContentBlock{}
 	if thinking != "" {
@@ -65,7 +71,7 @@ func TestCompletionsReplaysReasoningContent(t *testing.T) {
 	}
 	msgs := completionsMsgs(t, m, []llm.Message{
 		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "fix it"}}},
-		assistantMsg(m.ID, "the test fails because X", "looking"),
+		assistantMsg(m.Qualified(), "the test fails because X", "looking"),
 	})
 	if got, _ := msgs[1]["reasoning_content"].(string); got != "the test fails because X" {
 		t.Fatalf("assistant turn lost its reasoning_content: %v", msgs[1])
@@ -79,7 +85,7 @@ func TestCompletionsDropsForeignReasoning(t *testing.T) {
 	msgs := completionsMsgs(t, m, []llm.Message{
 		assistantMsg("opencode-go/glm-5.3-flash", "another model's thoughts", "hi"),
 		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
-			{Type: llm.BlockThinking, Text: "secret", Model: m.ID, Redacted: true},
+			{Type: llm.BlockThinking, Text: "secret", Model: m.Qualified(), Redacted: true},
 			{Type: llm.BlockText, Text: "hi"},
 		}},
 	})
@@ -96,7 +102,7 @@ func TestCompletionsDoesNotSendReasoningWhereUnwanted(t *testing.T) {
 		t.Fatalf("%s must not echo reasoning_content — its route never asked for it", m.Qualified())
 	}
 	msgs := completionsMsgs(t, m, []llm.Message{
-		assistantMsg(m.ID, "thoughts", "hi"),
+		assistantMsg(m.Qualified(), "thoughts", "hi"),
 	})
 	if _, ok := msgs[0]["reasoning_content"]; ok {
 		t.Fatalf("reasoning_content sent to a route that does not take it: %v", msgs[0])
