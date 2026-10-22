@@ -1477,20 +1477,20 @@ func (m *model) View() tea.View {
 		sb.WriteString("\n")
 	}
 	if m.login != nil {
-		sb.WriteString(m.loginPanel() + "\n")
+		sb.WriteString(m.panelSeparator() + m.loginPanel() + "\n")
 	} else if m.pick != nil {
-		sb.WriteString(m.pickerPanel() + "\n")
+		sb.WriteString(m.panelSeparator() + m.pickerPanel() + "\n")
 	} else if m.approval != nil {
 		rows := approvalDetailRows
 		if m.height > 0 {
 			// The picker rows sit above the command lines.
 			rows = min(rows, max(1, m.height-inputChrome-4-len(m.approval.options())))
 		}
-		sb.WriteString(approvalPanel(m.approval, max(20, m.width), rows, m.th, m.darkBG) + "\n")
+		sb.WriteString(m.panelSeparator() + approvalPanel(m.approval, max(20, m.width), rows, m.th, m.darkBG) + "\n")
 	} else if m.busy() {
 		sb.WriteString(m.activityLine() + "\n")
 	} else if d := m.dropdown(); d != nil {
-		sb.WriteString(m.dropdownPanel(d) + "\n")
+		sb.WriteString(m.panelSeparator() + m.dropdownPanel(d) + "\n")
 	}
 	if m.input.QuitArmed(m.now()) {
 		sb.WriteString(dim.Render("press ctrl+c again to quit") + "\n")
@@ -1674,9 +1674,11 @@ func (m *model) rule() string {
 	return m.th.ruleStyle(m.darkBG).Render(strings.Repeat("─", max(20, m.width))) + "\n"
 }
 
-// panelSeparator is the grey full-width line that opens a modal panel — the
-// picker, the login wizard: it is part of the panel, so it is on screen
-// exactly while the panel is (the accent input rules sit below it).
+// panelSeparator is the grey full-width line that opens every panel above the
+// input — the `/`-dropdown, the approval prompt, the picker and the login
+// wizard: the View draws it for whichever panel is up, so it separates the
+// scrollback from the panel and is on screen exactly while the panel is (the
+// accent input rules sit below it).
 func (m *model) panelSeparator() string {
 	return m.th.separatorStyle(m.darkBG).Render(strings.Repeat("─", max(20, m.width))) + "\n"
 }
