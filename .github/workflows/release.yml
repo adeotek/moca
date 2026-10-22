@@ -15,6 +15,16 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Release to build and publish: an existing tag (e.g. v0.7.6). Leave
+          empty to publish what the dispatched ref describes (git describe) —
+          which needs main to sit exactly on the tag. The input exists because
+          a fix to THIS workflow lands after the tag it publishes: dispatch
+          from main with version set instead of moving the tag.
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -52,32 +62,49 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          VERSION_INPUT: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          version="$(git describe --tags --always --dirty)"
+          if [ -n "$VERSION_INPUT" ]; then
+            version="$VERSION_INPUT"
+            # a release never invents a tag: the version it publishes has to
+            # exist already, so the assets name a commit that carries them
+            git rev-parse -q --verify "refs/tags/$version" >/dev/null || {
+              echo "version $version is not an existing tag — dispatch from that tag, or tag the commit first"; exit 1; }
+          else
+            version="$(git describe --tags --always --dirty)"
+          fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
           ext=""; [ "$GOOS" = "windows" ] && ext=".exe"
           mkdir -p dist/pkg
           CGO_ENABLED=0 go build -trimpath \
             -ldflags "-s -w -X github.com/adeotek/moca/internal/config.Version=$version" \
             -o "dist/pkg/moca$ext" ./cmd/moca
-          if [ "$GOOS" = "linux" ]; then
-            if [ "$GOARCH" = "$(go env GOHOSTARCH)" ]; then
-              # only the runner's own architecture can be executed here
-              out="$(./dist/pkg/moca --version)"
-              [ "$out" = "moca $version" ] || { echo "version stamp mismatch: $out (want moca $version)"; exit 1; }
-            else
-              # cross-compiled (linux/arm64): executing it on this runner is
-              # an Exec format error — check the binary is a well-formed
-              # build for the target architecture instead
-              file -b dist/pkg/moca | grep -qi aarch64 || { echo "not an aarch64 binary:"; file dist/pkg/moca; exit 1; }
-            fi
-          elif [ "$GOOS" = "windows" ] && [ "$GOARCH" = "arm64" ]; then
-            # Windows on ARM: a mislabelled package installs fine and then
-            # refuses to start, so check the PE machine type (the amd64
-            # package is the long-standing default and is left unchecked)
-            file -b dist/pkg/moca.exe | grep -qi 'arm64' || { echo "not an ARM64 PE binary:"; file dist/pkg/moca.exe; exit 1; }
+          # target_ok <path> <goos> <goarch>: the Go toolchain records the
+          # build target in the binary, and `go version -m` reads it from any
+          # Go binary whatever the host — unlike `file`, whose wording for the
+          # machine type drifts between magic databases ("ARM64" on Fedora 44,
+          # "Aarch64" on the Ubuntu runners, which failed v0.7.6's
+          # windows/arm64 job on a correctly built binary). A mislabelled
+          # package installs fine and then refuses to start, so every target is
+          # checked, not just the cross-compiled ones.
+          target_ok() {
+            go version -m "$1" | awk -v o="$2" -v a="$3" '
+              $1 == "build" && $2 == "GOOS=" o   { os = 1 }
+              $1 == "build" && $2 == "GOARCH=" a { arch = 1 }
+              END { exit !(os && arch) }'
+          }
+          if [ "$GOOS" = "linux" ] && [ "$GOARCH" = "$(go env GOHOSTARCH)" ]; then
+            # only the runner's own architecture can be executed here
+            out="$(./dist/pkg/moca --version)"
+            [ "$out" = "moca $version" ] || { echo "version stamp mismatch: $out (want moca $version)"; exit 1; }
           fi
+          target_ok "dist/pkg/moca$ext" "$GOOS" "$GOARCH" || {
+            echo "not a $GOOS/$GOARCH build:"
+            go version -m "dist/pkg/moca$ext"
+            file -b "dist/pkg/moca$ext"
+            exit 1
+          }
           cp LICENSE dist/pkg/
           ( cd dist/pkg
             if [ "$GOOS" = "windows" ]; then
@@ -122,9 +149,16 @@ jobs:
       - name: Create or update the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION_INPUT: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          version="$(git describe --tags --always --dirty)"
+          if [ -n "$VERSION_INPUT" ]; then
+            version="$VERSION_INPUT"
+            git rev-parse -q --verify "refs/tags/$version" >/dev/null || {
+              echo "version $version is not an existing tag — dispatch from that tag, or tag the commit first"; exit 1; }
+          else
+            version="$(git describe --tags --always --dirty)"
+          fi
           if gh release view "$version" >/dev/null 2>&1; then
             gh release upload "$version" dist/* --clobber
           elif git rev-parse -q --verify "refs/tags/$version" >/dev/null; then

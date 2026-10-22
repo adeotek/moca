@@ -25,6 +25,12 @@ A `moca acp` session in Zed on Windows 11 failed at `session/new` with `Incoming
 - **A handler panic killed the server silently.** The request goroutine, the notification path (which runs on the read loop) and a deferred follow-up now recover, log the panic with its stack to the diagnostic log, and answer `-32603 internal error in <method>: <panic>`; the connection keeps serving. Verified live: an injected panic in `session/new` answers the editor and the process stays up (`TestHandlerPanicAnswersAndKeepsServing`, plus the deferred and notification variants).
 - **Nothing is written to stderr under ACP.** The editor owns that pipe, and Zed on Windows has been reported to lose — even kill — a child over a write to it: a diagnostic log that cannot be opened no longer warns there, a serve error goes to the log, and the log's `mode` field now says `acp` rather than `tui`.
 
+### The release job that publishes it
+
+The first `Release` dispatch failed on windows/arm64 with `not an ARM64 PE binary:` followed by `file`'s description of a perfectly good AArch64 PE — the check grepped for `ARM64` and the Ubuntu runners' magic database says `Aarch64` (this Fedora host's says `ARM64`, which is how it passed locally when the row was written). Every package is now checked against the target the compiler recorded in its build info (`build GOOS=`/`GOARCH=` via `go version -m`), which reads any Go binary whatever the host and cannot drift with a magic file; windows/amd64 is checked too, since a mislabelled package installs fine and then refuses to start.
+
+The dispatch also takes an optional `version` input — an existing tag to publish, refused when no tag carries it. A fix to the release workflow lands *after* the tag it publishes, so without that input the choice was "move the tag" or "publish a draft named `v0.7.6-1-g…`"; with it, `main` publishes `v0.7.6` and fills in the release.
+
 ### Windows on ARM joins the published packages
 
 The Release workflow now publishes **four** packages: `moca-<version>-windows-arm64.zip` next to linux/amd64, linux/arm64 and windows/amd64, all built by the same manual dispatch and covered by the same `checksums.txt`.
