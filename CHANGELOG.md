@@ -2,6 +2,21 @@
 
 ## v0.7.6 (2026-10-22)
 
+### The reasoning echo actually goes out
+
+DeepSeek's thinking mode refuses a replayed assistant turn that drops the reasoning it produced — `HTTP 400 … The reasoning_content in the thinking mode must be passed back to the API`, and the run is dead. v0.7.2 added the echo for the four DeepSeek rows and **it never fired**.
+
+- **The seam was a broken comparison, not a missing feature.** The completions adapter compared a persisted thinking block's `Model` against `req.Model` — the *bare* id (`deepseek-v4.1-flash`) — while the agent stamps the block with the *qualified* one (`opencode-go/deepseek-v4.1-flash`) when it persists it. Nothing matched, so every request went out with the reasoning stripped. The adapter now compares the qualified id, exactly like the anthropic and responses adapters already did.
+- **The pin was why it survived a release.** `TestCompletionsReplaysReasoningContent` stamped its fixture with the bare id, so it agreed with the bug. It now stamps what the agent actually persists, and `TestRequestReplaysReasoningContent` drives a whole run over a scripted provider and asserts both the field on the second request and the qualified stamp in the transcript — it fails with the old comparison restored.
+- **Found on the wire, not in the code.** A logging tee in front of the zen go route resumed one recorded four-step session with HEAD and with the fixed tree and compared the first request of each — same stored history (six of seven assistant turns carrying thinking), so the binary was the only variable: HEAD replayed **0 of 7** turns with `reasoning_content`, the fixed tree **6 of 7** (the seventh never reasoned). A single-turn capture looked like the same symptom earlier and proved nothing — a turn that never reasoned and one whose reasoning was dropped are identical on the wire — which is why the A/B resumes a recorded transcript. Replaying a real 38-message transcript stripped the same way returned 200 on 24 routing shards: the gateway is lenient for this account today and the strictness lives in an upstream it reaches sometimes, so the shape is fixed against the documented requirement. §15 records the A/B.
+
+### A compaction no longer strips thinking a route needs back
+
+A compaction's kept tail is rebuilt without its thinking blocks — the summary stands in for that stretch. That is fine for a route that never sees the field, and it is the same 400 one compaction later on a route that requires it.
+
+- `Model.KeepsTailThinking()` (history-bound **or** `ReplayReasoning`) now gates the strip: a preserved-thinking route keeps the tail verbatim for the prefix-binding reason it always did, and a reasoning-required route keeps it because its own tool-call turns must carry `reasoning_content` back. Everything else still strips.
+- Pins: `TestKeptTailThinkingFollowsTheRoute` (an agent request over a crafted compacted transcript, both routes) and `TestKeepsTailThinkingFollowsReasoningReplay` (structural — every `ReplayReasoning` row must answer yes, so a new row cannot half-register).
+
 ### Windows on ARM joins the published packages
 
 The Release workflow now publishes **four** packages: `moca-<version>-windows-arm64.zip` next to linux/amd64, linux/arm64 and windows/amd64, all built by the same manual dispatch and covered by the same `checksums.txt`.

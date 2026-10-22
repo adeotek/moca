@@ -49,16 +49,18 @@ func Messages(entries []Entry) []llm.Message { return MessagesWith(entries, nil,
 //     later request and a /plan toggle never rewrites history (§14). Per-entry
 //     placement is deliberate: one envelope anchored at the end of the merged
 //     message would move as soon as a second flagged entry merged in.
-//   - historyBound: a preserved-thinking route binds the history to the exact
-//     prefix it produced, so the kept tail — assistant entries positioned
-//     before the latest compaction — replays verbatim, thinking blocks
-//     included. Everywhere else the kept tail's thinking is stripped: the
-//     summary already stands in for that stretch, and replaying its thinking
-//     buys no reasoning. The one exception is the tail's last assistant turn
-//     when it made tool calls (openToolTurn). Post-compaction turns keep
-//     theirs either way (the strip is scoped to entries before the
+//   - keepTailThinking: the route must get the kept tail's thinking back, so
+//     the tail — assistant entries positioned before the latest compaction —
+//     replays verbatim, thinking blocks included. Two callers answer yes: a
+//     preserved-thinking route, which binds the history to the exact prefix it
+//     produced, and a route that requires its reasoning echoed (provider.Model
+//     .KeepsTailThinking). Everywhere else the kept tail's thinking is
+//     stripped: the summary already stands in for that stretch, and replaying
+//     its thinking buys no reasoning. The one exception is the tail's last
+//     assistant turn when it made tool calls (openToolTurn). Post-compaction
+//     turns keep theirs either way (the strip is scoped to entries before the
 //     compaction boundary).
-func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, historyBound bool) []llm.Message {
+func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, keepTailThinking bool) []llm.Message {
 	var out []llm.Message
 	start, compactionIdx := 0, -1
 	if c, idx := LatestCompaction(entries); c != nil {
@@ -78,7 +80,7 @@ func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, history
 		}
 		appendUser(&out, llm.ContentBlock{Type: llm.BlockText, Text: SummaryPrefix + "\n" + c.Summary})
 	}
-	stripThinking := !historyBound && compactionIdx >= 0
+	stripThinking := !keepTailThinking && compactionIdx >= 0
 	keepIdx := -1
 	if stripThinking {
 		keepIdx = openToolTurn(entries, start, compactionIdx)

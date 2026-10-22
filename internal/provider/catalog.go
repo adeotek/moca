@@ -50,6 +50,17 @@ func (m Model) Qualified() string { return m.Provider + "/" + m.ID }
 // rows ride the same adapter and are covered by the no-vendor-keys item.
 func (m Model) HistoryBound() bool { return m.ThinkingMode == "adaptive" }
 
+// KeepsTailThinking reports whether a compaction's kept tail must replay its
+// thinking blocks instead of being stripped (§14, B1.2). Two kinds of route
+// need it, for different reasons: a preserved-thinking route binds the request
+// to the prefix its reasoning was produced against (HistoryBound), and a route
+// that requires its reasoning echoed back on the wire (ReplayReasoning —
+// DeepSeek's thinking mode: "the intermediate assistant's reasoning_content
+// must be passed back ... in all subsequent user interaction turns") rejects a
+// history whose own tool-call turns lost the field. 400 either way, and the
+// strip is a rewrite of exactly that history.
+func (m Model) KeepsTailThinking() bool { return m.HistoryBound() || m.ReplayReasoning }
+
 func (m Model) ClampEffort(e llm.Effort) llm.Effort {
 	if m.ThinkingMode == "none" || len(m.ThinkingLevelMap) == 0 {
 		return llm.EffortOff
