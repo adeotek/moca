@@ -269,6 +269,70 @@ func TestPickerSeparatorRule(t *testing.T) {
 	}
 }
 
+// Every panel above the input opens with the same grey rule (§3.5) — the
+// `/`-dropdown, the approval prompt and the picker alike (the login wizard has
+// its own pin): the line separates the scrollback from the panel, and the two
+// accent input rules stay below it. The activity row is not a panel.
+func TestEveryPanelOpensWithTheSeparatorRule(t *testing.T) {
+	const grey = "38;2;91;99;107"   // #5b636b separator
+	const accent = "38;2;217;119;6" // #d97706 input rules
+	cases := []struct {
+		name  string
+		open  func(m *model)
+		first string // the panel's first content line, right under the rule
+	}{
+		{"dropdown", func(m *model) {
+			m.input.Insert("/")
+			m.syncTextarea()
+		}, "❯"},
+		{"approval", func(m *model) {
+			m.approval = &approvalState{approvalMsg: approvalMsg{
+				q:     tools.Question{Kind: "shell", Subject: "python3", CanAlways: true},
+				reply: make(chan tools.Answer, 1),
+			}}
+		}, "? allow `python3`?"},
+		{"picker", func(m *model) {
+			m.openPicker(&pickState{title: "pick one", items: []pickItem{{key: "a", label: "first"}}})
+		}, "? pick one"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel()
+			tc.open(m)
+			v := m.View().Content
+			rules := fullWidthRules(v)
+			if len(rules) != 3 {
+				t.Fatalf("want the panel's rule + two input rules, got %d:\n%s", len(rules), v)
+			}
+			if !strings.Contains(rules[0], grey) {
+				t.Fatalf("the panel's rule must be the separator grey: %q", rules[0])
+			}
+			for _, l := range rules[1:] {
+				if !strings.Contains(l, accent) {
+					t.Fatalf("input rule lost the accent: %q", l)
+				}
+			}
+			lines := strings.Split(v, "\n")
+			idx := -1
+			for i, l := range lines {
+				if l == rules[0] {
+					idx = i
+					break
+				}
+			}
+			if idx < 0 || !strings.Contains(ansi.Strip(lines[idx+1]), tc.first) {
+				t.Fatalf("the grey rule must sit directly above the panel's first line %q:\n%s", tc.first, v)
+			}
+		})
+	}
+	// The activity row is a status line, not a panel: it opens no rule.
+	m := newTestModel()
+	m.running = true
+	if got := fullWidthRules(m.View().Content); len(got) != 2 {
+		t.Fatalf("%d rules with the activity row up, want 2", len(got))
+	}
+}
+
 // A skill invoked by name starts a run whose message points the agent at
 // the skill's path — the scrollback echoes it, exactly like a prompt
 // template's expansion.

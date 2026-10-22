@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.7.5 (2026-10-22)
+
+### Every panel opens with its own rule
+
+The grey line above a picker was never a property of the picker — it was drawn by two of the four panel builders, so the two it forgot never had one. The `/`-dropdown (what `/model` and `/effort` show the moment they are typed) and the approval prompt — the panels you see most — opened straight into their rows, with nothing separating them from the scrollback above.
+
+- **The View owns the rule now**, drawn for whichever panel is up: the `/`-dropdown, the approval prompt, the picker (`/model`/`/resume`/`/sessions`) and the `/login` wizard. The builders no longer draw their own, so the four cannot drift apart again, and the rule lives exactly as long as the panel does. The activity row is a status line, not a panel, and opens none.
+- It is the theme's `statusSep` grey, full width; the two accent-orange rules framing the input stay where they were.
+
+### The seeded graphify skill follows upstream
+
+`rtk` and `graphify` are planted once, when nothing exists at `~/.config/moca/skills/<name>`, and are never rewritten after that — so what the binary embeds is what the next fresh install gets.
+
+- **graphify 0.9.90 → 0.9.93** (`SKILL.md` from upstream's `skill.md` + `references/*.md`, the `claude` bundle). The three moved references carry real behaviour: chunking is bounded by lines as well as file count (a 6000-line cap, a long file alone in its chunk), a subagent's partly-read file is now verified against its real length and cached as partial so the next `--update` retries it instead of keeping a half-read file forever, and the Neo4j/FalkorDB exports push to the URI actually supplied rather than a localhost example.
+- **rtk: no change.** The bundled rtk skill is moca's own text, not upstream's; every command it teaches was re-checked against rtk 1.0.1 (`rtk git status`, `rtk test go test …`, `rtk err`, `rtk summary`, `rtk run`, `rtk proxy`, `rtk docker ps`) and still behaves as documented.
+- An existing seeded copy is **not** refreshed by this release — replace it by hand (`graphify install --platform claude` then copy the directory, see `docs/specs/external-tools.md`) if you want the new text on a machine that already has the old one.
+
 ## v0.7.4 (2026-10-21)
 
 ### A warning has to refuse the command before it names it

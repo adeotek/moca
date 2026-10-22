@@ -48,7 +48,7 @@ quoting model or option tables; the Unix analyser stays the reference.
 
 `graphify` (codebase knowledge graph) is in the default allowlist, and its
 skill is seeded like rtk's: on start moca plants the bundled copy (graphify
-0.9.90: `SKILL.md` + `references/*.md`, the `claude` bundle the moca platform
+0.9.93: `SKILL.md` + `references/*.md`, the `claude` bundle the moca platform
 entry reuses — Apache-2.0 OR MIT) in `~/.config/moca/skills/graphify/` when
 nothing exists at that path. An existing skill — yours, or an empty directory
 kept as an opt-out — is never touched, and moca never refreshes it, so to
