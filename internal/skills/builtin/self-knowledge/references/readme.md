@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/adeotek/moca/main/install.sh | bash
 irm https://raw.githubusercontent.com/adeotek/moca/main/install.ps1 | iex
 ```
 
-Re-running is safe — an existing installation is updated in place, never an error. `--version vX.Y.Z` / `-Version` pins a release, `--dir <path>` / `-Dir` picks the target directory, `--help` / `-?` prints usage. Packages for linux/amd64, linux/arm64 and windows/amd64 are on the [releases page](https://github.com/adeotek/moca/releases) (published by a manual **Release** workflow run — Actions → Release → Run workflow); other platforms (e.g. darwin) build from source with `make release`.
+Re-running is safe — an existing installation is updated in place, never an error. `--version vX.Y.Z` / `-Version` pins a release, `--dir <path>` / `-Dir` picks the target directory, `--help` / `-?` prints usage. Packages for linux/amd64, linux/arm64, windows/amd64 and windows/arm64 are on the [releases page](https://github.com/adeotek/moca/releases) (published by a manual **Release** workflow run — Actions → Release → Run workflow); other platforms (e.g. darwin) build from source with `make release`.
 
 **Self-update** — an installed moca updates itself from the same releases:
 

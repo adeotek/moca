@@ -33,7 +33,7 @@ fmt:
 # Cross-compiled release binaries (no cgo): dist/moca-<version>-<os>-<arch>[.exe]
 release:
 	@mkdir -p dist
-	@for p in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; do \
+	@for p in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64 windows/arm64; do \
 	  os=$${p%/*}; arch=$${p#*/}; ext=$$( [ $$os = windows ] && echo .exe ); \
 	  GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GORUN) build -trimpath -ldflags "$(LDFLAGS)" \
 	    -o dist/moca-$(VERSION)-$$os-$$arch$$ext ./cmd/moca || exit 1; \

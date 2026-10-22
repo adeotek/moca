@@ -83,7 +83,7 @@ if ($Uninstall -or $RemoveData) {
 switch ($env:PROCESSOR_ARCHITECTURE) {
     'AMD64' { $arch = 'amd64' }
     'ARM64' { $arch = 'arm64' }
-    default { throw "unsupported architecture: $env:PROCESSOR_ARCHITECTURE (windows/amd64 is published; 32-bit is not)" }
+    default { throw "unsupported architecture: $env:PROCESSOR_ARCHITECTURE (windows/amd64 and windows/arm64 are published; 32-bit is not)" }
 }
 
 # Tolerate both "0.2.0-beta" and "v0.2.0-beta".
