@@ -259,7 +259,7 @@ func (a *Agent) contextTokensLocked() int {
 		return a.anchorTokens + compact.Tokens(n)
 	}
 	return compact.Tokens(compact.RequestChars(a.opts.System, a.opts.Tools.Specs(),
-		TransformHistory(session.MessagesWith(a.entries, planExtra, a.model.HistoryBound()), a.model.Qualified())))
+		TransformHistory(session.MessagesWith(a.entries, planExtra, a.model.KeepsTailThinking()), a.model.Qualified())))
 }
 
 func (a *Agent) Status() Status {

@@ -336,7 +336,7 @@ func (a *Agent) request(choice llm.ToolChoice) llm.Request {
 	// the plan envelope per flagged entry (B1.1) and keeps the kept tail's
 	// thinking verbatim on a preserved-thinking route (B1.2).
 	a.mu.Lock()
-	msgs := session.MessagesWith(a.entries, planExtra, a.model.HistoryBound())
+	msgs := session.MessagesWith(a.entries, planExtra, a.model.KeepsTailThinking())
 	a.mu.Unlock()
 	return llm.Request{
 		Model:      a.model.ID,
