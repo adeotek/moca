@@ -103,8 +103,9 @@ func (m *model) pickKey(k tea.KeyPressMsg) tea.Cmd {
 // pickRows caps the rendered list.
 const pickRows = 10
 
-// pickerPanel renders the panel's own separator, the question (or the delete
-// confirmation) and the visible window of rows.
+// pickerPanel renders the question (or the delete confirmation) and the
+// visible window of rows. The View opens it with the panel separator, so
+// every panel above the input starts the same way.
 func (m *model) pickerPanel() string {
 	p := m.pick
 	limit := pickRows
@@ -113,7 +114,6 @@ func (m *model) pickerPanel() string {
 	}
 	start, end := windowRange(p.cursor, len(p.items), limit)
 	var b strings.Builder
-	b.WriteString(m.panelSeparator())
 	if p.confirm {
 		q := "delete this entry?"
 		if p.confirmPrompt != nil && p.cursor >= 0 && p.cursor < len(p.items) {
