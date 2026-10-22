@@ -48,20 +48,22 @@ func TestNewSessionWithoutModel(t *testing.T) {
 	o.ConfigPath = "/cfg/config.jsonc"
 	c := startClient(t, o)
 	_, err := c.call("session/new", NewSessionRequest{Cwd: t.TempDir()})
-	if err == nil || err.Code != codeAuthRequired || !strings.Contains(err.Message, "moca login") || !strings.Contains(err.Message, "/cfg/config.jsonc") {
+	// A plain error, not ACP's auth-required: moca advertises no auth methods,
+	// so an editor has nothing to call and renders a dead-end prompt (§9.5).
+	if err == nil || err.Code != codeInternal || !strings.Contains(err.Message, "moca login") || !strings.Contains(err.Message, "/cfg/config.jsonc") {
 		t.Fatalf("%+v", err)
 	}
 }
 
 // A model whose provider has no credential must not open a session that
-// fails on every prompt (the TUI refuses the same switch): -32000, naming
+// fails on every prompt (the TUI refuses the same switch): -32603, naming
 // the fix. Resume/load keep their own check (agent.Resume, stored model).
 func TestNewSessionWithoutCredential(t *testing.T) {
 	o := testOptions(t, newScript(t))
 	o.Config.Model = "other/x" // MOCA_T_OTHER is empty: no env key, no stored login
 	c := startClient(t, o)
 	_, err := c.call("session/new", NewSessionRequest{Cwd: t.TempDir()})
-	if err == nil || err.Code != codeAuthRequired || !strings.Contains(err.Message, "moca login other") {
+	if err == nil || err.Code != codeInternal || !strings.Contains(err.Message, "moca login other") {
 		t.Fatalf("%+v", err)
 	}
 	// An unknown model (a config typo) is refused the same way: it is not a
@@ -70,7 +72,7 @@ func TestNewSessionWithoutCredential(t *testing.T) {
 	o2.Config.Model = "fake/nope"
 	c2 := startClient(t, o2)
 	_, err = c2.call("session/new", NewSessionRequest{Cwd: t.TempDir()})
-	if err == nil || err.Code != codeAuthRequired || !strings.Contains(err.Message, "not in the catalog") {
+	if err == nil || err.Code != codeInternal || !strings.Contains(err.Message, "not in the catalog") {
 		t.Fatalf("unknown model: %+v", err)
 	}
 }

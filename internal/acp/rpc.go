@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"runtime/debug"
 	"strconv"
 	"sync"
 )
@@ -166,14 +168,16 @@ func (c *Conn) dispatch(ctx context.Context, line []byte) {
 			c.serveRequest(reqCtx, m)
 		}()
 	case m.Method != "":
-		c.h.Notify(ctx, m.Method, m.Params)
+		guardPanic("acp: notification handler panicked", m.Method, func() {
+			c.h.Notify(ctx, m.Method, m.Params)
+		})
 	case len(m.ID) > 0:
 		c.deliver(m)
 	}
 }
 
 func (c *Conn) serveRequest(ctx context.Context, m message) {
-	res, err := c.h.Request(ctx, m.Method, m.Params)
+	res, err := c.callHandler(ctx, m)
 	var then func()
 	if d, ok := res.(Deferred); ok {
 		res, then = d.Result, d.Then
@@ -197,8 +201,39 @@ func (c *Conn) serveRequest(ctx context.Context, m message) {
 	}
 	c.write(out)
 	if then != nil && out.Error == nil {
-		then()
+		guardPanic("acp: deferred follow-up panicked", m.Method, then)
 	}
+}
+
+// callHandler runs one handler with a panic guard. A handler bug must answer
+// the client with -32603 and reach the log file — not kill the process. In an
+// editor that is the difference between a visible error and "Incoming
+// transport closed: {reason: incoming_transport_closed, method: session/new}",
+// and it is the only report an external agent gets to make: Zed on Windows has
+// been reported to lose (and even kill a child over) a write to the stderr
+// pipe it provides, so a panic trace there is not a reliable channel.
+func (c *Conn) callHandler(ctx context.Context, m message) (res any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("acp: handler panicked", "method", m.Method, "panic", fmt.Sprint(r),
+				"stack", string(debug.Stack()))
+			res, err = nil, &RPCError{Code: codeInternal,
+				Message: fmt.Sprintf("internal error in %s: %v", m.Method, r)}
+		}
+	}()
+	return c.h.Request(ctx, m.Method, m.Params)
+}
+
+// guardPanic runs fn, logging a panic instead of letting it take the process
+// down (the same rule as callHandler: the client keeps its connection, the log
+// keeps the stack).
+func guardPanic(what, method string, fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error(what, "method", method, "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
+		}
+	}()
+	fn()
 }
 
 // cancelInflight serves $/cancel_request: the named request's context is

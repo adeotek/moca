@@ -196,7 +196,13 @@ func (srv *Server) sessionConfig(cwd string, requireModel bool) (config.Config, 
 		cfg.Model = srv.opts.Model
 	}
 	if requireModel && cfg.Model == "" {
-		return cfg, false, &RPCError{Code: codeAuthRequired, Message: fmt.Sprintf(
+		// -32603, not ACP's auth-required: initialize advertises no auth
+		// methods (moca's credentials live outside the editor, §9.5), so a
+		// "you must authenticate" answer leaves the client with nothing to
+		// call — Zed shows an auth prompt it cannot complete and the session
+		// request dies as a transport error. A plain error carrying the fix
+		// reaches the user as itself.
+		return cfg, false, &RPCError{Code: codeInternal, Message: fmt.Sprintf(
 			"no model configured: run `moca login <provider>` in a terminal, then set \"model\" in %s (or pass --model to `moca acp`)", srv.opts.ConfigPath)}
 	}
 	trusted := true
@@ -218,10 +224,11 @@ func (srv *Server) sessionConfig(cwd string, requireModel bool) (config.Config, 
 }
 
 // checkModel rejects a session whose configured model is unknown or whose
-// provider has no usable credential, before anything starts: the editor gets
-// ACP's "authentication required" carrying moca's fix, instead of a session
-// whose every prompt fails. A stored session uses its own model, which
-// agent.Resume checks.
+// provider has no usable credential, before anything starts. Both are -32603
+// with moca's own fix in the message (run `moca login`, name the model): the
+// client cannot act on ACP's auth-required, because moca advertises no auth
+// methods (§9.5) — an editor renders "Authentication required" over a
+// prompt it has no method to complete.
 func (srv *Server) checkModel(cfg config.Config) error {
 	// F-1 (ACP side): the --model flag is applied, and a local provider it
 	// names is added, before anything validates the model.
@@ -233,7 +240,7 @@ func (srv *Server) checkModel(cfg config.Config) error {
 	}
 	reg, err := provider.NewRegistry(cfg, srv.opts.HTTP, nil)
 	if err != nil {
-		return &RPCError{Code: codeAuthRequired, Message: err.Error()}
+		return &RPCError{Code: codeInternal, Message: err.Error()}
 	}
 	// F-2: a configured ollama is discovered first. Without this, a local
 	// model that is running right now was reported as "unknown model" and the
@@ -244,7 +251,7 @@ func (srv *Server) checkModel(cfg config.Config) error {
 		}
 	}
 	if err := reg.CheckCredential(cfg.Model); err != nil {
-		return &RPCError{Code: codeAuthRequired, Message: err.Error()}
+		return &RPCError{Code: codeInternal, Message: err.Error()}
 	}
 	return nil
 }

@@ -77,6 +77,18 @@ type Options struct {
 
 type usageError struct{ error }
 
+// logMode names the run in the diagnostic log: acp, oneshot or tui. ACP is its
+// own case because that channel forbids stderr writes entirely (§9.5).
+func (o Options) logMode() string {
+	switch {
+	case len(o.Sub) > 0 && o.Sub[0] == "acp":
+		return "acp"
+	case o.OneShot || o.Execute != "":
+		return "oneshot"
+	}
+	return "tui"
+}
+
 // cliModes are the --mode values — the permission modes plus plan (the plan
 // scope, which rides on ask; the agent enforces the pairing). The set is
 // config.PermModes plus the legacy `default`, which v0.7.1 and earlier printed

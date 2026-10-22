@@ -35,11 +35,20 @@ func (h *echoHandler) Request(ctx context.Context, method string, params json.Ra
 		return Deferred{Result: map[string]int{"n": 1}, Then: func() { close(h.then) }}, nil
 	case "bad":
 		return nil, invalidParams("bad %s", "input")
+	case "panic":
+		// A handler bug must not take the process (and the client's transport)
+		// down: the Conn answers -32603 and keeps serving.
+		panic("boom")
+	case "panic-then":
+		return Deferred{Result: map[string]int{"n": 2}, Then: func() { panic("then boom") }}, nil
 	}
 	return nil, &RPCError{Code: codeMethodNotFound, Message: "method not found: " + method}
 }
 
 func (h *echoHandler) Notify(ctx context.Context, method string, params json.RawMessage) {
+	if method == "npanic" {
+		panic("notify boom")
+	}
 	h.mu.Lock()
 	h.notes = append(h.notes, method)
 	h.mu.Unlock()
@@ -245,5 +254,56 @@ func TestCallCascadesCancel(t *testing.T) {
 	}
 	if err := <-got; !errors.Is(err, context.Canceled) {
 		t.Fatalf("Call: %v", err)
+	}
+}
+
+// A handler panic is a bug, not a reason to kill the client's transport: the
+// request is answered -32603 and the connection keeps serving. This is the
+// shape an editor sees as "Incoming transport closed" when it is missing, and
+// an external agent has no stderr to explain itself on (Zed on Windows).
+func TestHandlerPanicAnswersAndKeepsServing(t *testing.T) {
+	_, in, sc, done := pipePeer(t, &echoHandler{})
+	io.WriteString(in, `{"jsonrpc":"2.0","id":1,"method":"panic"}`+"\n")
+	m := readMsg(t, sc)
+	code, _ := m["error"].(map[string]any)["code"].(float64)
+	if m["id"] != float64(1) || int(code) != codeInternal {
+		t.Fatalf("a panicking handler must answer -32603: %v", m)
+	}
+	if msg, _ := m["error"].(map[string]any)["message"].(string); !strings.Contains(msg, "boom") {
+		t.Fatalf("the panic value belongs in the message: %v", m)
+	}
+	io.WriteString(in, `{"jsonrpc":"2.0","id":2,"method":"echo","params":3}`+"\n")
+	if m := readMsg(t, sc); m["id"] != float64(2) || m["result"] != float64(3) {
+		t.Fatalf("connection unusable after a panic: %v", m)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("serve ended after a recovered panic: %v", err)
+	default:
+	}
+}
+
+// A panic in a notification handler runs on the read loop: recover it there
+// too, or one bad notification stops every later request.
+func TestNotificationPanicKeepsTheLoop(t *testing.T) {
+	_, in, sc, _ := pipePeer(t, &echoHandler{})
+	io.WriteString(in, `{"jsonrpc":"2.0","method":"npanic"}`+"\n")
+	io.WriteString(in, `{"jsonrpc":"2.0","id":1,"method":"echo","params":"after"}`+"\n")
+	if m := readMsg(t, sc); m["id"] != float64(1) || m["result"] != "after" {
+		t.Fatalf("notification panic took the loop down: %v", m)
+	}
+}
+
+// A deferred follow-up runs after its response is written; a panic there is
+// logged, not fatal — the client already has its result.
+func TestDeferredPanicKeepsServing(t *testing.T) {
+	_, in, sc, _ := pipePeer(t, &echoHandler{})
+	io.WriteString(in, `{"jsonrpc":"2.0","id":1,"method":"panic-then"}`+"\n")
+	if m := readMsg(t, sc); m["id"] != float64(1) || m["result"].(map[string]any)["n"] != float64(2) {
+		t.Fatalf("result before the panic: %v", m)
+	}
+	io.WriteString(in, `{"jsonrpc":"2.0","id":2,"method":"echo","params":4}`+"\n")
+	if m := readMsg(t, sc); m["id"] != float64(2) || m["result"] != float64(4) {
+		t.Fatalf("connection unusable after a deferred panic: %v", m)
 	}
 }

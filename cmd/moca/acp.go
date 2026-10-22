@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -71,7 +72,10 @@ func runACP(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 	err = acp.Serve(ctx, stdin, stdout, acp.Options{Config: cfg, ConfigPath: cfgPath, Model: *model, Effort: *effort,
 		Mode: *mode, Trust: trust, Version: config.Version})
 	if err != nil && ctx.Err() == nil {
-		fmt.Fprintln(stderr, "moca:", err)
+		// The log, never stderr: the editor owns that pipe, and on Windows a
+		// write to it has been reported to take the child down with it
+		// (SPECS §9.5). The exit code is the contract a wrapper reads.
+		slog.Error("acp: serve stopped", "err", err)
 		return exitRuntime
 	}
 	return exitOK
