@@ -161,6 +161,36 @@ func TestHistoryBoundIsAdaptiveOnly(t *testing.T) {
 	}
 }
 
+// TestKeepsTailThinkingFollowsReasoningReplay: a compaction's kept tail keeps
+// its thinking blocks on the routes that need them back — a preserved-thinking
+// route binds the prefix, a reasoning-required route refuses a history where
+// its own turns lost reasoning_content — and nowhere else (the strip is the
+// token saving there). Structural, so a new row cannot half-register: every
+// ReplayReasoning row must answer yes.
+func TestKeepsTailThinkingFollowsReasoningReplay(t *testing.T) {
+	byID := map[string]Model{}
+	for _, m := range builtinCatalog {
+		byID[m.Qualified()] = m
+		if m.ReplayReasoning && !m.KeepsTailThinking() {
+			t.Fatalf("%s requires reasoning replay but would strip the kept tail", m.Qualified())
+		}
+		if m.HistoryBound() && !m.KeepsTailThinking() {
+			t.Fatalf("%s is history-bound but would strip the kept tail", m.Qualified())
+		}
+	}
+	for _, id := range []string{"opencode-go/deepseek-v4.1-flash", "opencode-go/deepseek-v4-flash",
+		"opencode-go/deepseek-v4-pro", "opencode-go/deepseek-v4-flash-vision-exp"} {
+		if !byID[id].ReplayReasoning || !byID[id].KeepsTailThinking() {
+			t.Fatalf("%s must replay reasoning and keep the kept tail's thinking", id)
+		}
+	}
+	for _, id := range []string{"opencode-go/glm-5.3-flash", "opencode-go/glm-5.3", "opencode-go/kimi-k3"} {
+		if byID[id].KeepsTailThinking() {
+			t.Fatalf("%s must strip the kept tail (it needs no reasoning back)", id)
+		}
+	}
+}
+
 // TestAdaptiveMapIncludesXHigh (B1.2): the adaptive map accepts xhigh, so the
 // clamp no longer pulls it down to high.
 func TestAdaptiveMapIncludesXHigh(t *testing.T) {
