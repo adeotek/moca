@@ -248,6 +248,40 @@ func TestOllamaChatWithoutKey(t *testing.T) {
 	}
 }
 
+// TestNewRegistryNilClientUsesDefault: a nil client means the default one,
+// for discovery and for the adapters. `moca acp` built its model-check
+// registry from Options.HTTP, which only tests set, so with providers.ollama
+// configured every session/new dereferenced a nil *http.Client in discovery
+// and answered -32603 (v0.7.8, reported from Zed on Windows).
+func TestNewRegistryNilClientUsesDefault(t *testing.T) {
+	f := newFakeOllama(t)
+	f.tags = []string{"llama3.1:8b"}
+	f.show["llama3.1:8b"] = ollamaShow{Capabilities: []string{"completion", "tools"}}
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // an empty credential store
+	r, err := NewRegistry(mustCfg(t, `{"providers":{"ollama":{"baseUrl":"`+f.URL+`"}}}`), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.getenv = func(string) string { return "" }
+	// The default is the header-bounded client, not http.DefaultClient: a
+	// registry built without one still cannot hang on a silent provider.
+	if tr, ok := r.hc.Transport.(*http.Transport); !ok || tr.ResponseHeaderTimeout != headerTimeout {
+		t.Fatalf("default client: %#v", r.hc)
+	}
+	d, err := r.DiscoverOllama(context.Background())
+	if err != nil || strings.Join(d.Models, " ") != "llama3.1:8b" {
+		t.Fatalf("discovery: %+v %v", d, err)
+	}
+	_, a, err := r.Resolve("ollama/llama3.1:8b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Stream(context.Background(), llm.Request{Model: "llama3.1:8b", MaxTokens: 10,
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "hi"}}}}}, func(llm.Event) {}); err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+}
+
 func TestOllamaServerDown(t *testing.T) {
 	f := newFakeOllama(t)
 	url := f.URL

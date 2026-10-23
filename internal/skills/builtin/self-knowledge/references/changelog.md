@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.10 (2026-10-24)
+
+### The ACP model check runs on a real HTTP client
+
+A v0.7.8 regression, reported from Zed on Windows: with `providers.ollama` configured, every `session/new` and `authenticate` answered `-32603 internal error … nil pointer dereference`, so even an editor whose user never intended any ollama path failed on its first prompt.
+
+- `moca acp` never sets `Options.HTTP` — the field is commented "tests" and only tests did. The model check (`authenticate`, and the `session/new` provider validation it shares) built its registry straight from that nil client; with ollama configured the check runs `DiscoverOllama` first and made an HTTP request **through the nil client** — a nil `*http.Client` dereference inside the handler. The agent path never failed because `agent.Start` always substituted its own default.
+- The fix is at the one choke point every caller passes through, not in the caller: `provider.NewRegistry` substitutes its own default when `hc` is nil — the same header-bounded client (120 s response-header bound, cloned from `http.DefaultTransport`) §7 already specifies, now **built once per process** (`sync.OnceValue`), so the ACP path's per-session registries share one connection pool instead of one transport each. `agent.Start`'s own substitution collapsed into it (`internal/agent` no longer builds an HTTP client; `tools`/other tests keep injecting theirs).
+- Pins: `TestModelCheckWithOllamaConfigured` (a real ACP client with nil `Options.HTTP`, a configured ollama; `authenticate` and `session/new` succeed and the fake `/api/tags` must have been hit — verified failing against the v0.7.8 tree by construction, it was the reported failure); `TestNewRegistryNilClientUsesDefault` (a nil client resolves to the bounded transport, not `http.DefaultClient`, and discovery → resolve → stream all run through it); and the moved-and-sharpened `TestDefaultHTTPClientBoundsHeaderWait` (now also pins that the default is one shared instance). +2 tests.
+
 ## v0.7.9 (2026-10-23)
 
 ### The distribution channels have renderers, and the Homebrew tap is live
