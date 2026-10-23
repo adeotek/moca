@@ -29,7 +29,7 @@ type Options struct {
 	// trusts every workdir (tests).
 	Trust   func(cwd string) (bool, error)
 	Version string
-	HTTP    *http.Client // tests
+	HTTP    *http.Client // nil = the provider default (cmd/moca); tests inject one
 
 	testEmit func(*session) // tests only: runs on a new session once it is ready
 }
