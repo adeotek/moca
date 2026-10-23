@@ -10,10 +10,17 @@ follow the published naming contract (`moca-<tag>-<goos>-<goarch>.tar.gz|zip`), 
 tag whose packages are not all published yields URLs that 404 — the script says so
 when `--verify` is passed and a HEAD request fails.
 
-The registry requires a `binary` distribution covering darwin, linux and windows
-(CI rejects a subset), a 16x16 monochrome `currentColor` icon, and an agent whose
-`initialize` returns at least one `authMethods` entry. moca satisfies all three from
-v0.7.8 on; on an older tag the darwin entries have nothing to point at.
+The registry's requirements, all of which this script encodes:
+
+- a `binary` distribution covering darwin, linux and windows (CI rejects a subset);
+- a `license_url` and a `sha256` per archive (the registry's validator downloads the
+  archive and refuses a checksum mismatch, so the checksums come from the release's
+  own `checksums.txt` — never typed in by hand);
+- an SVG icon at `<id>/icon.svg`, 16x16 and monochrome `currentColor`;
+- an agent whose `initialize` returns at least one `authMethods` entry.
+
+moca satisfies all of them from v0.7.8 on; on an older tag the darwin entries have
+nothing to point at.
 """
 from __future__ import annotations
 
@@ -21,11 +28,12 @@ import argparse
 import json
 import pathlib
 import sys
+import urllib.error
 import urllib.request
 
 IDENT = "moca"
 REPO = "https://github.com/adeotek/moca"
-DESCRIPTION = "Minimal, token-efficient coding agent: one Go binary, eight frozen tools, native ACP"
+DESCRIPTION = "A coding agent in one static Go binary: eight frozen tools, native ACP, any OpenAI-compatible model"
 
 # registry key -> (goos, goarch, extension)
 TARGETS = {
@@ -40,6 +48,32 @@ TARGETS = {
 
 def archive_url(tag: str, goos: str, goarch: str, ext: str) -> str:
     return f"{REPO}/releases/download/{tag}/moca-{tag}-{goos}-{goarch}.{ext}"
+
+
+def archive_name(tag: str, goos: str, goarch: str, ext: str) -> str:
+    return f"moca-{tag}-{goos}-{goarch}.{ext}"
+
+
+def fetch_checksums(tag: str) -> dict[str, str]:
+    """The release's own checksums.txt, as {asset: sha256}."""
+    url = f"{REPO}/releases/download/{tag}/checksums.txt"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310
+            text = resp.read().decode("utf-8")
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"cannot read {url}: {exc}\npublish the release before rendering its registry entry")
+    sums: dict[str, str] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        sha, name = parts[0].lower(), parts[1].lstrip("*")
+        if len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
+            raise SystemExit(f"checksums.txt carries a malformed sha256 for {name}: {sha!r}")
+        sums[name] = sha
+    if not sums:
+        raise SystemExit(f"{url} lists no checksums")
+    return sums
 
 
 def main() -> int:
@@ -57,11 +91,19 @@ def main() -> int:
         return 2
     version = tag[1:]
 
+    sums = fetch_checksums(tag)
+
     binary = {}
+    missing: list[str] = []
     for key, (goos, goarch, ext) in TARGETS.items():
-        url = archive_url(tag, goos, goarch, ext)
+        name = archive_name(tag, goos, goarch, ext)
+        sha = sums.get(name)
+        if sha is None:
+            missing.append(name)
+            continue
         binary[key] = {
-            "archive": url,
+            "archive": archive_url(tag, goos, goarch, ext),
+            "sha256": sha,
             "cmd": "moca.exe" if goos == "windows" else "./moca",
             "args": ["acp"],
         }
@@ -78,8 +120,11 @@ def main() -> int:
             print(f"{key}: {code} {entry['archive']}", file=sys.stderr)
             if code != 200:
                 bad.append(key)
-        if bad:
-            print(f"not published for {tag}: {', '.join(bad)} — the registry needs all six", file=sys.stderr)
+
+    if missing:
+        print(f"checksums.txt has no entry for: {', '.join(missing)}", file=sys.stderr)
+    if bad:
+        print(f"not published for {tag}: {', '.join(bad)} — the registry needs all six", file=sys.stderr)
 
     agent = {
         "id": IDENT,
@@ -90,7 +135,7 @@ def main() -> int:
         "website": args.website,
         "authors": ["adeotek"],
         "license": "MIT",
-        "icon": "icon.svg",
+        "license_url": f"{REPO}/blob/main/LICENSE",
         "distribution": {"binary": binary},
     }
 
@@ -100,10 +145,9 @@ def main() -> int:
     icon = root / "docs" / "assets" / "icon.svg"
     (out / "icon.svg").write_text(icon.read_text(encoding="utf-8"), encoding="utf-8")
     print(f"wrote {out}/agent.json and {out}/icon.svg for {tag}")
-    # A --verify run that found unpublished targets exits 1: the files are
-    # written either way, so they can be inspected, but the caller must not
-    # mistake "rendered" for "ready to submit".
-    return 1 if bad else 0
+    # An incomplete run exits 1: the files are written either way, so they can be
+    # inspected, but the caller must not mistake "rendered" for "ready to submit".
+    return 1 if (bad or missing) else 0
 
 
 if __name__ == "__main__":
