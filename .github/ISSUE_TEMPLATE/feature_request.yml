@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a change to moca
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        moca's non-goals list (subagents, hooks, LSP, image gen, voice, telemetry, plugin
+        systems) is permanent, not a backlog. Please read the README's "Non-goals" section
+        before filing — a well-argued "no" is cheaper than a rejected PR.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you unable to do today? Describe the task, not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including "do nothing", "a skill/prompt template instead of a code change", and "a `permissions.allow` rule".
+  - type: input
+    id: cost
+    attributes:
+      label: Effect on token cost, if any
+      description: moca trades features for cost per task; a change that spends tokens needs a reason.
