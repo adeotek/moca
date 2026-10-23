@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# moca installer — Linux.
+# moca installer — Linux and macOS.
 #
 # Downloads a release package (the latest one, or --version <v>), verifies it
 # against the release's checksums.txt, and installs the moca binary.
@@ -33,7 +33,7 @@ note() { printf '%s\n' "$*"; }
 
 usage() {
 	cat <<'EOF'
-moca installer — Linux
+moca installer — Linux and macOS
 
 usage: install.sh [--version <vX.Y.Z>] [--dir <path>] [--uninstall] [--remove-data]
 
@@ -115,12 +115,16 @@ if [ "$UNINSTALL" = "1" ] || [ "$REMOVE_DATA" = "1" ]; then
 	exit 0
 fi
 
-[ "$(uname -s)" = "Linux" ] || die "this installer is for Linux — on Windows use install.ps1; on macOS use 'go install github.com/${REPO}/cmd/moca@latest'"
+case "$(uname -s)" in
+Linux) OS=linux ;;
+Darwin) OS=darwin ;;
+*) die "unsupported OS: $(uname -s) — on Windows use install.ps1" ;;
+esac
 
 case "$(uname -m)" in
 x86_64 | amd64) ARCH=amd64 ;;
 aarch64 | arm64) ARCH=arm64 ;;
-*) die "unsupported architecture: $(uname -m) (linux/amd64 and linux/arm64 are published)" ;;
+*) die "unsupported architecture: $(uname -m) ($OS/amd64 and $OS/arm64 are published)" ;;
 esac
 
 # Tolerate both "0.2.0-beta" and "v0.2.0-beta".
@@ -143,22 +147,22 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 if [ -n "$VERSION" ]; then
-	note "moca installer: release $VERSION, linux/$ARCH"
+	note "moca installer: release $VERSION, $OS/$ARCH"
 	RELEASE_URL="$API_BASE/repos/$REPO/releases/tags/$VERSION"
 else
-	note "moca installer: latest release, linux/$ARCH"
+	note "moca installer: latest release, $OS/$ARCH"
 	RELEASE_URL="$API_BASE/repos/$REPO/releases?per_page=1"
 fi
 fetch "$RELEASE_URL" "$TMP/release.json" || die "could not fetch release metadata ($RELEASE_URL)"
 
 TAG="$(grep -o '"tag_name": *"[^"]*"' "$TMP/release.json" | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')"
 [ -n "$TAG" ] || die "could not parse the release tag (unexpected API response)"
-ASSET="moca-${TAG}-linux-${ARCH}.tar.gz"
+ASSET="moca-${TAG}-${OS}-${ARCH}.tar.gz"
 
 URLS="$(grep -o '"browser_download_url": *"[^"]*"' "$TMP/release.json" | sed 's/.*"\([^"]*\)"$/\1/')"
 PACKAGE_URL="$(printf '%s\n' "$URLS" | grep -- "/${ASSET}\$" | head -n 1 || true)"
 SUMS_URL="$(printf '%s\n' "$URLS" | grep -- '/checksums.txt$' | head -n 1 || true)"
-[ -n "$PACKAGE_URL" ] || die "release $TAG has no package for linux/$ARCH"
+[ -n "$PACKAGE_URL" ] || die "release $TAG has no package for $OS/$ARCH"
 
 note "downloading $ASSET…"
 fetch "$PACKAGE_URL" "$TMP/$ASSET" || die "download failed: $PACKAGE_URL"

@@ -80,7 +80,7 @@ func (srv *Server) Request(ctx context.Context, method string, params json.RawMe
 	case "initialize":
 		return srv.initialize(params)
 	case "authenticate":
-		return nil, &RPCError{Code: codeAuthRequired, Message: "moca uses its own credentials: run `moca login <provider>` in a terminal"}
+		return srv.authenticate(params)
 	case "session/new":
 		return srv.newSession(params)
 	case "session/prompt":
@@ -134,9 +134,45 @@ func (srv *Server) initialize(params json.RawMessage) (any, error) {
 			PromptCapabilities:  PromptCapabilities{EmbeddedContext: true},
 			SessionCapabilities: SessionCapabilities{List: &struct{}{}, Delete: &struct{}{}, Resume: &struct{}{}, Close: &struct{}{}},
 		},
-		AuthMethods: []AuthMethod{},
+		AuthMethods: []AuthMethod{authMethodLogin},
 		AgentInfo:   Implementation{Name: "moca", Title: "moca", Version: srv.opts.Version},
 	}, nil
+}
+
+// authMethodLogin is the one method initialize advertises: ACP's default
+// `agent` kind (no `type` field), whose id is what `authenticate` receives.
+//
+// Not the `terminal` kind, deliberately. ACP says an agent may advertise a
+// terminal method only when the client enabled its terminal authentication
+// capability, and the client then re-runs the configured agent invocation
+// interactively — for `moca acp` that is a second ACP server on a terminal,
+// not a login (and `moca login` needs a provider name on the command line, so
+// it cannot be expressed as appended args). The `agent` kind is what moca
+// actually does: it resolves the credential itself and reports the result.
+var authMethodLogin = AuthMethod{
+	ID:          "login",
+	Name:        "Sign in",
+	Description: "Run `moca login <provider>` in a terminal (API key, or the OpenAI subscription flow), then set \"model\" in the config or pass --model to `moca acp`.",
+}
+
+// authenticate answers the method initialize advertises. There is nothing to
+// hand over — moca's credentials live in ~/.config/moca/auth.json, outside the
+// editor — so the call re-checks the configured model's credential and reports
+// success, or the same error `session/new` would have given, which names the
+// fix. It is never a bare no-op success: an editor that offers "Sign in" must
+// not be told it worked while no credential resolves.
+func (srv *Server) authenticate(params json.RawMessage) (any, error) {
+	req, err := decode[AuthenticateRequest](params)
+	if err != nil {
+		return nil, err
+	}
+	if req.MethodID != authMethodLogin.ID {
+		return nil, invalidParams("unknown authentication method %q: moca advertises %q", req.MethodID, authMethodLogin.ID)
+	}
+	if err := srv.checkModel(srv.opts.Config); err != nil {
+		return nil, err
+	}
+	return AuthenticateResponse{}, nil
 }
 
 // clientSupports reports the client's notices and compaction extensions:
@@ -196,12 +232,12 @@ func (srv *Server) sessionConfig(cwd string, requireModel bool) (config.Config, 
 		cfg.Model = srv.opts.Model
 	}
 	if requireModel && cfg.Model == "" {
-		// -32603, not ACP's auth-required: initialize advertises no auth
-		// methods (moca's credentials live outside the editor, §9.5), so a
-		// "you must authenticate" answer leaves the client with nothing to
-		// call — Zed shows an auth prompt it cannot complete and the session
-		// request dies as a transport error. A plain error carrying the fix
-		// reaches the user as itself.
+		// -32603, not ACP's auth-required: the fix is outside the editor
+		// (run `moca login <provider>` in a terminal, set "model"), and a
+		// -32000 hides that text behind "Authentication required". The
+		// advertised `login` method makes the affordance discoverable, but
+		// calling it cannot configure a model either — so the error still
+		// carries the fix as itself (§9.5).
 		return cfg, false, &RPCError{Code: codeInternal, Message: fmt.Sprintf(
 			"no model configured: run `moca login <provider>` in a terminal, then set \"model\" in %s (or pass --model to `moca acp`)", srv.opts.ConfigPath)}
 	}
@@ -226,9 +262,9 @@ func (srv *Server) sessionConfig(cwd string, requireModel bool) (config.Config, 
 // checkModel rejects a session whose configured model is unknown or whose
 // provider has no usable credential, before anything starts. Both are -32603
 // with moca's own fix in the message (run `moca login`, name the model): the
-// client cannot act on ACP's auth-required, because moca advertises no auth
-// methods (§9.5) — an editor renders "Authentication required" over a
-// prompt it has no method to complete.
+// credential lives outside the editor, so ACP's auth-required would replace
+// the fix with a prompt that cannot succeed (§9.5). `authenticate` runs the
+// same check, so the editor's sign-in affordance reports the same answer.
 func (srv *Server) checkModel(cfg config.Config) error {
 	// F-1 (ACP side): the --model flag is applied, and a local provider it
 	// names is added, before anything validates the model.

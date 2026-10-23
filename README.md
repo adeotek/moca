@@ -4,9 +4,11 @@
 [![Release](https://img.shields.io/github/v/release/adeotek/moca)](https://github.com/adeotek/moca/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**A minimal, token-efficient, provider-agnostic coding agent: one Go binary, a Bubble Tea TUI, eight tools, no framework.**
+**One Go binary. Eight tools. No framework.** A small, fast, provider-agnostic coding agent for the terminal: it speaks the Agent Client Protocol, so Zed, VS Code and Paseo can drive it; it loads the `SKILL.md` skills you already have, unchanged; and it publishes its benchmark numbers — including the runs it loses ([BENCHMARKS.md](BENCHMARKS.md)).
 
-moca is a coding agent for the terminal, inspired by Claude Code, OpenCode and Pi — deliberately about a tenth of their surface area. It competes on **cost per task** and **transparency**, not features: prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap, and everything moca does ends up in plain session files you can read. It runs on Claude, ChatGPT (subscription login included), Ollama, OpenCode Zen, or any OpenAI-compatible endpoint.
+moca is a coding agent for the terminal, inspired by Claude Code, OpenCode and Pi — deliberately about a tenth of their surface area. Prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap, and everything moca does ends up in plain session files you can read. It runs on Claude, ChatGPT (subscription login included), Ollama, OpenCode Zen, or any OpenAI-compatible endpoint.
+
+![moca: a prompt, a tool call, the approval picker, a diff and a green test run](docs/demo/moca-demo.gif)
 
 - **Eight frozen tools** — `read` · `write` · `edit` · `shell` · `search` · `ls` · `web` (search + fetch) · `mcp`. Stable schemas by design; everything else is a [non-goal](#non-goals-v1-probably-forever).
 - **MCP without prompt bloat** — one lazy ~200-token proxy tool; servers start on first use and their tool lists never enter your prompt.
@@ -15,25 +17,23 @@ moca is a coding agent for the terminal, inspired by Claude Code, OpenCode and P
 - **Permission modes** — `default` / `auto` / `plan` / `yolo`, per run or per project.
 - **Editor support** — `moca acp` speaks the Agent Client Protocol, so Zed, VS Code and Paseo can drive it.
 
+**46 s median agent-run** on Terminal-Bench 2.0, the fastest of the four agents measured · **10/12** on that 12-task subset at moca's best, **8/12** at the newest run — the number moves, and every run is in [BENCHMARKS.md](BENCHMARKS.md) with the losses named.
+
+### Why not Claude Code, OpenCode or pi?
+
+If you are short of accuracy on hard tasks today, use one of them: on the same 12 tasks pi solved 11/12 where moca solved 6/12 (moca v0.5.1-beta; its own best since is 10/12), and Claude Code brings Anthropic's own model. moca's case is the shape of the thing — one static binary with no runtime, eight tools whose schemas do not change under you, ~200 tokens of MCP no matter how many servers you have, skills that migrate unchanged, sessions you can read — and a codebase you can read in an afternoon. If that is not what you are short of, the others are better at what they do, and [the numbers say so](BENCHMARKS.md).
+
 ## Install
 
-```bash
-go install github.com/adeotek/moca/cmd/moca@latest
-```
+One command, no toolchain. The installer downloads the release package for your platform, verifies it against the release's `checksums.txt`, and installs to `~/.local/bin` (`%LOCALAPPDATA%\Programs\moca` on Windows, added to your user PATH), or next to an existing `moca` when one is already on `PATH`.
 
-or the install script — it downloads the release package for your platform, verifies it against the release's `checksums.txt`, and installs to `~/.local/bin` (`%LOCALAPPDATA%\Programs\moca` on Windows, added to your user PATH), or next to an existing `moca` when one is already on `PATH`:
+| | |
+|---|---|
+| **macOS / Linux** | `curl -fsSL https://raw.githubusercontent.com/adeotek/moca/main/install.sh \| bash` |
+| **Windows** | `irm https://raw.githubusercontent.com/adeotek/moca/main/install.ps1 \| iex` |
+| **Any (with Go)** | `go install github.com/adeotek/moca/cmd/moca@latest` |
 
-```bash
-# Linux
-curl -fsSL https://raw.githubusercontent.com/adeotek/moca/main/install.sh | bash
-```
-
-```powershell
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/adeotek/moca/main/install.ps1 | iex
-```
-
-Re-running is safe — an existing installation is updated in place, never an error. `--version vX.Y.Z` / `-Version` pins a release, `--dir <path>` / `-Dir` picks the target directory, `--help` / `-?` prints usage. Packages for linux/amd64, linux/arm64, windows/amd64 and windows/arm64 are on the [releases page](https://github.com/adeotek/moca/releases) (published by a manual **Release** workflow run — Actions → Release → Run workflow); other platforms (e.g. darwin) build from source with `make release`.
+Re-running is safe — an existing installation is updated in place, never an error. `--version vX.Y.Z` / `-Version` pins a release, `--dir <path>` / `-Dir` picks the target directory, `--help` / `-?` prints usage. Packages for **linux, darwin and windows on amd64 and arm64** are on the [releases page](https://github.com/adeotek/moca/releases), published by a manual **Release** workflow run (Actions → Release → Run workflow).
 
 **Self-update** — an installed moca updates itself from the same releases:
 
@@ -43,6 +43,8 @@ moca update --check   # only report whether a newer release exists
 ```
 
 `moca update` verifies the package against the release's `checksums.txt` when published, then swaps the binary in place (atomic) — your config, credentials and sessions are never touched, and a running session keeps working (the new version starts on the next launch).
+
+A copy that a **package manager** installed is left alone: Homebrew, Scoop and WinGet own their own trees, so `moca update` names the manager's upgrade command and exits 2 instead of fighting it (`--force` overrides, for a copy you really do maintain by hand). `--check` stays read-only everywhere.
 
 ### Inspecting the config
 
@@ -60,7 +62,7 @@ Each version extracts its built-in skills to its own directory under `~/.local/s
 Remove the binary (the config, data and state directories are kept):
 
 ```bash
-# Linux
+# macOS and Linux
 curl -fsSL https://raw.githubusercontent.com/adeotek/moca/main/install.sh | bash -s -- --uninstall
 ```
 
@@ -129,7 +131,7 @@ No API key and no model list: moca asks the server (`/api/tags`, `/api/show`) wh
 
 ## Editors (ACP)
 
-`moca acp` speaks the [Agent Client Protocol](https://agentclientprotocol.com) on stdio, so ACP editors can drive moca. It uses your existing config and credentials (`moca login` in a terminal first).
+`moca acp` speaks the [Agent Client Protocol](https://agentclientprotocol.com) on stdio, so ACP editors can drive moca. It uses your existing config and credentials (`moca login` in a terminal first) — the agent advertises one `Sign in` method, and answering it re-checks that credential and reports moca's own fix when there is none.
 
 ```jsonc
 // Zed — settings.json
@@ -315,15 +317,15 @@ mise install        # provisions Go 1.27.1 (pinned once, in go.mod) and gopls
 make build          # bin/moca, version-stamped from git describe
 make test           # go test ./... -race -count=1
 make vet            # go vet ./... + gofmt -l . (both must be clean — the CI gate)
-make release        # five cross-compiled binaries in dist/
+make release        # six cross-compiled binaries in dist/ (linux, darwin, windows × amd64/arm64)
 ```
 
 `make` falls back to `mise x go -- go` when `go` is not on the PATH; with mise, the same targets run as `mise run build|test|vet|fmt|release|clean`. Two scripted harnesses sit beside the unit suites (both need a model key in the repo `.env`, both build first): the **eval corpus** (`bash test/evals/run.sh -n 3 -l <label>` — twelve scenarios with per-run metrics recorded under `test/evals/results/`, baseline in `test/evals/BASELINE.md`) and the **ship gate** (`bash test/shipgate/run.sh` — §14, a real bug behind a failing test fixed end to end; the checker is `//go:build shipgate`, so plain `go test ./...` skips it).
 
 ## Docs
 
-[`docs/specs/SPECS.md`](docs/specs/SPECS.md) — the single source of truth for design, specs, features and constraints · [`docs/specs/external-tools.md`](docs/specs/external-tools.md) — rtk, graphify, skills, prompts. · [`docs/tui-theme-builder.html`](docs/tui-theme-builder.html) — live TUI theme builder (emits a `tui.theme` block).
+[`docs/specs/SPECS.md`](docs/specs/SPECS.md) — the single source of truth for design, specs, features and constraints · [`BENCHMARKS.md`](BENCHMARKS.md) — every measured run, losses included · [`docs/specs/external-tools.md`](docs/specs/external-tools.md) — rtk, graphify, skills, prompts · [`docs/tui-theme-builder.html`](docs/tui-theme-builder.html) — live TUI theme builder (emits a `tui.theme` block) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md).
 
 ## Status
 
-Current release: **v0.7.7** (2026-10-23) — the approval prompt gains a fourth answer, **Allow for this session** (memory only, offered on `rm` and every other ask-every-time question, matching the command name where the rules could learn it and the exact command line where they could not), and its keys change: `o` once / `s` this session / `a` always (the one that saves) / `d` deny, with `ctrl+a` back to the input's line start. The full release history lives in the [changelog](CHANGELOG.md).
+Latest release: **[github.com/adeotek/moca/releases/latest](https://github.com/adeotek/moca/releases/latest)** · full history in the [changelog](CHANGELOG.md) · published benchmark numbers, losses included, in [BENCHMARKS.md](BENCHMARKS.md).

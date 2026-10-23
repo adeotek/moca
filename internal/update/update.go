@@ -375,6 +375,55 @@ func IsTemporary(exe string) bool {
 	return dir == tmp || strings.HasPrefix(dir, tmp+string(filepath.Separator))
 }
 
+// PackageManagedError reports a moca binary that a package manager owns.
+// Replacing it in place would fight that manager's own bookkeeping: brew keeps
+// a Cellar copy and a symlink, scoop and winget keep their manifests and shims,
+// and the next `upgrade` would either undo the change or break the link.
+type PackageManagedError struct {
+	Path    string // the resolved binary path
+	Manager string // "Homebrew"
+	Upgrade string // "brew upgrade moca"
+}
+
+func (e *PackageManagedError) Error() string {
+	return fmt.Sprintf("%s is managed by %s — run `%s` (or pass --force to replace it in place)", e.Path, e.Manager, e.Upgrade)
+}
+
+// packageManagers maps a path fragment of a manager's own tree to the manager
+// and the command that upgrades its moca. Matched against a lower-cased,
+// slash-normalised path; the moca-specific fragments come first so a broad
+// prefix cannot answer for the wrong manager.
+var packageManagers = []struct {
+	name    string
+	upgrade string
+	paths   []string
+}{
+	// A Cellar path is the real binary on every brew install (both the
+	// /opt/homebrew and the /usr/local prefix, Homebrew on Linux too).
+	{"Homebrew", "brew upgrade moca", []string{"/cellar/moca/", "/opt/homebrew/", "/home/linuxbrew/"}},
+	{"Scoop", "scoop update moca", []string{"/scoop/apps/moca/", "/scoop/shims/moca"}},
+	{"WinGet", "winget upgrade adeotek.moca", []string{"/microsoft/winget/packages/", "/microsoft/winget/links/"}},
+}
+
+// PackageManaged reports whether exe is a copy a package manager owns, as a
+// *PackageManagedError naming the manager and its upgrade command; nil when it
+// is not. Pure path matching — no exec, no network — and deliberately lexical:
+// a manager's layout on another OS is still recognisable here.
+func PackageManaged(exe string) error {
+	if exe == "" {
+		return nil
+	}
+	p := strings.ToLower(strings.ReplaceAll(exe, `\`, "/"))
+	for _, m := range packageManagers {
+		for _, frag := range m.paths {
+			if strings.Contains(p, frag) {
+				return &PackageManagedError{Path: exe, Manager: m.name, Upgrade: m.upgrade}
+			}
+		}
+	}
+	return nil
+}
+
 // Install downloads the release's platform package, verifies it against the
 // release's checksums.txt (when present — verified reports whether one was
 // checked), extracts the binary and swaps it in place of exe. The current

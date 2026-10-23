@@ -165,10 +165,27 @@ type DeleteSessionRequest struct {
 	SessionID string `json:"sessionId"`
 }
 
+// AuthMethod is one entry of the `initialize` response's authMethods. moca
+// advertises a single method of ACP's default `agent` kind (no `type` field):
+// it resolves the credential itself, so the client's only job is to offer the
+// affordance and call `authenticate`.
 type AuthMethod struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
+
+// AuthenticateRequest names the method the client wants to use; it must be one
+// initialize advertised.
+type AuthenticateRequest struct {
+	MethodID string `json:"methodId"`
+}
+
+// AuthenticateResponse is empty: ACP's answer carries no credentials, only the
+// fact that the agent accepted (or refused) the method. Returned as a value
+// rather than nil so the wire carries `{}`, not `null` — a schema-typed
+// response that a strict client deserialises as an object.
+type AuthenticateResponse struct{}
 
 type NewSessionRequest struct {
 	Cwd        string            `json:"cwd"`

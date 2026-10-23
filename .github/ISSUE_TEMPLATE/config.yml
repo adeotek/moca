@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage question
+    url: https://github.com/adeotek/moca/discussions
+    about: Ask in Discussions — issues are for bugs and proposals.
+  - name: Security issue
+    url: https://github.com/adeotek/moca/security/advisories/new
+    about: Please report vulnerabilities privately, never in an issue.

@@ -105,6 +105,66 @@ func TestRunUpdateUsage(t *testing.T) {
 	}
 }
 
+// atPackagePath makes the running binary look like a package manager's copy:
+// replacing it would leave a stale Cellar/scoop/winget record plus a broken
+// link, and the guard is the only thing between a brew user and that state.
+func atPackagePath(t *testing.T, path string) {
+	t.Helper()
+	old := updateExe
+	updateExe = func() (string, error) { return path, nil }
+	t.Cleanup(func() { updateExe = old })
+}
+
+func TestRunUpdateRefusesAPackageManager(t *testing.T) {
+	srv := fakeReleases(t, "v99.9.9")
+	defer srv.Close()
+	t.Setenv("MOCA_UPDATE_API", srv.URL)
+	setVersion(t, "v1.0.0")
+	atPackagePath(t, "/opt/homebrew/Cellar/moca/0.7.8/bin/moca")
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"update"}, nil, &out, &errb); code != exitUsage {
+		t.Fatalf("exit %d, stderr: %s", code, errb.String())
+	}
+	for _, want := range []string{"managed by Homebrew", "brew upgrade moca", "--force"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Fatalf("stderr missing %q:\n%s", want, errb.String())
+		}
+	}
+}
+
+// --check is read-only: it must still answer on a package-managed install.
+func TestRunUpdateCheckWorksFromAPackageManager(t *testing.T) {
+	srv := fakeReleases(t, "v99.9.9")
+	defer srv.Close()
+	t.Setenv("MOCA_UPDATE_API", srv.URL)
+	setVersion(t, "v1.0.0")
+	atPackagePath(t, "/opt/homebrew/Cellar/moca/0.7.8/bin/moca")
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"update", "--check"}, nil, &out, &errb); code != exitOK {
+		t.Fatalf("exit %d, stderr: %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "update available: v1.0.0 → v99.9.9") {
+		t.Fatalf("stdout:\n%s", out.String())
+	}
+}
+
+// --force is the documented override: the guard steps aside, and the next
+// failure is the download (the fake server serves no package).
+func TestRunUpdateForceSkipsTheGuard(t *testing.T) {
+	srv := fakeReleases(t, "v99.9.9")
+	defer srv.Close()
+	t.Setenv("MOCA_UPDATE_API", srv.URL)
+	setVersion(t, "v1.0.0")
+	atPackagePath(t, "/opt/homebrew/Cellar/moca/0.7.8/bin/moca")
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"update", "--force"}, nil, &out, &errb); code != exitRuntime {
+		t.Fatalf("exit %d, stderr: %s", code, errb.String())
+	}
+	if strings.Contains(errb.String(), "managed by") || !strings.Contains(errb.String(), "update failed") {
+		t.Fatalf("stderr:\n%s", errb.String())
+	}
+}
+
 func TestRunUpdateFetchFails(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

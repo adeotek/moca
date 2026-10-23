@@ -41,9 +41,14 @@ func TestProtocolShapesConform(t *testing.T) {
 		AgentCapabilities: AgentCapabilities{LoadSession: true,
 			PromptCapabilities:  PromptCapabilities{EmbeddedContext: true},
 			SessionCapabilities: SessionCapabilities{List: &struct{}{}}},
-		AuthMethods: []AuthMethod{}, AgentInfo: Implementation{Name: "moca", Title: "moca", Version: "1.0.0"},
+		AuthMethods: []AuthMethod{{ID: "login", Name: "Sign in", Description: "Run `moca login <provider>` in a terminal"}}, AgentInfo: Implementation{Name: "moca", Title: "moca", Version: "1.0.0"},
 	})
 	conform(t, "PromptResponse", PromptResponse{StopReason: stopEndTurn})
+	// The advertised method and the authenticate answer: an `agent`-kind entry
+	// (no `type`) and an empty object, never a bare null.
+	conform(t, "AuthMethod", AuthMethod{ID: "login", Name: "Sign in", Description: "Run `moca login <provider>` in a terminal"})
+	conform(t, "AuthMethod", AuthMethod{ID: "login", Name: "Sign in"})
+	conform(t, "AuthenticateResponse", AuthenticateResponse{})
 	for _, kind := range []string{updAgentMessage, updThought, updUserMessage} {
 		conform(t, "SessionNotification", SessionNotification{SessionID: "abcd1234",
 			Update: ContentChunk{SessionUpdate: kind, Content: ContentBlock{Type: "text", Text: "hi"}, MessageID: newMessageID()}})
@@ -72,7 +77,7 @@ func TestProtocolShapesConform(t *testing.T) {
 	conform(t, "InitializeResponse", InitializeResponse{ProtocolVersion: ProtocolVersion,
 		AgentCapabilities: AgentCapabilities{LoadSession: true, SessionCapabilities: SessionCapabilities{
 			List: &struct{}{}, Delete: &struct{}{}, Resume: &struct{}{}, Close: &struct{}{}}},
-		AuthMethods: []AuthMethod{}, AgentInfo: Implementation{Name: "moca", Version: "1"}})
+		AuthMethods: []AuthMethod{{ID: "login", Name: "Sign in", Description: "Run `moca login <provider>` in a terminal"}}, AgentInfo: Implementation{Name: "moca", Version: "1"}})
 	conform(t, "ResumeSessionResponse", ResumeSessionResponse{})
 	title := "fix the parser"
 	for _, u := range []any{

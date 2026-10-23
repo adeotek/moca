@@ -1,0 +1,72 @@
+name: Bug report
+description: Something moca did wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Run `moca update --check` first — if a newer release exists, retry on it.
+        Attach the newest file from `~/.local/state/moca/logs/`: it records what moca did,
+        never your prompts, code or keys.
+  - type: input
+    id: version
+    attributes:
+      label: moca version
+      description: Output of `moca --version`
+      placeholder: moca v0.7.8
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - linux/amd64
+        - linux/arm64
+        - darwin/arm64
+        - darwin/amd64
+        - windows/amd64
+        - windows/arm64
+        - built from source
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Provider / model
+      placeholder: opencode-go/glm-5.3-flash
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Permission mode
+      description: The mode badge on the status line, or the `--mode` flag you passed.
+      options:
+        - ask
+        - auto (the default)
+        - plan
+        - yolo
+        - not sure
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Steps to reproduce, expected vs actual.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log excerpt
+      description: Newest file from ~/.local/state/moca/logs/, or MOCA_LOG=debug output.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I am on the latest release (`moca update --check`)
+          required: true
+        - label: I removed API keys, tokens and private paths from what I pasted
+          required: true

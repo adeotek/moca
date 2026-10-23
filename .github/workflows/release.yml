@@ -7,10 +7,12 @@
 # The published assets are the contract `moca update` consumes
 # (internal/update.go): moca-<version>-<os>-<arch>.tar.gz (a .zip on
 # Windows) + checksums.txt — keep the two in sync if either side changes.
-# `make release` stays the local path and still cross-compiles all six
-# targets (darwin included); this workflow publishes the four the update
-# command can install (linux/amd64, linux/arm64, windows/amd64,
-# windows/arm64).
+# Six targets: linux, darwin and windows on amd64 and arm64 — the same set
+# `make release` cross-compiles locally. darwin is published (not local-only
+# any more) because a Homebrew formula installs a prebuilt tarball only when
+# one exists — the alternative puts a Go toolchain on every macOS user's
+# machine — and because the ACP registry rejects a `binary` distribution that
+# does not cover darwin, linux and windows.
 name: Release
 
 on:
@@ -44,6 +46,8 @@ jobs:
         include:
           - { goos: linux, goarch: amd64 }
           - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
           - { goos: windows, goarch: amd64 }
           - { goos: windows, goarch: arm64 }
     steps:

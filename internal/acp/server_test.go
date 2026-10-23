@@ -17,10 +17,45 @@ func TestInitialize(t *testing.T) {
 	}
 	var r InitializeResponse
 	json.Unmarshal(res, &r)
-	if r.ProtocolVersion != 1 || r.AgentInfo.Name != "moca" || r.AuthMethods == nil {
+	if r.ProtocolVersion != 1 || r.AgentInfo.Name != "moca" || len(r.AuthMethods) != 1 {
 		t.Fatalf("%s", res)
 	}
+	// Exactly one method, of ACP's default `agent` kind: the registry CI
+	// requires a non-empty authMethods, and an editor needs something to
+	// show beside a session that cannot open (§9.5).
+	am := r.AuthMethods[0]
+	if am.ID != "login" || am.Name != "Sign in" || !strings.Contains(am.Description, "moca login") {
+		t.Fatalf("authMethods: %+v", am)
+	}
+	// ACP allows the `terminal` kind only when the client enabled its terminal
+	// authentication capability, so the entry must stay the default `agent`
+	// kind: no `type` discriminator on the wire.
+	if b, err := json.Marshal(am); err != nil || strings.Contains(string(b), `"type"`) {
+		t.Fatalf("authMethod must serialise without a type discriminator: %s (%v)", b, err)
+	}
 	conform(t, "InitializeResponse", r)
+}
+
+// authenticate answers the advertised method with the credential check a
+// session/new makes: success only when a credential really resolves.
+func TestAuthenticate(t *testing.T) {
+	c := startClient(t, testOptions(t, newScript(t)))
+	if _, err := c.call("authenticate", AuthenticateRequest{MethodID: "login"}); err != nil {
+		t.Fatalf("a stored/env credential must authenticate: %+v", err)
+	}
+	// An id moca never advertised is refused rather than answered.
+	if _, err := c.call("authenticate", AuthenticateRequest{MethodID: "terminal"}); err == nil || err.Code != codeInvalidParams {
+		t.Fatalf("unknown method: %+v", err)
+	}
+	// No credential for the configured provider: the error carries the fix
+	// (the same answer session/new gives), never a silent success.
+	o := testOptions(t, newScript(t))
+	o.Config.Model = "other/x" // MOCA_T_OTHER is empty
+	c2 := startClient(t, o)
+	_, err := c2.call("authenticate", AuthenticateRequest{MethodID: "login"})
+	if err == nil || err.Code != codeInternal || !strings.Contains(err.Message, "moca login other") {
+		t.Fatalf("missing credential: %+v", err)
+	}
 }
 
 func TestUnknownMethodAndSession(t *testing.T) {
@@ -48,8 +83,8 @@ func TestNewSessionWithoutModel(t *testing.T) {
 	o.ConfigPath = "/cfg/config.jsonc"
 	c := startClient(t, o)
 	_, err := c.call("session/new", NewSessionRequest{Cwd: t.TempDir()})
-	// A plain error, not ACP's auth-required: moca advertises no auth methods,
-	// so an editor has nothing to call and renders a dead-end prompt (§9.5).
+	// A plain error, not ACP's auth-required: the fix is a `moca login` the
+	// editor cannot run, so the message must reach the user as itself (§9.5).
 	if err == nil || err.Code != codeInternal || !strings.Contains(err.Message, "moca login") || !strings.Contains(err.Message, "/cfg/config.jsonc") {
 		t.Fatalf("%+v", err)
 	}

@@ -15,17 +15,23 @@ import (
 // updateAPIBaseEnv overrides the GitHub API endpoint (tests, mirrors).
 const updateAPIBaseEnv = "MOCA_UPDATE_API"
 
-// runUpdate implements `moca update [--check]`. It runs before the config is
-// loaded: updating the binary must not depend on a parseable config — a
-// broken config may be exactly what the update is meant to fix.
+// updateExe resolves the binary an update replaces; a variable so tests can
+// point the package-manager guard at a path that is not the test binary.
+var updateExe = func() (string, error) { return os.Executable() }
+
+// runUpdate implements `moca update [--check] [--force]`. It runs before the
+// config is loaded: updating the binary must not depend on a parseable config —
+// a broken config may be exactly what the update is meant to fix.
 func runUpdate(ctx context.Context, o Options, stdout, stderr io.Writer) int {
-	check := false
+	check, force := false, false
 	for _, a := range o.Sub[1:] {
 		switch a {
 		case "--check":
 			check = true
+		case "--force":
+			force = true
 		default:
-			fmt.Fprintln(stderr, "moca: usage: moca update [--check]")
+			fmt.Fprintln(stderr, "moca: usage: moca update [--check] [--force]")
 			return exitUsage
 		}
 	}
@@ -74,7 +80,7 @@ func runUpdate(ctx context.Context, o Options, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "update available: %s → %s (%s, %.1f MiB)\nrun `moca update` to install it.\n", config.Version, rel.Tag, asset.Name, float64(asset.Size)/(1<<20))
 		return exitOK
 	}
-	exe, err := os.Executable()
+	exe, err := updateExe()
 	if err != nil {
 		fmt.Fprintf(stderr, "moca: cannot locate the running binary: %v\n", err)
 		return exitRuntime
@@ -83,6 +89,16 @@ func runUpdate(ctx context.Context, o Options, stdout, stderr io.Writer) int {
 	// return the link's path, e.g. on macOS).
 	if r, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = r
+	}
+	// A package manager's copy is that manager's to replace: writing over it
+	// leaves a stale Cellar/scoop/winget record and a broken link, and the
+	// manager's next upgrade undoes the change. `--check` (above) stays
+	// read-only and answers normally; `--force` is the user's override.
+	if !force {
+		if err := update.PackageManaged(exe); err != nil {
+			fmt.Fprintf(stderr, "moca: %v\n", err)
+			return exitUsage
+		}
 	}
 	if update.IsTemporary(exe) {
 		fmt.Fprintf(stderr, "moca: %s is a temporary build — install a package from https://github.com/%s/releases\n", exe, cl.Repo)
