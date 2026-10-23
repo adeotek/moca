@@ -47,7 +47,7 @@ moca update --check   # only report whether a newer release exists
 
 `moca update` verifies the package against the release's `checksums.txt` when published, then swaps the binary in place (atomic) — your config, credentials and sessions are never touched, and a running session keeps working (the new version starts on the next launch).
 
-A copy that a **package manager** installed is left alone: Homebrew, Scoop and WinGet own their own trees, so `moca update` names the manager's upgrade command and exits 2 instead of fighting it (`--force` overrides, for a copy you really do maintain by hand). `--check` stays read-only everywhere.
+A copy that a **package manager** installed is left alone: Homebrew, Scoop and WinGet own their own trees, so `moca update` names the manager's upgrade command and exits 2 instead of fighting it (`--force` overrides, for a copy you really do maintain by hand). `--check` stays read-only everywhere. The install scripts refuse the same way when the `moca` on `PATH` is a package manager's, before downloading anything — they name the manager's upgrade (or uninstall) command; `--dir` / `-Dir` installs a separate copy wherever you point it.
 
 ### Inspecting the config
 

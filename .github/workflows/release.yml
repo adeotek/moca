@@ -20,11 +20,12 @@ on:
     inputs:
       version:
         description: >-
-          Release to build and publish: an existing tag (e.g. v0.7.6). Leave
-          empty to publish what the dispatched ref describes (git describe) —
-          which needs main to sit exactly on the tag. The input exists because
-          a fix to THIS workflow lands after the tag it publishes: dispatch
-          from main with version set instead of moving the tag.
+          Release to build and publish: an existing tag (e.g. v0.7.6) — its
+          source is built, with this ref's workflow steps. Leave empty to
+          publish what the dispatched ref describes (git describe) — which
+          needs main to sit exactly on the tag. The input exists because a fix
+          to THIS workflow lands after the tag it publishes: dispatch from
+          main with version set instead of moving the tag.
         required: false
         default: ''
 
@@ -51,10 +52,17 @@ jobs:
           - { goos: windows, goarch: amd64 }
           - { goos: windows, goarch: arm64 }
     steps:
+      # With `version` set, the SOURCE is that tag's tree while the steps
+      # stay the dispatched ref's — the point of the input is a workflow fix
+      # that landed after the tag, never main's newer code shipped under the
+      # tag's name (GitHub reads the workflow file from the dispatched ref
+      # whatever this step checks out). Fully qualified, so only a tag can
+      # match: a branch that shares the tag's name never gets built.
       - name: Checkout (full history — git describe needs the tag)
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ inputs.version && format('refs/tags/{0}', inputs.version) || github.ref }}
 
       - name: Set up Go (version from go.mod)
         uses: actions/setup-go@v7

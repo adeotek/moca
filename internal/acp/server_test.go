@@ -62,6 +62,18 @@ func TestAuthenticate(t *testing.T) {
 	if err == nil || err.Code != codeInternal || !strings.Contains(err.Message, "moca login other") {
 		t.Fatalf("missing credential: %+v", err)
 	}
+	// No model at all — a fresh install, the user most likely to press the
+	// button: the answer session/new gives (the fix and the config path), not
+	// SplitModel's "must be provider-qualified" about an empty string.
+	o3 := testOptions(t, newScript(t))
+	o3.Config.Model = ""
+	o3.ConfigPath = "/cfg/config.jsonc"
+	c3 := startClient(t, o3)
+	_, err = c3.call("authenticate", AuthenticateRequest{MethodID: "login"})
+	if err == nil || err.Code != codeInternal || !strings.Contains(err.Message, "no model configured") ||
+		!strings.Contains(err.Message, "/cfg/config.jsonc") {
+		t.Fatalf("no model: %+v", err)
+	}
 }
 
 func TestUnknownMethodAndSession(t *testing.T) {
