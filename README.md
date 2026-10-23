@@ -30,10 +30,13 @@ One command, no toolchain. The installer downloads the release package for your 
 | | |
 |---|---|
 | **macOS / Linux** | `curl -fsSL https://raw.githubusercontent.com/adeotek/moca/main/install.sh \| bash` |
+| **macOS / Linux (Homebrew)** | `brew install adeotek/tap/moca` |
 | **Windows** | `irm https://raw.githubusercontent.com/adeotek/moca/main/install.ps1 \| iex` |
 | **Any (with Go)** | `go install github.com/adeotek/moca/cmd/moca@latest` |
 
 Re-running is safe — an existing installation is updated in place, never an error. `--version vX.Y.Z` / `-Version` pins a release, `--dir <path>` / `-Dir` picks the target directory, `--help` / `-?` prints usage. Packages for **linux, darwin and windows on amd64 and arm64** are on the [releases page](https://github.com/adeotek/moca/releases), published by a manual **Release** workflow run (Actions → Release → Run workflow).
+
+**Homebrew** — [`adeotek/homebrew-tap`](https://github.com/adeotek/homebrew-tap) installs the same prebuilt tarball (`brew install adeotek/tap/moca`), rendered from the release's `checksums.txt` so the formula and the release cannot disagree. That copy updates with `brew upgrade moca`, not `moca update` — see below.
 
 **Self-update** — an installed moca updates itself from the same releases:
 
