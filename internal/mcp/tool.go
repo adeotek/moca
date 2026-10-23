@@ -149,7 +149,7 @@ func (p *ProxyTool) Run(ctx context.Context, env *tools.Env, input json.RawMessa
 			case tools.Deny:
 				return errResult("refused: %s/%s is not marked read-only and is not in mcp.servers.%s.approve; the user did not approve it",
 					a.Server, a.Tool, a.Server)
-			case tools.AllowAlways:
+			case tools.AllowAlways, tools.AllowSession:
 				p.mu.Lock()
 				p.session[a.Server+"/"+a.Tool] = true
 				p.mu.Unlock()

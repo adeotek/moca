@@ -75,7 +75,7 @@ func TestApprovalPreservesDraft(t *testing.T) {
 	m.syncTextarea()
 	reply := make(chan tools.Answer, 1)
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python", CanAlways: true}, reply: reply})
-	m.Update(key("a"))
+	m.Update(key("o"))
 	if got := <-reply; got != tools.AllowOnce {
 		t.Fatal(got)
 	}
@@ -83,11 +83,14 @@ func TestApprovalPreservesDraft(t *testing.T) {
 		t.Fatal("draft untouched by approval keys")
 	}
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "rm"}, reply: reply})
-	m.Update(key("ctrl+a"))
+	m.Update(key("a"))
 	select {
 	case <-reply:
-		t.Fatal("ctrl+a is not offered for ask-every-time commands")
+		t.Fatal("`a` is not offered for ask-every-time commands")
 	default:
+	}
+	if m.input.Text() != "half-typed" {
+		t.Fatalf("a swallowed `a` must not be typed into the draft: %q", m.input.Text())
 	}
 	m.Update(key("esc"))
 	if got := <-reply; got != tools.Deny {

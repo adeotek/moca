@@ -281,8 +281,11 @@ func (s *session) ask(ctx context.Context, q tools.Question) tools.Answer {
 		id = s.openTool("ask")
 	}
 	opts := []PermissionOption{{OptionID: optAllowOnce, Name: "Allow once", Kind: "allow_once"}}
-	if q.CanAlways {
-		opts = append(opts, PermissionOption{OptionID: optAllowAlways, Name: "Always allow", Kind: "allow_always"})
+	if !q.NoSession {
+		// ACP has no persisted allow: the always-kind option is the
+		// in-memory "for this session" answer, offered on every question
+		// that may be remembered (rm included, matching an exact command).
+		opts = append(opts, PermissionOption{OptionID: optAllowSession, Name: "Allow for this session", Kind: "allow_always"})
 	}
 	opts = append(opts, PermissionOption{OptionID: optReject, Name: "Deny", Kind: "reject_once"})
 	raw, _ := json.Marshal(map[string]string{"detail": q.Detail})
@@ -299,9 +302,9 @@ func (s *session) ask(ctx context.Context, q tools.Question) tools.Answer {
 	switch resp.Outcome.OptionID {
 	case optAllowOnce:
 		return tools.AllowOnce
-	case optAllowAlways:
-		if q.CanAlways {
-			return tools.AllowAlways
+	case optAllowSession:
+		if !q.NoSession {
+			return tools.AllowSession
 		}
 	}
 	return tools.Deny

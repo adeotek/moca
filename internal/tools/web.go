@@ -90,6 +90,16 @@ func (webTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result 
 	}
 }
 
+// redirectSource is the request a redirect hop is coming from: the last entry
+// of via (net/http hands the chain oldest-first), never the URL the fetch
+// started at — the question has to name the page that steered the fetch here.
+func redirectSource(via []*http.Request) *url.URL {
+	if len(via) == 0 {
+		return nil
+	}
+	return via[len(via)-1].URL
+}
+
 func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int) Result {
 	if format == "" {
 		format = "markdown"
@@ -122,14 +132,26 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 	// cannot slip past the host check.
 	approved := map[string]bool{} // host names asked about
 	okIPs := map[string]bool{}    // addresses of approved hosts
-	askPrivate := func(host string) error {
+	// from is nil for the URL the fetch starts at; a redirect hop passes the
+	// URL that redirected. A hop always asks and is never offered "for this
+	// session" (a public page that redirects to localhost must not ride an
+	// earlier approval), and its question names both ends — the target alone
+	// would hide which page steered the fetch there. Same-host hops skip
+	// through `approved`.
+	askPrivate := func(target, from *url.URL) error {
+		host := target.Hostname()
 		if approved[host] || !webPrivateHost(host) {
 			return nil
 		}
+		q := Question{Kind: "web", Subject: "fetch " + host,
+			Detail: "a private or local network address — " + target.Redacted()}
+		if from != nil {
+			q.NoSession = true
+			q.Detail += " (redirected from " + from.Redacted() + ")"
+		}
 		ans := Deny
 		if env.Ask != nil {
-			ans = env.Ask(ctx, Question{Kind: "web", Subject: "fetch " + host,
-				Detail: "a private or local network address — " + u.Redacted()})
+			ans = env.Ask(ctx, q)
 		}
 		if ans == Deny {
 			return fmt.Errorf("refused: %s is a private or local address and the user did not approve fetching it", host)
@@ -144,7 +166,7 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 		}
 		return nil
 	}
-	if err := askPrivate(u.Hostname()); err != nil {
+	if err := askPrivate(u, nil); err != nil {
 		return errorf("%v", err)
 	}
 	dialer := &net.Dialer{Timeout: 30 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
@@ -163,7 +185,7 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 			if len(via) >= webRedirectMax {
 				return fmt.Errorf("stopped after %d redirects", webRedirectMax)
 			}
-			return askPrivate(r.URL.Hostname())
+			return askPrivate(r.URL, redirectSource(via))
 		},
 	}
 	t0 := time.Now()

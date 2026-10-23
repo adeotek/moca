@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.7.7 (2026-10-23)
+
+### The approval keys changed — `a` now saves
+
+**Read this first: `a` no longer means "once".** Allow once moved to `o`, Allow always is plain `a`, Allow for this session is `s`, and Deny stays `d · esc`. If you reach for `a` out of habit **on a question that offers "always"**, you will now write a permanent allow into the project's `.moca/config.jsonc` — the 700 ms typing pause still applies and a capital `A` still goes to the draft, but a stray lowercase `a` after a pause is a save. On a question with no always row (`rm`, a rule-Ask, a private-host fetch, a write outside the workdir) `a` is swallowed and saves nothing. `ctrl+a` answers nothing again: it falls through to the input box's line start, as it did before v0.4. The picker rows are `Allow once o` · `Allow for this session s` · `Allow always a` (only where "always" exists) · `Deny d · esc`, and the default selection stays Allow once.
+
+### Allow for this session
+
+The fourth answer keeps a decision **in memory only** for the rest of the session, and it exists where "always" never did: `rm`, a `permissions.ask` rule, auto mode's ask-every-time tier, a private-host web fetch and a write outside the workdir.
+
+- **One Agent is one session.** `/mode`, `/model` and `/effort` keep the set; `/clear` and `/resume` start empty (each builds a new Agent); every ACP session has its own. Nothing is written to any config file.
+- **What "the same command" means follows what the rules could learn.** A command allow-always could learn matches every invocation — `go version` then `go env GOPATH` asks once — and learns the name in the session's in-memory rules, so the next call skips the prompt and auto mode's classifier. A command they cannot (`rm`, an ask rule, auto's ask-every-time) matches **only the exact command line**: `rm -f x` is never `rm -f y`. MCP matches `server/tool`, web matches `fetch <host>`, write matches the resolved absolute path.
+- **Two questions never offer it.** moca's own config file — it holds the permission policy, so one answer may not widen the rules for the session; its path is resolved when the question is asked, by the same jail as the target, and one that cannot be resolved withholds the session answer from every outside-the-workdir write (fail closed) — and a web fetch's **redirect hop**: only a fetch that *starts* at a session-allowed host skips the prompt, so a public page that redirects to localhost still asks, and the hop's question now names both the target and the URL that redirected there (it used to show only the URL the fetch started at). The question line reads `(never saved)` where the session answer is all that can be kept (no always row) and keeps `(asks every time)` where even that is excluded.
+- **ACP** replaces "Always allow" with "Allow for this session" (`allow-session`, kind `allow_always` — the closest the schema has). ACP never persisted an allow anyway; the option is now offered on every question, `rm` included, and the editor's pick is remembered for that session.
+- **Pins.** `tools.RememberSession` has its own suite (nil stays nil, only session answers are recorded, the name and exact tiers never cross, a NoSession question is never answered from memory and a session answer to it is downgraded to once, a cancelled run denies); plus the shell tool's learn-where-you-can pin, web (a session host fetched twice asks once, a redirect hop still asks), write (a prompts file sticks, the config file keeps asking), the MCP proxy, `agent.TestSessionAllowScope` (ask→yolo→ask keeps it, a fresh agent does not, `Ask == nil` stays nil), the picker rows and keys (`TestApprovalSessionKey`, `TestApprovalSessionRowLabels`, `TestApprovalNoSessionRow`, `TestAllowAlwaysIsPlainA`) and the ACP round-trip.
+
 ## v0.7.6 (2026-10-22)
 
 ### The reasoning echo actually goes out

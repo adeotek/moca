@@ -166,7 +166,10 @@ type Agent struct {
 
 func New(o Options) (*Agent, error) {
 	a := &Agent{opts: o, entries: o.Prior}
-	a.checkers.paths, a.checkers.cmds, a.checkers.ask = o.Env.Paths, o.Env.Commands, o.Env.Ask
+	// One Agent is one session: the "allow for this session" set lives in
+	// this wrapper, so /clear and /resume (a new Agent) start empty and
+	// /mode, /model and /effort keep it. nil in stays nil (-p denies).
+	a.checkers.paths, a.checkers.cmds, a.checkers.ask = o.Env.Paths, o.Env.Commands, tools.RememberSession(o.Env.Ask)
 	a.checkers.autoPaths = o.Env.AutoJail
 	if s, ok := o.Env.Commands.(*permissions.Shell); ok {
 		aj, _ := o.Env.AutoJail.(*permissions.Jail)
