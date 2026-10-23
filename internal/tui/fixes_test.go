@@ -121,6 +121,9 @@ func TestAllowAlwaysIsPlainA(t *testing.T) {
 	if m.input.Buffer() != "A" {
 		t.Fatalf("ctrl+a must fall through to the input (line start): %q", m.input.Buffer())
 	}
+	if got := m.ta.Column(); got != 0 {
+		t.Fatalf("ctrl+a must move the cursor to the line start, not only fail to answer: column %d", got)
+	}
 	m.lastTyped = fixed.Add(-time.Second) // typed the A, paused, then answered
 	_, cmd := m.Update(key("a"))
 	if got := <-reply; got != tools.AllowAlways {

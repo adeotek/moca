@@ -90,6 +90,16 @@ func (webTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result 
 	}
 }
 
+// redirectSource is the request a redirect hop is coming from: the last entry
+// of via (net/http hands the chain oldest-first), never the URL the fetch
+// started at — the question has to name the page that steered the fetch here.
+func redirectSource(via []*http.Request) *url.URL {
+	if len(via) == 0 {
+		return nil
+	}
+	return via[len(via)-1].URL
+}
+
 func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int) Result {
 	if format == "" {
 		format = "markdown"
@@ -175,7 +185,7 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 			if len(via) >= webRedirectMax {
 				return fmt.Errorf("stopped after %d redirects", webRedirectMax)
 			}
-			return askPrivate(r.URL, via[len(via)-1].URL)
+			return askPrivate(r.URL, redirectSource(via))
 		},
 	}
 	t0 := time.Now()

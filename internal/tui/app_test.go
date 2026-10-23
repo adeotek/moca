@@ -89,6 +89,9 @@ func TestApprovalPreservesDraft(t *testing.T) {
 		t.Fatal("`a` is not offered for ask-every-time commands")
 	default:
 	}
+	if m.input.Text() != "half-typed" {
+		t.Fatalf("a swallowed `a` must not be typed into the draft: %q", m.input.Text())
+	}
 	m.Update(key("esc"))
 	if got := <-reply; got != tools.Deny {
 		t.Fatal("esc on prompt = deny")

@@ -67,7 +67,7 @@ func TestSchemasFrozen(t *testing.T) {
 func TestAnswerString(t *testing.T) {
 	for a, want := range map[Answer]string{
 		Deny: "deny", AllowOnce: "once", AllowAlways: "always", AllowSession: "session",
-		Answer(99): "deny", // out of range: a log/index value must never panic
+		Answer(99): "invalid", // out of range: never panics, never reads as an answer
 	} {
 		if got := a.String(); got != want {
 			t.Errorf("Answer(%d).String() = %q, want %q", int(a), got, want)

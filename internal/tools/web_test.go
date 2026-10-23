@@ -514,6 +514,26 @@ func TestWebFetchRedirectToOtherPrivateHostAsksAgain(t *testing.T) {
 	}
 }
 
+// TestRedirectSourceIsTheLastHop: a hop's question must name the page that
+// redirected there — the last entry of via (net/http hands the chain
+// oldest-first), never the URL the fetch started at.
+func TestRedirectSourceIsTheLastHop(t *testing.T) {
+	mk := func(raw string) *http.Request {
+		r, err := http.NewRequest(http.MethodGet, raw, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	if redirectSource(nil) != nil {
+		t.Fatal("no chain means no source")
+	}
+	via := []*http.Request{mk("http://a.test/one"), mk("http://b.test/two"), mk("http://c.test/three")}
+	if got := redirectSource(via); got == nil || got.Host != "c.test" || got.Path != "/three" {
+		t.Fatalf("want the last hop (c.test/three), got %v", got)
+	}
+}
+
 // TestWebFetchSessionAllow: a private host approved "for this session" is not
 // asked about again, and both fetches reach it — the remembered answer still
 // fills the dialer's approved addresses.

@@ -102,6 +102,15 @@ func TestRememberSessionNoSession(t *testing.T) {
 	if asked != 3 {
 		t.Fatalf("a downgraded answer was recorded: %d asks", asked)
 	}
+	// The lookup guard itself: that normal question has now recorded the very
+	// key the excluded one uses, and the excluded one must STILL ask — it is
+	// never served from memory.
+	if got := ask(context.Background(), q); got != AllowOnce {
+		t.Fatalf("an excluded question was answered from memory: %v", got)
+	}
+	if asked != 4 {
+		t.Fatalf("an excluded question was served without asking: %d asks", asked)
+	}
 }
 
 func TestRememberSessionCancelledContextDenies(t *testing.T) {

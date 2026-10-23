@@ -53,8 +53,9 @@ const approvalDetailRows = 6
 // approvalPrompt is the question line above the picker rows. The rows carry
 // the shortcuts, so the line never repeats them (rev 28: the options used to
 // be listed twice — horizontally here and as the picker below). A question
-// that can be answered for the session says the answer is never saved; an
-// excluded one (NoSession) still asks every time.
+// with no always row says the session answer is never saved; an excluded one
+// (NoSession) keeps the asks-every-time line, and one that can persist keeps
+// the bare question.
 func approvalPrompt(q tools.Question) string {
 	subject := Sanitize(q.Subject)
 	switch {
@@ -189,7 +190,14 @@ func (m *model) answerApproval(ans tools.Answer) tea.Cmd {
 		what := q.Subject
 		if q.SessionExact() && q.Detail != "" {
 			// The exact tier allows one line, not the name: say which line.
-			what = strings.SplitN(q.Detail, "\n", 2)[0]
+			// The note is one scrollback line, so a multi-line command shows
+			// its first line and an ellipsis rather than claiming the whole
+			// heredoc was named.
+			first, rest, _ := strings.Cut(q.Detail, "\n")
+			what = first
+			if rest != "" {
+				what += "…"
+			}
 		}
 		return m.printlnContent(fmt.Sprintf("allowing `%s` for this session", Sanitize(what)))
 	}

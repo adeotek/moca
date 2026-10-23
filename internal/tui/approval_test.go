@@ -231,6 +231,46 @@ func TestApprovalSessionKey(t *testing.T) {
 	if got := <-reply2; got != tools.AllowOnce {
 		t.Fatalf("o answered %v", got)
 	}
+	// A multi-line command cannot be quoted whole in a one-line note: the
+	// first line plus an ellipsis, so the note never claims the heredoc was
+	// what was allowed.
+	settle(m) // the first note's flush is credited before the next print
+	reply3 := make(chan tools.Answer, 1)
+	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "bash", Detail: "bash -c 'one\n two'"}, reply: reply3})
+	_, cmd = m.Update(key("s"))
+	if got := <-reply3; got != tools.AllowSession {
+		t.Fatalf("s answered %v", got)
+	}
+	if out := printed(cmd); !strings.Contains(out, "allowing `bash -c 'one…` for this session") {
+		t.Fatalf("multi-line session note: %q", out)
+	}
+}
+
+// TestApprovalPromptVariants: the question line names the one thing the rows do
+// not — what can be kept. A question with an always row keeps the bare line, one
+// with only the session answer says `(never saved)`, and an excluded one
+// (NoSession) keeps `(asks every time)`.
+func TestApprovalPromptVariants(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		q      tools.Question
+		want   string
+		absent []string
+	}{
+		{"persist", tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, "allow `python3`?", []string{"(never saved)", "(asks every time)"}},
+		{"session only", tools.Question{Kind: "shell", Subject: "rm", Detail: "rm -f x"}, "allow `rm` (never saved)?", []string{"(asks every time)"}},
+		{"excluded", tools.Question{Kind: "write", Subject: "/home/u/.config/moca/config.jsonc", NoSession: true}, "allow `/home/u/.config/moca/config.jsonc` (asks every time)?", []string{"(never saved)"}},
+	} {
+		got := approvalPrompt(c.q)
+		if !strings.Contains(got, c.want) {
+			t.Errorf("%s: prompt %q, want it to contain %q", c.name, got, c.want)
+		}
+		for _, a := range c.absent {
+			if strings.Contains(got, a) {
+				t.Errorf("%s: prompt %q must not say %q", c.name, got, a)
+			}
+		}
+	}
 }
 
 // keys is the row key list of an options() result, for compact assertions.

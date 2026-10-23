@@ -62,6 +62,15 @@ func approve(ctx context.Context, env *Env, names []string, command string, canA
 			if always {
 				env.Commands.Allow(n)
 			}
+		case AllowOnce:
+			// runs once: nothing to record
+		default:
+			// An out-of-range Answer — a non-conforming asker, or a value a
+			// future front end sends that this build does not know — must
+			// fail closed. The old fixed-size index panicked here (recovered
+			// into an error result); falling through the switch would run
+			// the command unapproved.
+			return fmt.Errorf("refused: `%s` needs explicit user approval and the approval answer was not recognised — ask the user to allow it or use another approach", n)
 		}
 	}
 	return nil

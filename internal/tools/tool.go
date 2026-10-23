@@ -54,7 +54,8 @@ const (
 )
 
 // String is the log/UX spelling of an answer. It is the safe indexing form
-// too: an out-of-range Answer must never panic a tool loop.
+// too: an out-of-range Answer must never panic a tool loop, and it must not
+// read as a real answer either.
 func (a Answer) String() string {
 	switch a {
 	case AllowOnce:
@@ -63,8 +64,10 @@ func (a Answer) String() string {
 		return "always"
 	case AllowSession:
 		return "session"
+	case Deny:
+		return "deny"
 	}
-	return "deny"
+	return "invalid"
 }
 
 // Question is an approval request. Kind is "shell", "mcp", "web" (a fetch of a private address) or "write"
@@ -155,7 +158,7 @@ func askOutsideWrite(ctx context.Context, env *Env, path string, refused error) 
 		case err != nil:
 			q.NoSession = true
 			slog.Debug("ask-write: config file unresolved, session answer withheld", "error", err)
-		case cfg == abs:
+		case samePath(cfg, abs):
 			q.NoSession = true
 			q.Detail = "moca's own config file — it holds the permission policy"
 		}
@@ -164,6 +167,29 @@ func askOutsideWrite(ctx context.Context, env *Env, path string, refused error) 
 		return "", fmt.Errorf("%s is outside the workdir and the user did not approve writing it — keep project slash commands in .moca/prompts/ inside the workdir, or ask the user first", path)
 	}
 	return abs, nil
+}
+
+// samePath reports whether two resolved paths name the same file: byte-equal,
+// or EqualFold per component where the filesystem folds case — the same fold
+// the jail's own containment test applies, so spelling the config path in
+// another case cannot side-step the session answer's exclusion.
+func samePath(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if !caseInsensitiveFS {
+		return false
+	}
+	ac, bc := foldComps(a), foldComps(b)
+	if len(ac) != len(bc) {
+		return false
+	}
+	for i := range ac {
+		if !strings.EqualFold(ac[i], bc[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 type Env struct {
