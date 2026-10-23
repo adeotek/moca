@@ -3,7 +3,7 @@
 package agent
 
 // TestSessionAllowScope pins the "allow for this session" scope: one Agent is
-// one session. The set survives /mode (ask → yolo → ask) and dies with the
+// one session. The set survives /mode (ask → yolo/auto → ask) and dies with the
 // Agent (/clear, /resume, a new ACP session); the name tier covers every
 // invocation of a command, the exact tier only the same command line.
 
@@ -52,11 +52,17 @@ func TestSessionAllowScope(t *testing.T) {
 	}
 
 	// rm is ask-every-time: the exact line is remembered, another line is not.
+	// The name tier above cannot pin the /mode survival on its own — the
+	// session answer also learned uname in the Rules, which would hide a set
+	// rebuilt per mode. rm learns nothing there, so only the wrapper's set
+	// can keep the repeat quiet across ask → auto → ask.
 	asked = nil
 	run()
+	a.SetMode(ModeAuto)
+	a.SetMode(ModeAsk)
 	run()
 	if len(asked) != 1 || !asked[0].SessionExact() {
-		t.Fatalf("rm -f x: %+v", asked)
+		t.Fatalf("rm -f x across /mode: %+v", asked)
 	}
 	run()
 	if len(asked) != 2 {

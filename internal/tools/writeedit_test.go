@@ -182,6 +182,21 @@ func (c fileAskChecker) Approvable(path string) (string, bool) {
 	return "", false
 }
 
+// unresolvedConfigChecker is askRootChecker with a config file the jail
+// cannot resolve right now (a symlink loop, a permission error): Resolve
+// refuses that one path and behaves as askRootChecker otherwise.
+type unresolvedConfigChecker struct {
+	askRootChecker
+	cfg string
+}
+
+func (c unresolvedConfigChecker) Resolve(path string, write bool) (string, error) {
+	if filepath.Clean(path) == c.cfg {
+		return "", fmt.Errorf("%s: too many levels of symbolic links", path)
+	}
+	return c.askRootChecker.Resolve(path, write)
+}
+
 // The user config file joins the ask-write roots (self-configure): a write
 // asks with Kind "write" and never allow-always; allowing writes once, and
 // the next edit asks again. auth.json beside it can never be approved.
@@ -288,7 +303,8 @@ func TestWriteEditTrackRunChanges(t *testing.T) {
 // under the global prompts root is an ordinary one — a session allow sticks, so
 // the same file is written again without a prompt. moca's own config file is
 // excluded: it holds the permission policy, so it keeps asking and a session
-// answer to it is downgraded to once.
+// answer to it is downgraded to once — and when its path cannot be resolved,
+// no ask-write question is offered the session answer (fail closed).
 func TestSessionAllowCoversAPromptsFileButNeverTheConfig(t *testing.T) {
 	root := t.TempDir()
 	prompts := filepath.Join(t.TempDir(), "prompts")
@@ -332,5 +348,22 @@ func TestSessionAllowCoversAPromptsFileButNeverTheConfig(t *testing.T) {
 	}
 	if asked != 2 {
 		t.Fatalf("the config file must ask every time, asked %d times", asked)
+	}
+
+	// A config path the jail cannot resolve: whether the target is the config
+	// file cannot be told, so the question is treated as one (fail closed) —
+	// the prompts file keeps asking instead of being remembered.
+	var qs []Question
+	lostEnv := &Env{Root: root, Paths: unresolvedConfigChecker{askRootChecker{root, prompts}, cfg},
+		Reads: NewReadTracker(), ConfigFile: cfg,
+		Ask: RememberSession(func(_ context.Context, q Question) Answer { qs = append(qs, q); return AllowSession })}
+	fresh := filepath.Join(prompts, "release.md") // new: no read guard in the way
+	for i, content := range []string{"one\n", "two\n"} {
+		if r := run(t, writeTool{}, lostEnv, map[string]any{"path": fresh, "content": content}); r.IsError {
+			t.Fatalf("write %d with the config unresolved: %q", i, r.Content)
+		}
+	}
+	if len(qs) != 2 || !qs[0].NoSession || !qs[1].NoSession {
+		t.Fatalf("an unresolvable config path must withhold the session answer: %+v", qs)
 	}
 }

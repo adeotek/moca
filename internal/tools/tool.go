@@ -145,10 +145,20 @@ func askOutsideWrite(ctx context.Context, env *Env, path string, refused error) 
 		Detail: "outside the workdir — moca slash commands (global prompt templates)"}
 	// moca's own config file holds the permission policy itself: a session
 	// allow there would let one approval widen the rules for the rest of the
-	// session, so that question always asks.
-	if abs == env.ConfigFile {
-		q.NoSession = true
-		q.Detail = "moca's own config file — it holds the permission policy"
+	// session, so that question always asks. Its path is resolved here, by
+	// the same jail and at the same moment as the target — no start-time
+	// copy to drift — and one that cannot be resolved fails closed: whether
+	// this target is the config file cannot be told, so it is treated as if
+	// it were (the cost is a missing session row, never a remembered write).
+	if env.ConfigFile != "" {
+		switch cfg, err := env.Paths.Resolve(env.ConfigFile, false); {
+		case err != nil:
+			q.NoSession = true
+			slog.Debug("ask-write: config file unresolved, session answer withheld", "error", err)
+		case cfg == abs:
+			q.NoSession = true
+			q.Detail = "moca's own config file — it holds the permission policy"
+		}
 	}
 	if env.Ask == nil || env.Ask(ctx, q) == Deny {
 		return "", fmt.Errorf("%s is outside the workdir and the user did not approve writing it — keep project slash commands in .moca/prompts/ inside the workdir, or ask the user first", path)
@@ -164,9 +174,10 @@ type Env struct {
 	Reads    *ReadTracker
 	Snap     Snapshotter
 	ShellEnv []string
-	// ConfigFile is moca's own user config file, resolved like a write
-	// target. The ask-write approval compares against it so a write there is
-	// never offered "for this session" (it holds the permission policy).
+	// ConfigFile is moca's own user config file as configured (unresolved).
+	// The ask-write approval resolves it through Paths when it asks and
+	// compares the target against that, so a write there is never offered
+	// "for this session" (it holds the permission policy).
 	ConfigFile string
 	// AutoJail carries the auto-mode path checker (the default jail with the
 	// temp roots writable) from start.go to the agent's checker setup; nil

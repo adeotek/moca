@@ -578,4 +578,12 @@ func TestWebFetchRedirectHopToSessionHostStillAsks(t *testing.T) {
 	if len(asked) != 3 || last.Subject != "fetch localhost" || !last.NoSession {
 		t.Fatalf("the redirect hop must ask with NoSession: %+v", asked)
 	}
+	// The hop's question shows where the fetch is being sent, and which URL
+	// sent it there — not the URL the fetch started at alone.
+	if !strings.Contains(last.Detail, local) || !strings.Contains(last.Detail, "redirected from "+hop.URL) {
+		t.Fatalf("the hop question must name its target and its source: %q", last.Detail)
+	}
+	if strings.Contains(asked[0].Detail, "redirected") {
+		t.Fatalf("a fetch's own host is not a redirect: %q", asked[0].Detail)
+	}
 }

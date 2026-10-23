@@ -52,7 +52,8 @@ func TestApprovalKeysIgnoredWhileTyping(t *testing.T) {
 	}
 	reply := make(chan tools.Answer, 4)
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", Detail: "python3 -c 1", CanAlways: true}, reply: reply})
-	for _, r := range "Add tests now" {
+	// Every answer letter in lowercase — `a` above all, the one that saves.
+	for _, r := range "Add a test for docs" {
 		m.Update(keyMsg(string(r)))
 	}
 	select {
@@ -60,11 +61,15 @@ func TestApprovalKeysIgnoredWhileTyping(t *testing.T) {
 		t.Fatalf("typed letters answered the prompt: %v", a)
 	default:
 	}
-	if m.ta.Value() != "Please Add tests now" {
+	if m.ta.Value() != "Please Add a test for docs" {
 		t.Fatalf("draft %q", m.ta.Value())
 	}
-	if b, _ := os.ReadFile(m.opts.ConfigPath); strings.Contains(string(b), "python3") {
+	// Allow-always saves to the project file (rev 28), never the user one.
+	if _, err := os.Stat(config.ProjectConfigFile(m.start.Workdir)); err == nil {
 		t.Fatal("allow-always must not be persisted by stray keystrokes")
+	}
+	if b, _ := os.ReadFile(m.opts.ConfigPath); strings.Contains(string(b), "python3") {
+		t.Fatal("the user config must never receive an approval")
 	}
 }
 

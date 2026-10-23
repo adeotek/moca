@@ -336,13 +336,11 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 		return nil, err
 	}
 	m := o.mode()
-	// moca's own config file, resolved like a write target: the ask-write
-	// approval compares against this exact string to keep the session allow
-	// away from the file that holds the permission policy.
-	cfgFile, _ := jail.Resolve(config.ConfigFile(), false)
+	// ConfigFile keeps the session allow away from the file that holds the
+	// permission policy; the ask-write approval resolves it when it asks.
 	env := &tools.Env{
 		Root: jail.Root(), Paths: jail, AutoJail: jail.WithWritable(permissions.TempRoots()...),
-		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps, ConfigFile: cfgFile,
+		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps, ConfigFile: config.ConfigFile(),
 		ShellEnv:    tools.ShellEnv(os.Environ(), config.EnvRefs(cfg)),
 		WebProvider: cfg.Web.Search.Provider, WebKey: webKey,
 		SpillDir: st.spillDir, SpillPrefix: w.ID8() + "-"}
