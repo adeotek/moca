@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/adeotek/moca)](https://github.com/adeotek/moca/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**One Go binary. Eight tools. No framework.** A small, fast, provider-agnostic coding agent for the terminal: it speaks the Agent Client Protocol, so Zed, VS Code and Paseo can drive it; it loads the `SKILL.md` skills you already have, unchanged; and it publishes its benchmark numbers — including the runs it loses ([BENCHMARKS.md](BENCHMARKS.md)).
+**One Go binary. Eight tools. No framework.** A small, fast, provider-agnostic coding agent for the terminal: it speaks the Agent Client Protocol, so Zed, VS Code and Paseo can drive it; it loads the `SKILL.md` skills you already have, unchanged; and it publishes its benchmark numbers — including the runs it loses ([BENCHMARKS.md](docs/BENCHMARKS.md)).
 
 moca is a coding agent for the terminal, inspired by Claude Code, OpenCode and Pi — deliberately about a tenth of their surface area. Prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap, and everything moca does ends up in plain session files you can read. It runs on Claude, ChatGPT (subscription login included), Ollama, OpenCode Zen, or any OpenAI-compatible endpoint.
 
@@ -17,11 +17,11 @@ moca is a coding agent for the terminal, inspired by Claude Code, OpenCode and P
 - **Permission modes** — `default` / `auto` / `plan` / `yolo`, per run or per project.
 - **Editor support** — `moca acp` speaks the Agent Client Protocol, so Zed, VS Code and Paseo can drive it.
 
-**46 s median agent-run** on Terminal-Bench 2.0, the fastest of the four agents measured · **10/12** on that 12-task subset at moca's best, **8/12** at the newest run — the number moves, and every run is in [BENCHMARKS.md](BENCHMARKS.md) with the losses named.
+**46 s median agent-run** on Terminal-Bench 2.0, the fastest of the four agents measured · **10/12** on that 12-task subset at moca's best, **8/12** at the newest run — the number moves, and every run is in [BENCHMARKS.md](docs/BENCHMARKS.md) with the losses named.
 
 ### Why not Claude Code, OpenCode or pi?
 
-If you are short of accuracy on hard tasks today, use one of them: on the same 12 tasks pi solved 11/12 where moca solved 6/12 (moca v0.5.1-beta; its own best since is 10/12), and Claude Code brings Anthropic's own model. moca's case is the shape of the thing — one static binary with no runtime, eight tools whose schemas do not change under you, ~200 tokens of MCP no matter how many servers you have, skills that migrate unchanged, sessions you can read — and a codebase you can read in an afternoon. If that is not what you are short of, the others are better at what they do, and [the numbers say so](BENCHMARKS.md).
+If you are short of accuracy on hard tasks today, use one of them: on the same 12 tasks pi solved 11/12 where moca solved 6/12 (moca v0.5.1-beta; its own best since is 10/12), and Claude Code brings Anthropic's own model. moca's case is the shape of the thing — one static binary with no runtime, eight tools whose schemas do not change under you, ~200 tokens of MCP no matter how many servers you have, skills that migrate unchanged, sessions you can read — and a codebase you can read in an afternoon. If that is not what you are short of, the others are better at what they do, and [the numbers say so](docs/BENCHMARKS.md).
 
 ## Install
 
@@ -327,8 +327,8 @@ make release        # six cross-compiled binaries in dist/ (linux, darwin, windo
 
 ## Docs
 
-[`docs/specs/SPECS.md`](docs/specs/SPECS.md) — the single source of truth for design, specs, features and constraints · [`BENCHMARKS.md`](BENCHMARKS.md) — every measured run, losses included · [`docs/specs/external-tools.md`](docs/specs/external-tools.md) — rtk, graphify, skills, prompts · [`docs/themes/tui-theme-builder.html`](docs/themes/tui-theme-builder.html) — live TUI theme builder (emits a `tui.theme` block) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md).
+[`docs/specs/SPECS.md`](docs/specs/SPECS.md) — the single source of truth for design, specs, features and constraints · [`BENCHMARKS.md`](docs/BENCHMARKS.md) — every measured run, losses included · [`docs/specs/external-tools.md`](docs/specs/external-tools.md) — rtk, graphify, skills, prompts · [`docs/themes/tui-theme-builder.html`](docs/themes/tui-theme-builder.html) — live TUI theme builder (emits a `tui.theme` block) · [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) · [`SECURITY.md`](docs/SECURITY.md).
 
 ## Status
 
-Latest release: **[github.com/adeotek/moca/releases/latest](https://github.com/adeotek/moca/releases/latest)** · full history in the [changelog](CHANGELOG.md) · published benchmark numbers, losses included, in [BENCHMARKS.md](BENCHMARKS.md).
+Latest release: **[github.com/adeotek/moca/releases/latest](https://github.com/adeotek/moca/releases/latest)** · full history in the [changelog](CHANGELOG.md) · published benchmark numbers, losses included, in [BENCHMARKS.md](docs/BENCHMARKS.md).
