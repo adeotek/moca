@@ -22,7 +22,7 @@ func TestSampleCoversEveryKey(t *testing.T) {
 	var names []string
 	// ThemeColors is exempt by name: 28 color roles, each optional and each
 	// documented where it lives (internal/tui/theme.go, and the interactive
-	// builder at docs/tui-theme-builder.html, which emits a ready block).
+	// builder at docs/themes/tui-theme-builder.html, which emits a ready block).
 	// Enumerating them would triple the sample without teaching anything the
 	// builder does not.
 	skip := map[reflect.Type]bool{reflect.TypeOf(ThemeColors{}): true}

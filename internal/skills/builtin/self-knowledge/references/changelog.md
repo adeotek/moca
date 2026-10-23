@@ -10,6 +10,13 @@ A v0.7.8 regression, reported from Zed on Windows: with `providers.ollama` confi
 - The fix is at the one choke point every caller passes through, not in the caller: `provider.NewRegistry` substitutes its own default when `hc` is nil — the same header-bounded client (120 s response-header bound, cloned from `http.DefaultTransport`) §7 already specifies, now **built once per process** (`sync.OnceValue`), so the ACP path's per-session registries share one connection pool instead of one transport each. `agent.Start`'s own substitution collapsed into it (`internal/agent` no longer builds an HTTP client; `tools`/other tests keep injecting theirs).
 - Pins: `TestModelCheckWithOllamaConfigured` (a real ACP client with nil `Options.HTTP`, a configured ollama; `authenticate` and `session/new` succeed and the fake `/api/tags` must have been hit — verified failing against the v0.7.8 tree by construction, it was the reported failure); `TestNewRegistryNilClientUsesDefault` (a nil client resolves to the bounded transport, not `http.DefaultClient`, and discovery → resolve → stream all run through it); and the moved-and-sharpened `TestDefaultHTTPClientBoundsHeaderWait` (now also pins that the default is one shared instance). +2 tests.
 
+### The theme builder moves under `docs/themes/`
+
+Documentation layout only: no tool, no config key, no agent-loop change.
+
+- **`docs/tui-theme-builder.html` → `docs/themes/tui-theme-builder.html`**, so the `docs/` root holds only the repository-level pages and every subdirectory names its subject. The path is a contract, not just a link: `TestThemeBuilderMatchesDefaults` reads the file to pin its palettes to the built-in `DefaultTheme`, so the move lands with the test, the `tui.theme` sample's comment and the README's references in the same change — and the embedded self-knowledge references are re-copied after them.
+- **`.opencode/plugins/graphify.js.v2` is dropped.** It was a byte-identical copy of the tracked `graphify.js` (same SHA-256, both carrying the same OpenCode v2 plugin), so the plugin that loads is unchanged and the repository carries one copy instead of two.
+
 ## v0.7.9 (2026-10-23)
 
 ### The distribution channels have renderers, and the Homebrew tap is live
