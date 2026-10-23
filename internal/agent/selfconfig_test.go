@@ -44,11 +44,13 @@ func TestAgentReachesItsOwnConfig(t *testing.T) {
 		t.Fatalf("read config: %q", r.Content)
 	}
 	// Write: the user is asked; allow-once writes, the question cannot be
-	// remembered (CanAlways false).
+	// remembered — no always (CanAlways false) and no session answer
+	// (NoSession: the real jail matches the config path at ask time, here a
+	// file created after the agent was built).
 	if r := run("edit", map[string]any{"path": cfgPath, "old_string": `"fake/m"`, "new_string": `"fake/m2"`}); r.IsError {
 		t.Fatalf("edit config: %q", r.Content)
 	}
-	if len(asked) != 1 || asked[0].Kind != "write" || asked[0].CanAlways || asked[0].Subject != cfgPath {
+	if len(asked) != 1 || asked[0].Kind != "write" || asked[0].CanAlways || !asked[0].NoSession || asked[0].Subject != cfgPath {
 		t.Fatalf("approval question: %+v", asked)
 	}
 	if b, _ := os.ReadFile(cfgPath); !strings.Contains(string(b), "fake/m2") {

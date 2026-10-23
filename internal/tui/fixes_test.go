@@ -52,7 +52,8 @@ func TestApprovalKeysIgnoredWhileTyping(t *testing.T) {
 	}
 	reply := make(chan tools.Answer, 4)
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", Detail: "python3 -c 1", CanAlways: true}, reply: reply})
-	for _, r := range "Add tests" {
+	// Every answer letter in lowercase — `a` above all, the one that saves.
+	for _, r := range "Add a test for docs" {
 		m.Update(keyMsg(string(r)))
 	}
 	select {
@@ -60,11 +61,15 @@ func TestApprovalKeysIgnoredWhileTyping(t *testing.T) {
 		t.Fatalf("typed letters answered the prompt: %v", a)
 	default:
 	}
-	if m.ta.Value() != "Please Add tests" {
+	if m.ta.Value() != "Please Add a test for docs" {
 		t.Fatalf("draft %q", m.ta.Value())
 	}
-	if b, _ := os.ReadFile(m.opts.ConfigPath); strings.Contains(string(b), "python3") {
+	// Allow-always saves to the project file (rev 28), never the user one.
+	if _, err := os.Stat(config.ProjectConfigFile(m.start.Workdir)); err == nil {
 		t.Fatal("allow-always must not be persisted by stray keystrokes")
+	}
+	if b, _ := os.ReadFile(m.opts.ConfigPath); strings.Contains(string(b), "python3") {
+		t.Fatal("the user config must never receive an approval")
 	}
 }
 
@@ -75,15 +80,22 @@ func TestApprovalKeysAnswerAfterPause(t *testing.T) {
 	m.lastTyped = fixed.Add(-5 * time.Second)
 	reply := make(chan tools.Answer, 1)
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, reply: reply})
-	m.Update(key("a"))
+	m.Update(key("o"))
 	if got := <-reply; got != tools.AllowOnce {
+		t.Fatal(got)
+	}
+	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, reply: reply})
+	m.Update(key("a"))
+	if got := <-reply; got != tools.AllowAlways {
 		t.Fatal(got)
 	}
 }
 
-// Allow-always is persistent: prose must never trigger it. A stray capital
-// `A` (even after a typing pause) goes to the draft; only ctrl+a persists.
-func TestAllowAlwaysRequiresCtrl(t *testing.T) {
+// Allow-always is now the plain `a` and `s`/`o` answer the other two: prose
+// must still reach the draft mid-sentence. A capital `A` (even after a typing
+// pause) goes to the draft; `a` after the pause answers AllowAlways and
+// persists; `ctrl+a` answers nothing (it is the input's line start again).
+func TestAllowAlwaysIsPlainA(t *testing.T) {
 	m := newAgentModel(t)
 	fixed := time.Now()
 	m.now = func() time.Time { return fixed }
@@ -102,15 +114,26 @@ func TestAllowAlwaysRequiresCtrl(t *testing.T) {
 	if _, err := os.Stat(config.ProjectConfigFile(m.start.Workdir)); err == nil {
 		t.Fatal("a typed A must not persist allow-always")
 	}
-	_, cmd := m.Update(key("ctrl+a"))
+	m.Update(key("ctrl+a"))
+	if !approvalPending(m, reply) {
+		t.Fatal("ctrl+a answered the prompt")
+	}
+	if m.input.Buffer() != "A" {
+		t.Fatalf("ctrl+a must fall through to the input (line start): %q", m.input.Buffer())
+	}
+	if got := m.ta.Column(); got != 0 {
+		t.Fatalf("ctrl+a must move the cursor to the line start, not only fail to answer: column %d", got)
+	}
+	m.lastTyped = fixed.Add(-time.Second) // typed the A, paused, then answered
+	_, cmd := m.Update(key("a"))
 	if got := <-reply; got != tools.AllowAlways {
-		t.Fatalf("ctrl+a is the allow-always key: %v", got)
+		t.Fatalf("a is the allow-always key: %v", got)
 	}
 	if !strings.Contains(printed(cmd), "always allowing") {
 		t.Fatalf("confirmation line: %q", printed(cmd))
 	}
 	if b, _ := os.ReadFile(config.ProjectConfigFile(m.start.Workdir)); !strings.Contains(string(b), `"python3"`) {
-		t.Fatalf("ctrl+a must persist: %s", b)
+		t.Fatalf("a must persist: %s", b)
 	}
 }
 
@@ -253,7 +276,7 @@ func TestRestartSessionKeepsModelAndAllowed(t *testing.T) {
 	reply := make(chan tools.Answer, 1)
 	m.lastTyped = time.Time{}
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, reply: reply})
-	m.Update(key("ctrl+a"))
+	m.Update(key("a"))
 	old := m.agent
 	cmd := m.restartSession()
 	if cmd == nil || m.agent == old {
@@ -306,7 +329,7 @@ func TestAllowAlwaysPersists(t *testing.T) {
 	m := newAgentModel(t)
 	reply := make(chan tools.Answer, 1)
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, reply: reply})
-	_, cmd := m.Update(key("ctrl+a"))
+	_, cmd := m.Update(key("a"))
 	if got := <-reply; got != tools.AllowAlways {
 		t.Fatal(got)
 	}
@@ -333,7 +356,7 @@ func TestAllowAlwaysPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "node", CanAlways: true}, reply: reply})
-	_, cmd = m.Update(key("ctrl+a"))
+	_, cmd = m.Update(key("a"))
 	if got := <-reply; got != tools.AllowAlways || !strings.Contains(printed(cmd), "not saved") {
 		t.Fatalf("failure line: %q", printed(cmd))
 	}
@@ -348,7 +371,7 @@ func TestAllowAlwaysNotesAnUntrustedWorkdir(t *testing.T) {
 	}
 	reply := make(chan tools.Answer, 1)
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, reply: reply})
-	_, cmd := m.Update(key("ctrl+a"))
+	_, cmd := m.Update(key("a"))
 	if got := <-reply; got != tools.AllowAlways {
 		t.Fatal(got)
 	}
@@ -371,7 +394,7 @@ func TestAllowAlwaysMCPPersists(t *testing.T) {
 	m.start.Config.MCP.Servers = map[string]config.MCPServer{"ctx7": {URL: "https://x"}}
 	reply := make(chan tools.Answer, 1)
 	m.Update(approvalMsg{q: tools.Question{Kind: "mcp", Subject: "ctx7/create_issue", Detail: `{"title":"x"}`, CanAlways: true}, reply: reply})
-	_, cmd := m.Update(key("ctrl+a"))
+	_, cmd := m.Update(key("a"))
 	if got := <-reply; got != tools.AllowAlways {
 		t.Fatal(got)
 	}

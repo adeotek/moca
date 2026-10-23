@@ -118,10 +118,10 @@ type model struct {
 	kbdEnhanced   bool
 	hintShown     bool
 	lastAssistant string
-	// lastTyped is when a key last edited the draft; `a`/`d` are ignored
-	// shortly after, so a user mid-sentence does not answer a prompt that
-	// pops up under their fingers (allow-always is ctrl+a — prose can never
-	// trigger it).
+	// lastTyped is when a key last edited the draft; `o`/`s`/`a`/`d` are
+	// ignored shortly after, so a user mid-sentence does not answer a prompt
+	// that pops up under their fingers — this pause is the only thing between
+	// a typed `a` and a saved allow-always (approvalKey).
 	lastTyped time.Time
 	// now is the model's clock; tests inject it so approval timing is
 	// deterministic.
@@ -219,7 +219,7 @@ func (m *model) notify(text string) tea.Cmd {
 // immutable, so the full reasoning opens in the pager.
 const thinkingHint = " · alt+t to read"
 
-// approvalIdle is the typing pause required before `a`/`d` answer a prompt.
+// approvalIdle is the typing pause required before `o`/`s`/`a`/`d` answer a prompt.
 const approvalIdle = 700 * time.Millisecond
 
 // inputChrome is the number of terminal rows the input box leaves for the

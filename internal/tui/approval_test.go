@@ -33,15 +33,16 @@ func TestApprovalPickerArrowsEnter(t *testing.T) {
 	reply := make(chan tools.Answer, 1)
 	m.approval = &approvalState{approvalMsg: approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, reply: reply}}
 	m.Update(key("down"))
-	m.Update(key("down")) // two downs: once → always → deny
-	if m.approval.sel != 2 {
-		t.Fatalf("two downs must land on deny: sel=%d", m.approval.sel)
+	m.Update(key("down"))
+	m.Update(key("down")) // three downs: once → session → always → deny
+	if m.approval.sel != 3 {
+		t.Fatalf("three downs must land on deny: sel=%d", m.approval.sel)
 	}
 	m.Update(key("enter"))
 	select {
 	case got := <-reply:
 		if got != tools.Deny {
-			t.Fatalf("down twice + enter must deny: %v", got)
+			t.Fatalf("down three times + enter must deny: %v", got)
 		}
 	default:
 		t.Fatal("enter did not answer the prompt")
@@ -55,12 +56,13 @@ func TestApprovalPickerAlwaysPersists(t *testing.T) {
 	m.lastTyped = fixed.Add(-2 * time.Second)
 	reply := make(chan tools.Answer, 1)
 	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, reply: reply})
+	m.Update(key("down")) // "Allow for this session"
 	m.Update(key("down")) // "Allow always"
 	_, cmd := m.Update(key("enter"))
 	select {
 	case got := <-reply:
 		if got != tools.AllowAlways {
-			t.Fatalf("picker enter must answer through the ctrl+a path: %v", got)
+			t.Fatalf("picker enter must answer through the `a` path: %v", got)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("enter did not answer the prompt")
@@ -69,7 +71,7 @@ func TestApprovalPickerAlwaysPersists(t *testing.T) {
 		t.Fatalf("confirmation line: %q", printed(cmd))
 	}
 	if b, _ := os.ReadFile(config.ProjectConfigFile(m.start.Workdir)); !strings.Contains(string(b), `"python3"`) {
-		t.Fatalf("picker enter must persist like ctrl+a: %s", b)
+		t.Fatalf("picker enter must persist like `a`: %s", b)
 	}
 }
 
@@ -93,7 +95,10 @@ func TestApprovalShowsItsOptionsOnce(t *testing.T) {
 		if got := strings.Count(flat, "Allow always"); got != btoi(q.CanAlways) {
 			t.Errorf("%s: %d 'Allow always' rows (CanAlways=%v):\n%s", q.Subject, got, q.CanAlways, flat)
 		}
-		for _, stale := range []string{"[a] once", "[ctrl+a]", "[d] deny"} {
+		if got := strings.Count(flat, "for this session"); got != btoi(!q.NoSession) {
+			t.Errorf("%s: %d session rows (NoSession=%v):\n%s", q.Subject, got, q.NoSession, flat)
+		}
+		for _, stale := range []string{"[a] once", "[o] once", "[ctrl+a]", "[d] deny"} {
 			if strings.Contains(flat, stale) {
 				t.Errorf("%s: the question line still repeats the options (%q):\n%s", q.Subject, stale, flat)
 			}
@@ -109,8 +114,8 @@ func btoi(b bool) int {
 }
 
 func TestApprovalPickerNoAlwaysRow(t *testing.T) {
-	// CanAlways=false: [once, deny] — down from once lands on deny; up from a
-	// fresh prompt wraps back to deny as well.
+	// CanAlways=false and not NoSession: [once, session, deny] — two downs
+	// from once land on deny; one up from a fresh prompt wraps back to deny.
 	forward, back := false, false
 	for _, down := range []bool{true, false} {
 		m := newTestModel()
@@ -122,9 +127,10 @@ func TestApprovalPickerNoAlwaysRow(t *testing.T) {
 		k := "up"
 		if down {
 			k = "down"
+			m.Update(key("down"))
 		}
 		m.Update(key(k))
-		if m.approval.sel != 1 {
+		if m.approval.sel != 2 {
 			t.Fatalf("wrap-around: sel=%d after %s", m.approval.sel, k)
 		}
 		m.Update(key("enter"))
@@ -145,6 +151,135 @@ func TestApprovalPickerNoAlwaysRow(t *testing.T) {
 	if !forward || !back {
 		t.Fatalf("not all subtests ran: forward=%v back=%v", forward, back)
 	}
+}
+
+// TestApprovalNoSessionRow: an excluded question (moca's own config file, a web
+// redirect hop) renders no session row, and `s` is swallowed — handled, no
+// answer, nothing typed into the draft.
+func TestApprovalNoSessionRow(t *testing.T) {
+	m := newTestModel()
+	fixed := time.Now()
+	m.now = func() time.Time { return fixed }
+	m.lastTyped = fixed.Add(-2 * time.Second)
+	reply := make(chan tools.Answer, 1)
+	q := tools.Question{Kind: "write", Subject: "/home/u/.config/moca/config.jsonc", NoSession: true}
+	m.Update(approvalMsg{q: q, reply: reply})
+	if got := strings.Join(keys(m.approval.options()), "|"); got != "o|d · esc" {
+		t.Fatalf("rows %q (a session row must not be offered)", got)
+	}
+	m.Update(key("s"))
+	if !approvalPending(m, reply) {
+		t.Fatal("s answered a NoSession question")
+	}
+	if m.input.Buffer() != "" {
+		t.Fatalf("s was typed into the draft: %q", m.input.Buffer())
+	}
+	if flat := ansi.Strip(approvalPanel(m.approval, 100, 6, DefaultTheme(), true)); !strings.Contains(flat, "(asks every time)") {
+		t.Fatalf("an excluded question keeps the asks-every-time line:\n%s", flat)
+	}
+}
+
+// TestApprovalSessionRowLabels: the session row says what it will cover — the
+// exact command line for an rm/rule-Ask question, the name for a learnable one.
+func TestApprovalSessionRowLabels(t *testing.T) {
+	cases := map[string]struct {
+		q    tools.Question
+		want string
+	}{
+		"learnable": {tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, "Allow for this session"},
+		"exact":     {tools.Question{Kind: "shell", Subject: "rm", Detail: "rm -f x"}, "Allow this exact command for this session"},
+		"mcp":       {tools.Question{Kind: "mcp", Subject: "docs/create_issue", CanAlways: true}, "Allow for this session"},
+		"web":       {tools.Question{Kind: "web", Subject: "fetch localhost"}, "Allow for this session"},
+		"write":     {tools.Question{Kind: "write", Subject: "/home/u/.config/moca/prompts/x.md"}, "Allow for this session"},
+	}
+	for name, c := range cases {
+		panel := ansi.Strip(approvalPanel(&approvalState{approvalMsg: approvalMsg{q: c.q}}, 100, 6, DefaultTheme(), true))
+		if !strings.Contains(panel, c.want+"    s") {
+			t.Errorf("%s: session row %q missing:\n%s", name, c.want, panel)
+		}
+	}
+}
+
+// TestApprovalSessionKey: `s` after the pause answers AllowSession, prints the
+// note and writes no project file; a fresh prompt is back at Allow once.
+func TestApprovalSessionKey(t *testing.T) {
+	m := newAgentModel(t)
+	fixed := time.Now()
+	m.now = func() time.Time { return fixed }
+	m.lastTyped = fixed.Add(-2 * time.Second)
+	reply := make(chan tools.Answer, 1)
+	q := tools.Question{Kind: "shell", Subject: "rm", Detail: "rm -f x"}
+	m.Update(approvalMsg{q: q, reply: reply})
+	if m.approval.sel != 0 {
+		t.Fatalf("the selection starts at Allow once: %d", m.approval.sel)
+	}
+	_, cmd := m.Update(key("s"))
+	if got := <-reply; got != tools.AllowSession {
+		t.Fatalf("s answered %v", got)
+	}
+	out := printed(cmd)
+	if !strings.Contains(out, "allowing `rm -f x` for this session") {
+		t.Fatalf("session note: %q", out)
+	}
+	if _, err := os.Stat(config.ProjectConfigFile(m.start.Workdir)); err == nil {
+		t.Fatal("a session answer must not write the project config")
+	}
+	// `o` is Allow once again (the key change), after the pause.
+	reply2 := make(chan tools.Answer, 1)
+	m.Update(approvalMsg{q: q, reply: reply2})
+	m.Update(key("o"))
+	if got := <-reply2; got != tools.AllowOnce {
+		t.Fatalf("o answered %v", got)
+	}
+	// A multi-line command cannot be quoted whole in a one-line note: the
+	// first line plus an ellipsis, so the note never claims the heredoc was
+	// what was allowed.
+	settle(m) // the first note's flush is credited before the next print
+	reply3 := make(chan tools.Answer, 1)
+	m.Update(approvalMsg{q: tools.Question{Kind: "shell", Subject: "bash", Detail: "bash -c 'one\n two'"}, reply: reply3})
+	_, cmd = m.Update(key("s"))
+	if got := <-reply3; got != tools.AllowSession {
+		t.Fatalf("s answered %v", got)
+	}
+	if out := printed(cmd); !strings.Contains(out, "allowing `bash -c 'one…` for this session") {
+		t.Fatalf("multi-line session note: %q", out)
+	}
+}
+
+// TestApprovalPromptVariants: the question line names the one thing the rows do
+// not — what can be kept. A question with an always row keeps the bare line, one
+// with only the session answer says `(never saved)`, and an excluded one
+// (NoSession) keeps `(asks every time)`.
+func TestApprovalPromptVariants(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		q      tools.Question
+		want   string
+		absent []string
+	}{
+		{"persist", tools.Question{Kind: "shell", Subject: "python3", CanAlways: true}, "allow `python3`?", []string{"(never saved)", "(asks every time)"}},
+		{"session only", tools.Question{Kind: "shell", Subject: "rm", Detail: "rm -f x"}, "allow `rm` (never saved)?", []string{"(asks every time)"}},
+		{"excluded", tools.Question{Kind: "write", Subject: "/home/u/.config/moca/config.jsonc", NoSession: true}, "allow `/home/u/.config/moca/config.jsonc` (asks every time)?", []string{"(never saved)"}},
+	} {
+		got := approvalPrompt(c.q)
+		if !strings.Contains(got, c.want) {
+			t.Errorf("%s: prompt %q, want it to contain %q", c.name, got, c.want)
+		}
+		for _, a := range c.absent {
+			if strings.Contains(got, a) {
+				t.Errorf("%s: prompt %q must not say %q", c.name, got, a)
+			}
+		}
+	}
+}
+
+// keys is the row key list of an options() result, for compact assertions.
+func keys(opts []approvalOption) []string {
+	out := make([]string, len(opts))
+	for i, o := range opts {
+		out[i] = o.key
+	}
+	return out
 }
 
 func TestApprovalPickerYieldsToDraft(t *testing.T) {
