@@ -47,7 +47,25 @@ const (
 	Deny Answer = iota
 	AllowOnce
 	AllowAlways
+	// AllowSession allows the question's session key for the rest of this
+	// session: in memory only, gone when the Agent is replaced (/clear,
+	// /resume, a new ACP session) and never written to any config file.
+	AllowSession
 )
+
+// String is the log/UX spelling of an answer. It is the safe indexing form
+// too: an out-of-range Answer must never panic a tool loop.
+func (a Answer) String() string {
+	switch a {
+	case AllowOnce:
+		return "once"
+	case AllowAlways:
+		return "always"
+	case AllowSession:
+		return "session"
+	}
+	return "deny"
+}
 
 // Question is an approval request. Kind is "shell", "mcp", "web" (a fetch of a private address) or "write"
 // (a tool write outside the workdir: the global prompt templates — slash
@@ -56,6 +74,29 @@ const (
 type Question struct {
 	Kind, Subject, Detail string
 	CanAlways             bool
+	// NoSession marks a question that must keep asking and must never be
+	// answered "for this session": moca's own config file (it holds the
+	// permission policy itself) and a web fetch's redirect hop (approving a
+	// page must not open the host it is steered to).
+	NoSession bool
+}
+
+// SessionExact reports whether a session allow must match the exact command
+// line rather than the command name. A shell question that is not offered
+// allow-always (rm, a rule-Ask, auto's ask-every-time, an unlearnable name)
+// can never be learned by name, so only the full line is a meaningful key.
+func (q Question) SessionExact() bool { return q.Kind == "shell" && !q.CanAlways }
+
+// SessionKey is the identity a session allow is remembered under. The tier
+// separator matters: a session `git` (name tier) must never answer a
+// rule-Ask `git push` (exact tier), so the exact tier appends the detail.
+// Kinds never mix either — a shell `fetch example.com` is not a web allow.
+func (q Question) SessionKey() string {
+	k := q.Kind + "\x00" + q.Subject
+	if q.SessionExact() {
+		k += "\x00" + q.Detail
+	}
+	return k
 }
 
 type Asker func(ctx context.Context, q Question) Answer
@@ -102,6 +143,13 @@ func askOutsideWrite(ctx context.Context, env *Env, path string, refused error) 
 	// the file that will actually be written.
 	q := Question{Kind: "write", Subject: abs,
 		Detail: "outside the workdir — moca slash commands (global prompt templates)"}
+	// moca's own config file holds the permission policy itself: a session
+	// allow there would let one approval widen the rules for the rest of the
+	// session, so that question always asks.
+	if abs == env.ConfigFile {
+		q.NoSession = true
+		q.Detail = "moca's own config file — it holds the permission policy"
+	}
 	if env.Ask == nil || env.Ask(ctx, q) == Deny {
 		return "", fmt.Errorf("%s is outside the workdir and the user did not approve writing it — keep project slash commands in .moca/prompts/ inside the workdir, or ask the user first", path)
 	}
@@ -116,6 +164,10 @@ type Env struct {
 	Reads    *ReadTracker
 	Snap     Snapshotter
 	ShellEnv []string
+	// ConfigFile is moca's own user config file, resolved like a write
+	// target. The ask-write approval compares against it so a write there is
+	// never offered "for this session" (it holds the permission policy).
+	ConfigFile string
 	// AutoJail carries the auto-mode path checker (the default jail with the
 	// temp roots writable) from start.go to the agent's checker setup; nil
 	// for Envs built by hand.

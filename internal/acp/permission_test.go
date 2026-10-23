@@ -27,16 +27,41 @@ func TestPermissionAllowOnce(t *testing.T) {
 	if p.ToolCall.ToolCallID != c.updatesOf(updToolCall)[0]["toolCallId"] {
 		t.Errorf("permission not tied to the running tool call: %+v", p.ToolCall)
 	}
-	kinds := map[string]bool{}
+	kinds := map[string]string{}
 	for _, o := range p.Options {
-		kinds[o.Kind] = true
+		kinds[o.Kind] = o.OptionID
 	}
-	if !kinds["allow_once"] || !kinds["reject_once"] || kinds["allow_always"] {
-		t.Errorf("options %+v (rm must not offer allow_always)", p.Options)
+	// rm now offers the session answer too — ACP has no persisted allow, so
+	// the always-kind option is the in-memory one and is offered everywhere.
+	if kinds["allow_once"] != optAllowOnce || kinds["reject_once"] != optReject || kinds["allow_always"] != optAllowSession {
+		t.Errorf("options %+v", p.Options)
 	}
 	conform(t, "RequestPermissionRequest", p)
 	if _, err := os.Stat(filepath.Join(work, "x.txt")); !os.IsNotExist(err) {
 		t.Fatal("approved rm did not run")
+	}
+}
+
+// TestPermissionAllowSessionRemembersExactCommand: an rm approved "for this
+// session" is not asked about again when the exact same line repeats, and a
+// different rm still asks (the exact tier, keyed by the full command line).
+func TestPermissionAllowSessionRemembersExactCommand(t *testing.T) {
+	work := t.TempDir()
+	os.WriteFile(filepath.Join(work, "x.txt"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(work, "y.txt"), []byte("y"), 0o644)
+	rm := func(f string) [2]string { return [2]string{"shell", `{"command":"rm ` + f + `"}`} }
+	s := newScript(t, toolTurn(rm("x.txt")), toolTurn(rm("x.txt")), toolTurn(rm("y.txt")), textTurn("done"))
+	c := startClient(t, askOptions(t, s))
+	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse { return selected(optAllowSession) }
+	sid := c.newSession(work)
+	if stop, err := c.prompt(sid, "delete them"); err != nil || stop != stopEndTurn {
+		t.Fatalf("stop %q err %+v", stop, err)
+	}
+	if len(c.perms) != 2 {
+		t.Fatalf("want 2 questions (x.txt once, y.txt once), got %d", len(c.perms))
+	}
+	if p := c.perms[0]; p.ToolCall.ToolCallID == "" || len(p.Options) != 3 {
+		t.Fatalf("first question %+v", p)
 	}
 }
 

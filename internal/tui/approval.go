@@ -27,12 +27,21 @@ type approvalOption struct {
 	ans   tools.Answer
 }
 
-// options returns the picker rows: Allow once, then Allow always (only when
-// the question can persist), then Deny.
+// options returns the picker rows: Allow once, Allow for this session (hidden
+// when the question forbids it), Allow always (only when the answer can
+// persist), then Deny.
 func (s *approvalState) options() []approvalOption {
-	opts := []approvalOption{{label: "Allow once", key: "a", ans: tools.AllowOnce}}
+	opts := []approvalOption{{label: "Allow once", key: "o", ans: tools.AllowOnce}}
+	if !s.q.NoSession {
+		session := "Allow for this session"
+		if s.q.SessionExact() {
+			// The name tier would be a lie here: only this exact line is allowed.
+			session = "Allow this exact command for this session"
+		}
+		opts = append(opts, approvalOption{label: session, key: "s", ans: tools.AllowSession})
+	}
 	if s.q.CanAlways {
-		opts = append(opts, approvalOption{label: "Allow always", key: "ctrl+a", ans: tools.AllowAlways})
+		opts = append(opts, approvalOption{label: "Allow always", key: "a", ans: tools.AllowAlways})
 	}
 	return append(opts, approvalOption{label: "Deny", key: "d · esc", ans: tools.Deny})
 }
@@ -43,13 +52,18 @@ const approvalDetailRows = 6
 
 // approvalPrompt is the question line above the picker rows. The rows carry
 // the shortcuts, so the line never repeats them (rev 28: the options used to
-// be listed twice — horizontally here and as the picker below).
+// be listed twice — horizontally here and as the picker below). A question
+// that can be answered for the session says the answer is never saved; an
+// excluded one (NoSession) still asks every time.
 func approvalPrompt(q tools.Question) string {
 	subject := Sanitize(q.Subject)
-	if q.CanAlways {
+	switch {
+	case q.CanAlways:
 		return fmt.Sprintf("allow `%s`?", subject)
+	case q.NoSession:
+		return fmt.Sprintf("allow `%s` (asks every time)?", subject)
 	}
-	return fmt.Sprintf("allow `%s` (asks every time)?", subject)
+	return fmt.Sprintf("allow `%s` (never saved)?", subject)
 }
 
 // approvalPanel renders the question, the picker rows and the command it is
@@ -89,20 +103,24 @@ func approvalPanel(s *approvalState, width, rows int, th Theme, dark bool) strin
 	return b.String()
 }
 
-// approvalKey answers the shown prompt. `a`/`d` count only after a typing
-// pause (a user mid-sentence must not answer with letters meant for the
-// draft); allow-always is `ctrl+a` — it is persistent, so a plain letter (a
-// stray capital `A`, the first letter of "Add…") always goes to the draft and
-// can never write the config. esc always denies. The arrows move the picker
-// selection with wrap-around and enter confirms it, but only when the draft
-// is empty and the typing pause has elapsed — with a draft they keep their
-// editing/history meaning and the input box is never dead while a prompt is
-// shown. handled=false lets the key fall through to normal input handling.
+// approvalKey answers the shown prompt. `o`/`s`/`a`/`d` count only after a
+// typing pause (a user mid-sentence must not answer with letters meant for the
+// draft; a capital always goes to the draft), and a letter the question does
+// not offer is swallowed — handled, no answer, nothing typed (`a` on an rm
+// question, `s` on a NoSession one). `a` is the one dangerous key: it persists
+// the answer, so a stray `a` after the pause does write `.moca/config.jsonc`
+// even with a half-typed draft — the CHANGELOG leads with that key change
+// (`ctrl+a` no longer answers; it falls through to the input's line start).
+// esc always denies. The arrows move the picker selection with wrap-around and
+// enter confirms it, but only when the draft is empty and the typing pause has
+// elapsed — with a draft they keep their editing/history meaning and the input
+// box is never dead while a prompt is shown. handled=false lets the key fall
+// through to normal input handling.
 func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch k.String() {
 	case "esc":
 		return m.answerApproval(tools.Deny), true
-	case "a", "d":
+	case "o", "s", "a", "d":
 		if m.now().Sub(m.lastTyped) < approvalIdle {
 			return nil, false
 		}
@@ -121,8 +139,18 @@ func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 	}
 	switch k.String() {
-	case "a":
+	case "o":
 		return m.answerApproval(tools.AllowOnce), true
+	case "s":
+		if m.approval.q.NoSession {
+			return nil, true // not offered: swallowed, not typed
+		}
+		return m.answerApproval(tools.AllowSession), true
+	case "a":
+		if !m.approval.q.CanAlways {
+			return nil, true // not offered for ask-every-time commands
+		}
+		return m.answerApproval(tools.AllowAlways), true
 	case "d":
 		return m.answerApproval(tools.Deny), true
 	case "up", "down":
@@ -136,21 +164,18 @@ func (m *model) approvalKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 	case "enter":
 		opts := m.approval.options()
 		return m.answerApproval(opts[m.approval.sel].ans), true
-	case "ctrl+a":
-		if !m.approval.q.CanAlways {
-			return nil, true // not offered for ask-every-time commands
-		}
-		return m.answerApproval(tools.AllowAlways), true
 	}
 	return nil, false
 }
 
 // answerApproval is the single confirm path for every approval answer: the
-// reply channel, the drop of the state and (for allow-always) the persist of
-// the decision. ctrl+a and the picker's enter cannot drift apart.
+// reply channel, the drop of the state and — for allow-always — the persist of
+// the decision. The `a` shortcut and the picker's enter cannot drift apart.
 //
-// Permanent approvals are project-scoped (rev 28): they are saved in the
-// workdir's `.moca/config.jsonc` — `permissions.allow` for a command,
+// AllowSession has no bookkeeping here: the running agent's RememberSession
+// wrapper records it, so the note only says what was decided and no config is
+// touched. Permanent approvals are project-scoped (rev 28): they are saved in
+// the workdir's `.moca/config.jsonc` — `permissions.allow` for a command,
 // `mcp.servers.<server>.approve` for an MCP tool — never in the user config,
 // so what one project needs does not follow the user into every other
 // directory. A workdir that is not trusted cannot have project resources
@@ -160,6 +185,14 @@ func (m *model) answerApproval(ans tools.Answer) tea.Cmd {
 	q, reply := m.approval.q, m.approval.reply
 	m.approval = nil
 	reply <- ans
+	if ans == tools.AllowSession {
+		what := q.Subject
+		if q.SessionExact() && q.Detail != "" {
+			// The exact tier allows one line, not the name: say which line.
+			what = strings.SplitN(q.Detail, "\n", 2)[0]
+		}
+		return m.printlnContent(fmt.Sprintf("allowing `%s` for this session", Sanitize(what)))
+	}
 	if ans != tools.AllowAlways {
 		return nil
 	}

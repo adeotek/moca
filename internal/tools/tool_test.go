@@ -63,3 +63,45 @@ func TestSchemasFrozen(t *testing.T) {
 			"Run with -update only for an approved change.")
 	}
 }
+
+func TestAnswerString(t *testing.T) {
+	for a, want := range map[Answer]string{
+		Deny: "deny", AllowOnce: "once", AllowAlways: "always", AllowSession: "session",
+		Answer(99): "deny", // out of range: a log/index value must never panic
+	} {
+		if got := a.String(); got != want {
+			t.Errorf("Answer(%d).String() = %q, want %q", int(a), got, want)
+		}
+	}
+}
+
+// TestQuestionSessionKey: a session allow is keyed by kind + subject, plus
+// the command line for the exact tier. The tiers and the kinds must never
+// collide — a session `git` may not answer a rule-Ask `git push`, and a shell
+// subject may not answer a web host of the same text.
+func TestQuestionSessionKey(t *testing.T) {
+	name := Question{Kind: "shell", Subject: "git", Detail: "git status", CanAlways: true}
+	exact := Question{Kind: "shell", Subject: "git", Detail: "git push origin main"}
+	if name.SessionExact() || !exact.SessionExact() {
+		t.Fatalf("tiers: name=%v exact=%v", name.SessionExact(), exact.SessionExact())
+	}
+	if name.SessionKey() == exact.SessionKey() {
+		t.Fatal("the exact tier must not collide with the name tier")
+	}
+	// The exact key is the full command: the same line matches, another does not.
+	if exact.SessionKey() != (Question{Kind: "shell", Subject: "git", Detail: "git push origin main"}).SessionKey() {
+		t.Fatal("the same question must produce the same key")
+	}
+	if exact.SessionKey() == (Question{Kind: "shell", Subject: "git", Detail: "git push other"}).SessionKey() {
+		t.Fatal("a different command line must produce a different key")
+	}
+	// Kinds never mix: same subject and detail, different kind.
+	kinds := map[string]string{}
+	for _, k := range []string{"shell", "mcp", "web", "write"} {
+		key := Question{Kind: k, Subject: "x", Detail: "y"}.SessionKey()
+		if prev, ok := kinds[key]; ok {
+			t.Fatalf("%s and %s share a session key", prev, k)
+		}
+		kinds[key] = k
+	}
+}

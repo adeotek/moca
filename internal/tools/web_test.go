@@ -513,3 +513,69 @@ func TestWebFetchRedirectToOtherPrivateHostAsksAgain(t *testing.T) {
 		t.Errorf("want a second question for the metadata host, asked %v, got %+v", subjects, r)
 	}
 }
+
+// TestWebFetchSessionAllow: a private host approved "for this session" is not
+// asked about again, and both fetches reach it — the remembered answer still
+// fills the dialer's approved addresses.
+func TestWebFetchSessionAllow(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("secret"))
+	}))
+	defer srv.Close()
+	var asked []Question
+	ask := RememberSession(func(_ context.Context, q Question) Answer {
+		asked = append(asked, q)
+		return AllowSession
+	})
+	env := &Env{Ask: ask}
+	input := json.RawMessage(`{"op":"fetch","url":"` + srv.URL + `/"}`)
+	for i := 0; i < 2; i++ {
+		if r := (webTool{}).Run(context.Background(), env, input); r.IsError || r.Content != "secret" {
+			t.Fatalf("fetch %d: asked=%v got %+v", i, asked, r)
+		}
+	}
+	if len(asked) != 1 {
+		t.Fatalf("a session-allowed host must be asked once, asked %d times: %+v", len(asked), asked)
+	}
+	if asked[0].Kind != "web" || asked[0].SessionExact() || asked[0].NoSession {
+		t.Fatalf("question %+v", asked[0])
+	}
+}
+
+// TestWebFetchRedirectHopToSessionHostStillAsks: only a fetch that STARTS at a
+// session-allowed host may skip the prompt. A redirect to that same host while
+// fetching something else is a hop — it always asks and offers no session row.
+func TestWebFetchRedirectHopToSessionHostStillAsks(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("internal"))
+	}))
+	defer target.Close()
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(target.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := "http://localhost:" + port + "/"
+	hop := httptest.NewServer(http.RedirectHandler(local, http.StatusFound))
+	defer hop.Close()
+
+	var asked []Question
+	ask := RememberSession(func(_ context.Context, q Question) Answer {
+		asked = append(asked, q)
+		return AllowSession
+	})
+	env := &Env{Ask: ask}
+	if r := (webTool{}).Run(context.Background(), env, json.RawMessage(`{"op":"fetch","url":"`+local+`/"}`)); r.IsError || r.Content != "internal" {
+		t.Fatalf("first fetch: %+v", r)
+	}
+	// localhost is now session-allowed, but the hop below starts at 127.0.0.1
+	// and is redirected to localhost: that hop must still be asked about.
+	r := webTool{}.Run(context.Background(), env, json.RawMessage(`{"op":"fetch","url":"`+hop.URL+`/"}`))
+	if r.IsError || r.Content != "internal" {
+		t.Fatalf("hop fetch: %+v", r)
+	}
+	last := asked[len(asked)-1]
+	if len(asked) != 3 || last.Subject != "fetch localhost" || !last.NoSession {
+		t.Fatalf("the redirect hop must ask with NoSession: %+v", asked)
+	}
+}

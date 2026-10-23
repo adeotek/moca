@@ -154,7 +154,7 @@ Every shell command the agent proposes runs through a permission ladder. Three m
 
 | Mode | Behavior |
 |---|---|
-| `ask` | every non-allowlisted command asks (once / always / deny) — this was called `default` before v0.7.2, and `default` still works as its name |
+| `ask` | every non-allowlisted command asks (once / for this session / always / deny) — this was called `default` before v0.7.2, and `default` still works as its name |
 | `auto` | **the default since v0.7.2**: safe actions (reads, builds, tests, confined edits) just run; risky ones (`git push`, installs…) ask every time; commands the tables can't judge get a one-shot classifier opinion — allow or ask |
 | `yolo` | no permission checks |
 
@@ -198,7 +198,7 @@ Pick per run with `moca --mode ask|auto|yolo|plan` (`default` is still accepted 
 
 Rules are whitespace-separated words with bash-style wildcards: `git push *` (prefix), `*.go` in a word, `rm *` beats `rm` on 100 spellings, and `mkfs*` style names still hard-deny no matter what the rules say. Project rules win over user rules; within one list, deny wins over ask, ask over allow. `shell.allow` keeps working and folds into the same user list (the approval prompt's *allow always* now writes a `permissions.allow` rule into the trusted project's `.moca/config.jsonc`, not `shell.allow`) — except for `rm`, which always asks unless a real `permissions.allow` rule covers the exact command. Safe things (reads, builds, tests, confined file edits, plain downloads) need no rule in auto mode; the risk table covers them.
 
-**In the TUI** the mode badge always leads status line 2, directly before the model (`Ask` / green `Auto` / red `Yolo`, plus blue `Plan` when plan mode is on) — and the model field renders in that same plan blue. An approval prompt is a picker: `↑`/`↓` and `enter` alongside the classic `a` / `ctrl+a` / `d` — with text in the input box, keys go to the draft as usual.
+**In the TUI** the mode badge always leads status line 2, directly before the model (`Ask` / green `Auto` / red `Yolo`, plus blue `Plan` when plan mode is on) — and the model field renders in that same plan blue. An approval prompt is a picker: `↑`/`↓` and `enter` alongside `o` (allow once) / `s` (allow for this session — memory only, offered on `rm` and the other ask-every-time questions too) / `a` (allow always — the one answer that saves) / `d` (deny); with text in the input box, keys go to the draft as usual.
 
 ## Use
 
@@ -229,7 +229,7 @@ Sessions are append-only files under `~/.local/share/moca/sessions/`, keyed by w
 | `ctrl+t` | cycle the effort level |
 | `@` + path | complete a workdir file (`tab`/`enter` inserts it) |
 | `ctrl+c` ×2 | quit (or `/exit`) |
-| `a` / `↑↓` `enter` / `ctrl+a` / `d` | approval picker: allow once / move+confirm / allow always (saved into the project's `.moca/config.jsonc`) / deny (arrows+enter only with an empty draft) |
+| `o` / `↑↓` `enter` / `s` / `a` / `d` | approval picker: allow once / move+confirm / allow for this session (memory only, never written) / allow always (saved into the project's `.moca/config.jsonc`) / deny (letters and arrows only after a 700 ms pause, arrows+enter only with an empty draft) |
 | `↑`/`↓` · `tab` · `esc` | in the `/` dropdown: pick · complete · dismiss |
 
 **Slash commands**: `/model` · `/effort` · `/mode` · `/hard` · `/yolo` · `/plan` · `/execute` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/remember <text>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`). Typing `/` opens a dropdown of every command, loaded template (`prompt:`) and skill (`skill:`) as you type — `↑`/`↓` pick, `tab` completes, `enter` on an exact name runs it, and the command echoes into the transcript like your messages before its output.
@@ -326,4 +326,4 @@ make release        # five cross-compiled binaries in dist/
 
 ## Status
 
-Current release: **v0.7.3** (2026-10-21) — self-managed skills now hold what they claim: a recorded rule may only cite a command the run actually executed, and a skill whose rules cite a command must say which one on its one-line description — the line every later session reads before deciding to open the file. Both rules are enforced by the write guard, with the refusal naming the fix, and both were measured before shipping: the `skills` eval scenario went 4/20 → 6/6. The full release history lives in the [changelog](CHANGELOG.md).
+Current release: **v0.7.7** (2026-10-23) — the approval prompt gains a fourth answer, **Allow for this session** (memory only, offered on `rm` and every other ask-every-time question, matching the command name where the rules could learn it and the exact command line where they could not), and its keys change: `o` once / `s` this session / `a` always (the one that saves) / `d` deny, with `ctrl+a` back to the input's line start. The full release history lives in the [changelog](CHANGELOG.md).

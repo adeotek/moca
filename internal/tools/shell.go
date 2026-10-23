@@ -41,17 +41,24 @@ func approve(ctx context.Context, env *Env, names []string, command string, canA
 		if env.Ask != nil {
 			ans = env.Ask(ctx, Question{Kind: "shell", Subject: n, Detail: command, CanAlways: always})
 		}
-		slog.Debug("approval", "name", n, "answer", [...]string{"deny", "once", "always"}[ans])
+		slog.Debug("approval", "name", n, "answer", ans.String())
 		switch ans {
 		case Deny:
 			if always {
 				return fmt.Errorf("refused: `%s` is not allowlisted and the user did not approve it; ask the user to allow it or use another approach", n)
 			}
 			return fmt.Errorf("refused: `%s` needs explicit user approval for every call and it was not given", n)
-		case AllowAlways:
+		case AllowAlways, AllowSession:
 			// T-3: the answer is only offered when the checker will honour it
 			// (CanAlways) — a non-conforming asker returning it anyway must not
 			// persist a permanent allow the rules ignore.
+			//
+			// AllowSession learns the name in the checkers' in-memory rules
+			// only (Rules.Learn; nothing writes to disk here), so a command
+			// approved "for this session" is not asked again — and skips auto
+			// mode's classifier call on the next invocation. The `always`
+			// guard also keeps the make-safety rule honest: it runs only for a
+			// name an allow rule matched.
 			if always {
 				env.Commands.Allow(n)
 			}

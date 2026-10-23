@@ -48,11 +48,13 @@ const (
 	stopCancelled = "cancelled"
 )
 
-// Permission option ids are moca's; their kinds are ACP's.
+// Permission option ids are moca's; their kinds are ACP's. "Allow for this
+// session" takes the allow_always kind — the closest one the schema has — and
+// is moca's in-memory answer; nothing is persisted over ACP.
 const (
-	optAllowOnce   = "allow-once"
-	optAllowAlways = "allow-always"
-	optReject      = "reject"
+	optAllowOnce    = "allow-once"
+	optAllowSession = "allow-session"
+	optReject       = "reject"
 )
 
 type Implementation struct {

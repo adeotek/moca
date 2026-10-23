@@ -219,7 +219,7 @@ func (m *model) notify(text string) tea.Cmd {
 // immutable, so the full reasoning opens in the pager.
 const thinkingHint = " · alt+t to read"
 
-// approvalIdle is the typing pause required before `a`/`d` answer a prompt.
+// approvalIdle is the typing pause required before `o`/`s`/`a`/`d` answer a prompt.
 const approvalIdle = 700 * time.Millisecond
 
 // inputChrome is the number of terminal rows the input box leaves for the

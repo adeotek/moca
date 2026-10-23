@@ -283,3 +283,54 @@ func TestWriteEditTrackRunChanges(t *testing.T) {
 		t.Fatalf("code edit: unverified=%q", env.Unverified)
 	}
 }
+
+// TestSessionAllowCoversAPromptsFileButNeverTheConfig: an ask-write question
+// under the global prompts root is an ordinary one — a session allow sticks, so
+// the same file is written again without a prompt. moca's own config file is
+// excluded: it holds the permission policy, so it keeps asking and a session
+// answer to it is downgraded to once.
+func TestSessionAllowCoversAPromptsFileButNeverTheConfig(t *testing.T) {
+	root := t.TempDir()
+	prompts := filepath.Join(t.TempDir(), "prompts")
+	os.MkdirAll(prompts, 0o755)
+	cfgDir := t.TempDir()
+	cfg := filepath.Join(cfgDir, "config.jsonc")
+	if err := os.WriteFile(cfg, []byte("{\n  \"model\": \"a/b\"\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	asked := 0
+	ask := func(context.Context, Question) Answer { asked++; return AllowSession }
+	env := &Env{Root: root, Paths: askRootChecker{root, prompts}, Reads: NewReadTracker(),
+		Ask: RememberSession(ask), ConfigFile: cfg}
+	dst := filepath.Join(prompts, "deploy.md")
+	if r := run(t, writeTool{}, env, map[string]any{"path": dst, "content": "one\n"}); r.IsError {
+		t.Fatalf("first write: %q", r.Content)
+	}
+	if r := run(t, writeTool{}, env, map[string]any{"path": dst, "content": "two\n"}); r.IsError {
+		t.Fatalf("second write: %q", r.Content)
+	}
+	if asked != 1 {
+		t.Fatalf("a session allow must cover the file: asked %d times", asked)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "two\n" {
+		t.Fatalf("content: %q", b)
+	}
+
+	// The config file: asked again every time, never remembered.
+	cfgEnv := &Env{Root: root, Paths: fileAskChecker{root, cfg}, Reads: NewReadTracker(),
+		Ask: RememberSession(ask), ConfigFile: cfg}
+	asked = 0
+	if r := run(t, readTool{}, cfgEnv, map[string]any{"path": cfg}); r.IsError {
+		t.Fatalf("read: %q", r.Content)
+	}
+	if r := run(t, writeTool{}, cfgEnv, map[string]any{"path": cfg, "content": "{\"model\":\"a/c\"}\n"}); r.IsError {
+		t.Fatalf("config write: %q", r.Content)
+	}
+	if r := run(t, writeTool{}, cfgEnv, map[string]any{"path": cfg, "content": "{\"model\":\"a/d\"}\n"}); r.IsError {
+		t.Fatalf("second config write: %q", r.Content)
+	}
+	if asked != 2 {
+		t.Fatalf("the config file must ask every time, asked %d times", asked)
+	}
+}
