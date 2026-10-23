@@ -18,6 +18,7 @@ make fmt                                    # go fmt ./...
 make release                                # 6 cross-compiled binaries in dist/
 bin/moca update --check                     # self-update: compare with the latest GitHub release
 scripts/release/render-acp-registry.py --tag <tag> --out <dir>   # the ACP registry entry (agent.json + icon)
+scripts/release/render-homebrew-formula.py --tag <tag> --out <dir>   # Formula/moca.rb for adeotek/homebrew-tap
 mise run <task>                             # the make targets, as mise tasks
 ```
 

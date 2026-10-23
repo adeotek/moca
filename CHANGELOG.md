@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.9 (2026-10-23)
+
+### The distribution channels have renderers, and the Homebrew tap is live
+
+Release tooling and documentation only: no tool schema, no config key, no agent-loop change. A named release because the README and this file are embedded in the binary as the self-knowledge references, so their text is part of the artifact.
+
+- **`scripts/release/render-acp-registry.py`** now renders the entry the ACP registry actually accepts. The first version emitted the six archive URLs and stopped there, which the registry's own build job rejects: `license_url` sits in `build_registry.py`'s `REQUIRED_FIELDS` even though `agent.schema.json` does not ask for it, and every binary target wants a `sha256` that `verify_agents.py` recomputes from the downloaded archive. Both are now derived from the release's own `checksums.txt` (a malformed hash, or a tag missing a package, exits 1 naming it), so the published entry cannot disagree with the published archives. The registry's tooling reproduces the result: `build_registry.py` adds `moca` to the 44-agent registry, and `verify_agents.py --auth-check --agent moca` downloads the linux package, verifies the checksum, runs `moca acp` and reports `Auth OK: login(agent)`.
+- **`scripts/release/render-homebrew-formula.py`** renders `Formula/moca.rb` for the new public tap **`adeotek/homebrew-tap`**, so `brew install adeotek/tap/moca` installs the same prebuilt tarball (darwin arm64/x86_64, linux arm64/x86_64) instead of putting a Go toolchain on every macOS user's machine — which is the reason the release publishes darwin at all. Two `brew audit --strict` rules are encoded in the template rather than patched into the tap: no explicit `version` when Homebrew can scan it out of the URL, and `livecheck` before the platform blocks. Verified in Homebrew's own container — `brew style` no offenses, `brew audit --strict --online` silent, `brew install` pours `moca v0.7.8`, `brew test` green — where the installed shim resolves to a `Cellar/moca/` path that `moca update` refuses (`brew upgrade moca`, §2).
+- The README's install matrix gains the **Homebrew** row it had deliberately withheld until the tap existed, and says that a tap copy updates with `brew upgrade moca`. A Windows package is in review at `microsoft/winget-pkgs`; that row waits until it merges.
+
 ## v0.7.8 (2026-10-23)
 
 ### macOS gets a package, and there are six of them
