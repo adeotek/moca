@@ -46,7 +46,13 @@ type Registry struct {
 	ollamaErr error
 }
 
+// NewRegistry builds the catalog. A nil hc means the shared default client
+// (header-bounded): every request the registry makes — discovery, the
+// adapters, an OAuth refresh — goes through hc, so it is never left nil.
 func NewRegistry(cfg config.Config, hc *http.Client, notify func(RetryNotice)) (*Registry, error) {
+	if hc == nil {
+		hc = defaultHTTPClient()
+	}
 	r := &Registry{cfg: cfg, hc: hc, notify: notify, getenv: os.Getenv, models: map[string]Model{}, oauth: map[string]CredentialFunc{}, sessionID: rand.Text()}
 	for _, m := range builtinCatalog {
 		r.models[m.Qualified()] = m

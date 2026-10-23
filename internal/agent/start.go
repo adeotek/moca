@@ -47,7 +47,7 @@ type StartOptions struct {
 	Headless bool
 	Ask      tools.Asker
 	Emit     func(Event)
-	HTTP     *http.Client
+	HTTP     *http.Client // nil = the provider default (header-bounded)
 	Slug     string
 	// ConfigPath is the user config file this run loaded (warnings name it);
 	// "" means config.ConfigFile().
@@ -93,12 +93,8 @@ func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error)
 	if pn, _, err := config.SplitModel(cfg.Model); err == nil {
 		cfg.UseProvider(pn)
 	}
-	hc := o.HTTP
-	if hc == nil {
-		hc = defaultHTTPClient()
-	}
 	emit := o.Emit
-	reg, err := provider.NewRegistry(cfg, hc, func(n provider.RetryNotice) {
+	reg, err := provider.NewRegistry(cfg, o.HTTP, func(n provider.RetryNotice) {
 		if emit != nil {
 			emit(Retry{n})
 		}
@@ -637,22 +633,6 @@ func Start(o StartOptions) (*Agent, error) {
 		return nil, &StartError{err}
 	}
 	return a, nil
-}
-
-// headerTimeout bounds the wait for provider response headers: the SSE stall
-// timeout only covers the response body, so a server that accepts a request
-// and then goes silent would hang an unattended run forever (seen once in
-// the live ship-gate runs).
-var headerTimeout = 120 * time.Second
-
-func defaultHTTPClient() *http.Client {
-	tr, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return &http.Client{Transport: http.DefaultTransport}
-	}
-	ct := tr.Clone()
-	ct.ResponseHeaderTimeout = headerTimeout
-	return &http.Client{Transport: ct}
 }
 
 // skillGuard is the validating guard: it enforces the skill contract (§12) on
