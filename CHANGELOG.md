@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.7.8 (2026-10-23)
+
+### macOS gets a package, and there are six of them
+
+The Release workflow publishes **six** packages now — linux, darwin and windows on amd64 and arm64 — instead of four, and `install.sh` runs on macOS. Two things were blocked on that: a Homebrew formula can only install a prebuilt tarball, so without a darwin package every macOS user builds from source (a Go toolchain on their machine), and the ACP registry rejects a `binary` distribution that does not cover darwin, linux and windows.
+
+- **`install.sh`** takes the OS from `uname -s` (`Linux` → `linux`, `Darwin` → `darwin`, anything else refused with a pointer at `install.ps1`) and composes the asset name from it, so the script is one file for both unices. Verified on this host against a fake release server: the macOS arm64 asset is downloaded, checksum-verified and installed, and the unsupported-OS and unsupported-arch refusals name what is published.
+- **No other code change was needed.** `internal/update` composes its suffix from `runtime.GOOS`/`GOARCH` rather than whitelisting platforms, so darwin was a matrix row.
+
+### `moca update` refuses a copy a package manager owns
+
+A brew-installed moca that rewrote its own binary would leave a stale Cellar entry, a broken symlink and a version `brew upgrade` then undoes — and `homebrew-core` forbids self-updating software outright. Same shape for Scoop's shims and winget's portable links.
+
+- `update.PackageManaged` matches the resolved executable path against those three trees by **path only** (no exec, no network; the path is lower-cased and backslash-normalised before matching, so a Windows layout is recognisable on any host).
+- `moca update` prints the manager's own command — `brew upgrade moca`, `scoop update moca`, `winget upgrade adeotek.moca` — and exits **2**, the code an argument/env refusal already used. `--force` skips the guard; `--check` never reaches it, so it still answers on a managed copy.
+- Pins: `TestPackageManaged` (13 paths, the four the plan named plus the negatives — `~/.local/bin`, `/usr/local/bin`, `~/go/bin` stay unmanaged) and the three CLI pins (refused, `--check` answering, `--force` reaching the download).
+
+### The ACP front end advertises a way to sign in
+
+`initialize` answered `authMethods: []`, and the ACP registry's CI rejects exactly that. It now advertises **one** method: id `login`, name `Sign in`, of ACP's default `agent` kind.
+
+- **It is not the `terminal` kind**, deliberately: ACP allows that only when the client enabled its terminal authentication capability, and the client would then re-run the configured invocation interactively — `moca acp` again, not a login (`moca login` needs a provider name as an argument, so it cannot ride in `args`). The `agent` kind says what actually happens: moca resolves its own credential.
+- **`authenticate` does real work.** It was an unconditional error; it now answers by running the same credential check `session/new` makes, so a sign-in button reports success only when a credential really resolves, and otherwise carries the same `-32603` message naming the fix. An id moca never advertised is `-32602`, and the response is `{}` rather than `null` — a schema-typed object a strict client can deserialise.
+- **The `-32603` in `session/new` stays.** The fix (`moca login`, the config's `model`) lives outside the editor, so ACP's auth-required would still swap the message for a prompt that cannot complete it. What changed is that the affordance now exists.
+- Pins: `TestAuthenticate` (success with a credential, `-32602` for an unknown id, the fix when the provider has none), `TestInitialize` (exactly one method, and **no `type` discriminator on the wire**), plus schema conformance for `AuthMethod` and `AuthenticateResponse`.
+
+### The README says what the harness supports
+
+The opening paragraph claimed moca "competes on cost per task". The published four-agent run says otherwise: moca was the most expensive zen agent **per solved task** ($0.051 vs OpenCode's $0.030) and last on accuracy (6/12). The headline is now the claims that survive scrutiny — one static binary, eight frozen tools, ~200 tokens of MCP, skills that migrate unchanged, fastest per agent-run (46 s median) — with the numbers in a new **[BENCHMARKS.md](BENCHMARKS.md)** that also states what the harness does not measure. The `## Status` section is a pointer to the releases page and the changelog rather than a version string somebody has to keep current.
+
 ## v0.7.7 (2026-10-23)
 
 ### The approval keys changed — `a` now saves
