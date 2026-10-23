@@ -109,7 +109,7 @@
     "notify": "osc9" // "osc9" (desktop notification) | "bell" | "off"
     // Colors: each role takes a #rrggbb hex or an ANSI color number (0-255).
     // Every role has a built-in default in internal/tui/theme.go, and the
-    // interactive builder (docs/tui-theme-builder.html) emits a ready block.
+    // interactive builder (docs/themes/tui-theme-builder.html) emits a ready block.
     // "theme": {
     //   "both": { "accent": "#d97706" },
     //   "dark": { "userBg": "#141618", "respBg": "#0a1619" },
