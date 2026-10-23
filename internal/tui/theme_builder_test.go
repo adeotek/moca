@@ -9,13 +9,13 @@ import (
 	"testing"
 )
 
-// TestThemeBuilderMatchesDefaults pins docs/tui-theme-builder.html to
+// TestThemeBuilderMatchesDefaults pins docs/themes/tui-theme-builder.html to
 // DefaultTheme: every themable field's preview default equals the built-in
 // value — or, for a role whose default is an ANSI slot, carries that slot —
 // and every config role has a builder field. Exported snippets then never
 // pin a stale default.
 func TestThemeBuilderMatchesDefaults(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "tui-theme-builder.html"))
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "themes", "tui-theme-builder.html"))
 	if err != nil {
 		t.Fatal(err)
 	}
