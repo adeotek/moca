@@ -9,14 +9,16 @@ import (
 )
 
 // TestSelfKnowledgeReferencesAreByteIdentical: the self-knowledge skill
-// embeds the living docs (SPECS.md, README.md) as references — the build
-// copies them (go:embed), so a stale copy would answer questions about moca
-// from outdated text. Any docs edit must re-copy the references in the same
-// commit; this test is the guard.
+// embeds the living docs (SPECS.md, README.md, CHANGELOG.md) as references —
+// the build copies them (go:embed), so a stale copy would answer questions
+// about moca from outdated text. Any docs edit must re-copy the references in
+// the same commit; this test is the guard. (The changelog was the one that
+// rotted: it sat at v0.7.7 through two releases before this pair was pinned.)
 func TestSelfKnowledgeReferencesAreByteIdentical(t *testing.T) {
 	for _, c := range []struct{ embedded, source string }{
 		{"builtin/self-knowledge/references/specs.md", filepath.Join("..", "..", "docs", "specs", "SPECS.md")},
 		{"builtin/self-knowledge/references/readme.md", filepath.Join("..", "..", "README.md")},
+		{"builtin/self-knowledge/references/changelog.md", filepath.Join("..", "..", "CHANGELOG.md")},
 	} {
 		got, err := fs.ReadFile(builtinFS, c.embedded)
 		if err != nil {
