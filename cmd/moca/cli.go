@@ -24,7 +24,7 @@ const (
 var errHelp = errors.New("help requested")
 
 func printUsage(w io.Writer) {
-	fmt.Fprint(w, `moca — minimal, token-efficient coding agent
+	fmt.Fprint(w, `moca — a coding agent for the terminal
 
 usage:
   moca                         TUI in the current directory
