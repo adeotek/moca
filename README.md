@@ -8,6 +8,8 @@
 
 moca is a coding agent for the terminal, inspired by Claude Code, OpenCode and Pi — deliberately about a tenth of their surface area. Prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap, and everything moca does ends up in plain session files you can read. It runs on Claude, ChatGPT (subscription login included), Ollama, OpenCode Zen, or any OpenAI-compatible endpoint.
 
+![moca: a prompt, a tool call, the approval picker, a diff and a green test run](docs/demo/moca-demo.gif)
+
 - **Eight frozen tools** — `read` · `write` · `edit` · `shell` · `search` · `ls` · `web` (search + fetch) · `mcp`. Stable schemas by design; everything else is a [non-goal](#non-goals-v1-probably-forever).
 - **MCP without prompt bloat** — one lazy ~200-token proxy tool; servers start on first use and their tool lists never enter your prompt.
 - **Skills from other tools, unchanged** — `SKILL.md` skills written for pi, Claude Code or OpenCode load as-is, and every skill you add is invokable from the TUI as `/name` (agent-recorded `auto` notes are listed but never commands).
