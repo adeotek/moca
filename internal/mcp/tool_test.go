@@ -78,6 +78,22 @@ func TestProxyGating(t *testing.T) {
 	if r := runP(newProxy(t, nil), &tools.Env{Ask: tools.AutoAllow}, map[string]any{"action": "call", "server": "docs", "tool": "create_issue"}); r.IsError {
 		t.Fatal("yolo (AutoAllow asker) runs non-read-only tools without asking")
 	}
+	// AllowSession sticks for the session too, through the proxy's own
+	// session map (the agent's wrapper remembers the question as well).
+	p2 := newProxy(t, nil)
+	sessionAsks := 0
+	envS := &tools.Env{Ask: func(_ context.Context, _ tools.Question) tools.Answer {
+		sessionAsks++
+		return tools.AllowSession
+	}}
+	for i := 0; i < 2; i++ {
+		if r := runP(p2, envS, map[string]any{"action": "call", "server": "docs", "tool": "create_issue"}); r.IsError {
+			t.Fatalf("call %d: %s", i, r.Content)
+		}
+	}
+	if sessionAsks != 1 {
+		t.Fatalf("allow-for-this-session must stick, asked %d times", sessionAsks)
+	}
 }
 
 func TestProxyArgErrors(t *testing.T) {
