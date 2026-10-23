@@ -1,6 +1,6 @@
 # AGENTS.md — moca
 
-One Go binary: a minimal TUI coding agent (`github.com/adeotek/moca`, binary `moca`). 427 Go files across 16 `internal/` packages.
+One Go binary: a minimal TUI coding agent (`github.com/adeotek/moca`, binary `moca`). 428 Go files across 17 `internal/` packages.
 
 ## Ground truth (read before changing behavior)
 

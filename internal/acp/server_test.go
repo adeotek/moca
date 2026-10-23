@@ -2,11 +2,17 @@ package acp
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"github.com/adeotek/moca/internal/config"
 )
 
 func TestInitialize(t *testing.T) {
@@ -110,6 +116,35 @@ func TestNewSessionWithoutCredential(t *testing.T) {
 	if err == nil || err.Code != codeInternal || !strings.Contains(err.Message, "not in the catalog") {
 		t.Fatalf("unknown model: %+v", err)
 	}
+}
+
+// TestModelCheckWithOllamaConfigured is a real editor's setup: Options.HTTP
+// is nil (cmd/moca never sets it) and providers.ollama is configured while
+// the model lives on another provider. The model check's discovery ran on
+// that nil client and panicked, so authenticate and every session/new
+// answered -32603 "internal error … nil pointer dereference" (v0.7.8, Zed on
+// Windows).
+func TestModelCheckWithOllamaConfigured(t *testing.T) {
+	var tags atomic.Int32
+	oll := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/tags" {
+			tags.Add(1)
+		}
+		io.WriteString(w, `{"models":[]}`)
+	}))
+	t.Cleanup(oll.Close) // registered first: closes after the client stops
+	o := testOptions(t, newScript(t))
+	o.HTTP = nil
+	o.Config.Providers["ollama"] = config.ProviderConfig{Auth: "api_key", BaseURL: oll.URL}
+	c := startClient(t, o)
+	// authenticate runs only the model check, so the discovery hit is its own.
+	if _, err := c.call("authenticate", AuthenticateRequest{MethodID: "login"}); err != nil {
+		t.Fatalf("authenticate: %+v", err)
+	}
+	if tags.Load() == 0 {
+		t.Fatal("the model check never asked the configured ollama")
+	}
+	c.newSession(t.TempDir())
 }
 
 func TestPromptStreamsTextAndEndsTurn(t *testing.T) {
