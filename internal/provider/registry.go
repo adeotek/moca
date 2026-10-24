@@ -27,6 +27,10 @@ var defaultBaseURLs = map[string]map[string]string{
 		"openai-completions": "https://opencode.ai/zen/go/v1",
 		"openai-responses":   "https://opencode.ai/zen/go/v1",
 	},
+	// The pay-as-you-go twin of the go tier: same account key, no
+	// per-conversation routing header, chat-completions only.
+	"opencode-zen": {"openai-completions": "https://opencode.ai/zen/v1"},
+	"openrouter":   {"openai-completions": "https://openrouter.ai/api/v1"},
 }
 
 type Registry struct {
@@ -41,6 +45,11 @@ type Registry struct {
 	models    map[string]Model
 	oauth     map[string]CredentialFunc
 	sessionID string
+	// cache holds the per-provider model lists (24 h); discovered is the last
+	// merged list per provider, so a rebuild (a cache clear, a refresh) is
+	// deterministic and never stacks duplicates.
+	cache      *ModelsCache
+	discovered map[string][]CachedModel
 	// ollamaErr is why the last discovery failed (nil when it succeeded or
 	// never ran); Verify cites it when a configured ollama model is missing.
 	ollamaErr error
@@ -53,29 +62,23 @@ func NewRegistry(cfg config.Config, hc *http.Client, notify func(RetryNotice)) (
 	if hc == nil {
 		hc = defaultHTTPClient()
 	}
-	r := &Registry{cfg: cfg, hc: hc, notify: notify, getenv: os.Getenv, models: map[string]Model{}, oauth: map[string]CredentialFunc{}, sessionID: rand.Text()}
+	r := &Registry{cfg: cfg, hc: hc, notify: notify, getenv: os.Getenv, models: map[string]Model{},
+		oauth: map[string]CredentialFunc{}, sessionID: rand.Text(),
+		cache: NewModelsCache(config.ModelsCacheFile(), ModelsCacheTTL), discovered: map[string][]CachedModel{}}
 	for _, m := range builtinCatalog {
+		m.CostKnown = true // every curated row carries authored prices
 		r.models[m.Qualified()] = m
 	}
 	for pname, p := range cfg.Providers {
+		r.addSeedsLocked(pname)
 		if err := r.applyModelOverrides(pname, p); err != nil {
 			return nil, err
 		}
 	}
-	for _, q := range []string{cfg.Model, cfg.ModelHard} {
-		if q == "" {
-			continue
-		}
-		// A local provider's models are discovered from its server after
-		// construction (NewRegistry makes no network call); Verify checks
-		// them then.
-		if pn, _, err := config.SplitModel(q); err == nil && config.IsLocalProvider(pn) {
-			continue
-		}
-		if _, ok := r.models[q]; !ok {
-			return nil, fmt.Errorf("model %q is not in the catalog; declare it under providers.<name>.models", q)
-		}
-	}
+	// Model existence is deliberately NOT checked here: a provider's list is
+	// discovered after construction (SPECS §6), so a model absent from the
+	// catalog may still exist upstream. Verify() is the gate, and it runs
+	// after discovery with the discovered ids in hand.
 	return r, nil
 }
 
@@ -103,13 +106,13 @@ func (r *Registry) applyModelOverrides(pname string, p config.ProviderConfig) er
 				q, pname, mid, strings.Join(config.Protocols, "|"))
 		}
 		if o.ContextWindow != 0 {
-			m.ContextWindow = o.ContextWindow
+			m.ContextWindow, m.WindowAssumed = o.ContextWindow, false
 		}
 		if o.MaxOutputTokens != 0 {
 			m.MaxOutput = o.MaxOutputTokens
 		}
 		if o.Cost != nil {
-			m.Cost = *o.Cost
+			m.Cost, m.CostKnown = *o.Cost, true
 		}
 		r.models[q] = m
 	}
@@ -134,9 +137,49 @@ func (r *Registry) Verify() error {
 			}
 			return fmt.Errorf("model %q: the ollama server at %s has no model %q with tool support — pull it (ollama pull %s) or declare it under providers.ollama.models", q, r.ollamaBase(), id, id)
 		}
+		if hint := r.nearestModels(q); hint != "" {
+			return fmt.Errorf("model %q is not in the catalog and the provider does not list it; did you mean: %s (declare any other id under providers.<name>.models)", q, hint)
+		}
 		return fmt.Errorf("model %q is not in the catalog; declare it under providers.<name>.models", q)
 	}
 	return nil
+}
+
+// nearestModels suggests up to three known ids when a configured model is
+// missing: the discovered list makes a typo diagnosable ("did you mean"),
+// which is the cost of deferring model validation to Verify.
+func (r *Registry) nearestModels(q string) string {
+	pn, id, err := config.SplitModel(q)
+	if err != nil || id == "" {
+		return ""
+	}
+	base := strings.ToLower(id)
+	var cand []string
+	r.mu.RLock()
+	for k := range r.models {
+		mid, ok := strings.CutPrefix(k, pn+"/")
+		if !ok || mid == id {
+			continue
+		}
+		low := strings.ToLower(mid)
+		if strings.Contains(low, base) || strings.Contains(base, low) || commonPrefix(low, base) >= 4 {
+			cand = append(cand, k)
+		}
+	}
+	r.mu.RUnlock()
+	slices.Sort(cand)
+	if len(cand) > 3 {
+		cand = cand[:3]
+	}
+	return strings.Join(cand, ", ")
+}
+
+func commonPrefix(a, b string) int {
+	n := 0
+	for n < len(a) && n < len(b) && a[n] == b[n] {
+		n++
+	}
+	return n
 }
 
 func (r *Registry) SetOAuth(provider string, fn CredentialFunc) { r.oauth[provider] = fn }
@@ -210,20 +253,36 @@ func (r *Registry) credential(provider string) CredentialFunc {
 	// prefixes. req.CacheKey is the session's stable cache-routing key; the
 	// process id is only the fallback for a request that carries none.
 	var extra map[string]string
-	if provider == "opencode-go" {
+	switch provider {
+	case "opencode-go":
 		extra = map[string]string{"x-opencode-session": r.sessionID}
+	case "openrouter":
+		// Optional app attribution (openrouter.ai rankings) plus the
+		// per-conversation sticky-routing key: OpenRouter pins the upstream
+		// provider per session, which is what keeps its prompt cache warm.
+		extra = map[string]string{
+			"X-OpenRouter-Title": "moca",
+			"HTTP-Referer":       "https://github.com/adeotek/moca",
+		}
 	}
 	withExtra := func(c Credential, req llm.Request) Credential {
-		if provider == "opencode-go" && req.CacheKey != "" {
-			extra["x-opencode-session"] = req.CacheKey
+		h := make(map[string]string, len(extra)+1)
+		for k, v := range extra {
+			h[k] = v
 		}
-		if len(extra) == 0 {
+		switch {
+		case provider == "opencode-go" && req.CacheKey != "":
+			h["x-opencode-session"] = req.CacheKey
+		case provider == "openrouter" && req.CacheKey != "":
+			h["x-session-id"] = req.CacheKey
+		}
+		if len(h) == 0 {
 			return c
 		}
 		if c.Headers == nil {
-			c.Headers = map[string]string{}
+			c.Headers = make(map[string]string, len(h))
 		}
-		for k, v := range extra {
+		for k, v := range h {
 			c.Headers[k] = v
 		}
 		return c
