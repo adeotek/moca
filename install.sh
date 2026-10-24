@@ -196,6 +196,9 @@ fetch "$RELEASE_URL" "$TMP/release.json" || die "could not fetch release metadat
 TAG="$(grep -o '"tag_name": *"[^"]*"' "$TMP/release.json" | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')"
 [ -n "$TAG" ] || die "could not parse the release tag (unexpected API response)"
 ASSET="moca-${TAG}-${OS}-${ARCH}.tar.gz"
+# ERE-escape the asset name so a dot matches only a dot (the name's dots are
+# literal, and checksums.txt is the trust anchor for everything below).
+ASSET_RE="$(printf '%s' "$ASSET" | sed 's/\./\\./g')"
 
 URLS="$(grep -o '"browser_download_url": *"[^"]*"' "$TMP/release.json" | sed 's/.*"\([^"]*\)"$/\1/')"
 PACKAGE_URL="$(printf '%s\n' "$URLS" | grep -- "/${ASSET}\$" | head -n 1 || true)"
@@ -208,11 +211,11 @@ fetch "$PACKAGE_URL" "$TMP/$ASSET" || die "download failed: $PACKAGE_URL"
 if [ -n "$SUMS_URL" ]; then
 	note "verifying checksum…"
 	fetch "$SUMS_URL" "$TMP/checksums.txt" || die "could not download checksums.txt"
-	grep -q -- "  ${ASSET}\$" "$TMP/checksums.txt" || die "checksums.txt has no entry for ${ASSET}"
+	grep -qE -- "  ${ASSET_RE}\$" "$TMP/checksums.txt" || die "checksums.txt has no entry for ${ASSET}"
 	if command -v sha256sum >/dev/null 2>&1; then
-		(cd "$TMP" && grep -- "  ${ASSET}\$" checksums.txt | sha256sum -c - >/dev/null 2>&1) || die "checksum mismatch — aborting (nothing was installed)"
+		(cd "$TMP" && grep -E -- "  ${ASSET_RE}\$" checksums.txt | sha256sum -c - >/dev/null 2>&1) || die "checksum mismatch — aborting (nothing was installed)"
 	elif command -v shasum >/dev/null 2>&1; then
-		(cd "$TMP" && grep -- "  ${ASSET}\$" checksums.txt | shasum -a 256 -c - >/dev/null 2>&1) || die "checksum mismatch — aborting (nothing was installed)"
+		(cd "$TMP" && grep -E -- "  ${ASSET_RE}\$" checksums.txt | shasum -a 256 -c - >/dev/null 2>&1) || die "checksum mismatch — aborting (nothing was installed)"
 	else
 		note "warning: sha256sum/shasum not found — skipping checksum verification"
 	fi

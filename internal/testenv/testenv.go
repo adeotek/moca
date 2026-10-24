@@ -9,6 +9,7 @@
 package testenv
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -46,7 +47,8 @@ func BlankKeys(t testing.TB) {
 func Main(m *testing.M) int {
 	root, err := os.MkdirTemp("", "moca-test-*")
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "testenv: setup failed: %v\n", err)
+		os.Exit(1)
 	}
 	os.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	os.Setenv("XDG_DATA_HOME", filepath.Join(root, "data"))

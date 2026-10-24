@@ -160,12 +160,22 @@ func (r *Registry) Verify() error {
 		if pn, _, err := config.SplitModel(q); err == nil && r.discoveryErr[pn] != nil {
 			// The list could not be read: "the provider does not list it"
 			// would be a claim moca never checked.
-			return fmt.Errorf("model %q is not in the catalog and %s's model list could not be fetched (%v) — retry when the provider is reachable, or declare it under providers.%s.models", q, pn, r.discoveryErr[pn], pn)
+			derr := r.discoveryErr[pn]
+			remediation := "retry when the provider is reachable"
+			var he *HTTPError
+			if errors.As(derr, &he) && (he.Status == 401 || he.Status == 403) {
+				// A revoked or expired key is fixed by the key, not by retrying.
+				remediation = "fix the provider's credential (update the key or log in again)"
+			}
+			return fmt.Errorf("model %q is not in the catalog and %s's model list could not be fetched (%v) — %s, or declare it under providers.%s.models", q, pn, derr, remediation, pn)
 		}
 		if pn, _, err := config.SplitModel(q); err == nil && r.listedByDiscovery(pn) {
 			// Discovery skips a provider with no usable credential, so its
 			// list was never read either: the credential is the fix, not a
-			// declaration. credentialReady takes no registry lock.
+			// declaration. credentialReady takes no registry lock, but its
+			// store read (a flock'd file read) does happen I/O under this
+			// one — never let a credential func here refresh a token or
+			// touch the network while mu is held.
 			if cerr := r.credentialReady(pn); cerr != nil {
 				return fmt.Errorf("model %q is not in the catalog, and %s's model list was not read: %w", q, pn, cerr)
 			}

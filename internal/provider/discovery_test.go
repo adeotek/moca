@@ -3,9 +3,11 @@ package provider
 // Tests for provider model discovery (SPECS §6, Tasks 2–4, 6, 10).
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -680,5 +682,70 @@ func TestDiscoveredBudgetThinking(t *testing.T) {
 	}
 	if m.ClampEffort(llm.EffortHigh) != llm.EffortHigh {
 		t.Fatalf("high effort: %v", m.ClampEffort(llm.EffortHigh))
+	}
+}
+
+// TestFetchAnthropicModelsPageCap: a pagination that never ends must not spin
+// past modelsMaxPages, and the truncation must be logged — an incomplete list
+// is never mistaken for the full one.
+func TestFetchAnthropicModelsPageCap(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
+		return 200, `{"data":[{"id":"m-1"}],"has_more":true,"last_id":"m-1"}`
+	})
+	hdr := http.Header{}
+	hdr.Set("x-api-key", "K")
+	hdr.Set("anthropic-version", "2023-06-01")
+
+	// The fixture always says has_more: the loop must stop at modelsMaxPages
+	// pages, and the truncation must be logged — an incomplete list is never
+	// mistaken for the full one.
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	models, err := fetchAnthropicModels(context.Background(), srv.Client(), srv.URL, hdr)
+	slog.SetDefault(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != modelsMaxPages {
+		t.Fatalf("the page cap bounds the fetch: %d models", len(models))
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("model list truncated")) {
+		t.Fatalf("the truncation must be logged, got: %s", buf.String())
+	}
+}
+
+// TestVerifySuggestsNearestModels: a typo's "did you mean" is bounded to three
+// candidates and stays within the typo'd model's own provider.
+func TestVerifySuggestsNearestModels(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
+		return 200, `{"data":[{"id":"mod-2"},{"id":"mod-23"},{"id":"mod-24"},{"id":"mod-25"},{"id":"unrelated"}]}`
+	})
+	cfg := discoveryCfg(t, srv.URL)
+	cfg.Model = "gw/mod-2zzz"
+	reg, err := NewRegistry(cfg, srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.DiscoverModels(context.Background())
+	err = reg.Verify()
+	if err == nil || !strings.Contains(err.Error(), "did you mean") {
+		t.Fatalf("a typo'd id must get a hint: %v", err)
+	}
+	hint := err.Error()
+	if i := strings.Index(hint, "did you mean: "); i >= 0 {
+		hint = hint[i+len("did you mean: "):]
+	}
+	if end := strings.Index(hint, " ("); end >= 0 {
+		hint = hint[:end]
+	}
+	cands := strings.Split(hint, ", ")
+	if len(cands) != 3 {
+		t.Fatalf("the hint is capped at three, got: %q", cands)
+	}
+	for _, c := range cands {
+		if !strings.HasPrefix(c, "gw/") || strings.Contains(c, "unrelated") {
+			t.Fatalf("candidates stay in the provider: %q", cands)
+		}
 	}
 }

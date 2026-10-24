@@ -527,9 +527,10 @@ func fetchAnthropicModels(ctx context.Context, hc *http.Client, base string, hdr
 		LastID  string      `json:"last_id"`
 	}
 	var out []CachedModel
+	var pg page
 	url := strings.TrimRight(base, "/") + "/v1/models?limit=1000"
 	for range modelsMaxPages {
-		var pg page
+		pg = page{}
 		if err := getJSON(ctx, hc, url, hdr, &pg); err != nil {
 			return out, err
 		}
@@ -564,6 +565,12 @@ func fetchAnthropicModels(ctx context.Context, hc *http.Client, base string, hdr
 			break
 		}
 		url = strings.TrimRight(base, "/") + "/v1/models?limit=1000&after_id=" + pg.LastID
+	}
+	// All pages spent but the vendor says there are more: say so, so an
+	// incomplete list is never mistaken for the full one (a model
+	// mis-claimed as "the provider does not list it" beyond the cap).
+	if pg.HasMore && pg.LastID != "" {
+		slog.Warn("anthropic model list truncated", "provider", "anthropic", "pages", modelsMaxPages)
 	}
 	return out, nil
 }
