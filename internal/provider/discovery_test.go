@@ -253,7 +253,7 @@ func TestZenBorrowsTheGoCatalog(t *testing.T) {
 	blankBuiltinKeys(t)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("MOCA_ZEN_KEY", "k")
-	cfg := mustCfg(t, `{"model":"opencode-zen/glm-5.3","providers":{"opencode-zen":{"baseUrl":"`+srv.URL+`","apiKey":"env:MOCA_ZEN_KEY"}}}`)
+	cfg := mustCfg(t, `{"model":"opencode/glm-5.3","providers":{"opencode":{"baseUrl":"`+srv.URL+`","apiKey":"env:MOCA_ZEN_KEY"}}}`)
 	reg, err := NewRegistry(cfg, srv.Client(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -262,14 +262,14 @@ func TestZenBorrowsTheGoCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg.DiscoverModels(context.Background())
-	m, ok := reg.models["opencode-zen/glm-5.3"]
+	m, ok := reg.models["opencode/glm-5.3"]
 	if !ok {
 		t.Fatal("seeded row present")
 	}
-	if m.Provider != "opencode-zen" || m.Cost.Input != 1.4 || m.ThinkingMode != "openai" || len(m.ThinkingLevelMap) == 0 {
+	if m.Provider != "opencode" || m.Cost.Input != 1.4 || m.ThinkingMode != "openai" || len(m.ThinkingLevelMap) == 0 {
 		t.Fatalf("zen borrows the go metadata with its own provider: %+v", m)
 	}
-	if m := reg.models["opencode-zen/zen-only"]; m.CostKnown {
+	if m := reg.models["opencode/zen-only"]; m.CostKnown {
 		t.Fatalf("an unseeded zen id stays unpriced: %+v", m)
 	}
 }
@@ -283,8 +283,8 @@ func TestActiveModelsFollowCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reg.ProviderReady("opencode-zen") || reg.ProviderReady("anthropic") {
-		t.Fatalf("readiness: zen=%v anthropic=%v", reg.ProviderReady("opencode-zen"), reg.ProviderReady("anthropic"))
+	if !reg.ProviderReady("opencode") || reg.ProviderReady("anthropic") {
+		t.Fatalf("readiness: zen=%v anthropic=%v", reg.ProviderReady("opencode"), reg.ProviderReady("anthropic"))
 	}
 	for _, m := range reg.ActiveModels() {
 		if strings.HasPrefix(m.Qualified(), "anthropic/") {
@@ -549,7 +549,7 @@ func TestZenSeedsNeedABaseURL(t *testing.T) {
 	}
 	n := 0
 	for q, m := range reg.models {
-		if m.Provider != "opencode-zen" {
+		if m.Provider != "opencode" {
 			continue
 		}
 		n++

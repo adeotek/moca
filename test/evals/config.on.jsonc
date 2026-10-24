@@ -3,6 +3,6 @@
   // regression check: the same corpus with and without the feature). The key
   // comes from the repo .env through the env: indirection.
   "model": "opencode-go/glm-5.3-flash",
-  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_GO_KEY" } },
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } },
   "skills": { "selfManaged": true }
 }

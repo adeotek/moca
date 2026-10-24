@@ -29,8 +29,8 @@ var defaultBaseURLs = map[string]map[string]string{
 	},
 	// The pay-as-you-go twin of the go tier: same account key, no
 	// per-conversation routing header, chat-completions only.
-	"opencode-zen": {"openai-completions": "https://opencode.ai/zen/v1"},
-	"openrouter":   {"openai-completions": "https://openrouter.ai/api/v1"},
+	"opencode":   {"openai-completions": "https://opencode.ai/zen/v1"},
+	"openrouter": {"openai-completions": "https://openrouter.ai/api/v1"},
 }
 
 type Registry struct {

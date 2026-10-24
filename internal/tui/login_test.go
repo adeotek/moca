@@ -104,10 +104,13 @@ func TestLoginStoresAPIKey(t *testing.T) {
 			t.Fatalf("picker missing %q:\n%s", want, view)
 		}
 	}
-	// anthropic, openai, opencode-go: two downs lands on opencode-go, which
-	// has no OAuth flow and goes straight to key entry.
-	m.Update(key("down"))
-	m.Update(key("down"))
+	// The picker is sorted by provider name, so walk the arrows down to
+	// opencode-go — a provider that sorts before it (opencode, the Zen tier)
+	// shifts the index, and this must not depend on where it lands. It has no
+	// OAuth flow and goes straight to key entry.
+	for i := 0; i < len(m.login.items) && m.login.items[m.login.cursor].key != "opencode-go"; i++ {
+		m.Update(key("down"))
+	}
 	m.Update(key("enter"))
 	if m.login.provider != "opencode-go" || m.login.step != loginEnterKey {
 		t.Fatalf("key entry not open: %+v", m.login)

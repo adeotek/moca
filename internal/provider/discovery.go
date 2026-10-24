@@ -11,7 +11,7 @@ package provider
 //	anthropic      GET {base}/v1/models?limit=1000   paginated (after_id/has_more)
 //	openai         GET {base}/models                 id + shutdown_date only
 //	opencode-go    GET {base}/models                 public, id only
-//	opencode-zen   GET {base}/models                 public, id only
+//	opencode       GET {base}/models                 public, id only
 //	openrouter     GET {base}/models                 public, window/pricing/efforts
 //	custom         GET {base}/models                 id only
 //
@@ -41,11 +41,11 @@ const (
 )
 
 // catalogSeeds borrows another provider's catalog rows when the two serve the
-// same models under the same vendor prices. opencode-zen is the pay-as-you-go
+// same models under the same vendor prices. opencode is the pay-as-you-go
 // twin of the go tier: same account, same published per-token prices, so a
 // discovered zen id that the go catalog already describes keeps its window,
 // cost and thinking map instead of degrading to an unpriced guess.
-var catalogSeeds = map[string]string{"opencode-zen": "opencode-go"}
+var catalogSeeds = map[string]string{"opencode": "opencode-go"}
 
 // fetchSpec describes how to list one provider's models.
 type fetchSpec struct {
@@ -60,7 +60,7 @@ func fetchSpecFor(name string) fetchSpec {
 		return fetchSpec{fetch: fetchAnthropicModels}
 	case "openai":
 		return fetchSpec{fetch: fetchOpenAIModels}
-	case "opencode-go", "opencode-zen":
+	case "opencode-go", "opencode":
 		return fetchSpec{fetch: fetchOpenAICompatibleModels}
 	case "openrouter":
 		return fetchSpec{fetch: fetchOpenRouterModels}
@@ -546,7 +546,7 @@ func fetchOpenAIModels(ctx context.Context, hc *http.Client, base string, hdr ht
 }
 
 // fetchOpenAICompatibleModels reads the OpenAI-shaped /models every compatible
-// gateway exposes: ids only (opencode-go, opencode-zen, custom providers).
+// gateway exposes: ids only (opencode-go, opencode, custom providers).
 func fetchOpenAICompatibleModels(ctx context.Context, hc *http.Client, base string, hdr http.Header) ([]CachedModel, error) {
 	var list struct {
 		Data []struct {

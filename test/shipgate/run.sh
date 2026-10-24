@@ -20,7 +20,7 @@ fi
 command -v go >/dev/null 2>&1 || { echo "go not found (mise install?)"; exit 2; }
 
 if [ -f "$REPO/.env" ]; then set -a; . "$REPO/.env"; set +a; fi
-if [ -z "${OPENCODE_GO_KEY:-}" ]; then echo "OPENCODE_GO_KEY not set (repo .env missing?)"; exit 2; fi
+if [ -z "${OPENCODE_API_KEY:-}" ]; then echo "OPENCODE_API_KEY not set (repo .env missing?)"; exit 2; fi
 [ -x "$MOCA" ] || { echo "build moca first: make build (looked for $MOCA)"; exit 2; }
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/moca-shipgate.XXXXXX")
