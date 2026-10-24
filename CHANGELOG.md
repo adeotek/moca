@@ -32,6 +32,18 @@ The release range re-read end to end, plus the distribution scripts it added. No
 - **Docs, same pass:** `docs/release.md` and AGENTS.md called the commit rule "conventional commits" when it is the house template `[{type}:{category}] short description` (CONTRIBUTING.md's own wording), and `--generate-notes` builds the release body from the merged pull requests, not from commits; SPECS §1 still named `v0.7.8` as the current version; and the v0.7.8 entry's `BENCHMARKS.md` link pointed at the root path this release's `docs/` move emptied.
 - +3 tests (1265).
 
+### One name, one voice: Mo Coding Agent (moca)
+
+The product had five descriptions. The GitHub sidebar said one thing — the only one naming `(Bubble Tea TUI)`, and the only one saying "one Go binary" where the rest said "static" — the ACP registry entry and the winget short description shared a second, the Homebrew `desc` was a third, shorter one, and the README a fourth. Three of them lived as Python literals in the release renderers, so they could only stay in step by hand.
+
+- **The title is `Mo Coding Agent (moca)`**: the agent is **Mo**, `moca` is the binary you run. `Mo` is a name, not an initialism, and it is written mixed-case only — `MO` is another project's expansion (ModelScope Coding Agent) and reads as an acronym (§1).
+- **`scripts/release/branding.json` is the one place a published string is written**: `title`, `registryName`, `agent`, `binary`, `line`, `sentence`. All three renderers read it, and none carries a literal.
+- **Two lengths, not one paste.** The 53-char `line` feeds Homebrew's `desc`, the ACP registry's `description` and winget's `ShortDescription`: Homebrew's Description Guidelines reject feature lists and taglines outright, and the registry's own entries run a 45-char median (44 measured). The 182-char `sentence` is the GitHub description, applied by hand (§2), and it opens with the line — a pin, so the two cannot drift.
+- **`(Bubble Tea TUI)` leaves the description**: an implementation detail in a positioning slot, on the one line whose job is differentiation. The keyword lives in the repository topics, `go.mod` and §2.
+- **The agent identifies as Mo**: `internal/agent/system-prompt.md` opens "You are Mo, a coding agent…", so asking it its name answers what the page says. Prompt text is part of the cached prefix, so this costs one prompt-cache reset for every user — batched with this pass rather than shipped alone.
+- Pins: `TestBrandingFileIsTheOnlySource` (a hardcoded copy of any published string fails), `TestBrandingChannelLimits` (the brew 80-char rule, the GitHub 350 cap, the sentence-opens-with-the-line prefix), `TestReadmeTitleMatchesBranding` (the page and its embedded mirror), `TestPromptNamesTheAgent`. +4 tests (1269).
+- Verified against v0.7.9's published `checksums.txt`: the registry entry emits `name: Mo Coding Agent` with the 53-char description, and the formula `desc` and winget `ShortDescription` carry the same line.
+
 ## v0.7.9 (2026-10-23)
 
 ### The distribution channels have renderers, and the Homebrew tap is live
