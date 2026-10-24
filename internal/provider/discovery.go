@@ -197,11 +197,20 @@ func (r *Registry) discoverOne(ctx context.Context, name string) ProviderModels 
 	if base == "" {
 		return out
 	}
+	// Custom providers: a declared model list IS the contract. moca cannot
+	// assume an arbitrary gateway publishes /models (or publishes it in the
+	// OpenAI shape), so discovery only fills in for a custom provider with no
+	// declarations at all — a vLLM that lists its own models. Checked before
+	// the cache, so rows cached before the declarations do not linger.
+	if _, builtin := config.BuiltinProviders[name]; !builtin && len(r.cfg.Providers[name].Models) > 0 {
+		return out
+	}
 	if cached, fresh := r.cache.Load(name, base); len(cached) > 0 {
 		r.mergeDiscovered(name, cached)
 		out.FromCache = fresh
 		out.Models, out.Assumed = r.discoveredIDs(cached), r.assumedModels(name)
 		if fresh {
+			r.setDiscoveryErr(name, nil)
 			return out
 		}
 	}
@@ -211,23 +220,17 @@ func (r *Registry) discoverOne(ctx context.Context, name string) ProviderModels 
 	if !r.ProviderReady(name) {
 		return out
 	}
-	// Custom providers: a declared model list IS the contract. moca cannot
-	// assume an arbitrary gateway publishes /models (or publishes it in the
-	// OpenAI shape), so discovery only fills in for a custom provider with no
-	// declarations at all — a vLLM that lists its own models.
-	if _, builtin := config.BuiltinProviders[name]; !builtin && !config.IsLocalProvider(name) &&
-		len(r.cfg.Providers[name].Models) > 0 {
-		return out
-	}
 	fctx, cancel := context.WithTimeout(ctx, modelFetchTimeout)
 	defer cancel()
-	got, err := spec.fetch(fctx, r.hc, base, r.discoveryHeaders(name))
+	got, err := spec.fetch(fctx, r.hc, base, r.discoveryHeaders(fctx, name))
 	if err != nil {
 		slog.Debug("model discovery failed", "provider", name, "url", base, "class", causeClass(err))
 		out.Err = err
+		r.setDiscoveryErr(name, err)
 		return out
 	}
 	slog.Debug("model discovery", "provider", name, "models", len(got), "cached", false)
+	r.setDiscoveryErr(name, nil)
 	r.mergeDiscovered(name, got)
 	if err := r.cache.Put(name, base, got); err != nil {
 		// The rows are in memory; a read-only data dir must not cost a run.
@@ -240,30 +243,46 @@ func (r *Registry) discoverOne(ctx context.Context, name string) ProviderModels 
 // discoveryHeaders builds the auth (and attribution) headers a list call
 // needs. A provider with no usable credential simply gets none: public
 // endpoints answer anyway and the others return an error that the caller
-// treats as a failed fetch.
-func (r *Registry) discoveryHeaders(name string) http.Header {
+// treats as a failed fetch. The provider extras (OpenRouter attribution, the
+// go tier's session header) arrive in cred.Headers from credential(). ctx is
+// the fetch's bounded context: an OAuth credential may refresh here.
+func (r *Registry) discoveryHeaders(ctx context.Context, name string) http.Header {
 	hdr := http.Header{}
 	hdr.Set("User-Agent", "moca/"+config.Version)
-	switch name {
-	case "openrouter":
-		hdr.Set("X-OpenRouter-Title", "moca")
-		hdr.Set("HTTP-Referer", "https://github.com/adeotek/moca")
-	}
-	cred, err := r.credential(name)(context.Background(), llm.Request{})
+	cred, err := r.credential(name)(ctx, llm.Request{})
 	if err != nil {
 		return hdr
 	}
 	if cred.Token != "" {
+		// The adapter's rule (anthropic.go): an API key travels as
+		// x-api-key, and Bearer is the OAuth signal — never both.
 		if name == "anthropic" {
-			hdr.Set("x-api-key", cred.Token)
 			hdr.Set("anthropic-version", "2023-06-01")
+			if !cred.OAuth {
+				hdr.Set("x-api-key", cred.Token)
+			} else {
+				hdr.Set("Authorization", "Bearer "+cred.Token)
+			}
+		} else {
+			hdr.Set("Authorization", "Bearer "+cred.Token)
 		}
-		hdr.Set("Authorization", "Bearer "+cred.Token)
 	}
 	for k, v := range cred.Headers {
 		hdr.Set(k, v)
 	}
 	return hdr
+}
+
+// setDiscoveryErr records why a provider's last list fetch failed (nil on
+// success); Verify cites it for a configured model the catalog lacks.
+func (r *Registry) setDiscoveryErr(name string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err == nil {
+		delete(r.discoveryErr, name)
+		return
+	}
+	r.discoveryErr[name] = err
 }
 
 // discoveredIDs lists a payload's ids.
@@ -305,14 +324,17 @@ func (r *Registry) mergeDiscovered(name string, models []CachedModel) {
 
 // addSeedsLocked clones the catalog rows of a sibling provider that serves the
 // same models at the same prices (catalogSeeds). The provider name is
-// rewritten, so the row is that provider's own.
+// rewritten, so the row is that provider's own. A row whose protocol the
+// provider has no base URL for is skipped: zen is chat-completions only, so a
+// go row on anthropic-messages or openai-responses could be listed and picked
+// but never resolved.
 func (r *Registry) addSeedsLocked(name string) {
 	src, ok := catalogSeeds[name]
 	if !ok {
 		return
 	}
 	for _, m := range builtinCatalog {
-		if m.Provider != src || m.ID == "" {
+		if m.Provider != src || m.ID == "" || r.baseURL(name, m.Protocol) == "" {
 			continue
 		}
 		m.Provider, m.CostKnown = name, true
@@ -330,8 +352,15 @@ func (r *Registry) rebuildProviderLocked(name string) {
 			delete(r.models, q)
 		}
 	}
+	// A provider-level protocol is the user's decision for every model the
+	// provider serves (a custom gateway on openai-responses or
+	// anthropic-messages): it wins over the fetcher's wire default.
+	proto := r.cfg.Providers[name].Protocol
 	for _, cm := range r.discovered[name] {
 		m := modelFromCached(name, cm)
+		if proto != "" {
+			m.Protocol = proto
+		}
 		r.models[m.Qualified()] = m
 	}
 	r.addSeedsLocked(name)
@@ -345,64 +374,66 @@ func (r *Registry) rebuildProviderLocked(name string) {
 	_ = r.applyModelOverrides(name, r.cfg.Providers[name])
 }
 
-// ClearModelsCache drops the on-disk cache and every discovered row, leaving
-// the catalog and declared models in place. The next discovery (or /model
-// open) refetches.
-func (r *Registry) ClearModelsCache() (providers, models int, err error) {
-	providers, models, err = r.cache.Clear()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.discovered = map[string][]CachedModel{}
-	for name := range r.cfg.Providers {
-		if name == "ollama" {
-			continue
-		}
-		r.rebuildProviderLocked(name)
+// ClearReport is what ClearModelsCache did.
+type ClearReport struct {
+	Providers, Models int            // the cache files deleted, and the models they held
+	Rescan            ProviderModels // the provider re-read at once (zero when none was named)
+}
+
+// ClearModelsCache deletes every provider's cache file, then re-reads rescan
+// — the active model's provider — at once, so its list and its file are fresh
+// before the next /model. No row leaves the registry: a session keeps the
+// models it is using (a failed re-read included), and every other provider's
+// list is replaced by its next discovery, which the deleted file can no longer
+// serve. Ollama has no cache file but is re-read all the same when named.
+func (r *Registry) ClearModelsCache(ctx context.Context, rescan string) (ClearReport, error) {
+	var rep ClearReport
+	var err error
+	if rep.Providers, rep.Models, err = r.cache.Clear(); err != nil {
+		return rep, err
 	}
-	return providers, models, err
+	if _, ok := r.cfg.Providers[rescan]; !ok {
+		return rep, nil
+	}
+	if rescan == "ollama" {
+		d, err := r.DiscoverOllama(ctx)
+		rep.Rescan = ProviderModels{Provider: rescan, Base: d.Base, Models: d.Models, Assumed: d.Assumed, Err: err}
+		return rep, nil
+	}
+	rep.Rescan = r.discoverOne(ctx, rescan)
+	return rep, nil
 }
 
 // ProviderReady reports whether a request to this provider could be
-// authenticated — the same predicate the request path applies (stored key,
-// resolvable env reference, or a local provider), with no network call.
+// authenticated — CheckCredential's predicate (stored key, resolvable env
+// reference, a stored subscription login, or a local provider), with no
+// network call and no refresh: the TUI asks it from its update goroutine.
 func (r *Registry) ProviderReady(name string) bool {
 	if _, ok := r.cfg.Providers[name]; !ok {
 		return false
 	}
-	_, err := r.credential(name)(context.Background(), llm.Request{})
-	return err == nil
+	return r.credentialReady(name) == nil
 }
 
 // ActiveModels is the catalog for a picker: rows whose provider can actually
 // run. A per-provider memo keeps it to one credential lookup per provider
-// rather than one per model.
+// rather than one per model, and the lookups (a store read each) run after
+// the lock is released.
 func (r *Registry) ActiveModels() []Model {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	all := r.Models()
 	ready := make(map[string]bool, len(r.cfg.Providers))
-	out := make([]Model, 0, len(r.models))
-	for _, m := range r.models {
+	out := all[:0]
+	for _, m := range all {
 		ok, seen := ready[m.Provider]
 		if !seen {
-			ok = r.providerReadyLocked(m.Provider)
+			ok = r.ProviderReady(m.Provider)
 			ready[m.Provider] = ok
 		}
 		if ok {
 			out = append(out, m)
 		}
 	}
-	slices.SortFunc(out, func(a, b Model) int { return strings.Compare(a.Qualified(), b.Qualified()) })
 	return out
-}
-
-// providerReadyLocked is ProviderReady without the nil-map guard; the caller
-// holds mu (the credential func reads the config, which is immutable).
-func (r *Registry) providerReadyLocked(name string) bool {
-	if _, ok := r.cfg.Providers[name]; !ok {
-		return false
-	}
-	_, err := r.credential(name)(context.Background(), llm.Request{})
-	return err == nil
 }
 
 // fetchAnthropicModels reads /v1/models, following the after_id cursor. The
@@ -445,7 +476,7 @@ func fetchAnthropicModels(ctx context.Context, hc *http.Client, base string, hdr
 			cm := CachedModel{ID: m.ID, Protocol: "anthropic-messages", Ctx: m.MaxInput, MaxOut: m.MaxTokens}
 			var levels []string
 			for _, lvl := range []string{"minimal", "low", "medium", "high", "xhigh", "max"} {
-				if _, ok := m.Capability.Effort[lvl]; ok {
+				if raw, ok := m.Capability.Effort[lvl]; ok && capabilitySupported(raw) {
 					levels = append(levels, lvl)
 				}
 			}
@@ -468,6 +499,19 @@ func fetchAnthropicModels(ctx context.Context, hc *http.Client, base string, hdr
 		url = strings.TrimRight(base, "/") + "/v1/models?limit=1000&after_id=" + pg.LastID
 	}
 	return out, nil
+}
+
+// capabilitySupported reads one capability entry: `{"supported": false}` is
+// an advertised NO (sending that level is a 400), so only an explicit false
+// excludes it; an entry with no flag counts by its presence.
+func capabilitySupported(raw json.RawMessage) bool {
+	var v struct {
+		Supported *bool `json:"supported"`
+	}
+	if json.Unmarshal(raw, &v) != nil || v.Supported == nil {
+		return true
+	}
+	return *v.Supported
 }
 
 // openaiDenyList drops the non-chat models api.openai.com lists beside the

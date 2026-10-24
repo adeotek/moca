@@ -56,6 +56,7 @@ func PromptsDir() string { return filepath.Join(ConfigDir(), "prompts") }
 // once (provider.MigrateLegacyStore).
 func AuthFile() string { return filepath.Join(ConfigDir(), "auth.json") }
 
-// ModelsCacheFile is ~/.local/share/moca/models-cache.json: the per-provider
-// model-list cache (24 h, disposable, metadata only — SPECS §6).
-func ModelsCacheFile() string { return filepath.Join(DataDir(), "models-cache.json") }
+// ModelsCacheDir is ~/.local/share/moca/models-cache/: the model-list cache,
+// one <provider>.json per provider (24 h, disposable, metadata only — SPECS
+// §6).
+func ModelsCacheDir() string { return filepath.Join(DataDir(), "models-cache") }

@@ -38,11 +38,16 @@ type Registry struct {
 	hc     *http.Client
 	notify func(RetryNotice)
 	getenv func(string) string // OLLAMA_HOST; a field so tests do not touch the process env
-	// mu guards models and ollamaErr: a discovery run (TUI /model, a /clear
-	// restart) rewrites the ollama entries and the recorded failure while
-	// the agent may resolve models and Verify may read the failure.
-	mu        sync.RWMutex
-	models    map[string]Model
+	// mu guards models, resolved and the recorded failures: a discovery run
+	// (TUI /model, a /clear-models-cache re-read) rewrites a provider's rows
+	// while the agent may resolve models and Verify may read the failures.
+	mu     sync.RWMutex
+	models map[string]Model
+	// resolved remembers every row Resolve handed out or Verify checked. The
+	// summarizer, the judge and /hard re-resolve their model by name
+	// mid-session; a later discovery that stops listing it (the provider
+	// retired the id) must not strand them. The live row wins when present.
+	resolved  map[string]Model
 	oauth     map[string]CredentialFunc
 	sessionID string
 	// cache holds the per-provider model lists (24 h); discovered is the last
@@ -50,6 +55,9 @@ type Registry struct {
 	// deterministic and never stacks duplicates.
 	cache      *ModelsCache
 	discovered map[string][]CachedModel
+	// discoveryErr is why a provider's last list fetch failed (absent when it
+	// succeeded, was served fresh from the cache, or never ran).
+	discoveryErr map[string]error
 	// ollamaErr is why the last discovery failed (nil when it succeeded or
 	// never ran); Verify cites it when a configured ollama model is missing.
 	ollamaErr error
@@ -64,7 +72,8 @@ func NewRegistry(cfg config.Config, hc *http.Client, notify func(RetryNotice)) (
 	}
 	r := &Registry{cfg: cfg, hc: hc, notify: notify, getenv: os.Getenv, models: map[string]Model{},
 		oauth: map[string]CredentialFunc{}, sessionID: rand.Text(),
-		cache: NewModelsCache(config.ModelsCacheFile(), ModelsCacheTTL), discovered: map[string][]CachedModel{}}
+		cache: NewModelsCache(config.ModelsCacheDir(), ModelsCacheTTL), discovered: map[string][]CachedModel{},
+		discoveryErr: map[string]error{}, resolved: map[string]Model{}}
 	for _, m := range builtinCatalog {
 		m.CostKnown = true // every curated row carries authored prices
 		r.models[m.Qualified()] = m
@@ -87,11 +96,15 @@ func NewRegistry(cfg config.Config, hc *http.Client, notify func(RetryNotice)) (
 // holds mu when the registry is live.
 func (r *Registry) applyModelOverrides(pname string, p config.ProviderConfig) error {
 	local := config.IsLocalProvider(pname)
+	_, builtin := config.BuiltinProviders[pname]
 	for mid, o := range p.Models {
 		q := pname + "/" + mid
 		m, ok := r.models[q]
 		if !ok {
-			m = Model{Provider: pname, ID: mid, Protocol: p.Protocol, ThinkingMode: "none", MaxOutput: 8192}
+			// A declared row is a decision, priced or not (§6) — except on a
+			// built-in provider, where it is most often a window/cost override
+			// of an id discovery has not merged yet, whose price is unknown.
+			m = Model{Provider: pname, ID: mid, Protocol: p.Protocol, ThinkingMode: "none", MaxOutput: 8192, CostKnown: !builtin}
 			if local {
 				// A declared local model with nothing else said: the OpenAI-
 				// compatible protocol and the assumed window.
@@ -119,16 +132,23 @@ func (r *Registry) applyModelOverrides(pname string, p config.ProviderConfig) er
 	return nil
 }
 
-// Verify checks that the configured default and hard models exist. It runs
-// after discovery, which is what makes a local provider's models known.
+// Verify checks that the configured default and hard models exist, and
+// remembers them (resolved) so they outlive a later relist. It runs after
+// discovery, which is what makes a local provider's models known.
 func (r *Registry) Verify() error {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// The judge's model is not a start gate (an unusable judge asks), but
+	// it is remembered like the others when present.
+	if m, ok := r.models[r.cfg.Permissions.Auto.Model]; ok {
+		r.resolved[m.Qualified()] = m
+	}
 	for _, q := range []string{r.cfg.Model, r.cfg.ModelHard} {
 		if q == "" {
 			continue
 		}
-		if _, ok := r.models[q]; ok {
+		if m, ok := r.models[q]; ok {
+			r.resolved[q] = m
 			continue
 		}
 		if pn, id, err := config.SplitModel(q); err == nil && pn == "ollama" {
@@ -137,7 +157,12 @@ func (r *Registry) Verify() error {
 			}
 			return fmt.Errorf("model %q: the ollama server at %s has no model %q with tool support — pull it (ollama pull %s) or declare it under providers.ollama.models", q, r.ollamaBase(), id, id)
 		}
-		if hint := r.nearestModels(q); hint != "" {
+		if pn, _, err := config.SplitModel(q); err == nil && r.discoveryErr[pn] != nil {
+			// The list could not be read: "the provider does not list it"
+			// would be a claim moca never checked.
+			return fmt.Errorf("model %q is not in the catalog and %s's model list could not be fetched (%v) — retry when the provider is reachable, or declare it under providers.%s.models", q, pn, r.discoveryErr[pn], pn)
+		}
+		if hint := r.nearestModelsLocked(q); hint != "" {
 			return fmt.Errorf("model %q is not in the catalog and the provider does not list it; did you mean: %s (declare any other id under providers.<name>.models)", q, hint)
 		}
 		return fmt.Errorf("model %q is not in the catalog; declare it under providers.<name>.models", q)
@@ -145,17 +170,17 @@ func (r *Registry) Verify() error {
 	return nil
 }
 
-// nearestModels suggests up to three known ids when a configured model is
-// missing: the discovered list makes a typo diagnosable ("did you mean"),
-// which is the cost of deferring model validation to Verify.
-func (r *Registry) nearestModels(q string) string {
+// nearestModelsLocked suggests up to three known ids when a configured model
+// is missing: the discovered list makes a typo diagnosable ("did you mean"),
+// which is the cost of deferring model validation to Verify. The caller holds
+// mu (Verify does).
+func (r *Registry) nearestModelsLocked(q string) string {
 	pn, id, err := config.SplitModel(q)
 	if err != nil || id == "" {
 		return ""
 	}
 	base := strings.ToLower(id)
 	var cand []string
-	r.mu.RLock()
 	for k := range r.models {
 		mid, ok := strings.CutPrefix(k, pn+"/")
 		if !ok || mid == id {
@@ -166,7 +191,6 @@ func (r *Registry) nearestModels(q string) string {
 			cand = append(cand, k)
 		}
 	}
-	r.mu.RUnlock()
 	slices.Sort(cand)
 	if len(cand) > 3 {
 		cand = cand[:3]
@@ -212,6 +236,15 @@ func (r *Registry) CheckCredential(qualified string) error {
 	if !ok {
 		return fmt.Errorf("%w %q", ErrUnknownModel, qualified)
 	}
+	return r.credentialReady(pname)
+}
+
+// credentialReady is the no-I/O credential check CheckCredential and
+// ProviderReady share: an env lookup or a stored key for api_key providers,
+// and for store-backed OAuth providers only that a login is stored — the
+// refresh (network, under the cross-process lock) is left to the first
+// request, which has a cancellable context.
+func (r *Registry) credentialReady(pname string) error {
 	if r.cfg.Providers[pname].Auth == "oauth" && r.oauth[pname] == nil {
 		if _, ok := oauthProviders[pname]; ok {
 			_, found, err := NewDefaultStore().Get(pname)
@@ -224,7 +257,7 @@ func (r *Registry) CheckCredential(qualified string) error {
 			return nil
 		}
 	}
-	_, err = r.credential(pname)(context.Background(), llm.Request{})
+	_, err := r.credential(pname)(context.Background(), llm.Request{})
 	return err
 }
 
@@ -357,6 +390,9 @@ func (r *Registry) Resolve(qualified string) (Model, Adapter, error) {
 	}
 	r.mu.RLock()
 	m, ok := r.models[qualified]
+	if !ok {
+		m, ok = r.resolved[qualified]
+	}
 	r.mu.RUnlock()
 	if !ok {
 		return Model{}, nil, fmt.Errorf("%w %q", ErrUnknownModel, qualified)
@@ -391,5 +427,8 @@ func (r *Registry) Resolve(qualified string) (Model, Adapter, error) {
 	if pname == "ollama" {
 		a = ollamaGuard{inner: a, base: base}
 	}
+	r.mu.Lock()
+	r.resolved[qualified] = m
+	r.mu.Unlock()
 	return m, WithRetry(a, DefaultRetryPolicy(r.notify)), nil
 }

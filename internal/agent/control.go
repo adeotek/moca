@@ -45,18 +45,29 @@ func (a *Agent) Models() []provider.Model { return a.opts.Providers.Models() }
 // returns the first hard failure — an unreachable Ollama server — and nil
 // otherwise: a cloud provider that fails discovery keeps its cache.
 func (a *Agent) RefreshModels(ctx context.Context) error {
-	_, err := a.opts.Providers.DiscoverOllama(ctx)
+	// Concurrently: both share the caller's deadline, and a slow Ollama
+	// server must not eat the cloud providers' share of it (they touch
+	// disjoint rows — DiscoverModels skips ollama).
+	errc := make(chan error, 1)
+	go func() {
+		_, err := a.opts.Providers.DiscoverOllama(ctx)
+		errc <- err
+	}()
 	a.opts.Providers.DiscoverModels(ctx)
-	return err
+	return <-errc
 }
 
 // ActiveModels is the model list the pickers show: rows whose provider can
 // actually run (a stored key, a resolvable env reference, or a local server).
 func (a *Agent) ActiveModels() []provider.Model { return a.opts.Providers.ActiveModels() }
 
-// ClearModelsCache drops the 24 h model-list cache and the discovered rows.
-func (a *Agent) ClearModelsCache() (providers, models int, err error) {
-	return a.opts.Providers.ClearModelsCache()
+// ClearModelsCache deletes every provider's cached model list and re-reads
+// rescan — the caller passes the current model's provider — at once. Nothing
+// the session uses stops resolving; the other providers refetch when a picker
+// opens or the next session starts. Safe off the UI goroutine: it touches the
+// registry only.
+func (a *Agent) ClearModelsCache(ctx context.Context, rescan string) (provider.ClearReport, error) {
+	return a.opts.Providers.ClearModelsCache(ctx, rescan)
 }
 
 // HasCredential reports whether a request to the qualified model could be

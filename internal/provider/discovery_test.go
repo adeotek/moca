@@ -4,11 +4,11 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -27,13 +27,10 @@ func blankBuiltinKeys(t *testing.T) {
 		t.Setenv(k, "")
 	}
 	// A key stored by a real /login (auth.json) would also make a provider
-	// ready: point the whole config/state tree at temp dirs.
-	if os.Getenv("XDG_CONFIG_HOME") == "" {
-		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	}
-	if os.Getenv("XDG_STATE_HOME") == "" {
-		t.Setenv("XDG_STATE_HOME", t.TempDir())
-	}
+	// ready: point the whole config/state tree at temp dirs — always, since a
+	// host that exports XDG_CONFIG_HOME names exactly the real store.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 }
 
 // jsonServer answers every request with body (and counts hits).
@@ -148,9 +145,9 @@ func TestFetchOpenRouterModels(t *testing.T) {
 func discoveryCfg(t *testing.T, url string) config.Config {
 	t.Helper()
 	blankBuiltinKeys(t)
-	if os.Getenv("XDG_DATA_HOME") == "" {
-		t.Setenv("XDG_DATA_HOME", t.TempDir())
-	}
+	// Always a fresh data dir: a host-exported XDG_DATA_HOME is the user's
+	// real models cache, which ClearModelsCache would delete.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("MOCA_DISC_TEST_KEY", "k")
 	return mustCfg(t, `{"providers":{"gw":{"baseUrl":"`+url+`","protocol":"openai-completions",
 		"auth":"api_key","apiKey":"env:MOCA_DISC_TEST_KEY"}}}`)
@@ -161,7 +158,8 @@ func TestDiscoverModelsUsesTheCache(t *testing.T) {
 	srv := jsonServer(t, &hits, func(*http.Request) (int, string) {
 		return 200, `{"data":[{"id":"m"}]}`
 	})
-	reg, err := NewRegistry(discoveryCfg(t, srv.URL), srv.Client(), nil)
+	cfg := discoveryCfg(t, srv.URL)
+	reg, err := NewRegistry(cfg, srv.Client(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +174,7 @@ func TestDiscoverModelsUsesTheCache(t *testing.T) {
 		t.Fatal("discovered model merged")
 	}
 	// A second registry on the same data dir reads the fresh cache: no network.
-	reg2, _ := NewRegistry(discoveryCfg(t, srv.URL), srv.Client(), nil)
+	reg2, _ := NewRegistry(cfg, srv.Client(), nil)
 	rep = reg2.DiscoverModels(context.Background())
 	if hits.Load() != 1 {
 		t.Fatalf("a fresh cache must not call the provider, hits=%d", hits.Load())
@@ -298,26 +296,155 @@ func TestActiveModelsFollowCredentials(t *testing.T) {
 	}
 }
 
-func TestClearModelsCacheDropsDiscoveredRows(t *testing.T) {
+// /clear-models-cache must not break the session: the active model's
+// provider is re-read at once (its file recreated) and its rows never leave
+// the registry meanwhile.
+func TestClearModelsCacheRescansTheActiveProvider(t *testing.T) {
 	var hits atomic.Int32
 	srv := jsonServer(t, &hits, func(*http.Request) (int, string) {
 		return 200, `{"data":[{"id":"m"}]}`
 	})
 	reg, _ := NewRegistry(discoveryCfg(t, srv.URL), srv.Client(), nil)
 	reg.DiscoverModels(context.Background())
-	if _, ok := reg.models["gw/m"]; !ok {
-		t.Fatal("discovered row present")
+	rep, err := reg.ClearModelsCache(context.Background(), "gw")
+	if err != nil || rep.Providers != 1 || rep.Models != 1 {
+		t.Fatalf("clear: %+v %v", rep, err)
 	}
-	providers, models, err := reg.ClearModelsCache()
-	if err != nil || providers != 1 || models != 1 {
-		t.Fatalf("clear: %d %d %v", providers, models, err)
+	if hits.Load() != 2 {
+		t.Fatalf("the active provider is re-read at once, hits=%d", hits.Load())
 	}
-	if _, ok := reg.models["gw/m"]; ok {
-		t.Fatal("cleared rows must leave the registry")
+	if rep.Rescan.Provider != "gw" || rep.Rescan.Err != nil || strings.Join(rep.Rescan.Models, ",") != "m" {
+		t.Fatalf("rescan report: %+v", rep.Rescan)
+	}
+	if _, fresh := reg.cache.Load("gw", rep.Rescan.Base); !fresh {
+		t.Fatal("the re-read recreates the provider's cache file")
+	}
+	if _, _, err := reg.Resolve("gw/m"); err != nil {
+		t.Fatalf("the session's model must still resolve: %v", err)
+	}
+}
+
+// The other providers are not re-read now: their files go, their rows stay
+// (a session may be using one as its cheap or judge model), and the next
+// discovery — which the deleted file can no longer serve — refetches them.
+func TestClearModelsCacheKeepsOtherProvidersRows(t *testing.T) {
+	var hits1, hits2 atomic.Int32
+	srv1 := jsonServer(t, &hits1, func(*http.Request) (int, string) { return 200, `{"data":[{"id":"a"}]}` })
+	srv2 := jsonServer(t, &hits2, func(*http.Request) (int, string) { return 200, `{"data":[{"id":"b"}]}` })
+	discoveryCfg(t, srv1.URL) // env isolation
+	cfg := mustCfg(t, `{"providers":{
+		"gw1":{"baseUrl":"`+srv1.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_DISC_TEST_KEY"},
+		"gw2":{"baseUrl":"`+srv2.URL+`","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_DISC_TEST_KEY"}}}`)
+	reg, _ := NewRegistry(cfg, http.DefaultClient, nil)
+	reg.DiscoverModels(context.Background())
+	rep, err := reg.ClearModelsCache(context.Background(), "gw1")
+	if err != nil || rep.Providers != 2 {
+		t.Fatalf("clear: %+v %v", rep, err)
+	}
+	if hits1.Load() != 2 || hits2.Load() != 1 {
+		t.Fatalf("only the active provider is re-read now: gw1=%d gw2=%d", hits1.Load(), hits2.Load())
+	}
+	if _, _, err := reg.Resolve("gw2/b"); err != nil {
+		t.Fatalf("gw2's rows stay until a refetch replaces them: %v", err)
 	}
 	reg.DiscoverModels(context.Background())
-	if hits.Load() != 2 {
-		t.Fatalf("the next discovery refetches, hits=%d", hits.Load())
+	if hits2.Load() != 2 {
+		t.Fatalf("the next discovery refetches gw2, hits=%d", hits2.Load())
+	}
+}
+
+// A re-read that fails reports why and leaves the provider's rows in place.
+func TestClearModelsCacheFailedRescanKeepsRows(t *testing.T) {
+	var down atomic.Bool
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
+		if down.Load() {
+			return http.StatusBadGateway, `{}`
+		}
+		return 200, `{"data":[{"id":"m"}]}`
+	})
+	reg, _ := NewRegistry(discoveryCfg(t, srv.URL), srv.Client(), nil)
+	reg.DiscoverModels(context.Background())
+	down.Store(true)
+	rep, err := reg.ClearModelsCache(context.Background(), "gw")
+	if err != nil || rep.Rescan.Err == nil {
+		t.Fatalf("the failed re-read is reported: %+v %v", rep, err)
+	}
+	if _, _, err := reg.Resolve("gw/m"); err != nil {
+		t.Fatalf("a failed re-read must not cost the session its model: %v", err)
+	}
+}
+
+// Ollama has no cache file, but it is the active provider all the same: the
+// clear re-reads the server, so a model pulled meanwhile shows up.
+func TestClearModelsCacheRescansOllama(t *testing.T) {
+	f := newFakeOllama(t)
+	f.tags = []string{"a:1b"}
+	f.show["a:1b"] = ollamaShow{Capabilities: []string{"completion", "tools"}}
+	f.show["b:1b"] = ollamaShow{Capabilities: []string{"completion", "tools"}}
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	r := ollamaRegistry(t, f.URL, "")
+	if _, err := r.DiscoverOllama(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f.tags = []string{"a:1b", "b:1b"}
+	rep, err := r.ClearModelsCache(context.Background(), "ollama")
+	if err != nil || rep.Rescan.Err != nil || strings.Join(rep.Rescan.Models, ",") != "a:1b,b:1b" {
+		t.Fatalf("rescan: %+v %v", rep, err)
+	}
+	if _, _, err := r.Resolve("ollama/b:1b"); err != nil {
+		t.Fatalf("the newly pulled model is resolvable: %v", err)
+	}
+}
+
+// A model the registry has handed out stays resolvable when a later
+// discovery stops listing it: the summarizer, the judge and /hard re-resolve
+// by name mid-session, and a provider retiring the id must not strand them.
+// The live row still wins when there is one.
+func TestResolveKeepsAModelItHandedOut(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) { return 200, `{"data":[]}` })
+	reg, _ := NewRegistry(discoveryCfg(t, srv.URL), srv.Client(), nil)
+	reg.mergeDiscovered("gw", []CachedModel{{ID: "m", Ctx: 100000}, {ID: "n"}})
+	if _, _, err := reg.Resolve("gw/m"); err != nil {
+		t.Fatal(err)
+	}
+	reg.mergeDiscovered("gw", []CachedModel{{ID: "k"}})
+	if _, ok := reg.models["gw/m"]; ok {
+		t.Fatal("setup: the relist must drop gw/m")
+	}
+	if m, _, err := reg.Resolve("gw/m"); err != nil || m.ContextWindow != 100000 {
+		t.Fatalf("a handed-out model must keep resolving: %+v %v", m, err)
+	}
+	if _, _, err := reg.Resolve("gw/n"); !errors.Is(err, ErrUnknownModel) {
+		t.Fatalf("a dropped model nobody resolved is gone: %v", err)
+	}
+	// The user's /model switch still sees the live catalog only.
+	if err := reg.CheckCredential("gw/m"); !errors.Is(err, ErrUnknownModel) {
+		t.Fatalf("a switch to a dropped model must be refused: %v", err)
+	}
+	reg.mergeDiscovered("gw", []CachedModel{{ID: "m", Ctx: 200000}})
+	if m, _, _ := reg.Resolve("gw/m"); m.ContextWindow != 200000 {
+		t.Fatalf("the live row wins over the remembered one: %d", m.ContextWindow)
+	}
+}
+
+// Verify checks the configured models at start; they stay resolvable before
+// their first use too (the judge may first run an hour into a session).
+func TestVerifiedModelsStayResolvable(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
+		return 200, `{"data":[{"id":"m"},{"id":"h"},{"id":"j"}]}`
+	})
+	cfg := discoveryCfg(t, srv.URL)
+	cfg.Model, cfg.ModelHard, cfg.Permissions.Auto.Model = "gw/m", "gw/h", "gw/j"
+	reg, _ := NewRegistry(cfg, srv.Client(), nil)
+	reg.DiscoverModels(context.Background())
+	if err := reg.Verify(); err != nil {
+		t.Fatal(err)
+	}
+	reg.mergeDiscovered("gw", nil)
+	for _, q := range []string{"gw/m", "gw/h", "gw/j"} {
+		if _, _, err := reg.Resolve(q); err != nil {
+			t.Fatalf("%s: a verified model must keep resolving: %v", q, err)
+		}
 	}
 }
 
@@ -342,5 +469,127 @@ func TestAssumedWindowsFollowTheMergedRow(t *testing.T) {
 	}
 	if !slices.Contains(d.Assumed, "brand-new") {
 		t.Fatalf("a discovered-only id with no window is a guess: %v", d.Assumed)
+	}
+}
+
+// TestDiscoverModelsParallelPutsKeepEveryEntry: providers are fetched in
+// parallel, and each Put is a read-modify-write of one file — unserialized,
+// the later rename dropped the earlier providers' entries, so the next start
+// refetched them despite a fresh 24 h cache.
+func TestDiscoverModelsParallelPutsKeepEveryEntry(t *testing.T) {
+	var hits atomic.Int32
+	srv := jsonServer(t, &hits, func(*http.Request) (int, string) {
+		time.Sleep(5 * time.Millisecond)
+		return 200, `{"data":[{"id":"m"}]}`
+	})
+	blankBuiltinKeys(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("MOCA_PAR_KEY", "k")
+	var b strings.Builder
+	b.WriteString(`{"providers":{`)
+	names := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
+	for i, n := range names {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`"` + n + `":{"baseUrl":"` + srv.URL + `","protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_PAR_KEY"}`)
+	}
+	b.WriteString(`}}`)
+	cfg := mustCfg(t, b.String())
+	reg, _ := NewRegistry(cfg, srv.Client(), nil)
+	reg.DiscoverModels(context.Background())
+	first := hits.Load()
+	reg2, _ := NewRegistry(cfg, srv.Client(), nil)
+	reg2.DiscoverModels(context.Background())
+	if got := hits.Load() - first; got != 0 {
+		t.Fatalf("every provider's entry must survive the parallel writes: %d refetched", got)
+	}
+}
+
+// TestDiscoveredRowsFollowTheProviderProtocol: a custom gateway declared on
+// openai-responses lists ids through the OpenAI-shaped /models, but its
+// models speak the provider's protocol, not the fetcher's default.
+func TestDiscoveredRowsFollowTheProviderProtocol(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) { return 200, `{"data":[{"id":"m"}]}` })
+	blankBuiltinKeys(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("MOCA_RESP_KEY", "k")
+	cfg := mustCfg(t, `{"providers":{"gw":{"baseUrl":"`+srv.URL+`","protocol":"openai-responses","auth":"api_key","apiKey":"env:MOCA_RESP_KEY"}}}`)
+	reg, _ := NewRegistry(cfg, srv.Client(), nil)
+	reg.DiscoverModels(context.Background())
+	if m := reg.models["gw/m"]; m.Protocol != "openai-responses" {
+		t.Fatalf("discovered row protocol: %+v", m)
+	}
+}
+
+// TestDeclaredCustomListIgnoresTheCache: a custom provider's declared list is
+// the contract, so rows cached before the declarations must not come back.
+func TestDeclaredCustomListIgnoresTheCache(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) { return 200, `{"data":[{"id":"old"}]}` })
+	cfg := discoveryCfg(t, srv.URL)
+	reg, _ := NewRegistry(cfg, srv.Client(), nil)
+	reg.DiscoverModels(context.Background())
+	declared := mustCfg(t, `{"providers":{"gw":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions",
+		"auth":"api_key","apiKey":"env:MOCA_DISC_TEST_KEY","models":{"new":{"contextWindow":32768}}}}}`)
+	reg2, _ := NewRegistry(declared, srv.Client(), nil)
+	reg2.DiscoverModels(context.Background())
+	if _, ok := reg2.models["gw/old"]; ok {
+		t.Fatal("a cached row outside the declared list must not be merged")
+	}
+}
+
+// TestZenSeedsNeedABaseURL: zen is chat-completions only, so go rows on the
+// other protocols are not cloned — they would be listed but never resolve.
+func TestZenSeedsNeedABaseURL(t *testing.T) {
+	blankBuiltinKeys(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	reg, err := NewRegistry(mustCfg(t, `{}`), http.DefaultClient, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for q, m := range reg.models {
+		if m.Provider != "opencode-zen" {
+			continue
+		}
+		n++
+		if _, _, err := reg.Resolve(q); err != nil {
+			t.Fatalf("a seeded zen row must resolve: %v", err)
+		}
+	}
+	if n == 0 {
+		t.Fatal("the completions rows are still seeded")
+	}
+}
+
+func TestAnthropicEffortHonoursSupportedFalse(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
+		return 200, `{"data":[{"id":"claude-x","max_input_tokens":200000,"max_tokens":64000,
+			"capabilities":{"effort":{"low":{"supported":true},"max":{"supported":false}},
+			"thinking":{"types":{"adaptive":{"supported":true}}}}}],"has_more":false}`
+	})
+	models, err := fetchAnthropicModels(context.Background(), srv.Client(), srv.URL, http.Header{})
+	if err != nil || len(models) != 1 {
+		t.Fatalf("%v %+v", err, models)
+	}
+	if got := strings.Join(models[0].Efforts, ","); got != "low" {
+		t.Fatalf("an effort advertised as unsupported must not be offered: %q", got)
+	}
+}
+
+// TestVerifyCitesAFailedDiscovery: with no cache and a failing list call,
+// "the provider does not list it" would be a claim nothing checked.
+func TestVerifyCitesAFailedDiscovery(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) { return http.StatusServiceUnavailable, `{}` })
+	blankBuiltinKeys(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("MOCA_DISC_TEST_KEY", "k")
+	cfg := mustCfg(t, `{"model":"gw/m","providers":{"gw":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions",
+		"auth":"api_key","apiKey":"env:MOCA_DISC_TEST_KEY"}}}`)
+	reg, _ := NewRegistry(cfg, srv.Client(), nil)
+	reg.DiscoverModels(context.Background())
+	err := reg.Verify()
+	if err == nil || !strings.Contains(err.Error(), "could not be fetched") {
+		t.Fatalf("Verify must name the failed discovery: %v", err)
 	}
 }

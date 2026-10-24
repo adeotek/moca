@@ -3,9 +3,11 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -177,8 +179,14 @@ func TestOllamaDiscovery(t *testing.T) {
 	if _, err := r.DiscoverOllama(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.Resolve("ollama/mystery:7b"); err == nil {
-		t.Fatal("a model gone from the server must disappear")
+	// Gone from the catalog: no picker lists it and a switch to it is refused.
+	// (Resolve still serves it, since this test resolved it above: a session
+	// holding a model keeps it — TestResolveKeepsAModelItHandedOut.)
+	if slices.ContainsFunc(r.Models(), func(m Model) bool { return m.Qualified() == "ollama/mystery:7b" }) {
+		t.Fatal("a model gone from the server must leave the catalog")
+	}
+	if err := r.CheckCredential("ollama/mystery:7b"); !errors.Is(err, ErrUnknownModel) {
+		t.Fatalf("a switch to a model gone from the server must be refused: %v", err)
 	}
 	if m, _, err := r.Resolve("ollama/gemma3:4b"); err != nil || m.ContextWindow != 20000 {
 		t.Fatalf("new model: %+v %v", m, err)

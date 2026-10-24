@@ -174,7 +174,8 @@ func (srv *Server) authenticate(params json.RawMessage) (any, error) {
 	if srv.opts.Model == "" && srv.opts.Config.Model == "" {
 		return nil, srv.noModel()
 	}
-	if err := srv.checkModel(srv.opts.Config); err != nil {
+	o := agent.StartOptions{Config: srv.opts.Config, Model: srv.opts.Model, HTTP: srv.opts.HTTP}
+	if _, err := srv.checkModel(o); err != nil {
 		return nil, err
 	}
 	return AuthenticateResponse{}, nil
@@ -274,39 +275,25 @@ func (srv *Server) noModel() *RPCError {
 // credential lives outside the editor, so ACP's auth-required would replace
 // the fix with a prompt that cannot succeed (§9.5). `authenticate` runs the
 // same check, so the editor's sign-in affordance reports the same answer.
-func (srv *Server) checkModel(cfg config.Config) error {
-	// F-1 (ACP side): the --model flag is applied, and a local provider it
-	// names is added, before anything validates the model.
-	if srv.opts.Model != "" {
-		cfg.Model = srv.opts.Model
-	}
-	if pn, _, err := config.SplitModel(cfg.Model); err == nil {
-		cfg.UseProvider(pn)
-	}
-	reg, err := provider.NewRegistry(cfg, srv.opts.HTTP, nil)
+//
+// The registry is the session's own (agent.OpenRegistry: the --model flag
+// applied, a local provider it names added, every provider's list — a
+// configured Ollama's included — discovered before Verify gates the model,
+// whose message names the nearest discovered ids for a typo). session/new
+// hands it to agent.Start, so a session discovers once.
+func (srv *Server) checkModel(o agent.StartOptions) (*provider.Registry, error) {
+	reg, err := agent.OpenRegistry(o)
 	if err != nil {
-		return &RPCError{Code: codeInternal, Message: err.Error()}
+		return nil, &RPCError{Code: codeInternal, Message: err.Error()}
 	}
-	// F-2: a configured ollama is discovered first. Without this, a local
-	// model that is running right now was reported as "unknown model" and the
-	// editor showed an authentication error for a server that needs no key.
-	if _, configured := cfg.Providers["ollama"]; configured || strings.HasPrefix(cfg.Model, "ollama/") {
-		if _, err := reg.DiscoverOllama(context.Background()); err != nil {
-			slog.Debug("acp: ollama discovery failed", "err", err)
-		}
+	model := o.Model
+	if model == "" {
+		model = o.Config.Model
 	}
-	// Every provider's list is discovered before the model is validated
-	// (§6): a model absent from the catalog may still exist upstream, so
-	// Verify (not construction) is the gate — and its message names the
-	// nearest discovered ids for a typo.
-	reg.DiscoverModels(context.Background())
-	if err := reg.Verify(); err != nil {
-		return &RPCError{Code: codeInternal, Message: err.Error()}
+	if err := reg.CheckCredential(model); err != nil {
+		return nil, &RPCError{Code: codeInternal, Message: err.Error()}
 	}
-	if err := reg.CheckCredential(cfg.Model); err != nil {
-		return &RPCError{Code: codeInternal, Message: err.Error()}
-	}
-	return nil
+	return reg, nil
 }
 
 func (srv *Server) startOptions(cfg config.Config, s *session) agent.StartOptions {
@@ -329,11 +316,16 @@ func (srv *Server) newSession(params json.RawMessage) (any, error) {
 	if len(req.MCPServers) > 0 {
 		slog.Debug("acp: client MCP servers ignored", "count", len(req.MCPServers))
 	}
-	if err := srv.checkModel(cfg); err != nil {
+	// The session exists before the check: the registry's retry notices and
+	// discovery warnings go to its emitter (held until the client has the id).
+	s := newSession(srv, req.Cwd, trusted)
+	o := srv.startOptions(cfg, s)
+	reg, err := srv.checkModel(o)
+	if err != nil {
 		return nil, err
 	}
-	s := newSession(srv, req.Cwd, trusted)
-	a, err := agent.Start(srv.startOptions(cfg, s))
+	o.Registry = reg
+	a, err := agent.Start(o)
 	if err != nil {
 		return nil, &RPCError{Code: codeInternal, Message: err.Error()}
 	}

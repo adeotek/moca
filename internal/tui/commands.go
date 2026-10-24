@@ -53,7 +53,7 @@ var builtinHelp = map[string]string{
 	"resume":             "[id]  pick an earlier session of this directory to continue",
 	"sessions":           "list, switch or delete this directory's sessions",
 	"compact":            "summarize older context now",
-	"clear-models-cache": "delete the cached provider model lists (they refetch on the next /model)",
+	"clear-models-cache": "delete the cached provider model lists and re-read the current model's provider now",
 	"cost":               "session token and cost detail",
 	"undo":               "revert the last write/edit of this session",
 	"copy":               "copy the last assistant message (OSC 52)",

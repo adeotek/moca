@@ -599,6 +599,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.openModelPicker(m.agent.Status().Model.Qualified())
 		return m, m.hold(warn)
+	case modelsClearedMsg:
+		m.status.Transient = ""
+		return m, m.hold(m.modelsClearedReport(msg))
 	case filesLoadedMsg:
 		if msg.gen != m.filesGen {
 			return m, nil // started before the index went stale
@@ -950,11 +953,17 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
 		}
-		providers, models, err := m.agent.ClearModelsCache()
-		if err != nil {
-			return m.printlnError("error: " + err.Error())
+		// The current model's provider is re-read at once (a network call,
+		// so off the loop); its name is read here, on the UI goroutine.
+		prov := st.Model.Provider
+		m.status.Transient = "re-reading " + prov + " models…"
+		a := m.agent
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+			defer cancel()
+			rep, err := a.ClearModelsCache(ctx, prov)
+			return modelsClearedMsg{rep: rep, err: err}
 		}
-		return m.printlnContent(fmt.Sprintf("models cache cleared: %d providers, %d models — the next /model refetches", providers, models))
 	case "effort":
 		if c.Args == "" {
 			return m.printlnContent(fmt.Sprintf("effort %s — supported: %s", AbbrevEffort(st.Effort), supportedEfforts(st.Model)))
@@ -1111,6 +1120,27 @@ func (m *model) cycleEffort() tea.Cmd {
 
 // modelList is the plain listing of /model during a run (the picker is
 // modal and a switch is refused then anyway).
+// modelsClearedReport is /clear-models-cache's scrollback line: what was
+// deleted, then what the re-read of the current model's provider found. A
+// failed re-read is not an error — the provider's models stay as they were.
+func (m *model) modelsClearedReport(msg modelsClearedMsg) tea.Cmd {
+	if msg.err != nil {
+		return m.printlnError("error: " + msg.err.Error())
+	}
+	rs := msg.rep.Rescan
+	line := fmt.Sprintf("models cache cleared: %d providers, %d models", msg.rep.Providers, msg.rep.Models)
+	switch {
+	case rs.Provider == "":
+	case rs.Err != nil:
+		return m.printlnWarn(fmt.Sprintf("%s — %s could not be re-read (%v); its models stay as they were", line, rs.Provider, rs.Err))
+	case len(rs.Models) == 0:
+		line += fmt.Sprintf(" — %s has no model list to re-read", rs.Provider)
+	default:
+		line += fmt.Sprintf(" — %s re-read now (%d models)", rs.Provider, len(rs.Models))
+	}
+	return m.printlnContent(line + "; the others refetch on the next /model")
+}
+
 func (m *model) modelList(cur string) string {
 	var lines []string
 	for _, mo := range m.agent.ActiveModels() {
