@@ -26,8 +26,10 @@ var DefaultShellAllow = []string{"go", "git", "gh", "grep", "rg", "find", "ls", 
 // override fields, they don't need baseUrl/protocol.
 var BuiltinProviders = map[string]string{
 	"anthropic":   "env:ANTHROPIC_API_KEY",
-	"opencode-go": "env:OPENCODE_API_KEY",
 	"openai":      "env:OPENAI_API_KEY",
+	"opencode-go": "env:OPENCODE_API_KEY",
+	"opencode":    "env:OPENCODE_API_KEY", // the pay-as-you-go tier: same account key as the go tier; override per provider
+	"openrouter":  "env:OPENROUTER_API_KEY",
 }
 
 // LocalProviders are built-in providers that need no API key and have no

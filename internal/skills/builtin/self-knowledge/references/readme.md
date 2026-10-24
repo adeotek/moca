@@ -6,7 +6,7 @@
 
 **One Go binary. Eight tools. No framework.** A small, fast, provider-agnostic coding agent for the terminal: it speaks the Agent Client Protocol, so Zed, VS Code and Paseo can drive it; it loads the `SKILL.md` skills you already have, unchanged; and it publishes its benchmark numbers — including the runs it loses ([BENCHMARKS.md](docs/BENCHMARKS.md)).
 
-moca is a coding agent for the terminal, inspired by Claude Code, OpenCode and Pi — deliberately about a tenth of their surface area. Prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap, and everything moca does ends up in plain session files you can read. It runs on Claude, ChatGPT (subscription login included), Ollama, OpenCode Zen, or any OpenAI-compatible endpoint. The agent is **Mo**; `moca` is the binary you run.
+moca is a coding agent for the terminal, inspired by Claude Code, OpenCode and Pi — deliberately about a tenth of their surface area. Prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap, and everything moca does ends up in plain session files you can read. It runs on Claude, ChatGPT (subscription login included), OpenCode Go and Zen, OpenRouter, Ollama, or any OpenAI-compatible endpoint. The agent is **Mo**; `moca` is the binary you run.
 
 ![moca: a prompt, a tool call, the approval picker, a diff and a green test run](docs/demo/moca-demo.gif)
 
@@ -74,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/adeotek/moca/main/install.sh | bash
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/adeotek/moca/main/install.ps1))) -Uninstall
 ```
 
-Full uninstall — the binary plus `~/.config/moca`, `~/.local/share/moca` and `~/.local/state/moca` (config, credentials, sessions, logs; `$XDG_CONFIG_HOME`/`$XDG_DATA_HOME`/`$XDG_STATE_HOME` are honored): pass `--remove-data` / `-RemoveData` instead. Both scripts refuse to delete anything whose `--version` output does not identify it as moca.
+Full uninstall — the binary plus `~/.config/moca`, `~/.local/share/moca` and `~/.local/state/moca` (config, credentials, sessions, logs; `$XDG_CONFIG_HOME`/`$XDG_DATA_HOME`/`$XDG_STATE_HOME` are honored): pass `--remove-data` / `-RemoveData` instead. Both scripts refuse to delete anything whose `--version` output does not identify it as moca. A copy a package manager installed (Homebrew, Scoop, WinGet) is left to that manager: the scripts name its uninstall command instead, and with `--remove-data` / `-RemoveData` they also print the command that deletes the data directories, which the manager's uninstall leaves in place.
 
 ## Configure
 
@@ -105,11 +105,15 @@ Secrets never appear as literals: `apiKey` is an optional `env:VAR` reference �
 
 | Provider | Auth | Notes |
 |---|---|---|
-| `opencode-go` | `OPENCODE_API_KEY` | OpenCode Zen (mixed-protocol catalog: glm-5.3, minimax-m3, kimi-k3, …) |
+| `opencode-go` | `OPENCODE_API_KEY` | OpenCode Go tier (mixed-protocol catalog: glm-5.3, minimax-m3, kimi-k3, …) |
+| `opencode` | `OPENCODE_API_KEY` | OpenCode Zen, pay-as-you-go — the same account key as the go tier (override with `providers.opencode.apiKey`); the key is the id models.dev (OpenCode's model registry) publishes for the tier, so `opencode/<model>` reads the same as in an `opencode.json` |
+| `openrouter` | `OPENROUTER_API_KEY` | one key, hundreds of models; ids keep their vendor prefix (`openrouter/anthropic/claude-sonnet-5.5`) |
 | `anthropic` | `ANTHROPIC_API_KEY` | Claude; subscription OAuth is **not permitted** by Anthropic's terms for third-party clients — API key only |
 | `openai` | `OPENAI_API_KEY` **or** `moca login openai` | ChatGPT Plus/Pro subscription login via OpenAI's "Sign in with ChatGPT" open-source flow |
 | `ollama` | none | local or LAN [Ollama](https://ollama.com) server — models are discovered from it; see below |
 | any name | `baseUrl` + `protocol` | custom providers: vLLM, LM Studio, OpenAI-compatible gateways |
+
+**The model list comes from the provider.** Each provider's own `/models` endpoint is read at startup and cached for 24 h (one file per provider in `~/.local/share/moca/models-cache/`), so a model released yesterday shows up in `/model` without a moca release. Curated metadata (prices, thinking levels) still wins where it exists; a discovered model with no published price shows `—` rather than a fake `$0.00`, and one with no published window gets 16384 plus a startup warning. `/model` lists only providers you can actually run; a fresh install's first picker still shows everything, with a `/login <provider>` hint per row. `/clear-models-cache` empties the cache and re-reads the current model's provider at once — the session keeps every model it is using, and the other providers refetch on the next `/model`. A custom provider that declares its own models is used as declared.
 
 #### Ollama (local or LAN)
 
@@ -237,7 +241,7 @@ Sessions are append-only files under `~/.local/share/moca/sessions/`, keyed by w
 | `o` / `↑↓` `enter` / `s` / `a` / `d` | approval picker: allow once / move+confirm / allow for this session (memory only, never written) / allow always (saved into the project's `.moca/config.jsonc`) / deny (letters and arrows only after a 700 ms pause, arrows+enter only with an empty draft) |
 | `↑`/`↓` · `tab` · `esc` | in the `/` dropdown: pick · complete · dismiss |
 
-**Slash commands**: `/model` · `/effort` · `/mode` · `/hard` · `/yolo` · `/plan` · `/execute` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/remember <text>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`). Typing `/` opens a dropdown of every command, loaded template (`prompt:`) and skill (`skill:`) as you type — `↑`/`↓` pick, `tab` completes, `enter` on an exact name runs it, and the command echoes into the transcript like your messages before its output.
+**Slash commands**: `/model` · `/clear-models-cache` · `/effort` · `/mode` · `/hard` · `/yolo` · `/plan` · `/execute` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/remember <text>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`). Typing `/` opens a dropdown of every command, loaded template (`prompt:`) and skill (`skill:`) as you type — `↑`/`↓` pick, `tab` completes, `enter` on an exact name runs it, and the command echoes into the transcript like your messages before its output.
 
 Prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`) and skills (every skill you add is invokable as `/name`; an agent-recorded `auto` note is listed but never a command) join the same dropdown. **`/create-command`** is a built-in skill (nothing is dropped into your config dir): run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir — once or for the session, never persistently) or project ones in `.moca/prompts/`. New commands and skills are usable the moment the run that wrote them finishes — no restart.
 

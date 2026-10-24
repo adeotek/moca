@@ -104,10 +104,13 @@ func TestLoginStoresAPIKey(t *testing.T) {
 			t.Fatalf("picker missing %q:\n%s", want, view)
 		}
 	}
-	// anthropic, openai, opencode-go: two downs lands on opencode-go, which
-	// has no OAuth flow and goes straight to key entry.
-	m.Update(key("down"))
-	m.Update(key("down"))
+	// The picker is sorted by provider name, so walk the arrows down to
+	// opencode-go — a provider that sorts before it (opencode, the Zen tier)
+	// shifts the index, and this must not depend on where it lands. It has no
+	// OAuth flow and goes straight to key entry.
+	for i := 0; i < len(m.login.items) && m.login.items[m.login.cursor].key != "opencode-go"; i++ {
+		m.Update(key("down"))
+	}
 	m.Update(key("enter"))
 	if m.login.provider != "opencode-go" || m.login.step != loginEnterKey {
 		t.Fatalf("key entry not open: %+v", m.login)
@@ -148,7 +151,7 @@ func TestLoginMarkedBackAndCancel(t *testing.T) {
 		t.Fatalf("esc from key entry must return to the method picker: %+v", m.login)
 	}
 	m.Update(key("esc"))
-	if m.login.step != loginPickProvider || len(m.login.items) != 3 {
+	if m.login.step != loginPickProvider || len(m.login.items) != len(m.start.Config.Providers) {
 		t.Fatalf("esc from the method picker must return to the provider picker: %+v", m.login)
 	}
 	if _, cmd := m.Update(key("esc")); m.login != nil || !strings.Contains(drained(m, cmd), "login cancelled") {

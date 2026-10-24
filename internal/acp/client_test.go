@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/testenv"
 )
 
 type wireMsg struct {
@@ -30,6 +32,10 @@ func testOptions(t *testing.T, s *scriptServer) Options {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// Blank the built-in providers' env references: this host exports real
+	// keys, and a ready provider is discovered against its real endpoint,
+	// which would add its models to the option list under test.
+	testenv.BlankKeys(t)
 	t.Setenv("MOCA_T_KEY", "k")
 	t.Setenv("MOCA_T_OTHER", "")
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`{"model":"fake/m","context":{"maxSteps":40},
@@ -262,3 +268,10 @@ func (c *testClient) prompt(sid, text string) (string, *RPCError) {
 	json.Unmarshal(res, &r)
 	return r.StopReason, nil
 }
+
+// TestMain isolates the package from this host's real environment: an ambient
+// provider key makes a built-in provider ready, and discovery then calls its
+// real endpoint from a unit test (slow, flaky, and it changes the model lists
+// these tests assert). The temp XDG root keeps a real config, auth store and
+// sessions out of the run.
+func TestMain(m *testing.M) { os.Exit(testenv.Main(m)) }

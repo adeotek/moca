@@ -22,7 +22,7 @@ func setupEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	for _, e := range []string{"ANTHROPIC_API_KEY", "OPENCODE_API_KEY", "OPENAI_API_KEY"} {
+	for _, e := range []string{"ANTHROPIC_API_KEY", "OPENCODE_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"} {
 		t.Setenv(e, "")
 	}
 }
@@ -295,5 +295,23 @@ func TestStatusLineCarriesTheSetupState(t *testing.T) {
 	}
 	if got := m.statusLine(); !strings.Contains(got, "no provider configured — /login") {
 		t.Fatalf("status line %q", got)
+	}
+}
+
+// TestOpenRouterOnlyIsUsable: OpenRouter has no catalog rows — its models are
+// all discovered — so a key for it alone must not read as "no provider
+// configured", and the first-run picker must discover before it opens.
+func TestOpenRouterOnlyIsUsable(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("OPENROUTER_API_KEY", "k")
+	cfg := config.Default()
+	reg, err := provider.NewRegistry(cfg, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !anyProviderUsable(reg, cfg) || !rowlessReadyProvider(reg, cfg) {
+		t.Fatal("an OpenRouter key alone makes a provider usable, pending discovery")
 	}
 }

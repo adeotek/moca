@@ -58,11 +58,12 @@ func TestModelArgCompletion(t *testing.T) {
 			t.Fatalf("current model marked: %+v", it)
 		}
 	}
-	// A provider with no credential is flagged (the catalog's built-ins have none here).
+	// An inactive provider contributes no rows at all (Review Focus 7): the
+	// list only offers models that can actually run.
 	m.input.SetBuffer("/model anthropic/")
 	m.syncTextarea()
-	if d = m.dropdown(); d == nil || !strings.Contains(d.items[0].hint, "no key") {
-		t.Fatalf("models without a credential are flagged: %+v", d)
+	if d = m.dropdown(); d != nil && len(d.items) != 0 {
+		t.Fatalf("inactive providers must not be offered: %+v", d)
 	}
 	m.input.SetBuffer("/model m2") // substring, not prefix
 	m.syncTextarea()

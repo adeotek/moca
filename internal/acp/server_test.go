@@ -233,3 +233,28 @@ func TestProjectUntrustedSkipsProjectFile(t *testing.T) {
 		t.Fatal("a trusted workdir's broken project file must be reported")
 	}
 }
+
+// One session/new discovers once: the model check's registry is the
+// session's. agent.Start used to build a second one and discover again, so
+// every provider whose list could not be read — a failure is never cached —
+// paid its fetch timeout twice per session.
+func TestNewSessionDiscoversOnce(t *testing.T) {
+	var hits atomic.Int32
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(down.Close)
+	o := testOptions(t, newScript(t))
+	gw, err := config.Parse([]byte(`{"providers":{"gw":{"baseUrl":"` + down.URL + `",
+		"protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Config.Providers["gw"] = gw.Providers["gw"]
+	c := startClient(t, o)
+	c.newSession(t.TempDir())
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("session/new must discover once; gw's list was asked %d times", n)
+	}
+}

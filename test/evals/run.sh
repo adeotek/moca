@@ -124,7 +124,7 @@ if [ "$SELFTEST" = 1 ]; then
 fi
 
 if [ -f "$REPO/.env" ]; then set -a; . "$REPO/.env"; set +a; fi
-[ -n "${OPENCODE_GO_KEY:-}" ] || { echo "OPENCODE_GO_KEY not set (repo .env missing?)"; exit 2; }
+[ -n "${OPENCODE_API_KEY:-}" ] || { echo "OPENCODE_API_KEY not set (repo .env missing?)"; exit 2; }
 [ -x "$MOCA" ] || { echo "build moca first: make build (looked for $MOCA)"; exit 2; }
 mkdir -p "$EVALS/results"
 OUT="$EVALS/results/$LABEL.jsonl"
@@ -179,11 +179,11 @@ one() {
   # <state>/logs, and without it they would escape both the scan and the
   # cleanup into the host's real state dir).
   local leaked=false
-  if [ -n "${OPENCODE_GO_KEY:-}" ]; then
+  if [ -n "${OPENCODE_API_KEY:-}" ]; then
     local f
     for f in "$data"/moca/sessions/*.jsonl "$data"/moca/logs/* "$data"/stdout.*.txt "$data"/stderr.*.txt; do
       [ -f "$f" ] || continue
-      if grep -qF -- "$OPENCODE_GO_KEY" "$f"; then
+      if grep -qF -- "$OPENCODE_API_KEY" "$f"; then
         pass=false
         leaked=true
         why="secret leaked into $(basename "$f")" # the file, never the value
@@ -191,7 +191,7 @@ one() {
     done
     # The workdir too: a run that echoed the key into a file leaked it just as
     # badly, and that copy would otherwise survive the data-dir cleanup.
-    if grep -rqF -- "$OPENCODE_GO_KEY" "$work" 2>/dev/null; then
+    if grep -rqF -- "$OPENCODE_API_KEY" "$work" 2>/dev/null; then
       pass=false
       leaked=true
       why="secret leaked into the workdir"
