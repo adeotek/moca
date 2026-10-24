@@ -20,7 +20,7 @@ on:
     inputs:
       version:
         description: >-
-          Release to build and publish: an existing tag (e.g. v0.7.6) — its
+          Release to build and publish: an existing tag (e.g. v1.2.3) — its
           source is built, with this ref's workflow steps. Leave empty to
           publish what the dispatched ref describes (git describe) — which
           needs main to sit exactly on the tag. The input exists because a fix
