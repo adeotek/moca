@@ -3,5 +3,5 @@
   // the scenario's (b) is report-only (recording cannot happen and is not
   // required; the suite must still go green).
   "model": "opencode-go/glm-5.3-flash",
-  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_GO_KEY" } }
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } }
 }

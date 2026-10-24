@@ -25,7 +25,10 @@ type StatusInfo struct {
 	In, Out      int
 	Cost         float64
 	Sub          bool
-	Transient    string
+	// CostUnknown marks a model whose provider publishes no price (a
+	// discovered row outside the catalog): the bar says `—`, never $0.0000.
+	CostUnknown bool
+	Transient   string
 	// Trigger is the context size at which auto-compaction fires (the
 	// window minus the reserve); the percent field turns red from there.
 	Trigger int
@@ -113,8 +116,11 @@ func RenderStatus(s StatusInfo, width int) (l1, l2 []segment) {
 		}
 	}
 	cost := fmt.Sprintf("$%.4f", s.Cost)
-	if s.Sub {
+	switch {
+	case s.Sub:
 		cost = "sub"
+	case s.CostUnknown:
+		cost = "—"
 	}
 	if s.Transient != "" {
 		cost = s.Transient

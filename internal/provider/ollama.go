@@ -141,7 +141,8 @@ func modelFromShow(id string, sh ollamaShow, known bool) (m Model, window int, r
 		}
 	}
 	m = Model{Provider: "ollama", ID: id, Protocol: "openai-completions", ContextWindow: window,
-		MaxOutput: min(max(window/4, 2048), 16384), ThinkingMode: "none"}
+		MaxOutput: min(max(window/4, 2048), 16384), ThinkingMode: "none",
+		CostKnown: true} // a local server: free, and known to be
 	if slices.Contains(caps, "thinking") {
 		m.ThinkingMode = "openai"
 		m.ThinkingLevelMap = map[llm.Effort]string{llm.EffortOff: "none", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}

@@ -16,7 +16,7 @@ git clone <sample-repo> /tmp/moca-demo/repo
 mkdir -p /tmp/moca-demo/config/moca
 cat > /tmp/moca-demo/config/moca/config.jsonc <<'EOF'
 { "model": "opencode-go/glm-5.3-flash",
-  "providers": { "opencode-go": { "auth": "api_key", "apiKey": "env:OPENCODE_GO_KEY" } } }
+  "providers": { "opencode-go": { "auth": "api_key", "apiKey": "env:OPENCODE_API_KEY" } } }
 EOF
 
 # 1. record — from the repo root; the tape writes docs/demo/moca-demo.gif into /vhs
@@ -25,7 +25,7 @@ docker run --rm \
   -v /tmp/moca-demo:/work \
   -v "$PWD/bin/moca":/usr/local/bin/moca:ro \
   -v /tmp/moca-demo/config/moca:/root/.config/moca \
-  -e OPENCODE_GO_KEY \
+  -e OPENCODE_API_KEY \
   ghcr.io/charmbracelet/vhs docs/demo/demo.tape
 
 sudo chown "$USER" docs/demo/moca-demo.gif   # the container runs as root

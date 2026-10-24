@@ -63,7 +63,7 @@ stays a known weakness.
 
 ```bash
 git clone https://github.com/adeotek/coding-agent-bench && cd coding-agent-bench
-make setup && cp .env.example .env    # OPENCODE_GO_KEY (+ an Anthropic key for Claude Code)
+make setup && cp .env.example .env    # OPENCODE_GO_KEY — this harness's name for the Zen key (+ an Anthropic key for Claude Code)
 make probe                            # one live request per agent, proves the credential flow
 TASK_NAMES=$(tr '\n' ',' < docs/tb2-subset-12.txt | sed 's/,$//') make subset
 ```
