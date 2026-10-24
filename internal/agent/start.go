@@ -102,7 +102,7 @@ func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error)
 	if err != nil {
 		return nil, err
 	}
-	if err := discoverLocal(reg, cfg, emit); err != nil {
+	if err := discoverModels(reg, cfg, emit); err != nil {
 		return nil, err
 	}
 	builtinDir, err := skills.ExtractBuiltins(config.DataDir())
@@ -297,13 +297,13 @@ func autoSkillsNote(sk []skills.Skill) string {
 	return fmt.Sprintf("self-managed skills: %d %s in this project (%s)", len(names), noun, strings.Join(names, ", "))
 }
 
-// discoverLocal reads a configured Ollama server's models into the registry
-// and then checks that the configured models exist. A server that is down is
-// not an error by itself — only if the default or hard model lives on it
-// (Verify says why). Warnings concern the model in use only: a window the
-// server did not report is a guess, and one under the minimum an agent can
-// work in will truncate the prompt silently.
-func discoverLocal(reg *provider.Registry, cfg config.Config, emit func(Event)) error {
+// discoverModels reads every configured provider's model list into the
+// registry and then checks that the configured models exist. Discovery is fail
+// open (a provider that is down or unauthenticated keeps its cache/catalog
+// rows), so only Verify can fail. Warnings concern the model in use only: a
+// window the provider did not publish is a guess, and one under the minimum an
+// agent can work in will truncate the prompt silently.
+func discoverModels(reg *provider.Registry, cfg config.Config, emit func(Event)) error {
 	if _, ok := cfg.Providers["ollama"]; ok {
 		d, _ := reg.DiscoverOllama(context.Background())
 		if pn, id, err := config.SplitModel(cfg.Model); err == nil && pn == "ollama" && emit != nil {
@@ -315,6 +315,12 @@ func discoverLocal(reg *provider.Registry, cfg config.Config, emit func(Event)) 
 					emit(Warning{fmt.Sprintf("ollama/%s: the server reported no context window; assuming %d. If its num_ctx is smaller, long sessions are silently truncated — start the server with OLLAMA_CONTEXT_LENGTH or set providers.ollama.models.%s.contextWindow to match", id, w, id)})
 				}
 			}
+		}
+	}
+	report := reg.DiscoverModels(context.Background())
+	if pn, id, err := config.SplitModel(cfg.Model); err == nil && emit != nil {
+		if d, ok := report.Provider(pn); ok && slices.Contains(d.Assumed, id) {
+			emit(Warning{fmt.Sprintf("%s/%s: the provider publishes no context window; assuming %d. If the real window is smaller, long sessions are silently truncated — set providers.%s.models.%s.contextWindow to match", pn, id, config.MinContextWindow, pn, id)})
 		}
 	}
 	return reg.Verify()
