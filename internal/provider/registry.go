@@ -135,7 +135,14 @@ func (r *Registry) applyModelOverrides(pname string, p config.ProviderConfig) er
 // Verify checks that the configured default and hard models exist, and
 // remembers them (resolved) so they outlive a later relist. It runs after
 // discovery, which is what makes a local provider's models known.
+//
+// The credential probe is made BEFORE the lock, not under it:
+// credentialReady reads the credential store (a flock'd file) and, for a
+// store-backed OAuth provider near expiry, refreshes over the network, so
+// holding the registry's write lock across it would stall every Resolve and
+// every Status() read behind a file lock or an HTTP round trip.
 func (r *Registry) Verify() error {
+	cred := r.verifyCredentials()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// The judge's model is not a start gate (an unusable judge asks), but
@@ -172,11 +179,9 @@ func (r *Registry) Verify() error {
 		if pn, _, err := config.SplitModel(q); err == nil && r.listedByDiscovery(pn) {
 			// Discovery skips a provider with no usable credential, so its
 			// list was never read either: the credential is the fix, not a
-			// declaration. credentialReady takes no registry lock, but its
-			// store read (a flock'd file read) does happen I/O under this
-			// one — never let a credential func here refresh a token or
-			// touch the network while mu is held.
-			if cerr := r.credentialReady(pn); cerr != nil {
+			// declaration. The probe itself ran before the lock (it reads
+			// the credential store); this branch only reads its answer.
+			if cerr := cred[pn]; cerr != nil {
 				return fmt.Errorf("model %q is not in the catalog, and %s's model list was not read: %w", q, pn, cerr)
 			}
 		}
@@ -186,6 +191,57 @@ func (r *Registry) Verify() error {
 		return fmt.Errorf("model %q is not in the catalog; declare it under providers.<name>.models", q)
 	}
 	return nil
+}
+
+// verifyCredentials answers credentialReady for every provider Verify may
+// cite: the provider of model/modelHard, when discovery reads its list and
+// that list was read successfully. It runs WITHOUT the registry lock — the
+// probe reads the credential store (a flock'd file) and can refresh a
+// subscription token over the network, which must never happen under a lock
+// every Resolve and Status() read contends for. A provider missing from the
+// map is one the loop never asks about; a nil value is a credential that
+// resolves, or a provider whose failed fetch is named as itself instead.
+func (r *Registry) verifyCredentials() map[string]error {
+	cred := map[string]error{}
+	for _, q := range []string{r.cfg.Model, r.cfg.ModelHard} {
+		pn, _, err := config.SplitModel(q)
+		if err != nil || pn == "ollama" || !r.listedByDiscovery(pn) {
+			continue
+		}
+		if _, done := cred[pn]; done {
+			continue
+		}
+		// A model the live catalog holds is one the loop below never asks
+		// about: no probe, so a start whose configured models both resolve
+		// does no credential-store read at all.
+		if r.hasModel(q) {
+			continue
+		}
+		cred[pn] = nil
+		// A failed fetch is cited as itself, with its own remediation:
+		// probing the credential would replace that answer with a less
+		// specific one.
+		if r.discoveryError(pn) == nil {
+			cred[pn] = r.credentialReady(pn)
+		}
+	}
+	return cred
+}
+
+// discoveryError reads a provider's recorded list failure under the lock.
+func (r *Registry) discoveryError(pname string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.discoveryErr[pname]
+}
+
+// hasModel reports whether the live catalog holds the qualified model (the
+// predicate Verify's loop tests, without taking the lock for the whole walk).
+func (r *Registry) hasModel(q string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.models[q]
+	return ok
 }
 
 // nearestModelsLocked suggests up to three known ids when a configured model
@@ -272,7 +328,8 @@ func (r *Registry) Models() []Model {
 // for store-backed OAuth providers that a login is stored (a token near
 // expiry is refreshed by the first request, which has a cancellable context,
 // not here). A TUI model switch calls this on its update goroutine, so it
-// fails fast before anything changes and never blocks on I/O.
+// fails fast before anything changes: no network call, and no registry lock
+// held across the credential-store read it does make.
 func (r *Registry) CheckCredential(qualified string) error {
 	pname, _, err := config.SplitModel(qualified)
 	if err != nil {
@@ -289,11 +346,13 @@ func (r *Registry) CheckCredential(qualified string) error {
 	return r.credentialReady(pname)
 }
 
-// credentialReady is the no-I/O credential check CheckCredential and
+// credentialReady is the network-free credential check CheckCredential and
 // ProviderReady share: an env lookup or a stored key for api_key providers,
 // and for store-backed OAuth providers only that a login is stored — the
 // refresh (network, under the cross-process lock) is left to the first
-// request, which has a cancellable context.
+// request, which has a cancellable context. It does read the credential store
+// (one flock'd file), so a caller holding the registry lock must hoist this
+// call out of it; Verify does.
 func (r *Registry) credentialReady(pname string) error {
 	if r.cfg.Providers[pname].Auth == "oauth" && r.oauth[pname] == nil {
 		if _, ok := oauthProviders[pname]; ok {

@@ -201,7 +201,7 @@ ASSET="moca-${TAG}-${OS}-${ARCH}.tar.gz"
 ASSET_RE="$(printf '%s' "$ASSET" | sed 's/\./\\./g')"
 
 URLS="$(grep -o '"browser_download_url": *"[^"]*"' "$TMP/release.json" | sed 's/.*"\([^"]*\)"$/\1/')"
-PACKAGE_URL="$(printf '%s\n' "$URLS" | grep -- "/${ASSET}\$" | head -n 1 || true)"
+PACKAGE_URL="$(printf '%s\n' "$URLS" | grep -E -- "/${ASSET_RE}\$" | head -n 1 || true)"
 SUMS_URL="$(printf '%s\n' "$URLS" | grep -- '/checksums.txt$' | head -n 1 || true)"
 [ -n "$PACKAGE_URL" ] || die "release $TAG has no package for $OS/$ARCH"
 

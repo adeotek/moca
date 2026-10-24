@@ -431,8 +431,14 @@ func (r *Registry) rebuildProviderLocked(name string) {
 			r.models[m.Qualified()] = m
 		}
 	}
-	// Declared models and overrides win over everything discovered.
-	_ = r.applyModelOverrides(name, r.cfg.Providers[name])
+	// Declared models and overrides win over everything discovered. The
+	// override is re-applied on every rebuild, and it cannot be rejected
+	// here: the config is immutable and NewRegistry validated this same map
+	// before it returned, so a failure is a bug in that ordering rather than
+	// a user error. Logged, never dropped.
+	if err := r.applyModelOverrides(name, r.cfg.Providers[name]); err != nil {
+		slog.Warn("declared model override not applied", "provider", name, "err", err)
+	}
 }
 
 // ClearReport is what ClearModelsCache did.

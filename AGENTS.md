@@ -1,6 +1,6 @@
 # AGENTS.md — moca
 
-One Go binary: a TUI coding agent (`github.com/adeotek/moca`, binary `moca`). 434 Go files across 17 `internal/` packages.
+One Go binary: a TUI coding agent (`github.com/adeotek/moca`, binary `moca`). 438 Go files across 17 `internal/` packages.
 
 ## Ground truth (read before changing behavior)
 
@@ -32,6 +32,7 @@ mise run <task>                             # the make targets, as mise tasks
 - **Skillgate** (not in CI, hermetic — no key, no network, a build first): `make build && bash test/skillgate/run.sh` — drives the built `moca` against a scripted openai-completions provider through 17 legs covering the self-managed-skills contract end to end: the skill write guard and its refusals, the caps, the shell refusal's scope, the switch table, the hint's silence with the feature off. The checker is `//go:build skillgate`, so plain `go test ./...` skips it.
 - **Ship gate** (not in CI, needs repo `.env` with `OPENCODE_API_KEY`, and a build first): `make build && bash test/shipgate/run.sh`. The checker is `//go:build shipgate`, so plain `go test ./...` skips it. Several `internal/tools` tests are `//go:build !windows`.
 - **ACP gate** (not in CI, a build first; hermetic — no key, no network): `make build && bash test/acpgate/run.sh` — drives the built `moca acp` over stdio against a scripted provider: a text turn, an approval, cancel, stdin-EOF exit 0 with an empty stderr, a second-process replay, close, delete, and an API-key leak scan. The checker is `//go:build acpgate`, so plain `go test ./...` skips it.
+- **Doc counts** (the drift class that bit twice in one pass): `cmd/moca/counts_test.go` runs in the normal suite and fails when AGENTS.md's Go-file count or SPECS §15's package count disagrees with the tree (`git ls-files '*.go'`, `go list ./...`). The `=== RUN` count is the one claim that can only be measured by running the suite, so it sits behind the `counts` tag: after any pass that adds or removes a test, `go test -tags counts ./cmd/moca -run TestSpecsTestCount -v`.
 
 ## Layout & dependency rules
 
