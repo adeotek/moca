@@ -1,0 +1,8 @@
+{
+  "title": "Mo Coding Agent (moca)",
+  "registryName": "Mo Coding Agent",
+  "agent": "Mo",
+  "binary": "moca",
+  "line": "Coding agent for the terminal in one static Go binary",
+  "sentence": "A coding agent for the terminal in one static Go binary: eight frozen tools, native ACP, MCP without prompt bloat, any OpenAI-compatible model. Benchmarks published, losses included."
+}

@@ -33,7 +33,13 @@ import urllib.request
 
 IDENT = "moca"
 REPO = "https://github.com/adeotek/moca"
-DESCRIPTION = "A coding agent in one static Go binary: eight frozen tools, native ACP, any OpenAI-compatible model"
+# The registry shows a display name and a one-line description in an editor's
+# agent picker. Both come from branding.json, so this entry cannot describe the
+# product differently from the formula and the manifests beside it; `id` stays
+# the folder name the registry requires, `name` is what a user reads.
+BRAND = json.loads((pathlib.Path(__file__).resolve().parent / "branding.json").read_text(encoding="utf-8"))
+NAME = BRAND["registryName"]
+DESCRIPTION = BRAND["line"]
 
 # registry key -> (goos, goarch, extension)
 TARGETS = {
@@ -128,7 +134,7 @@ def main() -> int:
 
     agent = {
         "id": IDENT,
-        "name": IDENT,
+        "name": NAME,
         "version": version,
         "description": DESCRIPTION,
         "repository": REPO,

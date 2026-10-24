@@ -1,4 +1,4 @@
-# moca — MO Coding Agent
+# Mo Coding Agent (moca)
 
 [![CI](https://github.com/adeotek/moca/actions/workflows/ci.yml/badge.svg)](https://github.com/adeotek/moca/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/adeotek/moca)](https://github.com/adeotek/moca/releases/latest)
@@ -6,7 +6,7 @@
 
 **One Go binary. Eight tools. No framework.** A small, fast, provider-agnostic coding agent for the terminal: it speaks the Agent Client Protocol, so Zed, VS Code and Paseo can drive it; it loads the `SKILL.md` skills you already have, unchanged; and it publishes its benchmark numbers — including the runs it loses ([BENCHMARKS.md](docs/BENCHMARKS.md)).
 
-moca is a coding agent for the terminal, inspired by Claude Code, OpenCode and Pi — deliberately about a tenth of their surface area. Prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap, and everything moca does ends up in plain session files you can read. It runs on Claude, ChatGPT (subscription login included), Ollama, OpenCode Zen, or any OpenAI-compatible endpoint.
+moca is a coding agent for the terminal, inspired by Claude Code, OpenCode and Pi — deliberately about a tenth of their surface area. Prompt caching, windowed reads, diff-shaped results and token-denominated compaction keep a session cheap, and everything moca does ends up in plain session files you can read. It runs on Claude, ChatGPT (subscription login included), Ollama, OpenCode Zen, or any OpenAI-compatible endpoint. The agent is **Mo**; `moca` is the binary you run.
 
 ![moca: a prompt, a tool call, the approval picker, a diff and a green test run](docs/demo/moca-demo.gif)
 
