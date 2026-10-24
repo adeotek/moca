@@ -104,3 +104,20 @@ func TestBrandingChannelLimits(t *testing.T) {
 		t.Errorf("binary is %q: the command, repo, module path, config dirs and release asset names are all built on moca", br.Binary)
 	}
 }
+
+// TestReadmeTitleMatchesBranding: the README's title and its embedded copy both
+// carry branding.json's title. The mirror is byte-copied from the README
+// (internal/skills/sync_test.go), so this also fails when only one was edited.
+func TestReadmeTitleMatchesBranding(t *testing.T) {
+	br := loadBranding(t)
+	want := "# " + br.Title
+	for _, path := range []string{
+		"README.md",
+		filepath.Join("internal", "skills", "builtin", "self-knowledge", "references", "readme.md"),
+	} {
+		first, _, _ := strings.Cut(repoFile(t, path), "\n")
+		if first != want {
+			t.Errorf("%s opens with %q, want %q", path, first, want)
+		}
+	}
+}
