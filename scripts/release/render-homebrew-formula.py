@@ -20,13 +20,19 @@ platform blocks for the same reason (ComponentsOrder). The output is what
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import sys
 import urllib.error
 import urllib.request
 
 REPO = "https://github.com/adeotek/moca"
-DESC = "Coding agent in one static Go binary"
+# The one-liner Homebrew prints beside `moca` in search/info. It comes from the
+# same file as the ACP registry entry and the winget manifests: Homebrew's
+# Description Guidelines reject feature lists and taglines, so the long form
+# lives in branding.json's `sentence` and never here.
+BRAND = json.loads((pathlib.Path(__file__).resolve().parent / "branding.json").read_text(encoding="utf-8"))
+DESC = BRAND["line"]
 
 # (brew platform block, cpu block) -> (goos, goarch, extension)
 TARGETS = {
