@@ -13,14 +13,16 @@ workflow.
 
 Before any tag exists, the release content is merged to `main`:
 
-1. Work on a branch (`phase/N-<slug>` or `chore/<slug>`), conventional commits,
+1. Work on a branch (`phase/N-<slug>` or `chore/<slug>`), commit and PR titles in
+   the house format `[type:category] short description`,
    PR-only into `main` (the local `.git/hooks/pre-push` hook blocks direct
    pushes to `main`).
 2. In the same PR, update every artifact the version touches:
    `CHANGELOG.md`, `docs/specs/SPECS.md` (header version line + the change
    narrative cited from §16), `README.md` if user-facing. One version bump per
    PR.
-3. Never create a commit without the user's explicit approval.
+3. An agent may prepare the release, but never commit without your explicit
+   approval.
 
 ## 1. Local gates
 
@@ -102,8 +104,8 @@ gh release view v0.7.11          # 6 packages + checksums.txt, not a draft
 ./install.sh --version v0.7.11 --dir /tmp/moca-upgrade-test
 ```
 
-Check the generated release notes render sanely (GitHub generates them from
-the conventional commits since the previous tag).
+Check the generated release notes render sanely (GitHub builds them from the
+merged pull requests since the previous tag).
 
 ## 5. Publish the distribution channels
 

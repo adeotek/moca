@@ -49,7 +49,7 @@ mise run <task>                             # the make targets, as mise tasks
 - Secrets: config `apiKey` must be an `env:VAR` reference (literals rejected). `.env` and `*.key` are gitignored — never commit them.
 - Thinking blocks/signatures are model-bound; cross-provider transforms happen in the agent before each request (see SPECS §14).
 - `tools.CommandChecker.Check` returns a 4-tuple (`need, askEveryTime, unsure, err`) since the v0.4 rule engine — `unsure` feeds auto mode's classifier (`Env.Judge`); new tools' test fakes must match it (see SPECS §11).
-- Git flow: `main` is PR-only — a local `.git/hooks/pre-push` blocks pushes to it (`--no-verify` is an emergency bypass only). Branch `phase/N-<slug>` or `chore/<slug>`, conventional commits, one version bump per PR.
+- Git flow: `main` is PR-only — a local `.git/hooks/pre-push` blocks pushes to it (`--no-verify` is an emergency bypass only). Branch `phase/N-<slug>` or `chore/<slug>`, commit and PR titles in the house template `[{type}:{category}] short description`, one version bump per PR.
 - Never create a commit without the user's explicit approval.
 
 ## Docs
