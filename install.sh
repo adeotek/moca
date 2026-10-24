@@ -196,9 +196,11 @@ fetch "$RELEASE_URL" "$TMP/release.json" || die "could not fetch release metadat
 TAG="$(grep -o '"tag_name": *"[^"]*"' "$TMP/release.json" | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')"
 [ -n "$TAG" ] || die "could not parse the release tag (unexpected API response)"
 ASSET="moca-${TAG}-${OS}-${ARCH}.tar.gz"
-# ERE-escape the asset name so a dot matches only a dot (the name's dots are
-# literal, and checksums.txt is the trust anchor for everything below).
-ASSET_RE="$(printf '%s' "$ASSET" | sed 's/\./\\./g')"
+# ERE-escape the asset name so every character matches itself: a tag may hold
+# `+` or `(`, which are literal in BRE and quantifiers in ERE, and the dot was
+# already the near-miss this started as. checksums.txt is the trust anchor for
+# everything below, so the name it is matched by must be exact.
+ASSET_RE="$(printf '%s' "$ASSET" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
 
 URLS="$(grep -o '"browser_download_url": *"[^"]*"' "$TMP/release.json" | sed 's/.*"\([^"]*\)"$/\1/')"
 PACKAGE_URL="$(printf '%s\n' "$URLS" | grep -E -- "/${ASSET_RE}\$" | head -n 1 || true)"

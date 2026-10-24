@@ -617,6 +617,34 @@ func TestVerifyNamesAMissingCredential(t *testing.T) {
 	}
 }
 
+// TestVerifyProbesTheCredentialOutsideTheLock pins the invariant that made
+// Verify's pre-lock probe necessary: the credential func may re-enter the
+// registry. A registered OAuth func here asks for Models() — an RLock — so a
+// probe made while Verify held the write lock would block forever. The
+// bounded wait turns that into a named failure instead of a hung suite.
+func TestVerifyProbesTheCredentialOutsideTheLock(t *testing.T) {
+	blankBuiltinKeys(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	reg, err := NewRegistry(mustCfg(t, `{"model":"openai/gpt-nope","providers":{"openai":{"auth":"oauth"}}}`), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetOAuth("openai", func(context.Context, llm.Request) (Credential, error) {
+		_ = reg.Models() // re-enters the registry under RLock
+		return Credential{Token: "t"}, nil
+	})
+	done := make(chan error, 1)
+	go func() { done <- reg.Verify() }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "is not in the catalog") {
+			t.Fatalf("the missing model is still named: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Verify blocked on its own lock: the credential probe must run before r.mu is taken")
+	}
+}
+
 // TestRevalidateMissingBypassesAFreshCache: a model published after the list
 // was cached must not be refused for a day — the configured model's provider
 // is re-read past the fresh cache before Verify.
