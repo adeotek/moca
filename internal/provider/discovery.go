@@ -200,7 +200,7 @@ func (r *Registry) discoverOne(ctx context.Context, name string) ProviderModels 
 	if cached, fresh := r.cache.Load(name, base); len(cached) > 0 {
 		r.mergeDiscovered(name, cached)
 		out.FromCache = fresh
-		out.Models, out.Assumed = r.discoveredIDs(name, cached)
+		out.Models, out.Assumed = r.discoveredIDs(cached), r.assumedModels(name)
 		if fresh {
 			return out
 		}
@@ -233,7 +233,7 @@ func (r *Registry) discoverOne(ctx context.Context, name string) ProviderModels 
 		// The rows are in memory; a read-only data dir must not cost a run.
 		slog.Debug("models cache write failed", "provider", name)
 	}
-	out.Models, out.Assumed = r.discoveredIDs(name, got)
+	out.Models, out.Assumed = r.discoveredIDs(got), r.assumedModels(name)
 	return out
 }
 
@@ -266,24 +266,32 @@ func (r *Registry) discoveryHeaders(name string) http.Header {
 	return hdr
 }
 
-// discoveredIDs lists a payload's ids and the ones whose window is a guess. A
-// window declared under providers.<name>.models is a decision, not a guess, so
-// it never shows up as assumed (the ollama rule, generalized).
-func (r *Registry) discoveredIDs(name string, models []CachedModel) (ids, assumed []string) {
-	declared := r.cfg.Providers[name].Models
+// discoveredIDs lists a payload's ids.
+func (r *Registry) discoveredIDs(models []CachedModel) []string {
+	ids := make([]string, 0, len(models))
 	for _, m := range models {
 		ids = append(ids, m.ID)
-		if m.Ctx > 0 {
-			continue
-		}
-		if o, ok := declared[m.ID]; ok && o.ContextWindow != 0 {
-			continue
-		}
-		assumed = append(assumed, m.ID)
 	}
 	slices.Sort(ids)
-	slices.Sort(assumed)
-	return ids, assumed
+	return ids
+}
+
+// assumedModels reports the provider's rows whose window is a guess. It reads
+// the MERGED rows, not the payload: a provider that publishes no window still
+// has correct windows for every curated or declared model, and warning about
+// those was the bug this replaced (the ollama rule — "a declared window is a
+// decision, not a guess" — applied to the final row instead of the payload).
+func (r *Registry) assumedModels(name string) []string {
+	var out []string
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, m := range r.models {
+		if m.Provider == name && m.WindowAssumed {
+			out = append(out, m.ID)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // mergeDiscovered records a provider's discovered rows and rebuilds its slice

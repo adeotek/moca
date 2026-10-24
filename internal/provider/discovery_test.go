@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -317,5 +318,29 @@ func TestClearModelsCacheDropsDiscoveredRows(t *testing.T) {
 	reg.DiscoverModels(context.Background())
 	if hits.Load() != 2 {
 		t.Fatalf("the next discovery refetches, hits=%d", hits.Load())
+	}
+}
+
+// TestAssumedWindowsFollowTheMergedRow: a provider whose payload carries no
+// window must not flag a curated model as a guess — the merged row has the
+// real window, and only rows that actually substituted 16384 are assumed.
+func TestAssumedWindowsFollowTheMergedRow(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
+		return 200, `{"data":[{"id":"glm-5.3"},{"id":"brand-new"}]}`
+	})
+	blankBuiltinKeys(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("MOCA_GO_KEY", "k")
+	cfg := mustCfg(t, `{"providers":{"opencode-go":{"baseUrl":"`+srv.URL+`","apiKey":"env:MOCA_GO_KEY"}}}`)
+	reg, err := NewRegistry(cfg, srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ := reg.DiscoverModels(context.Background()).Provider("opencode-go")
+	if slices.Contains(d.Assumed, "glm-5.3") {
+		t.Fatal("a curated window is not a guess")
+	}
+	if !slices.Contains(d.Assumed, "brand-new") {
+		t.Fatalf("a discovered-only id with no window is a guess: %v", d.Assumed)
 	}
 }
