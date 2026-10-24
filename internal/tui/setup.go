@@ -12,7 +12,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
@@ -84,12 +83,14 @@ func (m *model) setupModelHint() tea.Cmd {
 // choices from (there is no session yet to own one). It is cached so an
 // ollama discovery stays visible to the picker, and dropped when the config
 // is reloaded (loginFlipAuth); CheckCredential re-reads the credential store
-// per call, so a key stored with /login shows up without rebuilding.
+// per call, so a key stored with /login shows up without rebuilding. The nil
+// client is the provider's header-bounded default — the one every other
+// registry runs on (http.DefaultClient would wait on headers forever).
 func (m *model) setupRegistry() (*provider.Registry, error) {
 	if m.setupReg != nil {
 		return m.setupReg, nil
 	}
-	reg, err := provider.NewRegistry(m.start.Config, http.DefaultClient, nil)
+	reg, err := provider.NewRegistry(m.start.Config, nil, nil)
 	if err != nil {
 		return nil, err
 	}

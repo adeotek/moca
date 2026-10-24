@@ -24,8 +24,9 @@ for the ACP front end. Both are worth running when your change touches permissio
 ## Rules
 
 - **`docs/specs/SPECS.md` is the source of truth.** A behaviour change updates it in the same PR.
-- **`README.md` and `docs/specs/SPECS.md` are mirrored byte-identical** into
-  `internal/skills/builtin/self-knowledge/references/` — `make test` fails if you forget
+- **`README.md`, `CHANGELOG.md` and `docs/specs/SPECS.md` are mirrored byte-identical** into
+  `internal/skills/builtin/self-knowledge/references/` (`readme.md`, `changelog.md`, `specs.md`) —
+  `make test` fails if you forget
   (`cp README.md internal/skills/builtin/self-knowledge/references/readme.md`).
 - **Commit and PR titles**: `[{type}:{category}] short description`, type
   `feat|fix|chore`, category `global|docs|ui|tui|backend|core` (or an area slug).

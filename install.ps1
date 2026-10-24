@@ -41,7 +41,27 @@ $ProgressPreference = 'SilentlyContinue'
 
 # $IsWindows is $null on Windows PowerShell 5.1 (which only runs on Windows).
 if ($IsWindows -eq $false) {
-    throw 'this installer is for Windows — on Linux use install.sh'
+    throw 'this installer is for Windows — on Linux and macOS use install.sh'
+}
+
+# A moca a package manager owns is that manager's to replace or remove:
+# writing over a Scoop shim or a WinGet link (or deleting it) leaves the
+# manager's record stale and the command broken. The same lexical table as
+# internal/update.PackageManaged, Scoop and WinGet being the managers that
+# reach this script (TestInstallersKnowThePackageManagers keeps the two in
+# sync). Only the moca found on PATH is checked: -Dir names a target explicitly.
+function Get-PackageManager([string]$Path) {
+    $p = $Path.Replace('\', '/').ToLowerInvariant()
+    $managers = @(
+        @{ Name = 'Scoop'; Upgrade = 'scoop update moca'; Uninstall = 'scoop uninstall moca'; Paths = @('/scoop/apps/moca/', '/scoop/shims/moca') },
+        @{ Name = 'WinGet'; Upgrade = 'winget upgrade adeotek.moca'; Uninstall = 'winget uninstall adeotek.moca'; Paths = @('/winget/packages/', '/winget/links/') }
+    )
+    foreach ($m in $managers) {
+        foreach ($frag in $m.Paths) {
+            if ($p.Contains($frag)) { return $m }
+        }
+    }
+    return $null
 }
 
 if ($Uninstall -or $RemoveData) {
@@ -49,8 +69,10 @@ if ($Uninstall -or $RemoveData) {
     if (-not $Dir) {
         # -CommandType Application: an alias or function named moca has no
         # .Source path, and we must not delete a random moca.exe in the cwd.
-        $existing = Get-Command moca -CommandType Application -ErrorAction SilentlyContinue
+        $existing = Get-Command moca -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $existing) { throw 'moca is not on PATH — pass -Dir <path> to name the installation directory' }
+        $pm = Get-PackageManager $existing.Source
+        if ($pm) { throw "$($existing.Source) is managed by $($pm.Name) — run '$($pm.Uninstall)'" }
         $Dir = Split-Path -Parent $existing.Source
     }
     $target = Join-Path $Dir 'moca.exe'
@@ -88,6 +110,20 @@ switch ($env:PROCESSOR_ARCHITECTURE) {
 
 # Tolerate both "0.2.0-beta" and "v0.2.0-beta".
 if ($Version -and -not $Version.StartsWith('v')) { $Version = "v$Version" }
+
+# The target is settled before anything is downloaded: a refused target (a
+# package manager's copy) must not cost a download first. -CommandType
+# Application: an alias or function named moca has no .Source path.
+if (-not $Dir) {
+    $existing = Get-Command moca -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($existing) {
+        $pm = Get-PackageManager $existing.Source
+        if ($pm) { throw "$($existing.Source) is managed by $($pm.Name) — run '$($pm.Upgrade)', or pass -Dir <path> to install a separate copy" }
+        $Dir = Split-Path -Parent $existing.Source
+    } else {
+        $Dir = Join-Path $env:LOCALAPPDATA 'Programs\moca'
+    }
+}
 
 if ($Version) {
     Write-Host "moca installer: release $Version, windows/$arch"
@@ -131,14 +167,6 @@ try {
     $newExe = Join-Path $tmp 'moca.exe'
     if (-not (Test-Path $newExe)) { throw 'the package contains no moca.exe' }
 
-    if (-not $Dir) {
-        $existing = Get-Command moca -ErrorAction SilentlyContinue
-        if ($existing) {
-            $Dir = Split-Path -Parent $existing.Source
-        } else {
-            $Dir = Join-Path $env:LOCALAPPDATA 'Programs\moca'
-        }
-    }
     if (-not (Test-Path $Dir)) { New-Item -ItemType Directory -Path $Dir -Force | Out-Null }
 
     $target = Join-Path $Dir 'moca.exe'

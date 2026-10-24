@@ -31,6 +31,21 @@ REMOVE_DATA=0
 die() { printf 'moca: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
 
+# refuse_managed <path> <upgrade|uninstall>: a moca a package manager owns is
+# that manager's to replace or remove — writing over it (or deleting it) leaves
+# the manager's record stale and its link broken. The same lexical table as
+# internal/update.PackageManaged, Homebrew being the manager that reaches this
+# script (TestInstallersKnowThePackageManagers keeps the two in sync). Only the
+# moca found on PATH is checked: --dir names a target explicitly.
+refuse_managed() {
+	case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+	*/cellar/moca/* | */opt/homebrew/* | */home/linuxbrew/*)
+		[ "$2" = "uninstall" ] && die "$1 is managed by Homebrew — run 'brew uninstall moca'"
+		die "$1 is managed by Homebrew — run 'brew upgrade moca', or pass --dir <path> to install a separate copy"
+		;;
+	esac
+}
+
 usage() {
 	cat <<'EOF'
 moca installer — Linux and macOS
@@ -90,6 +105,7 @@ if [ "$UNINSTALL" = "1" ] || [ "$REMOVE_DATA" = "1" ]; then
 		EXISTING="$(command -v moca 2>/dev/null || true)"
 		[ -n "$EXISTING" ] || die "moca is not on PATH — pass --dir <path> to name the installation directory"
 		RESOLVED="$(readlink -f -- "$EXISTING" 2>/dev/null || printf '%s' "$EXISTING")"
+		refuse_managed "$RESOLVED" uninstall
 		TARGET="$RESOLVED"
 	fi
 	if [ ! -f "$TARGET" ]; then
@@ -143,6 +159,18 @@ fetch() { # fetch <url> <outfile>
 	fi
 }
 
+# The target is settled before anything is downloaded: a refused target
+# (a package manager's copy) must not cost a download first.
+if [ -z "$DIR" ]; then
+	if EXISTING="$(command -v moca 2>/dev/null)" && [ -n "$EXISTING" ]; then
+		RESOLVED="$(readlink -f -- "$EXISTING" 2>/dev/null || printf '%s' "$EXISTING")"
+		refuse_managed "$RESOLVED" upgrade
+		DIR="$(dirname -- "$RESOLVED")"
+	else
+		DIR="$HOME/.local/bin"
+	fi
+fi
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -185,14 +213,6 @@ fi
 tar -xzf "$TMP/$ASSET" -C "$TMP" moca || die "could not extract $ASSET"
 [ -f "$TMP/moca" ] || die "the package contains no moca binary"
 
-if [ -z "$DIR" ]; then
-	if EXISTING="$(command -v moca 2>/dev/null)" && [ -n "$EXISTING" ]; then
-		RESOLVED="$(readlink -f -- "$EXISTING" 2>/dev/null || printf '%s' "$EXISTING")"
-		DIR="$(dirname -- "$RESOLVED")"
-	else
-		DIR="$HOME/.local/bin"
-	fi
-fi
 if [ -e "$DIR" ] && [ ! -w "$DIR" ]; then
 	die "no write permission for $DIR — re-run with sudo, or pass --dir <path>"
 fi

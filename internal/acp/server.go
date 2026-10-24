@@ -169,6 +169,11 @@ func (srv *Server) authenticate(params json.RawMessage) (any, error) {
 	if req.MethodID != authMethodLogin.ID {
 		return nil, invalidParams("unknown authentication method %q: moca advertises %q", req.MethodID, authMethodLogin.ID)
 	}
+	// No model is session/new's answer too: checkModel alone would report
+	// SplitModel's complaint about an empty string, not the fix.
+	if srv.opts.Model == "" && srv.opts.Config.Model == "" {
+		return nil, srv.noModel()
+	}
 	if err := srv.checkModel(srv.opts.Config); err != nil {
 		return nil, err
 	}
@@ -232,14 +237,7 @@ func (srv *Server) sessionConfig(cwd string, requireModel bool) (config.Config, 
 		cfg.Model = srv.opts.Model
 	}
 	if requireModel && cfg.Model == "" {
-		// -32603, not ACP's auth-required: the fix is outside the editor
-		// (run `moca login <provider>` in a terminal, set "model"), and a
-		// -32000 hides that text behind "Authentication required". The
-		// advertised `login` method makes the affordance discoverable, but
-		// calling it cannot configure a model either — so the error still
-		// carries the fix as itself (§9.5).
-		return cfg, false, &RPCError{Code: codeInternal, Message: fmt.Sprintf(
-			"no model configured: run `moca login <provider>` in a terminal, then set \"model\" in %s (or pass --model to `moca acp`)", srv.opts.ConfigPath)}
+		return cfg, false, srv.noModel()
 	}
 	trusted := true
 	if srv.opts.Trust != nil {
@@ -257,6 +255,17 @@ func (srv *Server) sessionConfig(cwd string, requireModel bool) (config.Config, 
 		cfg.Project = p
 	}
 	return cfg, trusted, nil
+}
+
+// noModel is the answer to a session/new or an authenticate with no model
+// configured. -32603, not ACP's auth-required: the fix is outside the editor
+// (run `moca login <provider>` in a terminal, set "model"), and a -32000 hides
+// that text behind "Authentication required". The advertised `login` method
+// makes the affordance discoverable, but calling it cannot configure a model
+// either — so the error still carries the fix as itself (§9.5).
+func (srv *Server) noModel() *RPCError {
+	return &RPCError{Code: codeInternal, Message: fmt.Sprintf(
+		"no model configured: run `moca login <provider>` in a terminal, then set \"model\" in %s (or pass --model to `moca acp`)", srv.opts.ConfigPath)}
 }
 
 // checkModel rejects a session whose configured model is unknown or whose

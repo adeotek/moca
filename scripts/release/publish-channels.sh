@@ -118,27 +118,44 @@ render() { # render <label> <script> [args...]
 }
 
 echo "rendering the channels for $tag into $out"
+# `${extra[@]+…}`, not a bare "${extra[@]}": with `set -u`, bash before 4.4
+# (macOS's /bin/bash is 3.2) treats an empty array as unbound and exits.
 extra=()
 [ -n "$verify" ] && extra+=("$verify")
 
-render "acp-registry" render-acp-registry.py --tag "$tag" --out "$out/acp-registry" "${extra[@]}"
+render "acp-registry" render-acp-registry.py --tag "$tag" --out "$out/acp-registry" ${extra[@]+"${extra[@]}"}
 render "homebrew" render-homebrew-formula.py --tag "$tag" --out "$out/homebrew-tap"
 
-winget_args=(--tag "$tag" --out "$out/winget" "${extra[@]}")
+winget_args=(--tag "$tag" --out "$out/winget" ${extra[@]+"${extra[@]}"})
 [ -n "$date" ] && winget_args+=(--date "$date")
 render "winget" render-winget-manifests.py "${winget_args[@]}"
 
+# A channel that failed is never copied into a clone: its files are either
+# missing (an unpublished tag) or incomplete (a missing package renders an
+# all-zero sha256), and either way not something to commit.
+copy_ok() { # copy_ok <label>: the channel rendered
+	case " $failed " in
+	*" $1 "*)
+		echo "not copying $1: it did not render" >&2
+		return 1
+		;;
+	esac
+}
 if [ -n "$registry_repo" ]; then
 	[ -d "$registry_repo" ] || { echo "--registry-repo: $registry_repo is not a directory" >&2; exit 1; }
-	mkdir -p "$registry_repo/moca"
-	cp "$out/acp-registry/moca/agent.json" "$out/acp-registry/moca/icon.svg" "$registry_repo/moca/"
-	echo "copied moca/ into $registry_repo"
+	if copy_ok "acp-registry"; then
+		mkdir -p "$registry_repo/moca"
+		cp "$out/acp-registry/moca/agent.json" "$out/acp-registry/moca/icon.svg" "$registry_repo/moca/"
+		echo "copied moca/ into $registry_repo"
+	fi
 fi
 if [ -n "$tap_repo" ]; then
 	[ -d "$tap_repo" ] || { echo "--tap-repo: $tap_repo is not a directory" >&2; exit 1; }
-	mkdir -p "$tap_repo/Formula"
-	cp "$out/homebrew-tap/Formula/moca.rb" "$tap_repo/Formula/moca.rb"
-	echo "copied Formula/moca.rb into $tap_repo"
+	if copy_ok "homebrew"; then
+		mkdir -p "$tap_repo/Formula"
+		cp "$out/homebrew-tap/Formula/moca.rb" "$tap_repo/Formula/moca.rb"
+		echo "copied Formula/moca.rb into $tap_repo"
+	fi
 fi
 
 cat <<EOF
@@ -155,11 +172,9 @@ ACP registry (agentclientprotocol/registry)
       cd <fork> && uv run --with jsonschema .github/workflows/build_registry.py
       cd .github/workflows && uv run python verify_agents.py --auth-check --agent moca
 
-Homebrew tap (adeotek/homebrew-tap)
-  git -C <tap clone> checkout -b moca-$version
+Homebrew tap (adeotek/homebrew-tap) — a personal repository: commit on main and push, no PR
   cp "$out/homebrew-tap/Formula/moca.rb" <tap>/Formula/moca.rb   # or --tap-repo <tap>
   git -C <tap> commit -am "moca $version" && git -C <tap> push
-  # the tap is a personal repository: push straight to main, no PR needed
   Then, in the homebrew/brew container:
       brew tap adeotek/tap && brew style adeotek/tap/moca && brew audit --strict --online adeotek/tap/moca \\
         && brew install adeotek/tap/moca && brew test adeotek/tap/moca

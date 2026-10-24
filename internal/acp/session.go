@@ -284,8 +284,13 @@ func (s *session) ask(ctx context.Context, q tools.Question) tools.Answer {
 	if !q.NoSession {
 		// ACP has no persisted allow: the always-kind option is the
 		// in-memory "for this session" answer, offered on every question
-		// that may be remembered (rm included, matching an exact command).
-		opts = append(opts, PermissionOption{OptionID: optAllowSession, Name: "Allow for this session", Kind: "allow_always"})
+		// that may be remembered (rm included, matching an exact command —
+		// the label says so, as the TUI's row does).
+		name := "Allow for this session"
+		if q.SessionExact() {
+			name = "Allow this exact command for this session"
+		}
+		opts = append(opts, PermissionOption{OptionID: optAllowSession, Name: name, Kind: "allow_always"})
 	}
 	opts = append(opts, PermissionOption{OptionID: optReject, Name: "Deny", Kind: "reject_once"})
 	raw, _ := json.Marshal(map[string]string{"detail": q.Detail})

@@ -145,11 +145,11 @@ func (p *ProxyTool) Run(ctx context.Context, env *tools.Env, input json.RawMessa
 				// arguments alone hid which server and tool would run (T-8).
 				ans = env.Ask(ctx, tools.Question{Kind: "mcp", Subject: a.Server + "/" + a.Tool, Detail: string(input), CanAlways: true})
 			}
-			switch ans {
-			case tools.Deny:
+			if !ans.Allows() { // Deny, and any answer this build does not know
 				return errResult("refused: %s/%s is not marked read-only and is not in mcp.servers.%s.approve; the user did not approve it",
 					a.Server, a.Tool, a.Server)
-			case tools.AllowAlways, tools.AllowSession:
+			}
+			if ans == tools.AllowAlways || ans == tools.AllowSession {
 				p.mu.Lock()
 				p.session[a.Server+"/"+a.Tool] = true
 				p.mu.Unlock()

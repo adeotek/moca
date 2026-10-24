@@ -5,7 +5,11 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,6 +31,37 @@ func TestUnrecognisedAnswerFailsClosed(t *testing.T) {
 	}
 	if len(cmds.allowed) != 0 {
 		t.Fatalf("nothing may be learned from an unrecognised answer: %v", cmds.allowed)
+	}
+}
+
+// TestUnrecognisedAnswerFailsClosedEverywhere: the shell's fail-closed rule
+// holds at the other approval sites too. The web fetch and the outside-the-
+// workdir write tested `== Deny`, so an out-of-range Answer read as a yes —
+// the fetch ran and the file landed.
+func TestUnrecognisedAnswerFailsClosedEverywhere(t *testing.T) {
+	bogus := func(context.Context, Question) Answer { return Answer(99) }
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("secret"))
+	}))
+	defer srv.Close()
+	r := webTool{}.Run(context.Background(), &Env{Ask: bogus}, json.RawMessage(`{"op":"fetch","url":"`+srv.URL+`/"}`))
+	if !r.IsError || strings.Contains(r.Content, "secret") {
+		t.Errorf("web: an unrecognised answer must refuse the private fetch, got %+v", r)
+	}
+
+	root := t.TempDir()
+	prompts := filepath.Join(t.TempDir(), "prompts")
+	os.MkdirAll(prompts, 0o755)
+	target := filepath.Join(prompts, "x.md")
+	env := &Env{Root: root, Paths: askRootChecker{root, prompts}, Reads: NewReadTracker(), Ask: bogus}
+	r = run(t, writeTool{}, env, map[string]any{"path": target, "content": "x"})
+	if !r.IsError {
+		t.Errorf("write: an unrecognised answer must refuse, got %+v", r)
+	}
+	if _, err := os.Stat(target); err == nil {
+		t.Error("write: the file landed on an unrecognised answer")
 	}
 }
 

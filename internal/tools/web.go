@@ -153,7 +153,7 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 		if env.Ask != nil {
 			ans = env.Ask(ctx, q)
 		}
-		if ans == Deny {
+		if !ans.Allows() {
 			return fmt.Errorf("refused: %s is a private or local address and the user did not approve fetching it", host)
 		}
 		approved[host] = true

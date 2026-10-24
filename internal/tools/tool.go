@@ -70,6 +70,13 @@ func (a Answer) String() string {
 	return "invalid"
 }
 
+// Allows reports whether the answer grants the request. Every approval site
+// tests this rather than `!= Deny`: an out-of-range Answer (a non-conforming
+// asker, a value a future front end sends) must refuse, never read as a yes.
+func (a Answer) Allows() bool {
+	return a == AllowOnce || a == AllowAlways || a == AllowSession
+}
+
 // Question is an approval request. Kind is "shell", "mcp", "web" (a fetch of a private address) or "write"
 // (a tool write outside the workdir: the global prompt templates — slash
 // commands the agent writes for the user); Subject the command name, the
@@ -163,7 +170,7 @@ func askOutsideWrite(ctx context.Context, env *Env, path string, refused error) 
 			q.Detail = "moca's own config file — it holds the permission policy"
 		}
 	}
-	if env.Ask == nil || env.Ask(ctx, q) == Deny {
+	if env.Ask == nil || !env.Ask(ctx, q).Allows() {
 		return "", fmt.Errorf("%s is outside the workdir and the user did not approve writing it — keep project slash commands in .moca/prompts/ inside the workdir, or ask the user first", path)
 	}
 	return abs, nil

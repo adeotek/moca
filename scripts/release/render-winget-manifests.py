@@ -28,6 +28,7 @@ the official schemas (`https://aka.ms/winget-manifest.*.1.12.0.schema.json`).
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import pathlib
 import sys
@@ -48,7 +49,9 @@ DESCRIPTION = (
     "native Agent Client Protocol support so editors such as Zed and VS Code can drive it.",
     "It runs against Claude, ChatGPT, Ollama, OpenCode Zen, or any OpenAI-compatible endpoint, and keeps "
     "every session in plain files you can read.",
-    "`moca update` replaces itself from the latest GitHub release; this package installs the same prebuilt binary.",
+    # Not "`moca update` replaces itself": a winget copy is exactly what that
+    # command refuses (update.PackageManaged names `winget upgrade` instead).
+    "This package installs the same prebuilt binary as the GitHub release; update it with `winget upgrade adeotek.moca`.",
 )
 TAGS = ["cli", "go", "ai", "coding-agent", "acp", "terminal"]
 
@@ -176,9 +179,9 @@ def main() -> int:
         print(f"tag must look like vX.Y.Z, got {tag!r}", file=sys.stderr)
         return 2
 
-    import datetime
-
-    date = args.date or datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
+    # timezone.utc, not datetime.UTC: the alias is Python 3.11+, and macOS's
+    # stock python3 is older.
+    date = args.date or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
     files, missing = render(tag, fetch_checksums(tag), date)
 
     bad: list[str] = []

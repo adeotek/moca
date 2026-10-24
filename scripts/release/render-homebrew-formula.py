@@ -68,7 +68,6 @@ def fetch_checksums(tag: str) -> dict[str, str]:
 
 
 def render(tag: str, sums: dict[str, str]) -> tuple[str, list[str]]:
-    version = tag[1:]
     missing = [
         archive_name(tag, *t) for t in TARGETS.values() if archive_name(tag, *t) not in sums
     ]
