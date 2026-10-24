@@ -36,9 +36,14 @@ func TestResolveBuiltin(t *testing.T) {
 	}
 }
 
+// A model missing from the catalog is accepted at construction (the provider
+// may list it — SPECS §6) and rejected by Verify, after discovery.
 func TestUnknownModel(t *testing.T) {
-	_, err := NewRegistry(mustCfg(t, `{"model":"anthropic/nope-9"}`), http.DefaultClient, nil)
-	if err == nil || !strings.Contains(err.Error(), "anthropic/nope-9") {
+	r, err := NewRegistry(mustCfg(t, `{"model":"anthropic/nope-9"}`), http.DefaultClient, nil)
+	if err != nil {
+		t.Fatalf("construction must defer model validation: %v", err)
+	}
+	if err := r.Verify(); err == nil || !strings.Contains(err.Error(), "anthropic/nope-9") {
 		t.Fatalf("%v", err)
 	}
 }

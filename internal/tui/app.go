@@ -366,6 +366,7 @@ func (m *model) refreshStatus() {
 	m.status.Trigger = compact.NewBudget(st.Window, cc.ReserveTokens, cc.KeepRecentTokens).Trigger()
 	m.status.In = st.Usage.Input + st.Usage.CacheRead + st.Usage.CacheWrite
 	m.status.Out, m.status.Cost, m.status.Sub = st.Usage.Output, st.Cost, st.Sub
+	m.status.CostUnknown = !st.Model.CostKnown
 }
 
 func (m *model) branchCmd() tea.Cmd {
@@ -598,6 +599,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.openModelPicker(m.agent.Status().Model.Qualified())
 		return m, m.hold(warn)
+	case modelsClearedMsg:
+		m.status.Transient = ""
+		return m, m.hold(m.modelsClearedReport(msg))
 	case filesLoadedMsg:
 		if msg.gen != m.filesGen {
 			return m, nil // started before the index went stale
@@ -933,21 +937,33 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 			return cmd
 		}
 		if c.Args == "" {
-			if _, local := m.start.Config.Providers["ollama"]; local {
-				// Models pulled since startup should show up: ask the
-				// server first (a few seconds at most), then open the picker.
-				m.status.Transient = "reading models…"
-				a := m.agent
-				return func() tea.Msg {
-					ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-					defer cancel()
-					return modelsRefreshedMsg{err: a.RefreshModels(ctx)}
-				}
+			// Stale-while-revalidate: a fresh cache (24 h) costs no network
+			// call, a stale one refetches in the background and the picker
+			// opens when the result lands (the ollama path always did this).
+			m.status.Transient = "reading models…"
+			a := m.agent
+			return func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+				defer cancel()
+				return modelsRefreshedMsg{err: a.RefreshModels(ctx)}
 			}
-			m.openModelPicker(st.Model.Qualified())
-			return nil
 		}
 		return m.switchModel(c.Args)
+	case "clear-models-cache":
+		if cmd, refused := m.refuseRunning(); refused {
+			return cmd
+		}
+		// The current model's provider is re-read at once (a network call,
+		// so off the loop); its name is read here, on the UI goroutine.
+		prov := st.Model.Provider
+		m.status.Transient = "re-reading " + prov + " models…"
+		a := m.agent
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+			defer cancel()
+			rep, err := a.ClearModelsCache(ctx, prov)
+			return modelsClearedMsg{rep: rep, err: err}
+		}
 	case "effort":
 		if c.Args == "" {
 			return m.printlnContent(fmt.Sprintf("effort %s — supported: %s", AbbrevEffort(st.Effort), supportedEfforts(st.Model)))
@@ -1104,9 +1120,30 @@ func (m *model) cycleEffort() tea.Cmd {
 
 // modelList is the plain listing of /model during a run (the picker is
 // modal and a switch is refused then anyway).
+// modelsClearedReport is /clear-models-cache's scrollback line: what was
+// deleted, then what the re-read of the current model's provider found. A
+// failed re-read is not an error — the provider's models stay as they were.
+func (m *model) modelsClearedReport(msg modelsClearedMsg) tea.Cmd {
+	if msg.err != nil {
+		return m.printlnError("error: " + msg.err.Error())
+	}
+	rs := msg.rep.Rescan
+	line := fmt.Sprintf("models cache cleared: %d providers, %d models", msg.rep.Providers, msg.rep.Models)
+	switch {
+	case rs.Provider == "":
+	case rs.Err != nil:
+		return m.printlnWarn(fmt.Sprintf("%s — %s could not be re-read (%v); its models stay as they were", line, rs.Provider, rs.Err))
+	case len(rs.Models) == 0:
+		line += fmt.Sprintf(" — %s has no model list to re-read", rs.Provider)
+	default:
+		line += fmt.Sprintf(" — %s re-read now (%d models)", rs.Provider, len(rs.Models))
+	}
+	return m.printlnContent(line + "; the others refetch on the next /model")
+}
+
 func (m *model) modelList(cur string) string {
 	var lines []string
-	for _, mo := range m.agent.Models() {
+	for _, mo := range m.agent.ActiveModels() {
 		mark := "  "
 		if mo.Qualified() == cur {
 			mark = "* "
@@ -1120,7 +1157,15 @@ func (m *model) modelList(cur string) string {
 // a provider with no credential are marked (picking one reports the missing
 // key rather than switching).
 func (m *model) openModelPicker(cur string) {
-	items, cursor := modelPickItems(m.agent.Models(), cur, m.agent.HasCredential)
+	// Only providers that can actually run are offered (Review Focus 7); the
+	// current model is always listed, even if its provider went inactive
+	// (a revoked key) — otherwise the user could not see where they are.
+	models := m.agent.ActiveModels()
+	if st := m.agent.Status(); st.Model.ID != "" &&
+		!slices.ContainsFunc(models, func(x provider.Model) bool { return x.Qualified() == cur }) {
+		models = append(models, st.Model)
+	}
+	items, cursor := modelPickItems(models, cur, m.agent.HasCredential)
 	p := &pickState{title: "switch to which model?  (prompt cache is forfeited)", cancelNote: "model unchanged", onChoose: m.switchModel}
 	p.items, p.cursor = items, cursor
 	m.openPicker(p)

@@ -45,6 +45,11 @@ func toolTurn(calls ...[2]string) string {
 func newScript(t *testing.T, turns ...string) *scriptServer {
 	s := &scriptServer{turns: turns}
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet { // model discovery (SPECS §6)
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"data":[{"id":"m"},{"id":"m2"}]}`)
+			return
+		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		b, _ := io.ReadAll(r.Body)
@@ -98,6 +103,11 @@ func startWith(t *testing.T, s *scriptServer, maxSteps int, extraTop, extraModel
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// Ambient provider keys would make a built-in provider ready and send
+	// discovery to its real endpoint mid-test.
+	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY", "OPENROUTER_API_KEY"} {
+		t.Setenv(k, "")
+	}
 	t.Setenv("MOCA_T_KEY", "k")
 	work := t.TempDir()
 	if extraTop != "" {
@@ -367,4 +377,25 @@ func TestModelCanReadGlobalSkillSupportFiles(t *testing.T) {
 	if !w.IsError {
 		t.Fatal("skill dirs are read-only")
 	}
+}
+
+// TestMain isolates the package from this host's real environment: an ambient
+// provider key makes a built-in provider ready, and discovery then calls its
+// real endpoint from a unit test (slow, flaky, and it changes the model lists
+// these tests assert). The temp XDG root keeps a real config, auth store and
+// sessions out of the run.
+func TestMain(m *testing.M) {
+	root, err := os.MkdirTemp("", "moca-test-*")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	os.Setenv("XDG_DATA_HOME", filepath.Join(root, "data"))
+	os.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY", "OPENROUTER_API_KEY"} {
+		os.Setenv(k, "")
+	}
+	code := m.Run()
+	os.RemoveAll(root)
+	os.Exit(code)
 }

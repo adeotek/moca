@@ -133,3 +133,28 @@ func TestReadmeTitleMatchesBranding(t *testing.T) {
 		}
 	}
 }
+
+// TestACPIconContract pins the registry icon: the ACP registry requires a
+// 16x16 monochrome currentColor SVG, and docs/assets/icon.svg is the
+// full-colour brand art (an embedded raster), so the derived docs/assets/
+// icon-acp.svg is the one the release renderer ships. The renderer checks the
+// same rules at publish time; this pin catches a regression at CI time.
+func TestACPIconContract(t *testing.T) {
+	icon := repoFile(t, "docs", "assets", "icon-acp.svg")
+	if !strings.Contains(icon, `viewBox="0 0 16 16"`) {
+		t.Fatal("viewBox must be 0 0 16 16")
+	}
+	if !strings.Contains(icon, "currentColor") {
+		t.Fatal("must paint with currentColor")
+	}
+	if strings.Contains(icon, "<image") {
+		t.Fatal("must be vector paths, not an embedded raster")
+	}
+	if len(icon) > 8192 {
+		t.Fatalf("%d bytes is too large for a registry icon", len(icon))
+	}
+	renderer := repoFile(t, "scripts", "release", "render-acp-registry.py")
+	if !strings.Contains(renderer, "icon-acp.svg") {
+		t.Fatal("the ACP renderer must ship the derived icon, not the brand art")
+	}
+}

@@ -16,7 +16,9 @@ The registry's requirements, all of which this script encodes:
 - a `license_url` and a `sha256` per archive (the registry's validator downloads the
   archive and refuses a checksum mismatch, so the checksums come from the release's
   own `checksums.txt` — never typed in by hand);
-- an SVG icon at `<id>/icon.svg`, 16x16 and monochrome `currentColor`;
+- an SVG icon at `<id>/icon.svg`, 16x16 and monochrome `currentColor`,
+  rendered from `docs/assets/icon-acp.svg` (the derived mark; the full-colour
+  brand art at `docs/assets/icon.svg` is not registry-compliant);
 - an agent whose `initialize` returns at least one `authMethods` entry.
 
 moca satisfies all of them from v0.7.8 on; on an older tag the darwin entries have
@@ -82,6 +84,22 @@ def fetch_checksums(tag: str) -> dict[str, str]:
     return sums
 
 
+def icon_problems(text: str) -> list[str]:
+    """The registry's icon rules, checked rather than assumed: 16x16, vector,
+    monochrome through currentColor, and small enough to belong in a manifest."""
+    problems: list[str] = []
+    if 'viewBox="0 0 16 16"' not in text:
+        problems.append("viewBox must be 0 0 16 16")
+    if "currentColor" not in text:
+        problems.append("must paint with currentColor (monochrome)")
+    if "<image" in text:
+        problems.append("must be vector paths, not an embedded raster")
+    size = len(text.encode("utf-8"))
+    if size > 8192:
+        problems.append(f"{size} bytes is too large for a registry icon (max 8192)")
+    return problems
+
+
 def main() -> int:
     root = pathlib.Path(__file__).resolve().parents[2]
     ap = argparse.ArgumentParser()
@@ -145,15 +163,20 @@ def main() -> int:
         "distribution": {"binary": binary},
     }
 
+    icon = root / "docs" / "assets" / "icon-acp.svg"
+    icon_text = icon.read_text(encoding="utf-8")
+    icon_bad = icon_problems(icon_text)
+    for problem in icon_bad:
+        print(f"icon: {problem}", file=sys.stderr)
+
     out = pathlib.Path(args.out) / IDENT
     out.mkdir(parents=True, exist_ok=True)
     (out / "agent.json").write_text(json.dumps(agent, indent=2) + "\n", encoding="utf-8")
-    icon = root / "docs" / "assets" / "icon.svg"
-    (out / "icon.svg").write_text(icon.read_text(encoding="utf-8"), encoding="utf-8")
+    (out / "icon.svg").write_text(icon_text, encoding="utf-8")
     print(f"wrote {out}/agent.json and {out}/icon.svg for {tag}")
     # An incomplete run exits 1: the files are written either way, so they can be
     # inspected, but the caller must not mistake "rendered" for "ready to submit".
-    return 1 if (bad or missing) else 0
+    return 1 if (bad or missing or icon_bad) else 0
 
 
 if __name__ == "__main__":

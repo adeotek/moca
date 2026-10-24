@@ -216,3 +216,24 @@ func secondLineOf(s string) string {
 	l, _, _ := strings.Cut(rest, "\n")
 	return l
 }
+
+// TestMain isolates the package from this host's real environment: an ambient
+// provider key makes a built-in provider ready, and discovery then calls its
+// real endpoint from a unit test (slow, flaky, and it changes the model lists
+// these tests assert). The temp XDG root keeps a real config, auth store and
+// sessions out of the run.
+func TestMain(m *testing.M) {
+	root, err := os.MkdirTemp("", "moca-test-*")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	os.Setenv("XDG_DATA_HOME", filepath.Join(root, "data"))
+	os.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY", "OPENROUTER_API_KEY"} {
+		os.Setenv(k, "")
+	}
+	code := m.Run()
+	os.RemoveAll(root)
+	os.Exit(code)
+}

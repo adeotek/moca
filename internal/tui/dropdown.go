@@ -180,23 +180,20 @@ func (m *model) argHints(cmd, arg string) []dropItem {
 			return nil
 		}
 		cur := m.agent.Status().Model.Qualified()
-		creds := map[string]bool{} // one credential lookup per provider
-		for _, mo := range m.agent.Models() {
+		// Active providers only (Review Focus 7): the list is what can run.
+		for _, mo := range m.agent.ActiveModels() {
 			q := mo.Qualified()
 			if !strings.Contains(strings.ToLower(q), ql) {
 				continue
 			}
 			hint := ""
-			ok, seen := creds[mo.Provider]
-			if !seen {
-				ok = m.agent.HasCredential(q)
-				creds[mo.Provider] = ok
-			}
 			switch {
 			case q == cur:
 				hint = "current"
-			case !ok:
-				hint = "no key — /login " + mo.Provider
+			case mo.WindowAssumed:
+				hint = "est. window"
+			case !mo.CostKnown:
+				hint = "no price"
 			}
 			out = append(out, dropItem{name: q, hint: hint})
 		}

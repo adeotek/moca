@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +32,12 @@ func testOptions(t *testing.T, s *scriptServer) Options {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// Blank the built-in providers' env references: this host exports real
+	// keys, and a ready provider is discovered against its real endpoint,
+	// which would add its models to the option list under test.
+	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY", "OPENROUTER_API_KEY"} {
+		t.Setenv(k, "")
+	}
 	t.Setenv("MOCA_T_KEY", "k")
 	t.Setenv("MOCA_T_OTHER", "")
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`{"model":"fake/m","context":{"maxSteps":40},
@@ -261,4 +269,25 @@ func (c *testClient) prompt(sid, text string) (string, *RPCError) {
 	var r PromptResponse
 	json.Unmarshal(res, &r)
 	return r.StopReason, nil
+}
+
+// TestMain isolates the package from this host's real environment: an ambient
+// provider key makes a built-in provider ready, and discovery then calls its
+// real endpoint from a unit test (slow, flaky, and it changes the model lists
+// these tests assert). The temp XDG root keeps a real config, auth store and
+// sessions out of the run.
+func TestMain(m *testing.M) {
+	root, err := os.MkdirTemp("", "moca-test-*")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	os.Setenv("XDG_DATA_HOME", filepath.Join(root, "data"))
+	os.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY", "OPENROUTER_API_KEY"} {
+		os.Setenv(k, "")
+	}
+	code := m.Run()
+	os.RemoveAll(root)
+	os.Exit(code)
 }

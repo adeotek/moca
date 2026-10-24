@@ -52,6 +52,10 @@ type StartOptions struct {
 	// ConfigPath is the user config file this run loaded (warnings name it);
 	// "" means config.ConfigFile().
 	ConfigPath string
+	// Registry, when set, is OpenRegistry's result for these same options: a
+	// front end that validates the model before starting (ACP's checkModel)
+	// hands it over, so the session does not build and discover a second one.
+	Registry *provider.Registry
 }
 
 // setup is what Start and Resume need before a session exists: the config
@@ -83,17 +87,27 @@ type setup struct {
 	smOn bool
 }
 
-func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error) {
+// effectiveConfig is o.Config as a session over o runs it: the --model
+// override applied, and a local provider that model names opted in (`--model
+// ollama/x`, or /clear after a switch: naming one of its models is the
+// opt-in, no config entry needed).
+func effectiveConfig(o StartOptions) config.Config {
 	cfg := o.Config
 	if o.Model != "" {
 		cfg.Model = o.Model
 	}
-	// `--model ollama/x` or /clear after a switch: a local provider needs no
-	// config entry, naming one of its models is the opt-in.
 	if pn, _, err := config.SplitModel(cfg.Model); err == nil {
 		cfg.UseProvider(pn)
 	}
-	emit := o.Emit
+	return cfg
+}
+
+// OpenRegistry builds the provider registry a session over o uses: every
+// provider's model list discovered, the configured models verified, and the
+// discovery warnings and request retries sent to o.Emit. Start and Resume
+// call it unless o.Registry already holds its result.
+func OpenRegistry(o StartOptions) (*provider.Registry, error) {
+	cfg, emit := effectiveConfig(o), o.Emit
 	reg, err := provider.NewRegistry(cfg, o.HTTP, func(n provider.RetryNotice) {
 		if emit != nil {
 			emit(Retry{n})
@@ -102,8 +116,19 @@ func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error)
 	if err != nil {
 		return nil, err
 	}
-	if err := discoverLocal(reg, cfg, emit); err != nil {
+	if err := discoverModels(reg, cfg, emit); err != nil {
 		return nil, err
+	}
+	return reg, nil
+}
+
+func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error) {
+	cfg, emit, reg := effectiveConfig(o), o.Emit, o.Registry
+	if reg == nil {
+		var err error
+		if reg, err = OpenRegistry(o); err != nil {
+			return nil, err
+		}
 	}
 	builtinDir, err := skills.ExtractBuiltins(config.DataDir())
 	if err != nil {
@@ -297,13 +322,17 @@ func autoSkillsNote(sk []skills.Skill) string {
 	return fmt.Sprintf("self-managed skills: %d %s in this project (%s)", len(names), noun, strings.Join(names, ", "))
 }
 
-// discoverLocal reads a configured Ollama server's models into the registry
-// and then checks that the configured models exist. A server that is down is
-// not an error by itself — only if the default or hard model lives on it
-// (Verify says why). Warnings concern the model in use only: a window the
-// server did not report is a guess, and one under the minimum an agent can
-// work in will truncate the prompt silently.
-func discoverLocal(reg *provider.Registry, cfg config.Config, emit func(Event)) error {
+// discoverModels reads every configured provider's model list into the
+// registry and then checks that the configured models exist. Discovery is fail
+// open (a provider that is down or unauthenticated keeps its cache/catalog
+// rows), so only Verify can fail. Warnings concern the model in use only: a
+// window the provider did not publish is a guess, and one under the minimum an
+// agent can work in will truncate the prompt silently.
+func discoverModels(reg *provider.Registry, cfg config.Config, emit func(Event)) error {
+	// The cloud lists are read while Ollama answers: the two touch disjoint
+	// rows, and startup should wait for the slower one, not the sum.
+	reportc := make(chan provider.DiscoveryReport, 1)
+	go func() { reportc <- reg.DiscoverModels(context.Background()) }()
 	if _, ok := cfg.Providers["ollama"]; ok {
 		d, _ := reg.DiscoverOllama(context.Background())
 		if pn, id, err := config.SplitModel(cfg.Model); err == nil && pn == "ollama" && emit != nil {
@@ -315,6 +344,21 @@ func discoverLocal(reg *provider.Registry, cfg config.Config, emit func(Event)) 
 					emit(Warning{fmt.Sprintf("ollama/%s: the server reported no context window; assuming %d. If its num_ctx is smaller, long sessions are silently truncated — start the server with OLLAMA_CONTEXT_LENGTH or set providers.ollama.models.%s.contextWindow to match", id, w, id)})
 				}
 			}
+		}
+	}
+	report := <-reportc
+	if pn, id, err := config.SplitModel(cfg.Model); err == nil && emit != nil {
+		if d, ok := report.Provider(pn); ok && slices.Contains(d.Assumed, id) {
+			// The declaration must carry the protocol: it is applied when the
+			// registry is built, before discovery merges the row, and a new
+			// model on a built-in provider is refused without one.
+			proto := "openai-completions"
+			for _, mo := range reg.Models() {
+				if mo.Qualified() == cfg.Model {
+					proto = mo.Protocol
+				}
+			}
+			emit(Warning{fmt.Sprintf("%s/%s: the provider publishes no context window; assuming %d. If the real window is smaller, long sessions are silently truncated — set providers.%s.models.%s to {\"protocol\": %q, \"contextWindow\": <the real window>}", pn, id, config.MinContextWindow, pn, id, proto)})
 		}
 	}
 	return reg.Verify()

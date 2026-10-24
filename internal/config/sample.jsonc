@@ -21,7 +21,9 @@
   "providers": {
     "anthropic": { "auth": "api_key", "apiKey": "env:ANTHROPIC_API_KEY" }, // API key only — subscription OAuth is not permitted
     "opencode-go": { "auth": "api_key", "apiKey": "env:OPENCODE_API_KEY" }, // OpenCode Zen / Go key
-    "openai": { "auth": "api_key", "apiKey": "env:OPENAI_API_KEY" } // or "oauth" + `moca login openai` (ChatGPT subscription)
+    "openai": { "auth": "api_key", "apiKey": "env:OPENAI_API_KEY" }, // or "oauth" + `moca login openai` (ChatGPT subscription)
+    "openrouter": { "auth": "api_key", "apiKey": "env:OPENROUTER_API_KEY" }, // one key, many models; ids keep their vendor prefix
+    "opencode-zen": { "auth": "api_key", "apiKey": "env:OPENCODE_API_KEY" } // pay-as-you-go; shares the go tier's key unless overridden
     // A custom or local provider (vLLM, LM Studio, Ollama, a gateway):
     // "vllm": {
     //   "baseUrl": "http://localhost:8000/v1",

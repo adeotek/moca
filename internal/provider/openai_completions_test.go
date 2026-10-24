@@ -202,3 +202,44 @@ func TestCompletionsCacheKeyOnlyForOpenAI(t *testing.T) {
 		t.Fatal("no key, no field")
 	}
 }
+
+// TestCompletionsReasoningObjectMode: the "effort-object" thinking mode sends
+// OpenRouter's canonical reasoning:{effort} object — including "max", which the
+// reasoning_effort alias does not document — and never the alias itself.
+func TestCompletionsReasoningObjectMode(t *testing.T) {
+	stream := "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+	var body map[string]any
+	srv := sseServer(t, 200, stream, &body, nil)
+	defer srv.Close()
+
+	obj := Model{ID: "x", ThinkingMode: "effort-object", ThinkingLevelMap: map[llm.Effort]string{
+		llm.EffortMax: "max", llm.EffortLow: "low"}}
+	a := newOpenAICompletions(obj, srv.URL, keyCred("K"), srv.Client())
+	if _, err := a.Stream(context.Background(), llm.Request{Model: "x", MaxTokens: 10, Effort: llm.EffortMax}, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := body["reasoning"].(map[string]any)
+	if !ok || got["effort"] != "max" {
+		t.Fatalf("reasoning object: %v", body["reasoning"])
+	}
+	if _, has := body["reasoning_effort"]; has {
+		t.Fatal("object mode must not send the alias")
+	}
+
+	// A second capture: sseServer decodes into the same map, so reusing it
+	// would keep the object mode's keys around.
+	var body2 map[string]any
+	srv2 := sseServer(t, 200, stream, &body2, nil)
+	defer srv2.Close()
+	alias := Model{ID: "y", ThinkingMode: "openai", ThinkingLevelMap: map[llm.Effort]string{llm.EffortHigh: "high"}}
+	a2 := newOpenAICompletions(alias, srv2.URL, keyCred("K"), srv2.Client())
+	if _, err := a2.Stream(context.Background(), llm.Request{Model: "y", MaxTokens: 10, Effort: llm.EffortHigh}, func(llm.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if body2["reasoning_effort"] != "high" {
+		t.Fatalf("openai mode uses the alias: %v", body2["reasoning_effort"])
+	}
+	if _, has := body2["reasoning"]; has {
+		t.Fatal("openai mode must not send the object")
+	}
+}

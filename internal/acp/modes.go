@@ -69,11 +69,11 @@ func (s *session) buildConfigOptions() []ConfigOption {
 	opts := []ConfigOption{s.modeOption()}
 	cur := s.agent.Model().Qualified()
 	var vals []ConfigOptionValue
-	for _, m := range s.agent.Models() {
+	// ActiveModels: one credential probe per provider, not one store read
+	// per model — discovery puts hundreds of OpenRouter rows in this list.
+	for _, m := range s.agent.ActiveModels() {
 		q := m.Qualified()
-		if q == cur || s.agent.HasCredential(q) {
-			vals = append(vals, ConfigOptionValue{Value: q, Name: q})
-		}
+		vals = append(vals, ConfigOptionValue{Value: q, Name: q})
 	}
 	if !slices.ContainsFunc(vals, func(v ConfigOptionValue) bool { return v.Value == cur }) {
 		vals = append([]ConfigOptionValue{{Value: cur, Name: cur}}, vals...)

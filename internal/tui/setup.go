@@ -41,7 +41,7 @@ func (m *model) setupNotice() string {
 	if err != nil {
 		return m.th.alertStyle(m.darkBG).Render("error: " + err.Error())
 	}
-	if anyProviderUsable(reg) {
+	if anyProviderUsable(reg, m.start.Config) {
 		return m.th.mutedStyle(m.darkBG).Render("no model selected yet — /model picks one and starts the session")
 	}
 	return m.th.alertStyle(m.darkBG).Render("no provider configured") + " — run /login first (store an API key or sign in), then /model picks a model"
@@ -50,8 +50,10 @@ func (m *model) setupNotice() string {
 // anyProviderUsable is the /model picker's own test — CheckCredential, no
 // network — lifted to "is there anything to pick": some provider's
 // credential passes. A credential belongs to a provider, so one probe per
-// provider covers all its models.
-func anyProviderUsable(reg *provider.Registry) bool {
+// provider covers all its models. A cloud provider with no row yet counts by
+// its credential alone: its models are all discovered (OpenRouter has no
+// catalog rows), and discovery runs when /model opens the picker.
+func anyProviderUsable(reg *provider.Registry, cfg config.Config) bool {
 	seen := map[string]bool{}
 	for _, mod := range reg.Models() {
 		if seen[mod.Provider] {
@@ -59,6 +61,22 @@ func anyProviderUsable(reg *provider.Registry) bool {
 		}
 		seen[mod.Provider] = true
 		if reg.CheckCredential(mod.Qualified()) == nil {
+			return true
+		}
+	}
+	return rowlessReadyProvider(reg, cfg)
+}
+
+// rowlessReadyProvider reports a cloud provider whose credential passes but
+// that has no row yet — its models are all discovered (OpenRouter has no
+// catalog rows), so only a discovery run gives the picker anything of it.
+func rowlessReadyProvider(reg *provider.Registry, cfg config.Config) bool {
+	has := map[string]bool{}
+	for _, mod := range reg.Models() {
+		has[mod.Provider] = true
+	}
+	for name := range cfg.Providers {
+		if !has[name] && !config.IsLocalProvider(name) && reg.ProviderReady(name) {
 			return true
 		}
 	}
@@ -111,18 +129,26 @@ func (m *model) runModelSetup(args string) tea.Cmd {
 	if err != nil {
 		return m.printlnError("error: " + err.Error())
 	}
-	if _, local := m.start.Config.Providers["ollama"]; local {
-		// Models pulled meanwhile should show up: ask the server first (a
-		// few seconds at most), then open the picker.
-		m.status.Transient = "reading models…"
-		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-			defer cancel()
-			_, err := reg.DiscoverOllama(ctx)
-			return modelsRefreshedMsg{err: err}
-		}
+	// The lists are read first when the picker would otherwise miss models:
+	// a configured Ollama server's models pulled meanwhile, or a ready
+	// provider whose models are all discovered (OpenRouter has nothing to
+	// offer until then). A few seconds at most; then the picker. Otherwise
+	// the catalog is enough and the picker opens now.
+	_, local := m.start.Config.Providers["ollama"]
+	if !local && !rowlessReadyProvider(reg, m.start.Config) {
+		return m.openSetupModelPicker()
 	}
-	return m.openSetupModelPicker()
+	m.status.Transient = "reading models…"
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		var err error
+		if local {
+			_, err = reg.DiscoverOllama(ctx)
+		}
+		reg.DiscoverModels(ctx)
+		return modelsRefreshedMsg{err: err}
+	}
 }
 
 // openSetupModelPicker opens the first-run model picker: every catalog model,
