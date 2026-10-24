@@ -11,6 +11,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -134,18 +137,34 @@ func TestReadmeTitleMatchesBranding(t *testing.T) {
 	}
 }
 
-// TestACPIconContract pins the registry icon: the ACP registry requires a
-// 16x16 monochrome currentColor SVG, and docs/assets/icon.svg is the
-// full-colour brand art (an embedded raster), so the derived docs/assets/
-// icon-acp.svg is the one the release renderer ships. The renderer checks the
-// same rules at publish time; this pin catches a regression at CI time.
+// The ACP registry's icon rules, as its own validator applies them
+// (.github/workflows/build_registry.py in agentclientprotocol/registry):
+// 16x16, vector, monochrome through currentColor, no XML comments (icons are
+// embedded in MDX there), small enough for a manifest. The size may ride on
+// width/height OR on the viewBox, and the registry reads width/height first —
+// which is what lets the brand mark (512 units of geometry) ship at 16x16.
+// render-acp-registry.py's icon_problems checks the same rules with the same
+// wording at publish time; this pin catches a regression at CI time.
 func TestACPIconContract(t *testing.T) {
 	icon := repoFile(t, "docs", "assets", "icon-acp.svg")
-	if !strings.Contains(icon, `viewBox="0 0 16 16"`) {
-		t.Fatal("viewBox must be 0 0 16 16")
+	if strings.Contains(icon, "<!--") {
+		t.Fatal("must not contain XML comments — the ACP registry rejects them (icons are embedded in MDX)")
 	}
-	if !strings.Contains(icon, "currentColor") {
-		t.Fatal("must paint with currentColor")
+	w, h, ok := iconSize(icon)
+	switch {
+	case !ok:
+		t.Fatal(`needs width/height="16" or a viewBox`)
+	case w != h:
+		t.Fatalf("must be square (got %gx%g)", w, h)
+	case w != 16 || h != 16:
+		t.Fatalf(`must be 16x16 (got %gx%g) — declare width/height="16" if the viewBox is larger`, w, h)
+	}
+	inked, hardcoded := iconInk(icon)
+	if len(hardcoded) > 0 {
+		t.Fatalf("must paint with currentColor or none, not a hardcoded colour: %s", strings.Join(hardcoded, ", "))
+	}
+	if !inked {
+		t.Fatal("must paint with currentColor (monochrome)")
 	}
 	if strings.Contains(icon, "<image") {
 		t.Fatal("must be vector paths, not an embedded raster")
@@ -157,4 +176,86 @@ func TestACPIconContract(t *testing.T) {
 	if !strings.Contains(renderer, "icon-acp.svg") {
 		t.Fatal("the ACP renderer must ship the derived icon, not the brand art")
 	}
+}
+
+var (
+	iconRootTag = regexp.MustCompile(`(?is)<svg\b[^>]*>`)
+	iconLenRe   = regexp.MustCompile(`(?i)^\s*([0-9]*\.?[0-9]+)\s*(px)?\s*$`)
+	iconInkRe   = regexp.MustCompile(`(?i)\b(fill|stroke)\s*=\s*"([^"]*)"`)
+	iconStyleRe = regexp.MustCompile(`(?i)\bstyle\s*=\s*"([^"]*)"`)
+	iconPropRe  = regexp.MustCompile(`(?i)(fill|stroke)\s*:\s*([^;]+)`)
+)
+
+// iconSize mirrors the registry's precedence: width/height when both parse as
+// pixels, the viewBox's 3rd and 4th numbers otherwise.
+func iconSize(icon string) (w, h float64, ok bool) {
+	root := iconRootTag.FindString(icon)
+	if root == "" {
+		return 0, 0, false
+	}
+	w, wok := iconLength(iconAttr(root, "width"))
+	h, hok := iconLength(iconAttr(root, "height"))
+	if wok && hok {
+		return w, h, true
+	}
+	f := strings.FieldsFunc(iconAttr(root, "viewBox"), func(r rune) bool {
+		return r == ' ' || r == ',' || r == '	' || r == '\n' || r == '\r'
+	})
+	if len(f) != 4 {
+		return 0, 0, false
+	}
+	x, errX := strconv.ParseFloat(f[2], 64)
+	y, errY := strconv.ParseFloat(f[3], 64)
+	if errX != nil || errY != nil {
+		return 0, 0, false
+	}
+	return x, y, true
+}
+
+func iconAttr(tag, name string) string {
+	m := regexp.MustCompile(`(?i)\b` + name + `\s*=\s*"([^"]*)"`).FindStringSubmatch(tag)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// iconLength reads a length attribute as pixels: "16" and "16px" are both 16,
+// as the registry strips the unit.
+func iconLength(v string) (float64, bool) {
+	m := iconLenRe.FindStringSubmatch(v)
+	if m == nil {
+		return 0, false
+	}
+	px, err := strconv.ParseFloat(m[1], 64)
+	return px, err == nil
+}
+
+// iconInk walks every fill/stroke, attribute or inline style, and reports
+// whether the icon paints with currentColor and which hardcoded values break
+// theming — currentColor, none and inherit are the only legal inks.
+func iconInk(icon string) (currentColor bool, hardcoded []string) {
+	seen := map[string]bool{}
+	classify := func(prop, value string) {
+		switch v := strings.ToLower(strings.TrimSpace(value)); v {
+		case "currentcolor":
+			currentColor = true
+		case "none", "inherit":
+		default:
+			if !seen[prop+value] {
+				seen[prop+value] = true
+				hardcoded = append(hardcoded, prop+`="`+strings.TrimSpace(value)+`"`)
+			}
+		}
+	}
+	for _, m := range iconInkRe.FindAllStringSubmatch(icon, -1) {
+		classify(m[1], m[2])
+	}
+	for _, m := range iconStyleRe.FindAllStringSubmatch(icon, -1) {
+		for _, p := range iconPropRe.FindAllStringSubmatch(m[1], -1) {
+			classify(p[1], p[2])
+		}
+	}
+	sort.Strings(hardcoded)
+	return currentColor, hardcoded
 }
