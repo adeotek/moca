@@ -337,9 +337,14 @@ func TestOllamaVerify(t *testing.T) {
 	if err := r.Verify(); err == nil || !strings.Contains(err.Error(), "cannot reach ollama") {
 		t.Fatalf("server down: %v", err)
 	}
-	// Other providers' models are still verified against the catalog.
-	if _, err := NewRegistry(mustCfg(t, `{"model":"anthropic/nope-9"}`), http.DefaultClient, nil); err == nil {
-		t.Fatal("catalog check intact")
+	// Other providers' models are still verified — after discovery, not at
+	// construction (NewRegistry defers: a model may exist upstream only).
+	other, err := NewRegistry(mustCfg(t, `{"model":"anthropic/nope-9"}`), http.DefaultClient, nil)
+	if err != nil {
+		t.Fatalf("construction must defer model validation: %v", err)
+	}
+	if err := other.Verify(); err == nil || !strings.Contains(err.Error(), "anthropic/nope-9") {
+		t.Fatalf("catalog check intact: %v", err)
 	}
 }
 
