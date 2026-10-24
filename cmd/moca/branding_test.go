@@ -105,6 +105,18 @@ func TestBrandingChannelLimits(t *testing.T) {
 	}
 }
 
+// TestPromptNamesTheAgent: the agent's own identity line (§14) carries
+// branding.json's `agent`. A name in the README while the system prompt says a
+// different one is cosmetic — this line is what the model answers "who are
+// you" from.
+func TestPromptNamesTheAgent(t *testing.T) {
+	br := loadBranding(t)
+	first, _, _ := strings.Cut(repoFile(t, "internal", "agent", "system-prompt.md"), "\n")
+	if want := "You are " + br.Agent + ", "; !strings.HasPrefix(first, want) {
+		t.Errorf("system-prompt.md opens with %q, want a prefix of %q", first, want)
+	}
+}
+
 // TestReadmeTitleMatchesBranding: the README's title and its embedded copy both
 // carry branding.json's title. The mirror is byte-copied from the README
 // (internal/skills/sync_test.go), so this also fails when only one was edited.
