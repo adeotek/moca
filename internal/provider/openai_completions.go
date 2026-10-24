@@ -98,9 +98,17 @@ func (a *completionsAdapter) body(req llm.Request) map[string]any {
 			b["tool_choice"] = string(req.ToolChoice)
 		}
 	}
-	if a.m.ThinkingMode == "openai" {
+	switch a.m.ThinkingMode {
+	case "openai":
 		if v := a.m.ThinkingLevelMap[req.Effort]; v != "" {
 			b["reasoning_effort"] = v
+		}
+	case "effort-object":
+		// OpenRouter's canonical reasoning control. The alias
+		// (reasoning_effort) documents an enum without "max", so the object is
+		// the only shape that carries every level moca offers.
+		if v := a.m.ThinkingLevelMap[req.Effort]; v != "" {
+			b["reasoning"] = map[string]any{"effort": v}
 		}
 	}
 	return b

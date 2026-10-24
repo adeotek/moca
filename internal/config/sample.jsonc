@@ -15,13 +15,17 @@
   // `/hard` (and plan execution) escalate to this one.
   "modelHard": "opencode-go/glm-5.3",
 
-  // Providers. The three built-ins below are already known: an entry is only
+  // Providers. The five built-in providers below (anthropic, openai,
+  // opencode-go, opencode, openrouter) are already known — every one is listed
+  // by `/login` and `/model` whether or not it appears here. An entry is only
   // needed to change a URL, add a model, or point the key at another variable.
   // `apiKey` MUST be "env:VAR" — a literal secret in this file is a config error.
   "providers": {
-    "anthropic": { "auth": "api_key", "apiKey": "env:ANTHROPIC_API_KEY" }, // API key only — subscription OAuth is not permitted
-    "opencode-go": { "auth": "api_key", "apiKey": "env:OPENCODE_API_KEY" }, // OpenCode Zen / Go key
-    "openai": { "auth": "api_key", "apiKey": "env:OPENAI_API_KEY" } // or "oauth" + `moca login openai` (ChatGPT subscription)
+    "anthropic":   { "auth": "api_key", "apiKey": "env:ANTHROPIC_API_KEY" }, // API key only — subscription OAuth is not permitted
+    "openai":      { "auth": "api_key", "apiKey": "env:OPENAI_API_KEY" },    // or "oauth" + `moca login openai` (ChatGPT subscription)
+    "opencode-go": { "auth": "api_key", "apiKey": "env:OPENCODE_API_KEY" },  // OpenCode Go tier (subscription)
+    "opencode":    { "auth": "api_key", "apiKey": "env:OPENCODE_API_KEY" },  // OpenCode Zen, pay-as-you-go — same account key unless overridden
+    "openrouter":  { "auth": "api_key", "apiKey": "env:OPENROUTER_API_KEY" } // one key, many models; ids keep their vendor prefix
     // A custom or local provider (vLLM, LM Studio, Ollama, a gateway):
     // "vllm": {
     //   "baseUrl": "http://localhost:8000/v1",

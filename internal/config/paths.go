@@ -55,3 +55,8 @@ func PromptsDir() string { return filepath.Join(ConfigDir(), "prompts") }
 // everything the user manages; a v0.1 store in the data dir is migrated
 // once (provider.MigrateLegacyStore).
 func AuthFile() string { return filepath.Join(ConfigDir(), "auth.json") }
+
+// ModelsCacheDir is ~/.local/share/moca/models-cache/: the model-list cache,
+// one <provider>.json per provider (24 h, disposable, metadata only — SPECS
+// §6).
+func ModelsCacheDir() string { return filepath.Join(DataDir(), "models-cache") }

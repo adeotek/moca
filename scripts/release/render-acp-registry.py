@@ -16,7 +16,12 @@ The registry's requirements, all of which this script encodes:
 - a `license_url` and a `sha256` per archive (the registry's validator downloads the
   archive and refuses a checksum mismatch, so the checksums come from the release's
   own `checksums.txt` — never typed in by hand);
-- an SVG icon at `<id>/icon.svg`, 16x16 and monochrome `currentColor`;
+- an SVG icon at `<id>/icon.svg`, 16x16 and monochrome `currentColor`,
+  rendered from `docs/assets/icon-acp.svg` (the brand mark declared at 16x16:
+  a 512-unit drawing with `width="16" height="16"`, which the registry reads as
+  16x16 — it takes width/height first and falls back to the viewBox); the
+  full-colour variant at `docs/assets/icon.svg` is the same art without the
+  size attributes, so it cannot follow the editor's theme;
 - an agent whose `initialize` returns at least one `authMethods` entry.
 
 moca satisfies all of them from v0.7.8 on; on an older tag the darwin entries have
@@ -27,9 +32,11 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import sys
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 
 IDENT = "moca"
 REPO = "https://github.com/adeotek/moca"
@@ -80,6 +87,104 @@ def fetch_checksums(tag: str) -> dict[str, str]:
     if not sums:
         raise SystemExit(f"{url} lists no checksums")
     return sums
+
+
+# The registry's icon rules, taken from its own validator
+# (.github/workflows/build_registry.py) rather than its prose: 16x16, vector,
+# monochrome through currentColor, no HTML comments, small enough for a manifest.
+# The size may be carried by width/height OR by the viewBox — the registry reads
+# width/height first and only falls back to the viewBox, so a drawing whose
+# coordinates span 512 units is still 16x16 when it declares width="16"
+# height="16". docs/assets/icon-acp.svg is exactly that shape.
+PREFERRED_ICON_SIZE = 16.0
+MAX_ICON_BYTES = 8192
+ALLOWED_INK = {"currentcolor", "none", "inherit"}
+LENGTH = re.compile(r"\s*([0-9]*\.?[0-9]+)\s*(px)?\s*", re.IGNORECASE)
+
+
+def icon_length(value: str | None) -> float | None:
+    """A length attribute in pixels: '16' and '16px' both read 16, as the
+    registry strips the unit before parsing."""
+    m = LENGTH.fullmatch(value or "")
+    return float(m.group(1)) if m else None
+
+
+def icon_size(root: ET.Element) -> tuple[float, float] | None:
+    """The registry's order: width/height when both parse, else the viewBox."""
+    w, h = icon_length(root.get("width")), icon_length(root.get("height"))
+    if w is None or h is None:
+        parts = (root.get("viewBox") or "").replace(",", " ").split()
+        if len(parts) != 4:
+            return None
+        try:
+            w, h = float(parts[2]), float(parts[3])
+        except ValueError:
+            return None
+    return w, h
+
+
+def hardcoded_ink(root: ET.Element) -> tuple[bool, list[str]]:
+    """Every fill/stroke, attribute or inline style: currentColor, none or
+    inherit only. Returns (paints with currentColor, the offending values)."""
+    inked = False
+    bad: list[str] = []
+    for elem in root.iter():
+        for attr in ("fill", "stroke"):
+            value = elem.get(attr)
+            if value is None:
+                continue
+            norm = value.strip().lower()
+            if norm == "currentcolor":
+                inked = True
+            elif norm not in ALLOWED_INK:
+                bad.append(f'{attr}="{value.strip()}"')
+        for prop in (elem.get("style") or "").split(";"):
+            name, _, value = prop.partition(":")
+            if name.strip().lower() not in ("fill", "stroke") or not value.strip():
+                continue
+            norm = value.strip().lower()
+            if norm == "currentcolor":
+                inked = True
+            elif norm not in ALLOWED_INK:
+                bad.append(f"{name.strip()}:{value.strip()}")
+    return inked, sorted(set(bad))
+
+
+def icon_problems(text: str) -> list[str]:
+    """The registry's icon rules, checked rather than assumed — the same rules
+    (and the same failure wording) as cmd/moca's TestACPIconContract, so a
+    publish-time rejection is a CI-time failure here."""
+    problems: list[str] = []
+    if "<!--" in text:
+        problems.append("must not contain XML comments — the registry embeds icons in MDX and rejects them")
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as err:
+        return problems + [f"is not a parseable SVG: {err}"]
+    if root.tag.rsplit("}", 1)[-1] != "svg":
+        return problems + [f"root element must be <svg>, got <{root.tag}>"]
+
+    size = icon_size(root)
+    if size is None:
+        problems.append('needs width/height="16" or a viewBox')
+    else:
+        w, h = size
+        if w != h:
+            problems.append(f"must be square (got {w:g}x{h:g})")
+        if w != PREFERRED_ICON_SIZE or h != PREFERRED_ICON_SIZE:
+            problems.append(f'must be 16x16 (got {w:g}x{h:g}) — declare width/height="16" if the viewBox is larger')
+
+    inked, bad = hardcoded_ink(root)
+    if bad:
+        problems.append(f"must paint with currentColor or none, not a hardcoded colour: {', '.join(bad)}")
+    if not inked:
+        problems.append("must paint with currentColor (monochrome)")
+    if "<image" in text:
+        problems.append("must be vector paths, not an embedded raster")
+    size_bytes = len(text.encode("utf-8"))
+    if size_bytes > MAX_ICON_BYTES:
+        problems.append(f"{size_bytes} bytes is too large for a registry icon (max {MAX_ICON_BYTES})")
+    return problems
 
 
 def main() -> int:
@@ -145,15 +250,20 @@ def main() -> int:
         "distribution": {"binary": binary},
     }
 
+    icon = root / "docs" / "assets" / "icon-acp.svg"
+    icon_text = icon.read_text(encoding="utf-8")
+    icon_bad = icon_problems(icon_text)
+    for problem in icon_bad:
+        print(f"icon: {problem}", file=sys.stderr)
+
     out = pathlib.Path(args.out) / IDENT
     out.mkdir(parents=True, exist_ok=True)
     (out / "agent.json").write_text(json.dumps(agent, indent=2) + "\n", encoding="utf-8")
-    icon = root / "docs" / "assets" / "icon.svg"
-    (out / "icon.svg").write_text(icon.read_text(encoding="utf-8"), encoding="utf-8")
+    (out / "icon.svg").write_text(icon_text, encoding="utf-8")
     print(f"wrote {out}/agent.json and {out}/icon.svg for {tag}")
     # An incomplete run exits 1: the files are written either way, so they can be
     # inspected, but the caller must not mistake "rendered" for "ready to submit".
-    return 1 if (bad or missing) else 0
+    return 1 if (bad or missing or icon_bad) else 0
 
 
 if __name__ == "__main__":

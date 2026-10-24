@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/adeotek/moca/internal/compact"
+	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
@@ -40,12 +41,25 @@ type Status struct {
 // Models lists the catalog for /model (sorted by qualified id).
 func (a *Agent) Models() []provider.Model { return a.opts.Providers.Models() }
 
-// RefreshModels re-reads a configured Ollama server's models (models pulled
-// since startup appear; removed ones go). It returns the reason when the
-// server cannot be reached, and nil when no local provider is configured.
+// RefreshModels re-reads every provider's model list (models added since
+// startup appear; removed ones go) and a configured Ollama server's. It
+// returns the first hard failure — an unreachable Ollama server — and nil
+// otherwise: a cloud provider that fails discovery keeps its cache.
 func (a *Agent) RefreshModels(ctx context.Context) error {
-	_, err := a.opts.Providers.DiscoverOllama(ctx)
-	return err
+	return a.opts.Providers.Refresh(ctx)
+}
+
+// ActiveModels is the model list the pickers show: rows whose provider can
+// actually run (a stored key, a resolvable env reference, or a local server).
+func (a *Agent) ActiveModels() []provider.Model { return a.opts.Providers.ActiveModels() }
+
+// ClearModelsCache deletes every provider's cached model list and re-reads
+// rescan — the caller passes the current model's provider — at once. Nothing
+// the session uses stops resolving; the other providers refetch when a picker
+// opens or the next session starts. Safe off the UI goroutine: it touches the
+// registry only.
+func (a *Agent) ClearModelsCache(ctx context.Context, rescan string) (provider.ClearReport, error) {
+	return a.opts.Providers.ClearModelsCache(ctx, rescan)
 }
 
 // HasCredential reports whether a request to the qualified model could be
@@ -100,6 +114,28 @@ func (a *Agent) SetModel(q string, e llm.Effort) error {
 	if err := a.opts.Providers.CheckCredential(q); err != nil {
 		return err
 	}
+	return a.applyModel(q, e)
+}
+
+// restoreModel is /hard's way back to the model the session ran before it.
+// A relist that retired that id meanwhile must not strand the session in hard
+// mode — Resolve still serves a row it handed out — so the switch is checked
+// against the provider's credential only; a user's /model switch to a retired
+// id is still refused (SetModel → CheckCredential).
+func (a *Agent) restoreModel(q string, e llm.Effort) error {
+	pn, _, err := config.SplitModel(q)
+	if err != nil {
+		return err
+	}
+	if err := a.opts.Providers.ProviderCredential(pn); err != nil {
+		return err
+	}
+	return a.applyModel(q, e)
+}
+
+// applyModel makes the switch SetModel and restoreModel have checked: the
+// previous pair is restored if the new model does not resolve.
+func (a *Agent) applyModel(q string, e llm.Effort) error {
 	prev, prevAd, prevE := a.model, a.adapter, a.effort
 	if err := a.setModel(q, e); err != nil {
 		a.model, a.adapter, a.effort = prev, prevAd, prevE
@@ -146,7 +182,7 @@ func (a *Agent) Carry() (string, llm.Effort) {
 func (a *Agent) ToggleHard() (bool, error) {
 	if a.hard != nil {
 		saved := *a.hard
-		if err := a.SetModel(saved.model, saved.effort); err != nil {
+		if err := a.restoreModel(saved.model, saved.effort); err != nil {
 			return true, err
 		}
 		a.hard = nil

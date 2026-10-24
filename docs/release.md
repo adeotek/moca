@@ -57,8 +57,8 @@ git push origin v0.7.11     # tags push; main itself stays PR-only
 ```
 
 If you forgot to tag before dispatching, the workflow fails loudly: the
-`version` checkout step or the release step refuses a dispatcher-supplied
-`version` that is not an existing tag.
+`version` build/packaging step refuses a dispatcher-supplied `version` that
+is not an existing tag (`git rev-parse --verify refs/tags/$version`).
 
 ## 3. Dispatch the Release workflow
 

@@ -174,8 +174,13 @@ func (s *session) emit(e agent.Event) {
 		// TurnEnd is emitted outside a.mu (agent.go turn()), so Status is safe here.
 		if s.agent != nil {
 			st := s.agent.Status()
-			s.send(UsageUpdate{SessionUpdate: updUsage, Used: st.ContextTokens, Size: st.Window,
-				Cost: &Cost{Amount: st.Cost, Currency: "USD"}})
+			u := UsageUpdate{SessionUpdate: updUsage, Used: st.ContextTokens, Size: st.Window}
+			if st.Model.CostKnown {
+				// No price published, no cost claimed: an omitted cost, never
+				// an editor showing $0.00 (the TUI bar says `—`).
+				u.Cost = &Cost{Amount: st.Cost, Currency: "USD"}
+			}
+			s.send(u)
 		}
 	case agent.ToolStart:
 		s.send(startUpdate(s.openTool(e.Call.ID), s.cwd, e.Call))

@@ -7,8 +7,10 @@ import (
 
 // Model is one catalog entry. Cost is USD per million tokens.
 // ThinkingMode: "none" | "budget" (anthropic budget_tokens) | "adaptive"
-// (anthropic thinking:adaptive + output_config.effort) | "openai" (reasoning
-// effort). ThinkingLevelMap maps each supported effort to the wire value
+// (anthropic thinking:adaptive + output_config.effort) | "openai" (the
+// completions reasoning_effort field) | "effort-object" (the completions
+// reasoning:{effort} object — OpenRouter's canonical parameter, the only one
+// that accepts "max"). ThinkingLevelMap maps each supported effort to the wire value
 // (budget mode: values unused — the budget comes from MaxTokens and effort); a missing key means
 // the level is unsupported. EffortOff present means thinking can be disabled.
 type Model struct {
@@ -29,6 +31,14 @@ type Model struct {
 	// else (§14).
 	ReplayReasoning  bool
 	ThinkingLevelMap map[llm.Effort]string
+	// CostKnown is false for a model discovered without a published price: the
+	// UI renders `—` instead of claiming $0.00. Curated and declared rows are
+	// known by construction.
+	CostKnown bool
+	// WindowAssumed marks a ContextWindow that was substituted because the
+	// provider published none (16384): the startup warning and the picker both
+	// say so, and declaring a window clears it.
+	WindowAssumed bool
 }
 
 func (m Model) Qualified() string { return m.Provider + "/" + m.ID }

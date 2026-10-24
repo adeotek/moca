@@ -33,6 +33,14 @@ func TestSampleCoversEveryKey(t *testing.T) {
 			t.Errorf("sample.jsonc does not mention %q — every option belongs in the sample", k)
 		}
 	}
+	// Provider names too, not just keys: `/login`, `/model` and `moca login`
+	// offer every built-in, so one that ships without a sample row is one a
+	// user cannot discover from the config they were told to start from.
+	for name := range BuiltinProviders {
+		if !strings.Contains(sample, `"`+name+`"`) {
+			t.Errorf("sample.jsonc does not mention the built-in provider %q", name)
+		}
+	}
 }
 
 // collectKeys walks the JSON shape of a struct type and collects field names,

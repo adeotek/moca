@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/adeotek/moca/internal/agent"
+	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/tools"
 )
 
@@ -131,3 +132,10 @@ func (p *eventPipe) send(msg tea.Msg) {
 // modelsRefreshedMsg reports a re-read of the local server's models (the
 // /model picker opens after it).
 type modelsRefreshedMsg struct{ err error }
+
+// modelsClearedMsg reports /clear-models-cache: the deleted cache and the
+// re-read of the current model's provider.
+type modelsClearedMsg struct {
+	rep provider.ClearReport
+	err error
+}

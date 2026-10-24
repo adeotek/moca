@@ -1,5 +1,5 @@
 {
   // the off variant (-c off): identical to the shared config — no opt-in.
   "model": "opencode-go/glm-5.3-flash",
-  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_GO_KEY" } }
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } }
 }

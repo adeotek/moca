@@ -101,3 +101,17 @@ func TestStatusPercentColored(t *testing.T) {
 		t.Fatalf("warm percent not warm-styled: %q", got)
 	}
 }
+
+// TestStatusCostUnknownRendersDash: a model whose provider publishes no price
+// shows `—`, never $0.0000 (SPECS §6, Review Focus 2).
+func TestStatusCostUnknownRendersDash(t *testing.T) {
+	s := full
+	s.CostUnknown = true
+	if _, l2 := RenderStatus(s, 200); !strings.HasSuffix(plainLine(l2), "· —") {
+		t.Fatalf("unknown cost must render a dash: %q", plainLine(l2))
+	}
+	s.Sub = true // a subscription still wins: the cost is not unknown, it is included
+	if _, l2 := RenderStatus(s, 200); !strings.HasSuffix(plainLine(l2), "· sub") {
+		t.Fatalf("sub wins over the unknown flag: %q", plainLine(l2))
+	}
+}
