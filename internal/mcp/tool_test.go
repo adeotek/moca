@@ -96,6 +96,21 @@ func TestProxyGating(t *testing.T) {
 	}
 }
 
+// An Answer this build does not know must refuse, as it does in the shell
+// tool: the gate tested only `case Deny`, so an out-of-range value fell out
+// of the switch and ran a non-read-only server tool unapproved.
+func TestProxyUnrecognisedAnswerRefuses(t *testing.T) {
+	p := newProxy(t, nil)
+	env := &tools.Env{Ask: func(context.Context, tools.Question) tools.Answer { return tools.Answer(99) }}
+	r := runP(p, env, map[string]any{"action": "call", "server": "docs", "tool": "create_issue"})
+	if !r.IsError || !strings.Contains(r.Content, "refused") {
+		t.Fatalf("an unrecognised answer must refuse, got %+v", r)
+	}
+	if p.Allowed("docs", "create_issue", Annotations{}) {
+		t.Fatal("nothing may be remembered from an unrecognised answer")
+	}
+}
+
 func TestProxyArgErrors(t *testing.T) {
 	p := newProxy(t, nil)
 	if r := runP(p, &tools.Env{}, map[string]any{"action": "describe", "server": "docs"}); !r.IsError || !strings.Contains(r.Content, "tool") {

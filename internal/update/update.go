@@ -402,7 +402,10 @@ var packageManagers = []struct {
 	// /opt/homebrew and the /usr/local prefix, Homebrew on Linux too).
 	{"Homebrew", "brew upgrade moca", []string{"/cellar/moca/", "/opt/homebrew/", "/home/linuxbrew/"}},
 	{"Scoop", "scoop update moca", []string{"/scoop/apps/moca/", "/scoop/shims/moca"}},
-	{"WinGet", "winget upgrade adeotek.moca", []string{"/microsoft/winget/packages/", "/microsoft/winget/links/"}},
+	// Both portable roots: %LOCALAPPDATA%\Microsoft\WinGet\… for a user-scope
+	// install, %PROGRAMFILES%\WinGet\… (no `Microsoft` segment) for
+	// `--scope machine`.
+	{"WinGet", "winget upgrade adeotek.moca", []string{"/winget/packages/", "/winget/links/"}},
 }
 
 // PackageManaged reports whether exe is a copy a package manager owns, as a

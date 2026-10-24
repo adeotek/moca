@@ -68,6 +68,13 @@ func TestPermissionAllowSessionRemembersExactCommand(t *testing.T) {
 	if p := c.perms[0]; p.ToolCall.ToolCallID == "" || len(p.Options) != 3 {
 		t.Fatalf("first question %+v", p)
 	}
+	// The editor's row must say what it allows: only this exact line, as the
+	// TUI's row does — "Allow for this session" read as every rm.
+	for _, o := range c.perms[0].Options {
+		if o.OptionID == optAllowSession && o.Name != "Allow this exact command for this session" {
+			t.Errorf("exact-tier session option is labelled %q", o.Name)
+		}
+	}
 }
 
 // TestPermissionRedirectHopOffersNoSessionOption: a web fetch's redirect hop is
