@@ -9,9 +9,12 @@ number rather than the best one.
 **Setup.** [Terminal-Bench 2.0](https://www.tbench.ai) via [Harbor](https://github.com/harbor-framework/harbor)
 0.24.0, one trial per task × agent in a Docker container that installs the agent CLI inside the
 task environment and scores the result with the task's own verifier. moca, OpenCode and Pi run
-`opencode-go/glm-5.3-flash`; Claude Code runs `claude-sonnet-5`, its own model (it cannot use a
+`opencode-go/deepseek-v4.1-flash` since 2026-10-24 — before that, `glm-5.3-flash`, which is what
+every row in the tables below ran, so the first deepseek round is a new baseline, not a
+successor to those rows. Claude Code runs `claude-sonnet-5`, its own model (it cannot use a
 zen key) — same tasks, same sandbox, different model, which is why its cost is an
-API-equivalent, not cash.
+API-equivalent, not cash. A model id is checked against the provider's live `/models` catalog
+before a sweep, so a retired id is named up front rather than discovered mid-run.
 
 **The 12 tasks** (`docs/tb2-subset-12.txt` in the harness repo): `fix-git`,
 `cobol-modernization`, `kv-store-grpc`, `build-cython-ext`, `custom-memory-heap-crash`,
@@ -63,10 +66,11 @@ stays a known weakness.
 
 ```bash
 git clone https://github.com/adeotek/coding-agent-bench && cd coding-agent-bench
-make setup && cp .env.example .env    # OPENCODE_GO_KEY — this harness's name for the Zen key (+ an Anthropic key for Claude Code)
+make setup && cp .env.example .env    # OPENCODE_API_KEY — one Zen key for moca, OpenCode and Pi (moca's own default for opencode-go)
 make probe                            # one live request per agent, proves the credential flow
 TASK_NAMES=$(tr '\n' ',' < docs/tb2-subset-12.txt | sed 's/,$//') make subset
 ```
 
-`MOCA_VERSION` pins the release under test; the rendered Harbor config is copied into every job
-directory, so a run records exactly what ran.
+`MOCA_VERSION` pins the release under test — **v0.7.9 now**, the newest tag (v0.7.10's PRs are
+merged but the tag is not cut); the rendered Harbor config is copied into every job directory,
+so a run records exactly what ran.
