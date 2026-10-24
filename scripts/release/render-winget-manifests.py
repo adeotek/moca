@@ -41,7 +41,10 @@ MANIFEST_VERSION = "1.12.0"
 PUBLISHER = "adeotek"
 AUTHOR = "George Benjamin-Schonberger"
 COPYRIGHT = "Copyright (c) 2026 George Benjamin-Schonberger"
-SHORT_DESCRIPTION = "A coding agent in one static Go binary: eight frozen tools, native ACP, any OpenAI-compatible model"
+# winget shows this beside the package name; it caps at 256 chars and the long
+# form belongs in DESCRIPTION below, so the shared one-liner is the right fit.
+BRAND = json.loads((pathlib.Path(__file__).resolve().parent / "branding.json").read_text(encoding="utf-8"))
+SHORT_DESCRIPTION = BRAND["line"]
 # one entry per rendered line: a block scalar keeps the sentences apart instead of
 # running them into one wall of text in a client's package pane
 DESCRIPTION = (
