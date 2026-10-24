@@ -45,6 +45,11 @@ func toolTurn(calls ...[2]string) string {
 func newScript(t *testing.T, turns ...string) *scriptServer {
 	s := &scriptServer{turns: turns}
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet { // model discovery (SPECS §6)
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"data":[{"id":"m"},{"id":"m2"}]}`)
+			return
+		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		b, _ := io.ReadAll(r.Body)

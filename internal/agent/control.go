@@ -40,12 +40,23 @@ type Status struct {
 // Models lists the catalog for /model (sorted by qualified id).
 func (a *Agent) Models() []provider.Model { return a.opts.Providers.Models() }
 
-// RefreshModels re-reads a configured Ollama server's models (models pulled
-// since startup appear; removed ones go). It returns the reason when the
-// server cannot be reached, and nil when no local provider is configured.
+// RefreshModels re-reads every provider's model list (models added since
+// startup appear; removed ones go) and a configured Ollama server's. It
+// returns the first hard failure — an unreachable Ollama server — and nil
+// otherwise: a cloud provider that fails discovery keeps its cache.
 func (a *Agent) RefreshModels(ctx context.Context) error {
 	_, err := a.opts.Providers.DiscoverOllama(ctx)
+	a.opts.Providers.DiscoverModels(ctx)
 	return err
+}
+
+// ActiveModels is the model list the pickers show: rows whose provider can
+// actually run (a stored key, a resolvable env reference, or a local server).
+func (a *Agent) ActiveModels() []provider.Model { return a.opts.Providers.ActiveModels() }
+
+// ClearModelsCache drops the 24 h model-list cache and the discovered rows.
+func (a *Agent) ClearModelsCache() (providers, models int, err error) {
+	return a.opts.Providers.ClearModelsCache()
 }
 
 // HasCredential reports whether a request to the qualified model could be

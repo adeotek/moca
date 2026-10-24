@@ -295,6 +295,14 @@ func (srv *Server) checkModel(cfg config.Config) error {
 			slog.Debug("acp: ollama discovery failed", "err", err)
 		}
 	}
+	// Every provider's list is discovered before the model is validated
+	// (§6): a model absent from the catalog may still exist upstream, so
+	// Verify (not construction) is the gate — and its message names the
+	// nearest discovered ids for a typo.
+	reg.DiscoverModels(context.Background())
+	if err := reg.Verify(); err != nil {
+		return &RPCError{Code: codeInternal, Message: err.Error()}
+	}
 	if err := reg.CheckCredential(cfg.Model); err != nil {
 		return &RPCError{Code: codeInternal, Message: err.Error()}
 	}
