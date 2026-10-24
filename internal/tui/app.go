@@ -1074,8 +1074,13 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 	case "cost":
 		u := st.Usage
 		cost := fmt.Sprintf("$%.4f", st.Cost)
-		if st.Sub {
+		switch {
+		case st.Sub:
 			cost = "subscription"
+		case !st.Model.CostKnown:
+			// The status bar's rule: a model with no published price is
+			// never billed as $0.0000.
+			cost = "cost unknown (the provider publishes no price)"
 		}
 		return m.println(fmt.Sprintf("in %s (fresh %s · cache read %s · cache write %s) · out %s · %s",
 			FmtTokens(u.Input+u.CacheRead+u.CacheWrite), FmtTokens(u.Input), FmtTokens(u.CacheRead), FmtTokens(u.CacheWrite), FmtTokens(u.Output), cost))

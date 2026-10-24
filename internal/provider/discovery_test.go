@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/llm"
+	"github.com/adeotek/moca/internal/testenv"
 )
 
 // blankBuiltinKeys isolates a test from ambient credentials: this host's
@@ -23,9 +25,7 @@ import (
 // discovered against its real endpoint from a unit test.
 func blankBuiltinKeys(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY", "OPENROUTER_API_KEY"} {
-		t.Setenv(k, "")
-	}
+	testenv.BlankKeys(t)
 	// A key stored by a real /login (auth.json) would also make a provider
 	// ready: point the whole config/state tree at temp dirs — always, since a
 	// host that exports XDG_CONFIG_HOME names exactly the real store.
@@ -103,7 +103,10 @@ func TestFetchOpenAIModels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || models[0].ID != "gpt-6-luna" || models[0].Protocol != "openai-completions" {
+	// The Responses API, like the curated openai rows: chat completions
+	// rejects max_tokens on the reasoning models, and an OAuth login can use
+	// nothing else.
+	if len(models) != 1 || models[0].ID != "gpt-6-luna" || models[0].Protocol != "openai-responses" {
 		t.Fatalf("filters: %+v", models)
 	}
 }
@@ -591,5 +594,91 @@ func TestVerifyCitesAFailedDiscovery(t *testing.T) {
 	err := reg.Verify()
 	if err == nil || !strings.Contains(err.Error(), "could not be fetched") {
 		t.Fatalf("Verify must name the failed discovery: %v", err)
+	}
+}
+
+// TestVerifyNamesAMissingCredential: discovery skips a provider with no usable
+// credential, so its list was never read — the fix is the key, not a
+// declaration, and "the provider does not list it" would be unchecked.
+func TestVerifyNamesAMissingCredential(t *testing.T) {
+	blankBuiltinKeys(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	reg, err := NewRegistry(mustCfg(t, `{"model":"anthropic/claude-nope-9"}`), http.DefaultClient, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.DiscoverModels(context.Background())
+	err = reg.Verify()
+	if err == nil || !strings.Contains(err.Error(), "was not read") || strings.Contains(err.Error(), "does not list it") ||
+		!strings.Contains(err.Error(), "anthropic/claude-nope-9") {
+		t.Fatalf("Verify must name the missing credential: %v", err)
+	}
+}
+
+// TestRevalidateMissingBypassesAFreshCache: a model published after the list
+// was cached must not be refused for a day — the configured model's provider
+// is re-read past the fresh cache before Verify.
+func TestRevalidateMissingBypassesAFreshCache(t *testing.T) {
+	var hits atomic.Int32
+	var body atomic.Value
+	body.Store(`{"data":[{"id":"m"}]}`)
+	srv := jsonServer(t, &hits, func(*http.Request) (int, string) { return 200, body.Load().(string) })
+	cfg := discoveryCfg(t, srv.URL)
+	reg, _ := NewRegistry(cfg, srv.Client(), nil)
+	reg.DiscoverModels(context.Background())
+	body.Store(`{"data":[{"id":"m"},{"id":"new"}]}`)
+	reg2, _ := NewRegistry(cfg, srv.Client(), nil)
+	reg2.DiscoverModels(context.Background())
+	if hits.Load() != 1 {
+		t.Fatalf("setup: the second registry reads the fresh cache, hits=%d", hits.Load())
+	}
+	reg2.RevalidateMissing(context.Background(), "gw/m") // known: no fetch
+	if hits.Load() != 1 {
+		t.Fatalf("a listed model never costs a fetch, hits=%d", hits.Load())
+	}
+	reg2.RevalidateMissing(context.Background(), "gw/new", "gw/other")
+	if hits.Load() != 2 {
+		t.Fatalf("one re-read per provider, past the fresh cache, hits=%d", hits.Load())
+	}
+	if _, ok := reg2.Lookup("gw/new"); !ok {
+		t.Fatal("the newer model is listed after the re-read")
+	}
+}
+
+// TestZenSeedsFollowItsList: once zen's own list is known, only the go rows
+// it lists are seeded — the go catalog does not prove zen serves a model.
+func TestZenSeedsFollowItsList(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) { return 200, `{"data":[{"id":"glm-5.3"}]}` })
+	blankBuiltinKeys(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("MOCA_ZEN_KEY", "k")
+	cfg := mustCfg(t, `{"providers":{"opencode":{"baseUrl":"`+srv.URL+`","apiKey":"env:MOCA_ZEN_KEY"}}}`)
+	reg, err := NewRegistry(cfg, srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.DiscoverModels(context.Background())
+	for _, m := range reg.Models() {
+		if m.Provider == "opencode" && m.ID != "glm-5.3" {
+			t.Fatalf("a go row zen does not list was seeded: %s", m.Qualified())
+		}
+	}
+	if m, ok := reg.Lookup("opencode/glm-5.3"); !ok || !m.CostKnown {
+		t.Fatalf("a listed id keeps the go metadata: %+v", m)
+	}
+}
+
+// TestDiscoveredBudgetThinking: a budget-thinking Anthropic model publishes no
+// effort list, yet it can think at every level and not at all.
+func TestDiscoveredBudgetThinking(t *testing.T) {
+	m := modelFromCached("anthropic", CachedModel{ID: "claude-old", Protocol: "anthropic-messages", Mode: "budget", Ctx: 200000})
+	if m.ThinkingMode != "budget" {
+		t.Fatalf("budget thinking survives an empty effort list: %+v", m)
+	}
+	if _, ok := m.ThinkingLevelMap[llm.EffortOff]; !ok {
+		t.Fatal("budget thinking can be turned off")
+	}
+	if m.ClampEffort(llm.EffortHigh) != llm.EffortHigh {
+		t.Fatalf("high effort: %v", m.ClampEffort(llm.EffortHigh))
 	}
 }

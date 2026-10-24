@@ -16,6 +16,7 @@ import (
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/session"
+	"github.com/adeotek/moca/internal/testenv"
 )
 
 // scriptServer serves openai-completions SSE responses from a script, one
@@ -105,9 +106,7 @@ func startWith(t *testing.T, s *scriptServer, maxSteps int, extraTop, extraModel
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	// Ambient provider keys would make a built-in provider ready and send
 	// discovery to its real endpoint mid-test.
-	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY", "OPENROUTER_API_KEY"} {
-		t.Setenv(k, "")
-	}
+	testenv.BlankKeys(t)
 	t.Setenv("MOCA_T_KEY", "k")
 	work := t.TempDir()
 	if extraTop != "" {
@@ -384,18 +383,4 @@ func TestModelCanReadGlobalSkillSupportFiles(t *testing.T) {
 // real endpoint from a unit test (slow, flaky, and it changes the model lists
 // these tests assert). The temp XDG root keeps a real config, auth store and
 // sessions out of the run.
-func TestMain(m *testing.M) {
-	root, err := os.MkdirTemp("", "moca-test-*")
-	if err != nil {
-		panic(err)
-	}
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
-	os.Setenv("XDG_DATA_HOME", filepath.Join(root, "data"))
-	os.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
-	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY", "OPENROUTER_API_KEY"} {
-		os.Setenv(k, "")
-	}
-	code := m.Run()
-	os.RemoveAll(root)
-	os.Exit(code)
-}
+func TestMain(m *testing.M) { os.Exit(testenv.Main(m)) }

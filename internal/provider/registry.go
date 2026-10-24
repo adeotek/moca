@@ -162,6 +162,14 @@ func (r *Registry) Verify() error {
 			// would be a claim moca never checked.
 			return fmt.Errorf("model %q is not in the catalog and %s's model list could not be fetched (%v) — retry when the provider is reachable, or declare it under providers.%s.models", q, pn, r.discoveryErr[pn], pn)
 		}
+		if pn, _, err := config.SplitModel(q); err == nil && r.listedByDiscovery(pn) {
+			// Discovery skips a provider with no usable credential, so its
+			// list was never read either: the credential is the fix, not a
+			// declaration. credentialReady takes no registry lock.
+			if cerr := r.credentialReady(pn); cerr != nil {
+				return fmt.Errorf("model %q is not in the catalog, and %s's model list was not read: %w", q, pn, cerr)
+			}
+		}
 		if hint := r.nearestModelsLocked(q); hint != "" {
 			return fmt.Errorf("model %q is not in the catalog and the provider does not list it; did you mean: %s (declare any other id under providers.<name>.models)", q, hint)
 		}
@@ -198,6 +206,36 @@ func (r *Registry) nearestModelsLocked(q string) string {
 	return strings.Join(cand, ", ")
 }
 
+// listedByDiscovery reports whether discovery reads the provider's model list:
+// every configured provider except Ollama (DiscoverOllama owns it) and a custom
+// provider that declares its models (the declarations are the contract).
+func (r *Registry) listedByDiscovery(pname string) bool {
+	p, ok := r.cfg.Providers[pname]
+	if !ok || pname == "ollama" {
+		return false
+	}
+	_, builtin := config.BuiltinProviders[pname]
+	return builtin || len(p.Models) == 0
+}
+
+// lookupLocked is the row lookup Resolve and Lookup share: the live row, else
+// the row handed out before a relist dropped it (resolved). CheckCredential
+// deliberately reads the live catalog only. The caller holds mu.
+func (r *Registry) lookupLocked(qualified string) (Model, bool) {
+	if m, ok := r.models[qualified]; ok {
+		return m, true
+	}
+	m, ok := r.resolved[qualified]
+	return m, ok
+}
+
+// Lookup returns the row a qualified model resolves to, if any.
+func (r *Registry) Lookup(qualified string) (Model, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.lookupLocked(qualified)
+}
+
 func commonPrefix(a, b string) int {
 	n := 0
 	for n < len(a) && n < len(b) && a[n] == b[n] {
@@ -230,6 +268,8 @@ func (r *Registry) CheckCredential(qualified string) error {
 	if err != nil {
 		return err
 	}
+	// The live catalog only: a user's switch to an id a relist retired is
+	// refused (the session's own rows stay resolvable through Resolve).
 	r.mu.RLock()
 	_, ok := r.models[qualified]
 	r.mu.RUnlock()
@@ -388,12 +428,7 @@ func (r *Registry) Resolve(qualified string) (Model, Adapter, error) {
 	if err != nil {
 		return Model{}, nil, err
 	}
-	r.mu.RLock()
-	m, ok := r.models[qualified]
-	if !ok {
-		m, ok = r.resolved[qualified]
-	}
-	r.mu.RUnlock()
+	m, ok := r.Lookup(qualified)
 	if !ok {
 		return Model{}, nil, fmt.Errorf("%w %q", ErrUnknownModel, qualified)
 	}

@@ -20,6 +20,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -47,35 +48,38 @@ const (
 // cost and thinking map instead of degrading to an unpriced guess.
 var catalogSeeds = map[string]string{"opencode": "opencode-go"}
 
-// fetchSpec describes how to list one provider's models.
-type fetchSpec struct {
-	fetch func(ctx context.Context, hc *http.Client, base string, hdr http.Header) ([]CachedModel, error)
-}
+// modelsFetcher lists one provider's models.
+type modelsFetcher func(ctx context.Context, hc *http.Client, base string, hdr http.Header) ([]CachedModel, error)
 
-// fetchSpecFor returns the descriptor for a provider. Unknown names are custom
-// providers: OpenAI-compatible /models, credential required when one is set.
-func fetchSpecFor(name string) fetchSpec {
+// fetcherFor returns the lister for a provider. Every name without a
+// dedicated payload reader (opencode-go, opencode, custom providers) speaks
+// the OpenAI-compatible /models shape.
+func fetcherFor(name string) modelsFetcher {
 	switch name {
 	case "anthropic":
-		return fetchSpec{fetch: fetchAnthropicModels}
+		return fetchAnthropicModels
 	case "openai":
-		return fetchSpec{fetch: fetchOpenAIModels}
-	case "opencode-go", "opencode":
-		return fetchSpec{fetch: fetchOpenAICompatibleModels}
+		return fetchOpenAIModels
 	case "openrouter":
-		return fetchSpec{fetch: fetchOpenRouterModels}
+		return fetchOpenRouterModels
 	default:
-		return fetchSpec{fetch: fetchOpenAICompatibleModels}
+		return fetchOpenAICompatibleModels
 	}
 }
 
 // defaultProtocolFor is the protocol given to a discovered model that does not
-// name one. Anthropic speaks its own wire; every other provider here is an
-// OpenAI-compatible gateway, and chat completions is the common denominator on
-// api.openai.com (the Responses API does not serve every listed model).
+// name one. Anthropic speaks its own wire. api.openai.com rows ride the
+// Responses API like the curated openai rows: it serves every chat model,
+// while chat completions rejects `max_tokens` on the reasoning models and
+// does not serve the Responses-only ones at all — and a subscription (OAuth)
+// login can use nothing else. Every other provider here is an
+// OpenAI-compatible gateway on chat completions.
 func defaultProtocolFor(providerName string) string {
-	if providerName == "anthropic" {
+	switch providerName {
+	case "anthropic":
 		return "anthropic-messages"
+	case "openai":
+		return "openai-responses"
 	}
 	return "openai-completions"
 }
@@ -104,7 +108,14 @@ func modelFromCached(pname string, cm CachedModel) Model {
 	if m.ThinkingMode == "" {
 		m.ThinkingMode = "none"
 	}
-	if levels := effortMap(cm.Efforts, cm.Mandatory); len(levels) > 0 && m.ThinkingMode != "none" {
+	switch levels := effortMap(cm.Efforts, cm.Mandatory); {
+	case m.ThinkingMode == "budget":
+		// budget_tokens comes from MaxTokens and the effort, never from an
+		// advertised effort list (the budget-only models publish none), and
+		// a budget model can always think less or not at all: the curated
+		// budget rows' level set, off included.
+		m.ThinkingLevelMap = anthropicBudget
+	case len(levels) > 0 && m.ThinkingMode != "none":
 		m.ThinkingLevelMap = levels
 	}
 	if m.ThinkingMode != "none" && len(m.ThinkingLevelMap) == 0 {
@@ -178,16 +189,53 @@ func (r *Registry) DiscoverModels(ctx context.Context) DiscoveryReport {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			res[i] = r.discoverOne(ctx, name)
+			res[i] = r.discoverOne(ctx, name, false)
 		}()
 	}
 	wg.Wait()
 	return DiscoveryReport{Providers: res}
 }
 
-// discoverOne runs one provider's cache-then-fetch cycle.
-func (r *Registry) discoverOne(ctx context.Context, name string) ProviderModels {
-	spec := fetchSpecFor(name)
+// Refresh re-reads every provider's model list and a configured Ollama
+// server's, concurrently: both share ctx's deadline, and a slow Ollama server
+// must not eat the cloud providers' share of it (they touch disjoint rows —
+// DiscoverModels skips ollama). It returns Ollama's failure (an unreachable
+// server is the one hard failure) and nil otherwise: a cloud provider that
+// fails keeps its cache.
+func (r *Registry) Refresh(ctx context.Context) error {
+	errc := make(chan error, 1)
+	go func() {
+		_, err := r.DiscoverOllama(ctx)
+		errc <- err
+	}()
+	r.DiscoverModels(ctx)
+	return <-errc
+}
+
+// RevalidateMissing re-reads, past a fresh cache, the list of each named
+// model's provider when the registry does not know that model. A model the
+// provider published after its list was cached would otherwise be refused by
+// Verify — "the provider does not list it" — for up to ModelsCacheTTL, with
+// no way to refresh from a session that cannot start.
+func (r *Registry) RevalidateMissing(ctx context.Context, qualified ...string) {
+	seen := map[string]bool{}
+	for _, q := range qualified {
+		pn, _, err := config.SplitModel(q)
+		if err != nil || seen[pn] || !r.listedByDiscovery(pn) {
+			continue
+		}
+		if _, ok := r.Lookup(q); ok {
+			continue
+		}
+		seen[pn] = true
+		r.discoverOne(ctx, pn, true)
+	}
+}
+
+// discoverOne runs one provider's cache-then-fetch cycle; force skips the
+// fresh-cache shortcut (the cached rows still serve if the fetch fails).
+func (r *Registry) discoverOne(ctx context.Context, name string, force bool) ProviderModels {
+	fetch := fetcherFor(name)
 	proto := defaultProtocolFor(name)
 	if p := r.cfg.Providers[name]; p.Protocol != "" {
 		proto = p.Protocol
@@ -202,14 +250,14 @@ func (r *Registry) discoverOne(ctx context.Context, name string) ProviderModels 
 	// OpenAI shape), so discovery only fills in for a custom provider with no
 	// declarations at all — a vLLM that lists its own models. Checked before
 	// the cache, so rows cached before the declarations do not linger.
-	if _, builtin := config.BuiltinProviders[name]; !builtin && len(r.cfg.Providers[name].Models) > 0 {
+	if !r.listedByDiscovery(name) {
 		return out
 	}
 	if cached, fresh := r.cache.Load(name, base); len(cached) > 0 {
 		r.mergeDiscovered(name, cached)
 		out.FromCache = fresh
-		out.Models, out.Assumed = r.discoveredIDs(cached), r.assumedModels(name)
-		if fresh {
+		out.Models, out.Assumed = discoveredIDs(cached), r.assumedModels(name)
+		if fresh && !force {
 			r.setDiscoveryErr(name, nil)
 			return out
 		}
@@ -222,7 +270,7 @@ func (r *Registry) discoverOne(ctx context.Context, name string) ProviderModels 
 	}
 	fctx, cancel := context.WithTimeout(ctx, modelFetchTimeout)
 	defer cancel()
-	got, err := spec.fetch(fctx, r.hc, base, r.discoveryHeaders(fctx, name))
+	got, err := fetch(fctx, r.hc, base, r.discoveryHeaders(fctx, name))
 	if err != nil {
 		slog.Debug("model discovery failed", "provider", name, "url", base, "class", causeClass(err))
 		out.Err = err
@@ -236,7 +284,7 @@ func (r *Registry) discoverOne(ctx context.Context, name string) ProviderModels 
 		// The rows are in memory; a read-only data dir must not cost a run.
 		slog.Debug("models cache write failed", "provider", name)
 	}
-	out.Models, out.Assumed = r.discoveredIDs(got), r.assumedModels(name)
+	out.Models, out.Assumed = discoveredIDs(got), r.assumedModels(name)
 	return out
 }
 
@@ -286,7 +334,7 @@ func (r *Registry) setDiscoveryErr(name string, err error) {
 }
 
 // discoveredIDs lists a payload's ids.
-func (r *Registry) discoveredIDs(models []CachedModel) []string {
+func discoveredIDs(models []CachedModel) []string {
 	ids := make([]string, 0, len(models))
 	for _, m := range models {
 		ids = append(ids, m.ID)
@@ -327,14 +375,27 @@ func (r *Registry) mergeDiscovered(name string, models []CachedModel) {
 // rewritten, so the row is that provider's own. A row whose protocol the
 // provider has no base URL for is skipped: zen is chat-completions only, so a
 // go row on anthropic-messages or openai-responses could be listed and picked
-// but never resolved.
+// but never resolved. Once the provider's own list is known, only the ids it
+// lists are seeded: the sibling's catalog describes models, it does not prove
+// this provider serves them (before any list, every row seeds — Verify and the
+// picker have nothing better to go on).
 func (r *Registry) addSeedsLocked(name string) {
 	src, ok := catalogSeeds[name]
 	if !ok {
 		return
 	}
+	var listed map[string]bool
+	if d := r.discovered[name]; len(d) > 0 {
+		listed = make(map[string]bool, len(d))
+		for _, cm := range d {
+			listed[cm.ID] = true
+		}
+	}
 	for _, m := range builtinCatalog {
 		if m.Provider != src || m.ID == "" || r.baseURL(name, m.Protocol) == "" {
+			continue
+		}
+		if listed != nil && !listed[m.ID] {
 			continue
 		}
 		m.Provider, m.CostKnown = name, true
@@ -400,7 +461,7 @@ func (r *Registry) ClearModelsCache(ctx context.Context, rescan string) (ClearRe
 		rep.Rescan = ProviderModels{Provider: rescan, Base: d.Base, Models: d.Models, Assumed: d.Assumed, Err: err}
 		return rep, nil
 	}
-	rep.Rescan = r.discoverOne(ctx, rescan)
+	rep.Rescan = r.discoverOne(ctx, rescan, false)
 	return rep, nil
 }
 
@@ -409,10 +470,16 @@ func (r *Registry) ClearModelsCache(ctx context.Context, rescan string) (ClearRe
 // reference, a stored subscription login, or a local provider), with no
 // network call and no refresh: the TUI asks it from its update goroutine.
 func (r *Registry) ProviderReady(name string) bool {
+	return r.ProviderCredential(name) == nil
+}
+
+// ProviderCredential is ProviderReady's predicate with its reason: nil, or
+// the error that names the fix (no key stored, not logged in).
+func (r *Registry) ProviderCredential(name string) error {
 	if _, ok := r.cfg.Providers[name]; !ok {
-		return false
+		return fmt.Errorf("unknown provider %q", name)
 	}
-	return r.credentialReady(name) == nil
+	return r.credentialReady(name)
 }
 
 // ActiveModels is the catalog for a picker: rows whose provider can actually
@@ -540,7 +607,7 @@ func fetchOpenAIModels(ctx context.Context, hc *http.Client, base string, hdr ht
 		if slices.ContainsFunc(openaiDenyList, func(s string) bool { return strings.Contains(strings.ToLower(m.ID), s) }) {
 			continue
 		}
-		out = append(out, CachedModel{ID: m.ID, Protocol: "openai-completions"})
+		out = append(out, CachedModel{ID: m.ID, Protocol: defaultProtocolFor("openai")})
 	}
 	return out, nil
 }

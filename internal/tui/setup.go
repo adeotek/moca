@@ -64,7 +64,8 @@ func anyProviderUsable(reg *provider.Registry, cfg config.Config) bool {
 			return true
 		}
 	}
-	return rowlessReadyProvider(reg, cfg)
+	// seen now holds every provider with a row: one catalog pass serves both.
+	return readyWithoutRows(reg, cfg, seen)
 }
 
 // rowlessReadyProvider reports a cloud provider whose credential passes but
@@ -75,6 +76,12 @@ func rowlessReadyProvider(reg *provider.Registry, cfg config.Config) bool {
 	for _, mod := range reg.Models() {
 		has[mod.Provider] = true
 	}
+	return readyWithoutRows(reg, cfg, has)
+}
+
+// readyWithoutRows is rowlessReadyProvider over a known set of providers with
+// rows.
+func readyWithoutRows(reg *provider.Registry, cfg config.Config, has map[string]bool) bool {
 	for name := range cfg.Providers {
 		if !has[name] && !config.IsLocalProvider(name) && reg.ProviderReady(name) {
 			return true
@@ -142,12 +149,10 @@ func (m *model) runModelSetup(args string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		defer cancel()
-		var err error
-		if local {
-			_, err = reg.DiscoverOllama(ctx)
-		}
-		reg.DiscoverModels(ctx)
-		return modelsRefreshedMsg{err: err}
+		// Refresh reads Ollama and the cloud lists concurrently (a slow
+		// local server must not eat the cloud share of the deadline); with
+		// no Ollama configured its half returns at once.
+		return modelsRefreshedMsg{err: reg.Refresh(ctx)}
 	}
 }
 

@@ -331,8 +331,8 @@ func autoSkillsNote(sk []skills.Skill) string {
 func discoverModels(reg *provider.Registry, cfg config.Config, emit func(Event)) error {
 	// The cloud lists are read while Ollama answers: the two touch disjoint
 	// rows, and startup should wait for the slower one, not the sum.
-	reportc := make(chan provider.DiscoveryReport, 1)
-	go func() { reportc <- reg.DiscoverModels(context.Background()) }()
+	cloud := make(chan struct{})
+	go func() { reg.DiscoverModels(context.Background()); close(cloud) }()
 	if _, ok := cfg.Providers["ollama"]; ok {
 		d, _ := reg.DiscoverOllama(context.Background())
 		if pn, id, err := config.SplitModel(cfg.Model); err == nil && pn == "ollama" && emit != nil {
@@ -346,19 +346,18 @@ func discoverModels(reg *provider.Registry, cfg config.Config, emit func(Event))
 			}
 		}
 	}
-	report := <-reportc
+	<-cloud
+	// A configured model the fresh cache does not list may be newer than the
+	// cache: re-read that provider before Verify refuses it.
+	reg.RevalidateMissing(context.Background(), cfg.Model, cfg.ModelHard)
 	if pn, id, err := config.SplitModel(cfg.Model); err == nil && emit != nil {
-		if d, ok := report.Provider(pn); ok && slices.Contains(d.Assumed, id) {
+		// The merged row, not the payload: a curated or declared window is a
+		// decision, so only a discovered row without one is flagged.
+		if mo, ok := reg.Lookup(cfg.Model); ok && mo.WindowAssumed {
 			// The declaration must carry the protocol: it is applied when the
 			// registry is built, before discovery merges the row, and a new
 			// model on a built-in provider is refused without one.
-			proto := "openai-completions"
-			for _, mo := range reg.Models() {
-				if mo.Qualified() == cfg.Model {
-					proto = mo.Protocol
-				}
-			}
-			emit(Warning{fmt.Sprintf("%s/%s: the provider publishes no context window; assuming %d. If the real window is smaller, long sessions are silently truncated — set providers.%s.models.%s to {\"protocol\": %q, \"contextWindow\": <the real window>}", pn, id, config.MinContextWindow, pn, id, proto)})
+			emit(Warning{fmt.Sprintf("%s/%s: the provider publishes no context window; assuming %d. If the real window is smaller, long sessions are silently truncated — set providers.%s.models.%s to {\"protocol\": %q, \"contextWindow\": <the real window>}", pn, id, mo.ContextWindow, pn, id, mo.Protocol)})
 		}
 	}
 	return reg.Verify()

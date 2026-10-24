@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/adeotek/moca/internal/compact"
+	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
@@ -45,16 +46,7 @@ func (a *Agent) Models() []provider.Model { return a.opts.Providers.Models() }
 // returns the first hard failure — an unreachable Ollama server — and nil
 // otherwise: a cloud provider that fails discovery keeps its cache.
 func (a *Agent) RefreshModels(ctx context.Context) error {
-	// Concurrently: both share the caller's deadline, and a slow Ollama
-	// server must not eat the cloud providers' share of it (they touch
-	// disjoint rows — DiscoverModels skips ollama).
-	errc := make(chan error, 1)
-	go func() {
-		_, err := a.opts.Providers.DiscoverOllama(ctx)
-		errc <- err
-	}()
-	a.opts.Providers.DiscoverModels(ctx)
-	return <-errc
+	return a.opts.Providers.Refresh(ctx)
 }
 
 // ActiveModels is the model list the pickers show: rows whose provider can
@@ -122,6 +114,28 @@ func (a *Agent) SetModel(q string, e llm.Effort) error {
 	if err := a.opts.Providers.CheckCredential(q); err != nil {
 		return err
 	}
+	return a.applyModel(q, e)
+}
+
+// restoreModel is /hard's way back to the model the session ran before it.
+// A relist that retired that id meanwhile must not strand the session in hard
+// mode — Resolve still serves a row it handed out — so the switch is checked
+// against the provider's credential only; a user's /model switch to a retired
+// id is still refused (SetModel → CheckCredential).
+func (a *Agent) restoreModel(q string, e llm.Effort) error {
+	pn, _, err := config.SplitModel(q)
+	if err != nil {
+		return err
+	}
+	if err := a.opts.Providers.ProviderCredential(pn); err != nil {
+		return err
+	}
+	return a.applyModel(q, e)
+}
+
+// applyModel makes the switch SetModel and restoreModel have checked: the
+// previous pair is restored if the new model does not resolve.
+func (a *Agent) applyModel(q string, e llm.Effort) error {
 	prev, prevAd, prevE := a.model, a.adapter, a.effort
 	if err := a.setModel(q, e); err != nil {
 		a.model, a.adapter, a.effort = prev, prevAd, prevE
@@ -168,7 +182,7 @@ func (a *Agent) Carry() (string, llm.Effort) {
 func (a *Agent) ToggleHard() (bool, error) {
 	if a.hard != nil {
 		saved := *a.hard
-		if err := a.SetModel(saved.model, saved.effort); err != nil {
+		if err := a.restoreModel(saved.model, saved.effort); err != nil {
 			return true, err
 		}
 		a.hard = nil
