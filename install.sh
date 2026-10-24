@@ -31,16 +31,22 @@ REMOVE_DATA=0
 die() { printf 'moca: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
 
-# refuse_managed <path> <upgrade|uninstall>: a moca a package manager owns is
-# that manager's to replace or remove — writing over it (or deleting it) leaves
-# the manager's record stale and its link broken. The same lexical table as
-# internal/update.PackageManaged, Homebrew being the manager that reaches this
-# script (TestInstallersKnowThePackageManagers keeps the two in sync). Only the
-# moca found on PATH is checked: --dir names a target explicitly.
+# refuse_managed <path> <upgrade|uninstall|remove-data> [<data dir>...]: a moca
+# a package manager owns is that manager's to replace or remove — writing over
+# it (or deleting it) leaves the manager's record stale and its link broken.
+# The same lexical table as internal/update.PackageManaged, Homebrew being the
+# manager that reaches this script (TestInstallersKnowThePackageManagers keeps
+# the two in sync). Only the moca found on PATH is checked: --dir names a
+# target explicitly. For remove-data the refusal also spells out deleting the
+# data dirs: brew uninstall leaves them behind, and once moca is off PATH this
+# script has no installation left to find.
 refuse_managed() {
 	case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
 	*/cellar/moca/* | */opt/homebrew/* | */home/linuxbrew/*)
-		[ "$2" = "uninstall" ] && die "$1 is managed by Homebrew — run 'brew uninstall moca'"
+		case "$2" in
+		uninstall) die "$1 is managed by Homebrew — run 'brew uninstall moca'" ;;
+		remove-data) die "$1 is managed by Homebrew — run 'brew uninstall moca', then delete moca's data by hand (Homebrew leaves it in place):"$'\n'"  rm -rf --$(printf ' %q' "${@:3}")" ;;
+		esac
 		die "$1 is managed by Homebrew — run 'brew upgrade moca', or pass --dir <path> to install a separate copy"
 		;;
 	esac
@@ -99,13 +105,20 @@ done
 
 if [ "$UNINSTALL" = "1" ] || [ "$REMOVE_DATA" = "1" ]; then
 	[ -z "$VERSION" ] || die "--version has no effect together with --uninstall/--remove-data"
+	CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/moca"
+	DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/moca"
+	STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/moca"
 	if [ -n "$DIR" ]; then
 		TARGET="$DIR/moca"
 	else
 		EXISTING="$(command -v moca 2>/dev/null || true)"
 		[ -n "$EXISTING" ] || die "moca is not on PATH — pass --dir <path> to name the installation directory"
 		RESOLVED="$(readlink -f -- "$EXISTING" 2>/dev/null || printf '%s' "$EXISTING")"
-		refuse_managed "$RESOLVED" uninstall
+		if [ "$REMOVE_DATA" = "1" ]; then
+			refuse_managed "$RESOLVED" remove-data "$CONFIG_DIR" "$DATA_DIR" "$STATE_DIR"
+		else
+			refuse_managed "$RESOLVED" uninstall
+		fi
 		TARGET="$RESOLVED"
 	fi
 	if [ ! -f "$TARGET" ]; then
@@ -120,9 +133,6 @@ if [ "$UNINSTALL" = "1" ] || [ "$REMOVE_DATA" = "1" ]; then
 	rm -f -- "$TARGET" || die "could not remove $TARGET"
 	note "removed moca from $TARGET"
 	if [ "$REMOVE_DATA" = "1" ]; then
-		CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/moca"
-		DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/moca"
-		STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/moca"
 		rm -rf -- "$CONFIG_DIR" "$DATA_DIR" "$STATE_DIR"
 		note "removed moca data: $CONFIG_DIR, $DATA_DIR, $STATE_DIR"
 	else

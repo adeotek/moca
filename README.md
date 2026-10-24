@@ -74,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/adeotek/moca/main/install.sh | bash
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/adeotek/moca/main/install.ps1))) -Uninstall
 ```
 
-Full uninstall — the binary plus `~/.config/moca`, `~/.local/share/moca` and `~/.local/state/moca` (config, credentials, sessions, logs; `$XDG_CONFIG_HOME`/`$XDG_DATA_HOME`/`$XDG_STATE_HOME` are honored): pass `--remove-data` / `-RemoveData` instead. Both scripts refuse to delete anything whose `--version` output does not identify it as moca.
+Full uninstall — the binary plus `~/.config/moca`, `~/.local/share/moca` and `~/.local/state/moca` (config, credentials, sessions, logs; `$XDG_CONFIG_HOME`/`$XDG_DATA_HOME`/`$XDG_STATE_HOME` are honored): pass `--remove-data` / `-RemoveData` instead. Both scripts refuse to delete anything whose `--version` output does not identify it as moca. A copy a package manager installed (Homebrew, Scoop, WinGet) is left to that manager: the scripts name its uninstall command instead, and with `--remove-data` / `-RemoveData` they also print the command that deletes the data directories, which the manager's uninstall leaves in place.
 
 ## Configure
 

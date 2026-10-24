@@ -66,12 +66,26 @@ function Get-PackageManager([string]$Path) {
 
 if ($Uninstall -or $RemoveData) {
     if ($Version) { throw '-Version has no effect together with -Uninstall/-RemoveData' }
+    $configDir = if ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME 'moca' } else { Join-Path $env:USERPROFILE '.config/moca' }
+    $dataDir = if ($env:XDG_DATA_HOME) { Join-Path $env:XDG_DATA_HOME 'moca' } else { Join-Path $env:USERPROFILE '.local/share/moca' }
+    $stateDir = if ($env:XDG_STATE_HOME) { Join-Path $env:XDG_STATE_HOME 'moca' } else { Join-Path $env:USERPROFILE '.local/state/moca' }
     if (-not $Dir) {
         # -CommandType Application: an alias or function named moca has no
         # .Source path, and we must not delete a random moca.exe in the cwd.
         $existing = Get-Command moca -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $existing) { throw 'moca is not on PATH — pass -Dir <path> to name the installation directory' }
         $pm = Get-PackageManager $existing.Source
+        if ($pm -and $RemoveData) {
+            # The manager's uninstall leaves the data dirs behind, and once
+            # moca is off PATH this script has no installation left to find:
+            # spell the deletion out (single-quoted, ' doubled). It goes out
+            # as plain host output ahead of the throw — the error view wraps
+            # a message into a framed box no one can paste a command from.
+            $paths = ($configDir, $dataDir, $stateDir | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ', '
+            Write-Host "$($pm.Name) leaves moca's data in place; after '$($pm.Uninstall)', delete it with:"
+            Write-Host "  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath $paths"
+            throw "$($existing.Source) is managed by $($pm.Name) — run '$($pm.Uninstall)', then delete moca's data with the command above"
+        }
         if ($pm) { throw "$($existing.Source) is managed by $($pm.Name) — run '$($pm.Uninstall)'" }
         $Dir = Split-Path -Parent $existing.Source
     }
@@ -90,9 +104,6 @@ if ($Uninstall -or $RemoveData) {
     Remove-Item -Path "$target.old" -Force -ErrorAction SilentlyContinue
     Write-Host "removed moca from $target"
     if ($RemoveData) {
-        $configDir = if ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME 'moca' } else { Join-Path $env:USERPROFILE '.config/moca' }
-        $dataDir = if ($env:XDG_DATA_HOME) { Join-Path $env:XDG_DATA_HOME 'moca' } else { Join-Path $env:USERPROFILE '.local/share/moca' }
-        $stateDir = if ($env:XDG_STATE_HOME) { Join-Path $env:XDG_STATE_HOME 'moca' } else { Join-Path $env:USERPROFILE '.local/state/moca' }
         Remove-Item -Path $configDir, $dataDir, $stateDir -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "removed moca data: $configDir, $dataDir, $stateDir"
     } else {
