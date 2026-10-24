@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" role="img" aria-label="moca">
+  <!-- ACP registry icon: the custom brand mark's 16px optical variant — four
+       blades around an aperture void, drawn as a dashed ring so the gaps
+       survive rasterisation at 16 px (a scaled-down copy of the detail-heavy
+       brand art does not). currentColor lets an editor paint it on light or
+       dark chrome. docs/assets/icon.svg stays the full-colour brand art; this
+       is the only file the registry entry ships (render-acp-registry.py,
+       TestACPIconContract). -->
+  <circle cx="8" cy="8" r="5.4" fill="none" stroke="currentColor" stroke-width="3.2"
+          stroke-dasharray="6.28 2.2" transform="rotate(-90 8 8)"/>
+</svg>
