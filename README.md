@@ -105,11 +105,15 @@ Secrets never appear as literals: `apiKey` is an optional `env:VAR` reference �
 
 | Provider | Auth | Notes |
 |---|---|---|
-| `opencode-go` | `OPENCODE_API_KEY` | OpenCode Zen (mixed-protocol catalog: glm-5.3, minimax-m3, kimi-k3, …) |
+| `opencode-go` | `OPENCODE_API_KEY` | OpenCode Go tier (mixed-protocol catalog: glm-5.3, minimax-m3, kimi-k3, …) |
+| `opencode-zen` | `OPENCODE_API_KEY` | OpenCode Zen, pay-as-you-go — same account key as the go tier (override with `providers.opencode-zen.apiKey`) |
+| `openrouter` | `OPENROUTER_API_KEY` | one key, hundreds of models; ids keep their vendor prefix (`openrouter/anthropic/claude-sonnet-5.5`) |
 | `anthropic` | `ANTHROPIC_API_KEY` | Claude; subscription OAuth is **not permitted** by Anthropic's terms for third-party clients — API key only |
 | `openai` | `OPENAI_API_KEY` **or** `moca login openai` | ChatGPT Plus/Pro subscription login via OpenAI's "Sign in with ChatGPT" open-source flow |
 | `ollama` | none | local or LAN [Ollama](https://ollama.com) server — models are discovered from it; see below |
 | any name | `baseUrl` + `protocol` | custom providers: vLLM, LM Studio, OpenAI-compatible gateways |
+
+**The model list comes from the provider.** Each provider's own `/models` endpoint is read at startup and cached for 24 h (`~/.local/share/moca/models-cache.json`), so a model released yesterday shows up in `/model` without a moca release. Curated metadata (prices, thinking levels) still wins where it exists; a discovered model with no published price shows `—` rather than a fake `$0.00`, and one with no published window gets 16384 plus a startup warning. `/model` lists only providers you can actually run; a fresh install's first picker still shows everything, with a `/login <provider>` hint per row. `/clear-models-cache` empties the cache (the next `/model` refetches). A custom provider that declares its own models is used as declared.
 
 #### Ollama (local or LAN)
 
