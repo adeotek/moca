@@ -148,7 +148,7 @@ func TestLoginMarkedBackAndCancel(t *testing.T) {
 		t.Fatalf("esc from key entry must return to the method picker: %+v", m.login)
 	}
 	m.Update(key("esc"))
-	if m.login.step != loginPickProvider || len(m.login.items) != 3 {
+	if m.login.step != loginPickProvider || len(m.login.items) != len(m.start.Config.Providers) {
 		t.Fatalf("esc from the method picker must return to the provider picker: %+v", m.login)
 	}
 	if _, cmd := m.Update(key("esc")); m.login != nil || !strings.Contains(drained(m, cmd), "login cancelled") {
