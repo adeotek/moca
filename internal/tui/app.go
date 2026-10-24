@@ -366,6 +366,7 @@ func (m *model) refreshStatus() {
 	m.status.Trigger = compact.NewBudget(st.Window, cc.ReserveTokens, cc.KeepRecentTokens).Trigger()
 	m.status.In = st.Usage.Input + st.Usage.CacheRead + st.Usage.CacheWrite
 	m.status.Out, m.status.Cost, m.status.Sub = st.Usage.Output, st.Cost, st.Sub
+	m.status.CostUnknown = !st.Model.CostKnown
 }
 
 func (m *model) branchCmd() tea.Cmd {
@@ -933,21 +934,27 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 			return cmd
 		}
 		if c.Args == "" {
-			if _, local := m.start.Config.Providers["ollama"]; local {
-				// Models pulled since startup should show up: ask the
-				// server first (a few seconds at most), then open the picker.
-				m.status.Transient = "reading models…"
-				a := m.agent
-				return func() tea.Msg {
-					ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-					defer cancel()
-					return modelsRefreshedMsg{err: a.RefreshModels(ctx)}
-				}
+			// Stale-while-revalidate: a fresh cache (24 h) costs no network
+			// call, a stale one refetches in the background and the picker
+			// opens when the result lands (the ollama path always did this).
+			m.status.Transient = "reading models…"
+			a := m.agent
+			return func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+				defer cancel()
+				return modelsRefreshedMsg{err: a.RefreshModels(ctx)}
 			}
-			m.openModelPicker(st.Model.Qualified())
-			return nil
 		}
 		return m.switchModel(c.Args)
+	case "clear-models-cache":
+		if cmd, refused := m.refuseRunning(); refused {
+			return cmd
+		}
+		providers, models, err := m.agent.ClearModelsCache()
+		if err != nil {
+			return m.printlnError("error: " + err.Error())
+		}
+		return m.printlnContent(fmt.Sprintf("models cache cleared: %d providers, %d models — the next /model refetches", providers, models))
 	case "effort":
 		if c.Args == "" {
 			return m.printlnContent(fmt.Sprintf("effort %s — supported: %s", AbbrevEffort(st.Effort), supportedEfforts(st.Model)))
@@ -1106,7 +1113,7 @@ func (m *model) cycleEffort() tea.Cmd {
 // modal and a switch is refused then anyway).
 func (m *model) modelList(cur string) string {
 	var lines []string
-	for _, mo := range m.agent.Models() {
+	for _, mo := range m.agent.ActiveModels() {
 		mark := "  "
 		if mo.Qualified() == cur {
 			mark = "* "
@@ -1120,7 +1127,15 @@ func (m *model) modelList(cur string) string {
 // a provider with no credential are marked (picking one reports the missing
 // key rather than switching).
 func (m *model) openModelPicker(cur string) {
-	items, cursor := modelPickItems(m.agent.Models(), cur, m.agent.HasCredential)
+	// Only providers that can actually run are offered (Review Focus 7); the
+	// current model is always listed, even if its provider went inactive
+	// (a revoked key) — otherwise the user could not see where they are.
+	models := m.agent.ActiveModels()
+	if st := m.agent.Status(); st.Model.ID != "" &&
+		!slices.ContainsFunc(models, func(x provider.Model) bool { return x.Qualified() == cur }) {
+		models = append(models, st.Model)
+	}
+	items, cursor := modelPickItems(models, cur, m.agent.HasCredential)
 	p := &pickState{title: "switch to which model?  (prompt cache is forfeited)", cancelNote: "model unchanged", onChoose: m.switchModel}
 	p.items, p.cursor = items, cursor
 	m.openPicker(p)

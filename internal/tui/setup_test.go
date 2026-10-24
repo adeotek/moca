@@ -22,7 +22,7 @@ func setupEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	for _, e := range []string{"ANTHROPIC_API_KEY", "OPENCODE_API_KEY", "OPENAI_API_KEY"} {
+	for _, e := range []string{"ANTHROPIC_API_KEY", "OPENCODE_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"} {
 		t.Setenv(e, "")
 	}
 }
