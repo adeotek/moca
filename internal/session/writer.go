@@ -29,6 +29,16 @@ type Writer struct {
 	path string
 	id8  string
 	last string
+	// A deferred writer (CreateLazy) has no file yet: the session is an id,
+	// a path and the header in memory, and the file appears with the first
+	// conversational entry. Until then, metadata entries (a model or mode
+	// switch from the TUI) wait in pending and are written in order behind
+	// the header, so a session that never gets a prompt leaves nothing on
+	// disk (§8).
+	dir     string
+	slug    string
+	head    Entry   // the session header entry, written first on materialize
+	pending []Entry // entries appended before the file existed
 }
 
 func newID() string {
@@ -55,36 +65,48 @@ func Slug(prompt string) string {
 	return s
 }
 
+// Create makes the session file at once and writes the header entry.
 func Create(dir string, h Header, slug string) (*Writer, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	w, err := newWriter(dir, h, slug)
+	if err != nil {
 		return nil, err
 	}
-	os.Chmod(dir, 0o700)
+	if err := w.materialize(); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+// CreateLazy allocates a session without touching the disk: the id, the path
+// and the header stay in memory and the file is created by the first entry
+// that is not pre-conversation metadata (see Append). Opening moca and
+// quitting without sending a prompt therefore leaves no session behind to
+// resume or clean up (§8). Path and ID8 are final from here on: a caller may
+// print them before the file exists, and Created says whether it does.
+func CreateLazy(dir string, h Header, slug string) (*Writer, error) {
+	return newWriter(dir, h, slug)
+}
+
+// newWriter allocates the session's identity: a random id8, the file name
+// built from it and the header entry. Nothing is written.
+func newWriter(dir string, h Header, slug string) (*Writer, error) {
 	if h.StartedAt.IsZero() {
 		h.StartedAt = time.Now()
 	}
-	for range 10 {
-		id8 := newID()[:8]
-		p := filepath.Join(dir, fmt.Sprintf("%s-%s-%s.jsonl", h.StartedAt.Format("2006-01-02"), slug, id8))
-		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY|os.O_APPEND, 0o600)
-		if errors.Is(err, fs.ErrExist) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if err := lockFile(f); err != nil {
-			f.Close()
-			return nil, err
-		}
-		w := &Writer{f: f, path: p, id8: id8}
-		if _, err := w.Append(Entry{Type: TypeSession, Session: &h}); err != nil {
-			f.Close()
-			return nil, err
-		}
-		return w, nil
-	}
-	return nil, errors.New("could not allocate a unique session id")
+	w := &Writer{dir: dir, slug: slug}
+	// The header's id is settled now, not at materialize time: entries
+	// buffered before the file exists chain to it, and the chain must read
+	// the same whether the first prompt or a metadata entry arrived first.
+	w.head = Entry{Type: TypeSession, Session: &h, ID: newID(), Time: h.StartedAt}
+	w.last = w.head.ID
+	w.reid()
+	return w, nil
+}
+
+// reid allocates a fresh id8 and the file name that carries it.
+func (w *Writer) reid() {
+	w.id8 = newID()[:8]
+	w.path = filepath.Join(w.dir, fmt.Sprintf("%s-%s-%s.jsonl", w.head.Session.StartedAt.Format("2006-01-02"), w.slug, w.id8))
 }
 
 // Open reopens a session file for appending and returns its entries. The
@@ -180,20 +202,117 @@ func (w *Writer) Append(e Entry) (Entry, error) {
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
-	b, err := json.Marshal(e)
-	if err != nil {
-		return e, err
+	if w.f == nil {
+		if preConversation(e.Type) { // a model/mode switch: nothing to persist yet
+			w.pending = append(w.pending, e)
+			w.last = e.ID
+			return e, nil
+		}
+		if err := w.materializeLocked(); err != nil {
+			return e, err
+		}
 	}
-	if _, err := w.f.Write(append(b, '\n')); err != nil {
+	if err := w.write(e); err != nil {
 		return e, err
 	}
 	w.last = e.ID
 	return e, nil
 }
 
-func (w *Writer) Path() string { return w.path }
-func (w *Writer) ID8() string  { return w.id8 }
-func (w *Writer) Close() error { return w.f.Close() }
+// preConversation is an entry type that describes the session's settings
+// rather than a turn: it is buffered until a real entry arrives, so changing
+// the model or the mode in a TUI you then quit does not create a session.
+func preConversation(t string) bool {
+	return t == TypeModelChange || t == TypePermissionMode
+}
+
+// materialize creates the session file (and its lock) and writes the header
+// followed by the entries buffered before it. A file that appears anyway — a
+// name collision — gets a fresh id and another try.
+func (w *Writer) materialize() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.materializeLocked()
+}
+
+func (w *Writer) materializeLocked() error {
+	if w.f != nil {
+		return nil
+	}
+	if err := os.MkdirAll(w.dir, 0o700); err != nil {
+		return err
+	}
+	os.Chmod(w.dir, 0o700)
+	for range 10 {
+		f, err := os.OpenFile(w.path, os.O_CREATE|os.O_EXCL|os.O_WRONLY|os.O_APPEND, 0o600)
+		if errors.Is(err, fs.ErrExist) {
+			w.reid()
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := lockFile(f); err != nil {
+			f.Close()
+			return err
+		}
+		w.f = f
+		// The header leads, then whatever was buffered behind it — in the
+		// order it was appended, so the parentId chain and the replay read
+		// the same session a prompt-first start would have written.
+		for _, e := range append([]Entry{w.head}, w.pending...) {
+			if err := w.write(e); err != nil {
+				f.Close()
+				w.f = nil
+				return err
+			}
+		}
+		w.pending = nil
+		return nil
+	}
+	return errors.New("could not allocate a unique session id")
+}
+
+// write marshals e and appends it; the caller holds the lock.
+func (w *Writer) write(e Entry) error {
+	b, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	_, err = w.f.Write(append(b, '\n'))
+	return err
+}
+
+// Path is the session file's path. For a deferred session it names a file
+// that does not exist yet (Created says which).
+func (w *Writer) Path() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.path
+}
+
+func (w *Writer) ID8() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.id8
+}
+
+// Created reports whether the session file exists yet: false for a deferred
+// session nobody has prompted (§8).
+func (w *Writer) Created() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.f != nil
+}
+
+func (w *Writer) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.f == nil {
+		return nil // a deferred session that never got a prompt: nothing to close
+	}
+	return w.f.Close()
+}
 
 // ReadFile tolerates a truncated last line (crash mid-write).
 func ReadFile(path string) ([]Entry, error) {

@@ -203,10 +203,10 @@ func TestPlanEnvelopeKeepsPrefixStable(t *testing.T) {
 // default first, yolo in plan turns plan off first.
 func TestModeEntriesRecordBothFlags(t *testing.T) {
 	a, _, _ := startTest(t, newScript(t), 40)
-	a.SetYolo(true)
+	a.SetMode(ModeYolo)
 	a.SetPlan(true)
-	a.SetYolo(false)
-	a.SetYolo(true)
+	a.SetMode(ModeAsk)
+	a.SetMode(ModeYolo)
 	var got []session.PermissionMode
 	for _, e := range a.entries {
 		if e.Type == session.TypePermissionMode {
@@ -217,7 +217,7 @@ func TestModeEntriesRecordBothFlags(t *testing.T) {
 		{Yolo: true, Mode: "yolo"},
 		{Mode: "ask"}, {Plan: true, Mode: "ask"}, // SetPlan(true): yolo off, then plan on
 		{Plan: true, Mode: "ask"},
-		{Mode: "ask"}, {Yolo: true, Mode: "yolo"}, // SetYolo(true): plan off, then yolo
+		{Mode: "ask"}, {Yolo: true, Mode: "yolo"}, // SetMode(yolo): plan off, then yolo
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)

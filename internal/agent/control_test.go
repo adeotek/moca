@@ -64,6 +64,63 @@ func TestToggleHard(t *testing.T) {
 	}
 }
 
+// With no modelHardEffort the escalation stays at high, the level /hard
+// shipped with (§4).
+func TestHardEffortDefaultsToHigh(t *testing.T) {
+	s := newScript(t)
+	cfg := catalogConfig(t, s, `,"modelHard":"opencode-go/glm-5.3"`)
+	a := startCatalog(t, s, cfg)
+	if on, err := a.ToggleHard(); err != nil || !on || a.Effort() != llm.EffortHigh {
+		t.Fatalf("hard: on=%v effort=%q (%v)", on, a.Effort(), err)
+	}
+}
+
+// modelEffort and modelHardEffort (§4, v0.7.11): the config decides a fresh
+// session's effort and /hard's escalation, both clamped to the model's own
+// levels, and the session header records the resolved level.
+func TestConfigEffort(t *testing.T) {
+	s := newScript(t)
+	cfg := catalogConfig(t, s, `,"modelEffort":"high","modelHard":"opencode-go/glm-5.3","modelHardEffort":"max"`)
+	a := startCatalog(t, s, cfg)
+	// glm-5.3-flash supports low|high|max, so "high" is taken as-is.
+	if a.Effort() != llm.EffortHigh {
+		t.Fatalf("modelEffort high → %q", a.Effort())
+	}
+	entries, err := session.ReadFile(a.Session().Path())
+	if err != nil || len(entries) == 0 || entries[0].Session.Effort != string(llm.EffortHigh) {
+		t.Fatalf("header effort: %+v (%v)", entries, err)
+	}
+	// /hard goes to modelHard at modelHardEffort.
+	on, err := a.ToggleHard()
+	if err != nil || !on || a.Model().Qualified() != "opencode-go/glm-5.3" || a.Effort() != llm.EffortMax {
+		t.Fatalf("hard: on=%v model=%s effort=%q (%v)", on, a.Model().Qualified(), a.Effort(), err)
+	}
+	if on, err := a.ToggleHard(); err != nil || on || a.Model().Qualified() != "opencode-go/glm-5.3-flash" || a.Effort() != llm.EffortHigh {
+		t.Fatalf("back: on=%v model=%s effort=%q (%v)", on, a.Model().Qualified(), a.Effort(), err)
+	}
+}
+
+// The config effort is a starting point, not a floor: it is clamped to the
+// model's levels, and --effort still wins over it (§4 — the flag is the
+// per-run override).
+func TestConfigEffortClampsAndFlagWins(t *testing.T) {
+	s := newScript(t)
+	// flash has no medium: the closest level at or below is low.
+	a := startCatalog(t, s, catalogConfig(t, s, `,"modelEffort":"medium"`))
+	if a.Effort() != llm.EffortLow {
+		t.Fatalf("modelEffort medium on a low|high|max model → %q, want low", a.Effort())
+	}
+	s2 := newScript(t)
+	cfg := catalogConfig(t, s2, `,"modelEffort":"low"`)
+	b, err := Start(StartOptions{Config: cfg, Workdir: t.TempDir(), HTTP: s2.srv.Client(), Slug: "t", Effort: "max"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Effort() != llm.EffortMax {
+		t.Fatalf("--effort max over modelEffort low → %q", b.Effort())
+	}
+}
+
 func TestSteeringLandsAfterToolResults(t *testing.T) {
 	s := newScript(t, toolTurn([2]string{"ls", `{}`}), textTurn("done"))
 	a, _, _ := startTestWith(t, s, "", "")

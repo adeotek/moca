@@ -84,6 +84,8 @@ Full uninstall — the binary plus `~/.config/moca`, `~/.local/share/moca` and `
 {
   "model":      "opencode-go/glm-5.3-flash",   // everyday turns — cheap, fast
   "modelHard":  "opencode-go/glm-5.3",         // /hard escalation: planning, gnarly debug
+  // "modelEffort": "medium",                  // off|minimal|low|medium|high|xhigh|max (clamped per model)
+  // "modelHardEffort": "high",                // what /hard escalates to (default: high)
 
   "providers": {
     "opencode-go": { "auth": "api_key", "apiKey": "env:OPENCODE_API_KEY" },
@@ -112,6 +114,8 @@ Secrets never appear as literals: `apiKey` is an optional `env:VAR` reference �
 | `openai` | `OPENAI_API_KEY` **or** `moca login openai` | ChatGPT Plus/Pro subscription login via OpenAI's "Sign in with ChatGPT" open-source flow |
 | `ollama` | none | local or LAN [Ollama](https://ollama.com) server — models are discovered from it; see below |
 | any name | `baseUrl` + `protocol` | custom providers: vLLM, LM Studio, OpenAI-compatible gateways |
+
+**Effort is config too**: `"modelEffort"` sets the level a fresh session runs at (absent = the model's own default, `medium` on most) and `"modelHardEffort"` the level `/hard` escalates to (default `high`) — both clamp to the levels the model really accepts (`glm-5.3-flash` has only `low|high|max`, so `medium` lands on `low`), `--effort` overrides the first for one run, and `/effort` or `ctrl+t` change it mid-session.
 
 **The model list comes from the provider.** Each provider's own `/models` endpoint is read at startup and cached for 24 h (one file per provider in `~/.local/share/moca/models-cache/`), so a model released yesterday shows up in `/model` without a moca release. Curated metadata (prices, thinking levels) still wins where it exists; a discovered model with no published price shows `—` rather than a fake `$0.00`, and one with no published window gets 16384 plus a startup warning. `/model` lists only providers you can actually run; a fresh install's first picker still shows everything, with a `/login <provider>` hint per row. `/clear-models-cache` empties the cache and re-reads the current model's provider at once — the session keeps every model it is using, and the other providers refetch on the next `/model`. A custom provider that declares its own models is used as declared.
 
@@ -169,7 +173,7 @@ Every shell command the agent proposes runs through a permission ladder. Three m
 
 A fresh install starts at `auto`; `--mode ask`, `/mode ask` or `"defaultMode": "ask"` in the config switches to the strictest interactive mode. Auto mode's classifier is one extra model call only when the risk table cannot decide a command, and `"auto": {"classifier": false}` turns it off (unsure commands then ask).
 
-Pick per run with `moca --mode ask|auto|yolo|plan` (`default` is still accepted — it is what earlier releases called `ask`) — `plan` is **plan mode** as a flag value (the plan scope: the run writes `docs/plans/`, nothing else; the v0.4.0-beta dev builds spelled these `--plan`, `--yolo` and `--no-yolo`, which now map to `--mode plan`, `--mode yolo` and `--mode default`) — or in the config with `"permissions": { "defaultMode": "auto" }` (user level; a trusted project's `.moca/config.jsonc` can pin it too and wins) — or in the TUI with **shift+tab** (`default → auto → plan → yolo`; `/mode` for the same, and plan rides only on `default`).
+Pick per run with `moca --mode ask|auto|yolo|plan` (`default` is still accepted — it is what earlier releases called `ask`) — `plan` is **plan mode** as a flag value (the plan scope: the run writes `docs/plans/`, nothing else; the v0.4.0-beta dev builds spelled these `--plan`, `--yolo` and `--no-yolo`, which now map to `--mode plan`, `--mode yolo` and `--mode default`) — or in the config with `"permissions": { "defaultMode": "auto" }` (user level; a trusted project's `.moca/config.jsonc` can pin it too and wins) — or in the TUI with **shift+tab** (`ask → auto → plan → yolo`) or `/mode` — no argument opens a picker over the four states, `/mode ask|auto|yolo|plan` sets one directly, and plan rides only on `ask`. The `/yolo` command is gone in v0.7.11; the mode itself is unchanged (`--mode yolo`, `"defaultMode": "yolo"` and the shift+tab stop all still work).
 
 ```jsonc
 // ~/.config/moca/config.jsonc
@@ -221,7 +225,7 @@ moca --continue                 # resume the latest session of this directory (o
 
 `-p` contract: stdout is the final answer text only; tool activity, retries and the token/cost summary go to stderr. Exit codes: `0` completed · `1` provider/runtime error · `2` config or usage error · `3` incomplete (step limit, or stopped after repeating the same failing call) · `130` interrupted.
 
-Sessions are append-only files under `~/.local/share/moca/sessions/`, keyed by working directory: `--continue` reopens this directory's latest, `--resume <id8>` any of its sessions and `--resume last` its newest (a session resumes only from the directory it started in), and `/sessions` lists, switches or deletes them in the TUI.
+Sessions are append-only files under `~/.local/share/moca/sessions/`, keyed by working directory — a TUI session is written on its first prompt, so opening moca and quitting (or only switching model or mode) leaves nothing behind: `--continue` reopens this directory's latest, `--resume <id8>` any of its sessions and `--resume last` its newest (a session resumes only from the directory it started in), and `/sessions` lists, switches or deletes them in the TUI.
 
 **TUI keys**
 
@@ -241,7 +245,7 @@ Sessions are append-only files under `~/.local/share/moca/sessions/`, keyed by w
 | `o` / `↑↓` `enter` / `s` / `a` / `d` | approval picker: allow once / move+confirm / allow for this session (memory only, never written) / allow always (saved into the project's `.moca/config.jsonc`) / deny (letters and arrows only after a 700 ms pause, arrows+enter only with an empty draft) |
 | `↑`/`↓` · `tab` · `esc` | in the `/` dropdown: pick · complete · dismiss |
 
-**Slash commands**: `/model` · `/clear-models-cache` · `/effort` · `/mode` · `/hard` · `/yolo` · `/plan` · `/execute` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/remember <text>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`). Typing `/` opens a dropdown of every command, loaded template (`prompt:`) and skill (`skill:`) as you type — `↑`/`↓` pick, `tab` completes, `enter` on an exact name runs it, and the command echoes into the transcript like your messages before its output.
+**Slash commands**: `/model` · `/clear-models-cache` · `/effort` · `/mode` · `/hard` · `/plan` · `/execute` · `/clear` · `/resume` · `/sessions` · `/compact` · `/cost` · `/undo` · `/copy` · `/show <n>` · `/remember <text>` · `/login` · `/logout` · `/help` · `/exit` (`/q`/`/quit`). Typing `/` opens a dropdown of every command, loaded template (`prompt:`) and skill (`skill:`) as you type — `↑`/`↓` pick, `tab` completes, `enter` on an exact name runs it, and the command echoes into the transcript like your messages before its output.
 
 Prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`) and skills (every skill you add is invokable as `/name`; an agent-recorded `auto` note is listed but never a command) join the same dropdown. **`/create-command`** is a built-in skill (nothing is dropped into your config dir): run it and the agent writes or updates the command for you — personal commands in `~/.config/moca/prompts/` (moca asks you to approve a write outside the workdir — once or for the session, never persistently) or project ones in `.moca/prompts/`. New commands and skills are usable the moment the run that wrote them finishes — no restart.
 

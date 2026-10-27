@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/adeotek/moca/internal/skills"
 )
@@ -226,5 +227,70 @@ func TestHelpTextAlignsWideRuneNames(t *testing.T) {
 	}
 	if rows != len(sk) {
 		t.Fatalf("listed %d skill rows, want %d:\n%s", rows, len(sk), h)
+	}
+}
+
+// /help's command column prints in the theme's help blue and the descriptions
+// stay at the terminal's default foreground (v0.7.11, `helpCmd`): styling is a
+// per-row wrapper, so the SGR-stripped listing is byte-identical to the plain
+// HelpText — the column alignment survives the color.
+func TestStyledHelpTextPaintsCommandsOnly(t *testing.T) {
+	theme := DefaultTheme()
+	blue := theme.Dark.HelpCmd
+	paint := func(dark bool) func(string) string {
+		st := theme.helpCmdStyle(dark)
+		return func(s string) string { return st.Render(s) }
+	}
+	prompts := []skills.Prompt{{Name: "review", Description: "review a diff"}}
+	sk := []skills.Skill{{Name: "self-knowledge", Description: "about moca"}}
+	for _, dark := range []bool{true, false} {
+		plain := HelpText(prompts, sk)
+		styled := StyledHelpText(prompts, sk, paint(dark))
+		if got := ansi.Strip(styled); got != plain {
+			t.Fatalf("dark=%v: styled help must strip back to the plain listing:\n%q\n---\n%q", dark, got, plain)
+		}
+		// Every block's rows paint the command and nothing else: the /exit row
+		// (commands) and /self-knowledge (skills) open with the blue SGR, and
+		// what follows the colored token carries no escape at all.
+		for _, name := range []string{"/exit", "/self-knowledge", "/review"} {
+			token := theme.helpCmdStyle(dark).Render(name)
+			var row string
+			for _, ln := range strings.Split(styled, "\n") {
+				if strings.Contains(ln, token) {
+					row = ln
+					break
+				}
+			}
+			if row == "" {
+				t.Fatalf("dark=%v: no row for %s", dark, name)
+			}
+			if !strings.HasPrefix(row, token) {
+				t.Fatalf("dark=%v: %s must open its row in the help color: %q", dark, name, row)
+			}
+			rest := strings.TrimPrefix(row, token)
+			if strings.Contains(rest, "\x1b[") {
+				t.Fatalf("dark=%v: the description after %s must stay unstyled: %q", dark, name, rest)
+			}
+		}
+	}
+	// The palette really differs per variant — a fixed hex would pass everything
+	// above while ignoring the terminal's background.
+	if theme.Dark.HelpCmd == theme.Light.HelpCmd {
+		t.Fatalf("helpCmd must have a dark and a light value, both are %q", blue)
+	}
+}
+
+// The /help command prints through the trusted path (println), so the color
+// reaches the scrollback; the content path would Sanitize it into literal text.
+func TestHelpCommandPrintsStyled(t *testing.T) {
+	m := newAgentModel(t)
+	out := drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "help"}))
+	if !strings.Contains(out, m.th.helpCmdStyle(true).Render("/exit")) {
+		t.Fatalf("/help must color its command column: %q", out)
+	}
+	// printed() renders tea.Println's message, whose body sits inside braces.
+	got := strings.TrimSuffix(strings.TrimPrefix(ansi.Strip(out), "{"), "}")
+	if want := HelpText(m.opts.Prompts, m.allSkills()); got != want {
+		t.Fatalf("/help text lost a row or an escape leaked:\n%q\n---\n%q", got, want)
 	}
 }

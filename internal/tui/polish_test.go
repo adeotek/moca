@@ -121,6 +121,13 @@ func TestExitLine(t *testing.T) {
 	if l := m.exitLine(); !strings.Contains(l, "moca --resume "+m.agent.Session().ID8()) {
 		t.Fatalf("exit line %q", l)
 	}
+	// A deferred session that never got a prompt has an id but no transcript
+	// (§8): printing its id would offer a resume that cannot work.
+	d := newAgentModelDeferred(t, true)
+	d.sessionUsed = true
+	if l := d.exitLine(); l != "" {
+		t.Fatalf("a session with no file must print no resume hint: %q", l)
+	}
 }
 
 // The exit frame keeps the status bar and drops the input box, so the exit

@@ -19,6 +19,9 @@ import (
 // for the trust decision.
 func TestResolveMode(t *testing.T) {
 	cfgAuto := config.Config{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}
+	// v0.7.11 removed the legacy top-level `yolo` flag: permissions.defaultMode
+	// is the one config layer that selects the mode.
+	cfgYolo := config.Config{Permissions: config.PermissionsConfig{DefaultMode: "yolo"}}
 	cases := []struct {
 		name     string
 		args     []string
@@ -31,11 +34,11 @@ func TestResolveMode(t *testing.T) {
 		// `default` is v0.7.1's name for ask: still parsed, resolved as ask.
 		{"--mode default beats cfg auto", []string{"--mode", "default", "-p", "x"}, cfgAuto, "ask", false},
 		{"--mode plan", []string{"--mode", "plan", "-p", "x"}, config.Config{}, "ask", true},
-		{"--mode plan over cfg yolo", []string{"--mode", "plan", "-p", "x"}, config.Config{Yolo: true}, "ask", true},
+		{"--mode plan over cfg yolo", []string{"--mode", "plan", "-p", "x"}, cfgYolo, "ask", true},
 		{"--mode plan over cfg defaultMode auto", []string{"--mode", "plan", "-p", "x"}, cfgAuto, "ask", true},
-		{"--mode ask over cfg yolo", []string{"--mode", "ask", "-p", "x"}, config.Config{Yolo: true}, "ask", false},
+		{"--mode ask over cfg yolo", []string{"--mode", "ask", "-p", "x"}, cfgYolo, "ask", false},
 		{"cfg defaultMode wins", []string{"-p", "x"}, cfgAuto, "auto", false},
-		{"cfg yolo flag wins", []string{"-p", "x"}, config.Config{Yolo: true}, "yolo", false},
+		{"cfg defaultMode yolo wins", []string{"-p", "x"}, cfgYolo, "yolo", false},
 		{"unset defaults to auto", []string{"-p", "x"}, config.Config{}, "auto", false},
 	}
 	for _, c := range cases {
@@ -165,7 +168,6 @@ func TestLoadProjectIgnoredWhenUntrusted(t *testing.T) {
 // for the trust decision either.
 func TestPlanNeverResolvesWider(t *testing.T) {
 	for _, cfg := range []config.Config{
-		{Yolo: true},
 		{Permissions: config.PermissionsConfig{DefaultMode: "yolo"}},
 		{Permissions: config.PermissionsConfig{DefaultMode: "auto"}},
 		{Project: &config.ProjectConfig{Permissions: config.PermissionsConfig{DefaultMode: "auto"}}},

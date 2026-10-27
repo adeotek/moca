@@ -118,6 +118,22 @@ func matchCommands(items []dropItem, q string) []dropItem {
 	return out
 }
 
+// exactCursor is the row enter acts on: the item whose name equals the typed
+// word, else the first prefix match. Landing on the exact row is what makes
+// "enter on an exact name sends" hold when a longer sibling shares the prefix
+// — `/mode` used to leave the cursor on `/model`, so enter completed the draft
+// and ran the model picker instead (v0.7.11). The comparison is
+// case-insensitive, matching matchCommands' filter.
+func exactCursor(items []dropItem, word string) int {
+	lw := strings.ToLower(word)
+	for i, it := range items {
+		if strings.ToLower(it.name) == lw {
+			return i
+		}
+	}
+	return 0
+}
+
 // dropdown returns the active autocomplete state for the current draft, or
 // nil. It is hidden whenever enter would be refused or the screen is owned by
 // something else: a run (typed text steers the model), a compaction, a `!`
@@ -144,6 +160,7 @@ func (m *model) dropdown() *dropState {
 		} else {
 			d.items = matchCommands(m.commandHints(), cmd)
 		}
+		d.cursor = exactCursor(d.items, d.word)
 		m.drop = d
 	}
 	if m.drop.dismissed || len(m.drop.items) == 0 {

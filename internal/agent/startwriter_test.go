@@ -6,12 +6,15 @@ package agent
 // easy to reach: an environment-referenced web key that does not resolve.
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/session"
 )
 
 func countFDs(t *testing.T) int {
@@ -64,5 +67,58 @@ func TestFailedStartDoesNotLeakTheSessionWriter(t *testing.T) {
 			names[i] = e.Name()
 		}
 		t.Fatalf("failed Start left %d session file(s) behind: %v", len(ents), names)
+	}
+}
+
+// TestDeferredSessionWaitsForTheFirstPrompt (§8): the TUI's Start keeps the
+// session off the disk — a model or mode switch is buffered — and the file
+// appears, complete and in order, with the first turn.
+func TestDeferredSessionWaitsForTheFirstPrompt(t *testing.T) {
+	s := newScript(t, textTurn("ok"))
+	a, _, _ := startTest(t, s, 40, func(o *StartOptions) { o.DeferSession = true })
+	if a.Session().Created() {
+		t.Fatal("a deferred Start must not create the session file")
+	}
+	dir := filepath.Join(os.Getenv("XDG_DATA_HOME"), "moca", "sessions")
+	if ents, err := os.ReadDir(dir); err == nil && len(ents) != 0 {
+		t.Fatalf("sessions dir holds %d file(s) before any prompt", len(ents))
+	}
+	// Pre-conversation metadata stays in memory: switching effort and mode in
+	// a TUI you then quit must leave nothing to resume.
+	if _, err := a.SetEffort("high"); err != nil {
+		t.Fatal(err)
+	}
+	a.SetMode(ModeYolo)
+	if a.Session().Created() {
+		t.Fatal("a model/mode switch must not create the session file")
+	}
+	if _, err := a.Run(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.Session().Created() {
+		t.Fatal("the first prompt must create the session file")
+	}
+	if !strings.Contains(a.Session().Path(), a.Session().ID8()) {
+		t.Fatalf("path %q does not carry the id8 %q", a.Session().Path(), a.Session().ID8())
+	}
+	entries, err := session.ReadFile(a.Session().Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 0 || entries[0].Type != session.TypeSession {
+		t.Fatalf("the header must lead: %+v", entries)
+	}
+	var types []string
+	for _, e := range entries[1:] {
+		types = append(types, e.Type)
+	}
+	// The buffered settings land before the turn that created the file.
+	if len(types) < 4 || types[0] != session.TypeModelChange || types[1] != session.TypePermissionMode || types[2] != session.TypeMessage {
+		t.Fatalf("entries after the header: %v", types)
+	}
+	for i := 1; i < len(entries); i++ {
+		if entries[i].ParentID != entries[i-1].ID {
+			t.Fatalf("chain broken at entry %d: %q → %q", i, entries[i].ParentID, entries[i-1].ID)
+		}
 	}
 }

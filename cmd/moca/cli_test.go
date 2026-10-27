@@ -22,6 +22,7 @@ import (
 )
 
 func TestParseArgs(t *testing.T) {
+	yoloCfg := config.Config{Permissions: config.PermissionsConfig{DefaultMode: "yolo"}} // v0.7.11 removed the legacy top-level flag
 	o, err := parseArgs([]string{"-p", "hi", "--model", "openai/x", "--effort", "high", "--no-approve"}, nil)
 	if err != nil || !o.OneShot || o.Prompt != "hi" || o.Model != "openai/x" || o.Effort != "high" || o.Approve == nil || *o.Approve {
 		t.Fatalf("%+v %v", o, err)
@@ -45,11 +46,11 @@ func TestParseArgs(t *testing.T) {
 	// --mode ask replaces --no-yolo: it suppresses a configured yolo. The
 	// legacy spelling `default` is the same mode and still parses.
 	o, _ = parseArgs([]string{"--mode", "ask", "-p", "x"}, nil)
-	if m, plan := o.ResolveMode(config.Config{Yolo: true}); m != "ask" || plan {
-		t.Fatal("--mode ask overrides config yolo")
+	if m, plan := o.ResolveMode(config.Config{Permissions: config.PermissionsConfig{DefaultMode: "yolo"}}); m != "ask" || plan {
+		t.Fatal("--mode ask overrides a configured yolo")
 	}
 	o, _ = parseArgs([]string{"--mode", "default", "-p", "x"}, nil)
-	if m, _ := o.ResolveMode(config.Config{Yolo: true}); m != "ask" {
+	if m, _ := o.ResolveMode(yoloCfg); m != "ask" {
 		t.Fatalf("--mode default must still parse as ask, got %q", m)
 	}
 	o, _ = parseArgs([]string{"--mode", "plan", "-p", "x"}, nil)
@@ -63,7 +64,7 @@ func TestParseArgs(t *testing.T) {
 	if mode, plan := o.ResolveMode(config.Config{}); mode != "auto" || plan {
 		t.Fatal("no flag → auto without plan")
 	}
-	if m, _ := o.ResolveMode(config.Config{Yolo: true}); m != "yolo" {
+	if m, _ := o.ResolveMode(yoloCfg); m != "yolo" {
 		t.Fatal("no flag → config yolo decides")
 	}
 	if _, err := parseArgs([]string{"--effort", "med", "-p", "x"}, nil); err == nil {

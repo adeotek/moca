@@ -41,6 +41,13 @@ type StartOptions struct {
 	Trusted bool
 	Mode    PermMode // default | auto | yolo (the plan's Defaults first, then this)
 	Plan    bool
+	// DeferSession keeps the session file off the disk until the first
+	// prompt arrives (§8): the interactive TUI sets it, so opening moca and
+	// quitting — or only switching model/mode — leaves no empty session to
+	// resume. The file's id and path exist from the start either way.
+	// Front ends that hand the id out as a loadable session (ACP's
+	// session/new) create the file immediately.
+	DeferSession bool
 	// Headless marks a one-shot task run (-p): there a text-only reply with
 	// no tool call at all is a defect (the action nudge applies), while an
 	// interactive turn may legitimately be a question.
@@ -645,19 +652,21 @@ func Start(o StartOptions) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	effort := m.DefaultEffort()
-	if o.Effort != "" {
-		e, _ := llm.ParseEffort(o.Effort)
-		effort = m.ClampEffort(e)
-	}
+	effort := startEffort(m, cfg, o.Effort)
 	slug := o.Slug
 	if slug == "" {
 		slug = "session"
 	}
-	w, err := session.Create(filepath.Join(config.DataDir(), "sessions"), session.Header{
+	h := session.Header{
 		Workdir: jail.Root(), Provider: m.Provider, Model: cfg.Model, Effort: string(effort),
 		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.mode() == ModeYolo, Mode: string(o.mode()),
-		SelfManagedSkills: selfManaged != nil}, slug)
+		SelfManagedSkills: selfManaged != nil}
+	var w *session.Writer
+	if o.DeferSession {
+		w, err = session.CreateLazy(filepath.Join(config.DataDir(), "sessions"), h, slug)
+	} else {
+		w, err = session.Create(filepath.Join(config.DataDir(), "sessions"), h, slug)
+	}
 	if err != nil {
 		return nil, &StartError{err}
 	}
@@ -668,14 +677,34 @@ func Start(o StartOptions) (*Agent, error) {
 		// append to. Close it, then delete it: leaving it behind both held the
 		// lock (a retry saw ErrInUse on a session nobody was using) and put an
 		// empty session in /resume's list. Close precedes Remove — Windows
-		// refuses to delete an open file.
+		// refuses to delete an open file. A deferred session never wrote the
+		// file, so there is nothing to remove.
 		_ = w.Close()
+		if !w.Created() {
+			return nil, &StartError{err}
+		}
 		if rmErr := os.Remove(w.Path()); rmErr != nil {
 			slog.Debug("failed start: session file remains", "path", w.Path(), "err", rmErr)
 		}
 		return nil, &StartError{err}
 	}
 	return a, nil
+}
+
+// startEffort resolves a fresh session's effort (§4): --effort wins, else the
+// configured modelEffort, else the model's own default; always clamped to the
+// levels the model accepts. Resume is not this function: a stored session's
+// effort is its own, and only a flag overrides it there.
+func startEffort(m provider.Model, cfg config.Config, flag string) llm.Effort {
+	effort := m.DefaultEffort()
+	if cfg.ModelEffort != "" {
+		effort = m.ClampEffort(llm.Effort(cfg.ModelEffort))
+	}
+	if flag != "" {
+		e, _ := llm.ParseEffort(flag) // validated by the flag's own parse
+		effort = m.ClampEffort(e)
+	}
+	return effort
 }
 
 // skillGuard is the validating guard: it enforces the skill contract (§12) on

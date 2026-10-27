@@ -236,6 +236,44 @@ func TestClampRunes(t *testing.T) {
 	}
 }
 
+// Enter on a full command name runs that command, even when a longer sibling
+// shares the prefix: the cursor lands on the exact row, so `/mode` + enter no
+// longer completes to `/model` and opens the model picker (v0.7.11 — the
+// pre-dropdown rule "enter on an exact name sends" was only true while the
+// exact name happened to be the first match).
+func TestDropdownEnterRunsTheExactName(t *testing.T) {
+	m := newAgentModel(t)
+	for _, c := range BuiltinCommands {
+		m.input.SetBuffer("/" + c)
+		m.syncTextarea()
+		m.drop = nil
+		d := m.dropdown()
+		if d == nil {
+			t.Fatalf("/%s: the dropdown must open", c)
+		}
+		if got := d.items[d.cursor].name; got != c {
+			t.Fatalf("/%s: the cursor sits on %q, want the exact row", c, got)
+		}
+		if _, handled := m.dropdownKey(d, keyMsg("enter")); handled {
+			t.Fatalf("/%s: enter must submit, not complete the draft (%q)", c, m.input.Buffer())
+		}
+	}
+	// The rule itself, on a list where the exact row is not the first match —
+	// the argument rows (a model id, an effort level) behave the same way.
+	items := []dropItem{{name: "model"}, {name: "mode"}}
+	for _, tc := range []struct {
+		word string
+		want int
+	}{{"mode", 1}, {"MODE", 1}, {"mod", 0}, {"", 0}} {
+		if got := exactCursor(items, tc.word); got != tc.want {
+			t.Fatalf("exactCursor(%q) = %d, want %d", tc.word, got, tc.want)
+		}
+	}
+	if got := exactCursor(nil, "anything"); got != 0 {
+		t.Fatalf("an empty list must keep cursor 0, got %d", got)
+	}
+}
+
 func contains(list []string, s string) bool {
 	for _, v := range list {
 		if v == s {

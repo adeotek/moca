@@ -1,6 +1,8 @@
 {
   "model":      "opencode-go/glm-5.3-flash",   // everyday turns — cheap, fast
   "modelHard":  "opencode-go/glm-5.3",          // /hard escalation: planning, gnarly debug
+  // "modelEffort": "medium",                    // fresh session's effort (§4); --effort overrides
+  // "modelHardEffort": "high",                  // /hard's effort (§4)
 
   "providers": {
     "anthropic":   { "auth": "api_key", "apiKey": "env:ANTHROPIC_API_KEY" },  // api_key only — subscription OAuth not permitted (§3, rev 12)
@@ -33,8 +35,6 @@
   "snapshot": { "retentionDays": 30 },   // 0 = keep forever
 
   "log": { "level": "info" },            // diagnostic log in ~/.local/state/moca/logs (info|debug|off); MOCA_LOG overrides
-
-  "yolo": false,                         // true = all permission checks off by default (§7.5); --mode default overrides
 
   // Self-managed project skills (§12): this user-level key is the only opt-in.
   // A trusted .moca/config.jsonc may set false to opt a repository out (a true

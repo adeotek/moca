@@ -46,6 +46,82 @@ func TestCreateAppendRead(t *testing.T) {
 	_ = time.Now
 }
 
+// TestCreateLazyLeavesNoFile: a deferred session that never gets a prompt is
+// an id and a path, nothing more (§8) — no file, no lock, and no sessions dir
+// on a machine that never ran a prompt.
+func TestCreateLazyLeavesNoFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "sessions")
+	w, err := CreateLazy(dir, Header{Workdir: "/w", Model: "a/b"}, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Created() {
+		t.Fatal("CreateLazy must not create the file")
+	}
+	if _, err := os.Stat(w.Path()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the file must not exist: %v", err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the sessions dir must not exist yet: %v", err)
+	}
+	if !regexp.MustCompile(`/\d{4}-\d{2}-\d{2}-s-[0-9a-f]{8}\.jsonl$`).MatchString(w.Path()) {
+		t.Fatalf("path: %q", w.Path())
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing a session that never wrote must be a no-op: %v", err)
+	}
+	if _, err := os.Stat(w.Path()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("Close must not create the file")
+	}
+}
+
+// TestLazyWriterMaterializesOnTheFirstTurn: a model or mode switch before the
+// first prompt is buffered, not written; the first message creates the file
+// with the header, the buffered entry and itself, in order and chained, so the
+// transcript reads the same as a prompt-first start.
+func TestLazyWriterMaterializesOnTheFirstTurn(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "sessions")
+	w, err := CreateLazy(dir, Header{Workdir: "/w", Model: "a/b", SystemPrompt: "SYS"}, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mc, err := w.Append(Entry{Type: TypeModelChange, ModelChange: &ModelChange{Model: "a/b", Effort: "high"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Created() {
+		t.Fatal("a pre-conversation entry must not create the session")
+	}
+	msg, err := w.Append(Entry{Type: TypeMessage, Message: &llm.Message{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: "hi"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !w.Created() {
+		t.Fatal("the first message must create the session")
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadFile(w.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].Type != TypeSession || got[1].Type != TypeModelChange || got[2].Type != TypeMessage {
+		t.Fatalf("entries: %+v", got)
+	}
+	if got[0].Session.SystemPrompt != "SYS" || got[1].ID != mc.ID || got[2].ID != msg.ID {
+		t.Fatalf("ids/header: %+v", got)
+	}
+	if got[1].ParentID != got[0].ID || got[2].ParentID != got[1].ID {
+		t.Fatalf("chain: %q → %q → %q", got[0].ID, got[1].ParentID, got[2].ParentID)
+	}
+	// The file the lazy writer created is a session the rest of the package
+	// reads: Find locates it by its id8 and the header's workdir.
+	if _, err := Find(dir, w.ID8(), "/w"); err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+}
+
 func TestSlug(t *testing.T) {
 	if Slug("") != "session" || Slug("!!!") != "session" || Slug("Héllo Wörld") != "h-llo-w-rld" {
 		t.Fatal(Slug("Héllo Wörld"))

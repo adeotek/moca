@@ -90,11 +90,12 @@ func TestCtrlTCyclesEffort(t *testing.T) {
 	}
 }
 
-// Yolo can never carry plan: entering yolo drops it first.
+// Yolo can never carry plan: entering yolo drops it first. Since v0.7.11 the
+// only TUI route to the mode is /mode (the /yolo command is gone).
 func TestYoloNeverCarriesPlan(t *testing.T) {
 	m := newAgentModel(t)
 	m.agent.SetPlan(true)
-	m.runCommand(Parsed{Kind: KindCommand, Name: "yolo"})
+	m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "yolo"})
 	if m.agent.Plan() {
 		t.Fatal("yolo must not carry plan")
 	}
@@ -147,13 +148,56 @@ func TestShiftTabRefusedWhileRunning(t *testing.T) {
 	}
 }
 
+// /mode with no argument opens a picker over the four states (v0.7.11), the
+// current one marked and preselected; enter applies the row, esc leaves the
+// mode alone. The argument form still sets a mode directly.
+func TestModeCommandOpensThePicker(t *testing.T) {
+	m := newAgentModel(t)
+	if cmd := m.runCommand(Parsed{Kind: KindCommand, Name: "mode"}); cmd != nil {
+		t.Fatal("opening the picker prints nothing")
+	}
+	if m.pick == nil {
+		t.Fatal("no-arg /mode must open the picker")
+	}
+	var pos []string
+	for _, it := range m.pick.items {
+		pos = append(pos, it.key)
+	}
+	if got := strings.Join(pos, ","); got != "ask,auto,yolo,plan" {
+		t.Fatalf("picker rows %q, want ask,auto,yolo,plan", got)
+	}
+	if cur := m.pick.items[m.pick.cursor]; !strings.HasPrefix(cur.label, "auto") || !strings.Contains(cur.label, "— current") {
+		t.Fatalf("the current mode must be preselected: %q (cursor %d)", cur.label, m.pick.cursor)
+	}
+	// Walk to plan and take it.
+	m.pick.cursor = 3
+	drained(m, m.pickKey(keyMsg("enter")))
+	if m.pick != nil || !m.agent.Plan() || m.agent.Mode() != agent.ModeAsk {
+		t.Fatalf("enter on plan: mode %v plan %v (picker %v)", m.agent.Mode(), m.agent.Plan(), m.pick != nil)
+	}
+	// Plan is the marked row now, and esc changes nothing.
+	m.runCommand(Parsed{Kind: KindCommand, Name: "mode"})
+	if cur := m.pick.items[m.pick.cursor]; cur.key != "plan" || !strings.Contains(cur.label, "— current") {
+		t.Fatalf("plan must be the current row: %q", cur.label)
+	}
+	if out := drained(m, m.pickKey(keyMsg("esc"))); !strings.Contains(out, "mode unchanged") {
+		t.Fatalf("esc note: %q", out)
+	}
+	if !m.agent.Plan() {
+		t.Fatal("esc must leave the mode alone")
+	}
+	// A picker opened mid-run is refused like every other mode change.
+	m.agent.SetPlan(false)
+	m.running = true
+	out := drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode"}))
+	if m.pick != nil || !strings.Contains(out, "finish or interrupt the run first") {
+		t.Fatalf("mid-run /mode must refuse, not open the picker: %q", out)
+	}
+}
+
 func TestModeCommandShowsAndSets(t *testing.T) {
 	m := newAgentModel(t)
-	out := drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode"}))
-	if !strings.Contains(out, "mode: Auto") {
-		t.Fatalf("no-arg /mode prints the current mode (auto by default): %q", out)
-	}
-	out = drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "auto"}))
+	out := drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "auto"}))
 	if m.agent.Mode() != agent.ModeAuto {
 		t.Fatalf("/mode auto: %q mode=%v", out, m.agent.Mode())
 	}
@@ -166,7 +210,7 @@ func TestModeCommandShowsAndSets(t *testing.T) {
 	if m.agent.Mode() != agent.ModeAuto {
 		t.Fatalf("bad arg must not change the mode: %v", m.agent.Mode())
 	}
-	if !strings.Contains(out, "usage: /mode ask|auto|yolo|plan") {
+	if !strings.Contains(out, "usage: /mode [ask|auto|yolo|plan]") {
 		t.Fatalf("bad arg names the modes: %q", out)
 	}
 	m.running = true
@@ -218,7 +262,7 @@ func TestModeCommandPlanSymmetry(t *testing.T) {
 	// The usage line names all four values.
 	m.agent.SetMode(agent.ModeAsk)
 	out = drained(m, m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "bogus"}))
-	if !strings.Contains(out, "usage: /mode ask|auto|yolo|plan") {
+	if !strings.Contains(out, "usage: /mode [ask|auto|yolo|plan]") {
 		t.Fatalf("usage must list four values: %q", out)
 	}
 }

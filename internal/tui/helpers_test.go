@@ -42,6 +42,14 @@ func newAgentModelCfg(t *testing.T, so agent.StartOptions, cfgPath string) *mode
 // /clear, steering return, `!` notes, allow-always — run against real code.
 func newAgentModel(t *testing.T) *model {
 	t.Helper()
+	return newAgentModelDeferred(t, false)
+}
+
+// newAgentModelDeferred is newAgentModel with the TUI's own StartOptions:
+// deferSession keeps the session file off the disk until the first prompt
+// (§8), the shape cmd/moca starts the interactive TUI with.
+func newAgentModelDeferred(t *testing.T, deferSession bool) *model {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"+
@@ -62,7 +70,8 @@ func newAgentModel(t *testing.T) *model {
 		t.Fatal(err)
 	}
 	return newAgentModelCfg(t, agent.StartOptions{Config: cfg, Workdir: t.TempDir(), HTTP: srv.Client(),
-		Slug: "t", Ask: func(_ context.Context, _ tools.Question) tools.Answer { return tools.Deny }}, cfgPath)
+		Slug: "t", Ask: func(_ context.Context, _ tools.Question) tools.Answer { return tools.Deny },
+		DeferSession: deferSession}, cfgPath)
 }
 
 // newThinkingAgentModel builds an agent whose model has effort levels to
