@@ -20,6 +20,127 @@ agent's reaction was the defect.
 - No new config key: the per-turn ceiling stays `min(model.maxOutputTokens, context.reserveTokens)`, and a
   reasoning-heavy model can still be bounded lower per model (`providers.<p>.models.<id>.maxOutputTokens`).
 
+### Effort is config; the legacy `yolo` flag is gone
+
+Both halves of the model pair now carry their effort, so a level you always want does not have to be retyped
+on every launch — and the boolean that predated the mode model is retired.
+
+- **`modelEffort`** is the level a fresh session starts at (`/hard` aside). Absent keeps the model's own
+  default, which is what every session did before; `--effort` still wins over it for one run, and `/effort` /
+  `ctrl+t` still change it mid-session. The value is clamped to the levels the model really accepts — the
+  config is a wish, not a promise: `"modelEffort": "medium"` on `glm-5.3-flash` (only `low|high|max`) runs
+  at `low`, exactly like the built-in default.
+- **`modelHardEffort`** is what `/hard` escalates to; absent keeps `high`, the level it shipped with. (The
+  sample's `modelHard` comment also stopped claiming plan execution escalates — it never did.) Both
+  keys are validated against `config.Efforts` (`off|minimal|low|medium|high|xhigh|max`), which
+  `TestEffortsMatchLLM` pins to `llm.Efforts` — `config` is a leaf package and cannot import it, so the two
+  lists must not drift by hand.
+- **The legacy top-level `"yolo": false` key is removed**, sample included. It had been redundant since
+  v0.7.2 (`permissions.defaultMode` is the config's mode) and its `true` conflicted with `defaultMode`
+  anyway. Strict decode is what an old config gets: `json: unknown field "yolo"` with its `line:col`, not a
+  silent permission switch. The fix is one line — `"permissions": { "defaultMode": "yolo" }`.
+- Pinned by `TestConfigEffort` (config level reaches the session header, `/hard` escalates at
+  `modelHardEffort`), `TestConfigEffortClampsAndFlagWins` (`medium` clamps to `low`; `--effort max` beats
+  `"modelEffort": "low"`), `TestHardEffortDefaultsToHigh`, `TestModelEfforts` (every level accepted, an
+  unknown word named, absent keys stay empty) and `TestEffortsMatchLLM`.
+
+### A TUI session starts with your first prompt
+
+`moca` used to write the session file at startup, so simply opening it and quitting — or opening it, changing
+the model, and quitting — left a header-only session behind: a row in `/sessions` and `/resume` that nothing
+ever happened in, and a file to clean up by hand.
+
+- `agent.Start` gained `DeferSession`; `cmd/moca` passes it for the interactive TUI. With it,
+  `session.CreateLazy` allocates the id8, the file name and the header **in memory** and writes nothing: no
+  file, no lock, not even the `sessions` directory on a machine that has never sent a prompt. The first entry
+  that is not pre-conversation metadata creates the file and writes the header, then whatever was buffered
+  (`model_change`, `permission_mode`), then that entry — in order, chained, byte-for-byte what a prompt-first
+  start would have written.
+- The exit hint follows the file: `session <id8> · resume with: moca --resume <id8>` prints only once the
+  session exists (`Writer.Created`), so a launch nobody prompted prints no resume command that could not
+  work.
+- `-p` always prompts, and **ACP's `session/new` keeps writing its file immediately** — it hands that id out
+  to the client as a loadable session, so a file that appears only after the first prompt would break
+  `session/load` on a session the editor just created.
+- Pinned by `agent.TestDeferredSessionWaitsForTheFirstPrompt` (no file after Start and after a model/mode
+  switch; the transcript, its order and its parentId chain after the first turn) and
+  `session.TestLazyWriterMaterializesOnTheFirstTurn` / `session.TestCreateLazyLeavesNoFile`, plus the TUI's
+  `TestExitLine`.
+
+### `/mode` is a picker; `/yolo` is gone
+
+The two TUI routes to the permission mode disagreed about how much they explained: `/mode` printed a state
+line and a cycle hint, `/yolo` silently toggled one mode. One route now, and it shows what it can do.
+
+- **`/mode` with no argument opens a modal picker** over `ask`, `auto`, `yolo` and `plan` — one row per state
+  with what it means, the current one marked `— current` and under the cursor, `enter` to switch, `esc` to
+  leave the mode alone (`mode unchanged`). `/mode ask|auto|yolo|plan` still sets one directly, and both routes
+  are refused while a run or `!` is in progress. Plan is marked `current` while the plan scope is on, since
+  that is the state it names.
+- **The `/yolo` command is removed** — the mode is not. `--mode yolo`, `"permissions.defaultMode": "yolo"`,
+  the shift+tab stop and ACP's mode picker all keep working, and `agent.SetYolo` (its only caller) went with
+  the command: `SetMode(ModeYolo)`/`SetMode(ModeAsk)` is the pair every path uses. The sample config and the
+  README's command list lose the name; the `/help` line for `/mode` now says the picker exists.
+- Pinned by `TestModeCommandOpensThePicker` (four rows, the current one preselected and re-marked after a
+  change, `esc` changing nothing, a mid-run `/mode` refused rather than opening a panel) and
+  `TestYoloNeverCarriesPlan` now drives the mode through `/mode yolo`.
+
+### `enter` on a full command name runs it
+
+The `/` dropdown selected the first prefix match, so a command whose name is a prefix of another could not be
+typed and sent: `/mode` put the cursor on `/model`, `enter` completed the draft to `/model ` and the second
+`enter` opened the model picker mid-run (no way to reach `/mode` by hand at all — only the argument form worked
+once the picker was open).
+
+- The cursor now lands on the row whose name **equals** the word (case-insensitively, like the filter), falling
+  back to the first prefix match for a partial one — `exactCursor` in `dropdown.go`, applied to the command list
+  and to a command's argument rows. `↑`/`↓` still move it, so picking another row and pressing `enter` completes
+  to that row exactly as before; `tab` is untouched.
+- Pinned by `TestDropdownEnterRunsTheExactName`: every built-in typed in full must sit under the cursor and let
+  `enter` submit, plus `exactCursor`'s own cases (exact/partial/case-insensitive/empty list). Verified in the
+  built binary: `/mode` + `enter` opens the mode picker, `/mod` + `enter` still completes to `/model`.
+
+### Seeded skills re-checked: rtk 1.1.0, graphify 0.9.97
+
+The two standard skills moca plants are copies, not live links — upstream moved, so the bundled text was checked
+against the current releases and updated where it had drifted.
+
+- **rtk (0.51.0 → 1.1.0, released 2026-10-25).** The seeded skill gains 1.1.0's wrappers: `rtk mvn test`,
+  `rtk gradlew build`, `rtk dotnet test`, `rtk pnpm install` for builds/tests, and `rtk aws …`, `rtk psql …`,
+  `rtk glab mr list`, `rtk oc get pods`, `rtk wget <url>` for cloud/DB/download output, with the allowlist rule
+  spelled out (each wrapped tool must be allowlisted, so on a default config they ask once).
+  The shell analyser's class tables were re-verified against the real CLI and **nothing moved**: every
+  classified subcommand still exists and keeps its class, `run -c|--command` and `<runner> --shell` are still
+  the option-*before*-command string forms (refused), and 1.1.0's new subcommands fall into the generic rule —
+  the wrappers above as the tool they wrap, `pipeline`/`plugins`/`tasks`/`methods` as their own word, so a
+  writing or later-running authoring subcommand asks instead of running silently. Pinned by new `TestRtkUnwrap`
+  cases for the whole 1.1.0 surface.
+- **graphify (0.9.93 → 0.9.97, released 2026-10-27).** Re-generated upstream's `claude` bundle from 0.9.97 and
+  diffed it against the seed: **byte-identical**, `.graphify_version` aside (which moca deliberately does not
+  embed). Nothing to re-seed — the version pins in SPECS §12 and `docs/specs/external-tools.md` now say 0.9.97
+  and record the check.
+- Existing installs keep their planted copy by design (seeding is create-only); delete
+  `~/.config/moca/skills/rtk/` to pick up the new text.
+
+### `/help` reads as a list
+
+`/help` printed one flat block: command, padding, description, all in the terminal's foreground, so twenty
+rows of names read as prose.
+
+- **The command column now prints in the theme's blue** — a new `helpCmd` role (`#60a5fa` on dark,
+  `#1d4ed8` on light, the same blue the model field and the Plan badge use), configurable like every other
+  color through `tui.theme` and exported by `docs/themes/tui-theme-builder.html`. The **descriptions stay at
+  the terminal's default foreground**: the help body is text, not chrome.
+- Styling is a per-row wrapper in `renderHelp`, so the column is still measured and padded on the plain text —
+  the SGR-stripped listing is byte-identical to `HelpText`, and a multi-byte or long name lines up exactly as
+  before. `/help` prints through `println` (the styled path); control bytes in a skill's or template's name
+  and description are neutralized in `renderHelp` instead, since `printlnContent`'s `Sanitize` would turn the
+  colors into literal escape text.
+- Pinned by `TestStyledHelpTextPaintsCommandsOnly` (both variants: the command token opens each row in the
+  role's SGR, the description after it carries none, the stripped output equals `HelpText`, and the two
+  variants really differ) and `TestHelpCommandPrintsStyled` (the `/help` command path reaches the scrollback
+  colored); `TestThemeBuilderMatchesDefaults` keeps the new role in the palette and the builder.
+
 ### The system prompt: one general "done" rule, four gaps closed
 
 A review of `internal/agent/system-prompt.md`. The prompt is 46 lines instead of 49.
@@ -43,6 +164,7 @@ A review of `internal/agent/system-prompt.md`. The prompt is 46 lines instead of
 - The Environment block (date, git state) moved last of all — below the skills rosters and the project
   instructions — so the fixed text *and the per-project text* are a stable prefix providers with automatic
   prefix caching can reuse across sessions; the per-session date/git bytes sit deepest in the prompt.
+
 
 ## v0.7.10 (2026-10-24)
 

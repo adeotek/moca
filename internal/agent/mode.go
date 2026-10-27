@@ -68,7 +68,7 @@ type checkers struct {
 // Mode reports the current permission mode.
 func (a *Agent) Mode() PermMode { return a.mode }
 
-// Yolo reports whether yolo mode is on (kept for /yolo and the status line).
+// Yolo reports whether yolo mode is on (the status line's red badge).
 func (a *Agent) Yolo() bool { return a.mode == ModeYolo }
 
 // applyMode is the only place that swaps the checkers into Env. It must run
@@ -107,16 +107,6 @@ func (a *Agent) SetMode(m PermMode) {
 	a.append(session.Entry{Type: session.TypePermissionMode,
 		PermissionMode: &session.PermissionMode{Yolo: m == ModeYolo, Plan: a.plan, Mode: string(m)}})
 	a.emit(ModeChanged{Mode: m, Plan: a.plan})
-}
-
-// SetYolo toggles yolo mode between runs (never during Run): the /yolo
-// command's shorthand for SetMode(ModeYolo) / SetMode(ModeDefault).
-func (a *Agent) SetYolo(on bool) {
-	m := ModeAsk
-	if on {
-		m = ModeYolo
-	}
-	a.SetMode(m)
 }
 
 // judgeFn builds the auto-mode classifier's tools.Env.Judge: nil unless the

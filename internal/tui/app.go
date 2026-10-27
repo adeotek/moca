@@ -899,7 +899,10 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 	case "logout":
 		return m.runLogout(c.Args)
 	case "help":
-		return m.printlnContent(HelpText(m.opts.Prompts, m.allSkills()))
+		// The command column reads in the theme's help blue; the descriptions
+		// stay at the terminal's default foreground (§3.5).
+		st := m.th.helpCmdStyle(m.darkBG)
+		return m.println(StyledHelpText(m.opts.Prompts, m.allSkills(), func(s string) string { return st.Render(s) }))
 	case "exit":
 		return m.quit()
 	case "copy":
@@ -999,14 +1002,6 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 			return m.printlnContent(fmt.Sprintf("hard mode on: %s · %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
 		}
 		return m.printlnContent(fmt.Sprintf("hard mode off: back to %s · %s (prompt cache forfeited)", s.Model.Qualified(), AbbrevEffort(s.Effort)))
-	case "yolo":
-		if cmd, refused := m.refuseRunning(); refused {
-			return cmd
-		}
-		// Entering yolo drops plan first (SetMode: two notices —
-		// PlanChanged then ModeChanged).
-		m.agent.SetYolo(!m.agent.Yolo()) // ModeChanged prints + refreshes
-		return nil
 	case "mode":
 		return m.runMode(c.Args)
 	case "plan":
@@ -1753,8 +1748,8 @@ func supportedEfforts(mo provider.Model) string {
 func Run(ctx context.Context, o AppOptions) error {
 	var p *tea.Program
 	// p is captured by the closures below. Events are delivered through a
-	// FIFO pipe so an emit from inside Update (a slash command toggling
-	// yolo, /clear restarting the session) can never block the event loop on
+	// FIFO pipe so an emit from inside Update (a slash command switching
+	// the mode, /clear restarting the session) can never block the event loop on
 	// Program.Send (bridge.go); the pipe buffers events emitted before the
 	// program exists (agent.Start warnings, Resume's Resumed line). The
 	// asker is called from the agent's run goroutine only, where a direct
@@ -1814,7 +1809,9 @@ func Run(ctx context.Context, o AppOptions) error {
 // exitLine is printed below the final frame on exit: how to come back to a
 // session that holds something (empty when there is nothing to resume).
 func (m *model) exitLine() string {
-	if m.agent == nil || !m.sessionUsed {
+	// A deferred session that never got a prompt has no file to resume: its
+	// id exists, the transcript does not (§8).
+	if m.agent == nil || !m.sessionUsed || !m.agent.Session().Created() {
 		return ""
 	}
 	id := m.agent.Session().ID8()

@@ -13,6 +13,8 @@ description: Token-compressed CLI proxy. Prefer it for shell command output when
 | `go test ./...` / `pytest` / `npm test` | `rtk test go test ./...` (any runner; `--` before it also works) |
 | a noisy build or script | `rtk err <cmd>` (errors only) or `rtk summary <cmd>` |
 | `docker ps`, `gh pr list`, `kubectl get` | `rtk docker ps`, `rtk gh pr list`, `rtk kubectl get` |
+| `mvn test`, `gradlew build`, `dotnet test`, `pnpm install` | `rtk mvn test`, `rtk gradlew build`, `rtk dotnet test`, `rtk pnpm install` |
+| `aws …`, `psql …`, `glab mr list`, `oc get pods`, `wget <url>` | `rtk aws …`, `rtk psql …`, `rtk glab mr list`, `rtk oc get pods`, `rtk wget <url>` |
 
 For files use moca's read/search/ls tools — reads are windowed and tracked
 (edit requires a tracked read of the file), and shell reads (`cat`, `rtk
@@ -20,5 +22,5 @@ read`, …) do not count. rtk is for command output.
 
 Rules:
 - If rtk output is unusable (empty when output was expected, garbled, or contradicting the exit code), re-run as `rtk proxy <cmd>` for the raw output.
-- `rtk` is allowlisted, but so must be the command it runs: the analyser unwraps `rtk <cmd>` — `rtk proxy python x` needs `python` allowlisted. Its own read-only subcommands (`rtk read`, `rtk gain`, …) need only `rtk`; `rtk ls`/`find`/`grep`/`tree` need that tool allowlisted too.
+- `rtk` is allowlisted, but so must be the command it runs: the analyser unwraps `rtk <cmd>` — `rtk proxy python x` needs `python` allowlisted. Its own read-only subcommands (`rtk read`, `rtk gain`, …) need only `rtk`; `rtk ls`/`find`/`grep`/`tree` need that tool allowlisted too, and so do the wrappers 1.1.0 added (`glab`, `aws`, `psql`, `pnpm`, `dotnet`, `oc`, `wget`, `mvn`, `gradlew`) — each asks once on a default config.
 - Don't wrap commands whose full output you must parse exactly (e.g. `git diff` you will apply as a patch).
