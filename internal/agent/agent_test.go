@@ -33,6 +33,14 @@ func textTurn(s string) string {
 	return fmt.Sprintf("data: {\"choices\":[{\"delta\":{\"content\":%s},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n", b)
 }
 
+// truncatedTurn is a turn cut off at the output limit: finish_reason "length",
+// which is what a reasoning model returns after spending the whole per-turn
+// budget thinking and emitting nothing.
+func truncatedTurn(s string) string {
+	b, _ := json.Marshal(s)
+	return fmt.Sprintf("data: {\"choices\":[{\"delta\":{\"content\":%s},\"finish_reason\":\"length\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n", b)
+}
+
 func toolTurn(calls ...[2]string) string {
 	var sb strings.Builder
 	for i, c := range calls {
