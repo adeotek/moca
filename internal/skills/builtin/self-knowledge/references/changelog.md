@@ -85,6 +85,21 @@ line and a cycle hint, `/yolo` silently toggled one mode. One route now, and it 
   change, `esc` changing nothing, a mid-run `/mode` refused rather than opening a panel) and
   `TestYoloNeverCarriesPlan` now drives the mode through `/mode yolo`.
 
+### `enter` on a full command name runs it
+
+The `/` dropdown selected the first prefix match, so a command whose name is a prefix of another could not be
+typed and sent: `/mode` put the cursor on `/model`, `enter` completed the draft to `/model ` and the second
+`enter` opened the model picker mid-run (no way to reach `/mode` by hand at all — only the argument form worked
+once the picker was open).
+
+- The cursor now lands on the row whose name **equals** the word (case-insensitively, like the filter), falling
+  back to the first prefix match for a partial one — `exactCursor` in `dropdown.go`, applied to the command list
+  and to a command's argument rows. `↑`/`↓` still move it, so picking another row and pressing `enter` completes
+  to that row exactly as before; `tab` is untouched.
+- Pinned by `TestDropdownEnterRunsTheExactName`: every built-in typed in full must sit under the cursor and let
+  `enter` submit, plus `exactCursor`'s own cases (exact/partial/case-insensitive/empty list). Verified in the
+  built binary: `/mode` + `enter` opens the mode picker, `/mod` + `enter` still completes to `/model`.
+
 ### `/help` reads as a list
 
 `/help` printed one flat block: command, padding, description, all in the terminal's foreground, so twenty
