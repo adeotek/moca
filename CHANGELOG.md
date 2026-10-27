@@ -100,6 +100,28 @@ once the picker was open).
   `enter` submit, plus `exactCursor`'s own cases (exact/partial/case-insensitive/empty list). Verified in the
   built binary: `/mode` + `enter` opens the mode picker, `/mod` + `enter` still completes to `/model`.
 
+### Seeded skills re-checked: rtk 1.1.0, graphify 0.9.97
+
+The two standard skills moca plants are copies, not live links — upstream moved, so the bundled text was checked
+against the current releases and updated where it had drifted.
+
+- **rtk (0.51.0 → 1.1.0, released 2026-10-25).** The seeded skill gains 1.1.0's wrappers: `rtk mvn test`,
+  `rtk gradlew build`, `rtk dotnet test`, `rtk pnpm install` for builds/tests, and `rtk aws …`, `rtk psql …`,
+  `rtk glab mr list`, `rtk oc get pods`, `rtk wget <url>` for cloud/DB/download output, with the allowlist rule
+  spelled out (each wrapped tool must be allowlisted, so on a default config they ask once).
+  The shell analyser's class tables were re-verified against the real CLI and **nothing moved**: every
+  classified subcommand still exists and keeps its class, `run -c|--command` and `<runner> --shell` are still
+  the option-*before*-command string forms (refused), and 1.1.0's new subcommands fall into the generic rule —
+  the wrappers above as the tool they wrap, `pipeline`/`plugins`/`tasks`/`methods` as their own word, so a
+  writing or later-running authoring subcommand asks instead of running silently. Pinned by new `TestRtkUnwrap`
+  cases for the whole 1.1.0 surface.
+- **graphify (0.9.93 → 0.9.97, released 2026-10-27).** Re-generated upstream's `claude` bundle from 0.9.97 and
+  diffed it against the seed: **byte-identical**, `.graphify_version` aside (which moca deliberately does not
+  embed). Nothing to re-seed — the version pins in SPECS §12 and `docs/specs/external-tools.md` now say 0.9.97
+  and record the check.
+- Existing installs keep their planted copy by design (seeding is create-only); delete
+  `~/.config/moca/skills/rtk/` to pick up the new text.
+
 ### `/help` reads as a list
 
 `/help` printed one flat block: command, padding, description, all in the terminal's foreground, so twenty

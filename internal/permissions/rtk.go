@@ -8,7 +8,8 @@ import (
 )
 
 // rtk subcommand classes, captured from `rtk --help` and `rtk <sub> --help`
-// (rtk 0.51.0, 2026-10-06, linuxbrew install), plus execution probes:
+// (rtk 1.1.0, 2026-10-27, linuxbrew install; first captured on 0.51.0,
+// 2026-10-06), plus execution probes:
 // `rtk test echo x` and `rtk test -- echo x` both run the command directly;
 // `rtk err`, `rtk summary` and `rtk run` take the command as the first
 // positional word; `rtk run -c` and `--shell` take a shell command string;
@@ -17,7 +18,18 @@ import (
 // literal argv of the wrapped command (spy-probed 2026-10-06 — review pass 2
 // H1 did not reproduce); the string-executing shape is the option-before-
 // command form, refused below. Re-check when bumping the rtk version the
-// built-in skill documents.
+// seeded skill documents.
+//
+// The 1.1.0 re-check (2026-10-27) changed no class: every subcommand the two
+// maps name still exists and still executes nothing / the same word, and
+// `run -c|--command` plus `<runner> --shell` are still the string forms. 1.1.0
+// adds proxy subcommands (glab, aws, psql, pnpm, dotnet, oc, wget, mvn, mvnd,
+// gradlew) which fall into the generic rule below by design — the wrapped tool
+// must be allowlisted — and authoring subcommands (pipeline: add/promote write
+// filter files; plugins: new/build write a crate and install a binary) which
+// are likewise left out of rtkSelf so they ask instead of running silently.
+// tasks/methods are read-only today (`list` only) but stay fail-closed too: a
+// later `tasks run` would otherwise inherit rtkSelf's silence.
 //
 // The analyser's contract (§7/§10): `rtk <cmd>` is unwrapped like env/time —
 // the wrapped command passes the same analysis — and rtk itself must be

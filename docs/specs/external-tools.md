@@ -22,9 +22,10 @@ command:
   command given as their first argument (after `--` also works): that
   command is what gets checked.
 - Shell command strings (`rtk run -c '…'`, `--shell`) and unknown options
-  are refused — the analyser cannot see inside them; on rtk 0.51.0 the
-  string form is the option-*before*-command shape, which is the refused
-  one (a later `--shell …` is literal argv — spy-probed).
+  are refused — the analyser cannot see inside them; on rtk 1.1.0 the
+  string form is the option-*before*-command shape (`rtk run -c …`,
+  `rtk test --shell sh …`), which is the refused one (a later `--shell …`
+  after the command word is literal argv — spy-probed).
 - rtk's own read-only machinery (`rtk read`, `rtk gain`, `rtk json`,
   `rtk deps`, `rtk log`, `rtk smart`, …) is allowed as plain `rtk`.
 - Subcommands that proxy a native binary (`rtk ls`, `rtk tree`, `rtk find`,
@@ -37,7 +38,11 @@ command:
   (`rtk init`, `config`, `trust`, `untrust`, `learn`, `telemetry`) ask once
   (as `init`, `config`, …) instead of running silently.
 
-The subcommand classes are captured from the real CLI (rtk 0.51.0) in
+The subcommand classes are captured from the real CLI (rtk **1.1.0**,
+re-checked 2026-10-27 — the 0.51.0 capture moved no class; the wrappers 1.1.0
+adds, `glab aws psql pnpm dotnet oc wget mvn mvnd gradlew`, and its authoring
+subcommands, `pipeline methods plugins tasks`, deliberately fall into the
+generic rule and must pass the allowlist as their own word) in
 `internal/permissions/rtk.go` — re-check them when the documented rtk
 version changes.
 
@@ -48,8 +53,10 @@ quoting model or option tables; the Unix analyser stays the reference.
 
 `graphify` (codebase knowledge graph) is in the default allowlist, and its
 skill is seeded like rtk's: on start moca plants the bundled copy (graphify
-0.9.93: `SKILL.md` + `references/*.md`, the `claude` bundle the moca platform
-entry reuses — Apache-2.0 OR MIT) in `~/.config/moca/skills/graphify/` when
+**0.9.97**: `SKILL.md` + the eight `references/*.md`, the `claude` bundle the
+moca platform entry reuses — Apache-2.0 OR MIT; re-checked 2026-10-27 and
+byte-identical to the 0.9.93 bundle, so nothing had to move) in
+`~/.config/moca/skills/graphify/` when
 nothing exists at that path. An existing skill — yours, or an empty directory
 kept as an opt-out — is never touched, and moca never refreshes it, so to
 pick up a newer graphify skill replace it with one of the routes below.
