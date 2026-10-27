@@ -57,13 +57,26 @@ func selfManagedProbe(dir string) string {
 //go:embed system-prompt.md
 var embeddedTemplate string
 
+// The session-varying environment block is a second template: the fixed text
+// is rendered first, the appended skills/MCP/project-instruction sections
+// come in the middle, and the environment (date, git state — the only bytes
+// that change between sessions in the same repo) with the version stamp goes
+// last, so an automatic prefix cache reuses the fixed and per-project text
+// across sessions (SPECS §14, rev 37).
+//
+//go:embed system-prompt-env.md
+var embeddedEnvTemplate string
+
 // promptTemplate trims the file's trailing newline: the markdown file ends
 // with one (editors, diffs), the prompt text must not.
 var promptTemplate = strings.TrimRight(embeddedTemplate, "\n")
 
-// renderPrompt resolves every {{token}} in one NewReplacer pass — replacement
-// values containing token-looking text are never re-scanned.
-func renderPrompt(in PromptInput, verify, rtk string) string {
+var envTemplate = strings.TrimRight(embeddedEnvTemplate, "\n")
+
+// renderPrompt resolves every {{token}} in one NewReplacer pass over one of
+// the two embedded templates (the fixed text and the environment block) —
+// replacement values containing token-looking text are never re-scanned.
+func renderPrompt(templ string, in PromptInput, verify, rtk string) string {
 	return strings.NewReplacer(
 		"{{workdir}}", in.Workdir,
 		"{{os}}", in.OS,
@@ -76,7 +89,7 @@ func renderPrompt(in PromptInput, verify, rtk string) string {
 		"{{config_dir}}", in.ConfigDir,
 		"{{prompts_dir}}", in.PromptsDir,
 		"{{skills_dir}}", in.SkillsDir,
-	).Replace(promptTemplate)
+	).Replace(templ)
 }
 
 func BuildSystemPrompt(in PromptInput) string {
@@ -85,11 +98,7 @@ func BuildSystemPrompt(in PromptInput) string {
 	if in.RTK {
 		rtk = "- Prefer rtk-prefixed variants for shell command output where they exist (e.g. `rtk git status`, `rtk test -- go test ./...`).\n"
 	}
-	verify := ""
-	if in.Verify != "" {
-		verify = fmt.Sprintf("- Project checks: `%s` (from %s) — run them after changes\n", in.Verify, in.VerifySource)
-	}
-	sb.WriteString(renderPrompt(in, verify, rtk))
+	sb.WriteString(renderPrompt(promptTemplate, in, "", rtk))
 	if len(in.Skills) > 0 {
 		sb.WriteString("\n\n# Skills\nLoad a skill's instructions with read on its path when the task matches.\n")
 		for _, s := range in.Skills {
@@ -136,6 +145,15 @@ func BuildSystemPrompt(in PromptInput) string {
 	for _, i := range in.Instructions {
 		fmt.Fprintf(&sb, "\n# Project instructions (%s)\n%s\n", i.Path, strings.TrimSpace(i.Content))
 	}
+	// The environment block and the version stamp are the prompt's tail: the
+	// per-session bytes (date, git state) sit as deep as possible, below the
+	// per-project appends, so the shared prefix reaches past them.
+	verify := ""
+	if in.Verify != "" {
+		verify = fmt.Sprintf("- Project checks: `%s` (from %s) — run them after changes\n", in.Verify, in.VerifySource)
+	}
+	sb.WriteString("\n")
+	sb.WriteString(renderPrompt(envTemplate, in, verify, rtk))
 	return sb.String()
 }
 

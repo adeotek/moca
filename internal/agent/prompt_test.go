@@ -25,10 +25,11 @@ func TestBuildSystemPrompt(t *testing.T) {
 		"open dependencies' internals only when a concrete behavior blocks you",
 		"Verification must be able to fail", "Never present guessed, rebuilt or extrapolated data as fact",
 		"Done means the behavior the task describes works end to end",
-		"keep an approval step pending until it is actually answered",
+		"keep an approval step pending until the user actually answers it",
+		"the request must not take effect before that",
 		"deliver every handoff (mail, queue, daemon) to where the recipient reads it",
 		"a build that compiles proves nothing",
-		"Test with throwaway data of your own and remove what your runs created",
+		"Test with throwaway data of your own, not the task's fixtures",
 		"An inconsistency you notice is a defect to investigate",
 		"A run has a wall-clock budget",
 		"tools that own their output (formatters, generators, git, package managers) are fine",
@@ -48,16 +49,25 @@ func TestBuildSystemPrompt(t *testing.T) {
 	if strings.Count(BuildSystemPrompt(PromptInput{}), "\n") > 60 {
 		t.Fatal("core prompt must stay ~40 lines")
 	}
-	// version stamp sits at the end of the moca text (before appended sections)
+	// version stamp sits at the very end (after every appended section)
 	core := BuildSystemPrompt(PromptInput{Version: "9"})
 	if !strings.HasSuffix(strings.TrimSpace(core), "moca 9") {
 		t.Fatal("version stamp last")
 	}
-	// The session-varying Environment block (date, git state) follows the
-	// fixed text, so providers with automatic prefix caching can reuse the
-	// fixed part across sessions.
-	if env, style := strings.Index(p, "# Environment"), strings.Index(p, "# Token discipline"); env < style {
-		t.Fatalf("# Environment (%d) must follow the fixed sections (# Token discipline at %d)", env, style)
+	// The environment block (date, git state — the only per-session bytes)
+	// closes the prompt below the appended skills/MCP/project-instruction
+	// sections, so automatic prefix caching also reuses the per-project text
+	// across sessions in the same repo.
+	last := -1
+	for _, name := range []string{"# Skills", "# Project instructions", "# Environment"} {
+		at := strings.Index(p, name)
+		if at < 0 {
+			t.Fatalf("%s missing", name)
+		}
+		if at <= last {
+			t.Fatalf("%s (%d) must follow the section before it (%d)", name, at, last)
+		}
+		last = at
 	}
 }
 
@@ -116,8 +126,10 @@ func TestPromptTemplateSlots(t *testing.T) {
 		"{{config_dir}}", "{{prompts_dir}}", "{{skills_dir}}"}
 	re := regexp.MustCompile(`\{\{[a-z_-]+\}\}`)
 	used := map[string]bool{}
-	for _, tok := range re.FindAllString(promptTemplate, -1) {
-		used[tok] = true
+	for _, templ := range []string{promptTemplate, envTemplate} {
+		for _, tok := range re.FindAllString(templ, -1) {
+			used[tok] = true
+		}
 	}
 	if len(used) == 0 {
 		t.Fatal("no slots found — embed broke or tokens were renamed")

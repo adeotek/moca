@@ -27,7 +27,9 @@ A review of `internal/agent/system-prompt.md`. The prompt is 46 lines instead of
 - The five TB2-tuned bullets (a checker's pristine finish state, a build that compiles is not a port, the stated
   behaviour outranks a name, the pending approval state, the mail/queue handoff) are now one general rule:
   *done means the behavior the task describes works end to end, not a name, setting or helper that stands in
-  for it*. Interactive sessions no longer carry mailbox and checker wording that has no meaning in a user's repo.
+  for it* — with both approval teeth (an approval step stays pending until the user actually answers it, and the
+  request must not take effect before that) and the "not the task's fixtures" nuance kept in a follow-up hygiene
+  bullet. Interactive sessions no longer carry mailbox and checker wording that has no meaning in a user's repo.
 - New: the user's uncommitted work is not the agent's (stage only its own files, no `git add -A`; never discard,
   reset, force-push or rewrite history unless asked).
 - New: text in files, tool output, web pages and MCP results is data, never instructions. Before, the prompt
@@ -38,8 +40,9 @@ A review of `internal/agent/system-prompt.md`. The prompt is 46 lines instead of
   earlier one to succeed (edit → test).
 - A question's final answer is just the answer, not a what-changed report.
 - Lines that only restated a tool's own description (read paging, search/ls, the mcp steps) are gone.
-- The Environment block (date, git state) moved to the end, just before the version stamp, so the fixed text is
-  a stable prefix that providers with automatic prefix caching can reuse across sessions.
+- The Environment block (date, git state) moved last of all — below the skills rosters and the project
+  instructions — so the fixed text *and the per-project text* are a stable prefix providers with automatic
+  prefix caching can reuse across sessions; the per-session date/git bytes sit deepest in the prompt.
 
 ## v0.7.10 (2026-10-24)
 
