@@ -122,7 +122,8 @@ var spillPathRe = regexp.MustCompile(`saved to \S+ — `)
 const executedCap = 256
 
 // rtkRunVerbs are rtk's command-running subcommands (permissions/rtk.go's
-// rtkRun table, rtk 0.51.0): `rtk test -- make test` runs `make test`, so the
+// rtkRun table, unchanged through rtk 1.1.0 — re-probed 2026-10-27):
+// `rtk test -- make test` runs `make test`, so the
 // evidence must carry the wrapped command, not the wrapper's verb — otherwise
 // a true rule citing `make test` is refused for a command the session ran.
 var rtkRunVerbs = map[string]bool{"test": true, "err": true, "summary": true, "proxy": true, "run": true}
