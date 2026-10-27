@@ -156,15 +156,24 @@ func (a *Agent) SetEffort(e llm.Effort) (llm.Effort, error) {
 func (a *Agent) HardOn() bool { return a.hard != nil }
 
 // restoreHard re-enters hard mode after a resume: the saved pair is not in
-// the transcript, so it is the configured default model at its default effort
-// (what /hard would have saved). A default that no longer resolves leaves hard
-// mode off.
+// the transcript, so it is the configured default model at the configured
+// hard effort (what /hard would have saved). A default that no longer
+// resolves leaves hard mode off.
 func (a *Agent) restoreHard() {
 	m, _, err := a.opts.Providers.Resolve(a.opts.Config.Model)
 	if err != nil {
 		return
 	}
-	a.hard = &savedModel{m.Qualified(), m.DefaultEffort()}
+	a.hard = &savedModel{m.Qualified(), m.ClampEffort(hardEffort(a.opts.Config))}
+}
+
+// hardEffort is the level /hard escalates to: config modelHardEffort, else
+// high (§4). The caller clamps it to the hard model's own levels.
+func hardEffort(cfg config.Config) llm.Effort {
+	if cfg.ModelHardEffort != "" {
+		return llm.Effort(cfg.ModelHardEffort)
+	}
+	return llm.EffortHigh
 }
 
 // Carry is the model and effort a replacement session (/clear) should start
@@ -177,8 +186,8 @@ func (a *Agent) Carry() (string, llm.Effort) {
 	return a.model.Qualified(), a.effort
 }
 
-// ToggleHard switches to modelHard at high effort (clamped) and back to the
-// saved pair on the next call (§11).
+// ToggleHard switches to modelHard at the configured hard effort (default
+// high, clamped) and back to the saved pair on the next call (§11).
 func (a *Agent) ToggleHard() (bool, error) {
 	if a.hard != nil {
 		saved := *a.hard
@@ -192,7 +201,7 @@ func (a *Agent) ToggleHard() (bool, error) {
 		return false, errors.New("modelHard is not configured")
 	}
 	saved := savedModel{a.model.Qualified(), a.effort}
-	if err := a.SetModel(a.opts.Config.ModelHard, llm.EffortHigh); err != nil {
+	if err := a.SetModel(a.opts.Config.ModelHard, hardEffort(a.opts.Config)); err != nil {
 		return false, err
 	}
 	a.hard = &saved

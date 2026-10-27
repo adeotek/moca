@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/adeotek/moca/internal/llm"
 )
 
 func TestSpecExampleDecodesIntact(t *testing.T) {
@@ -46,14 +48,57 @@ func TestSpecExampleDecodesIntact(t *testing.T) {
 		c.Context.ProgressNudge() != 12 {
 		t.Fatalf("context: %+v", c.Context)
 	}
-	if c.Yolo {
-		t.Fatal("example ships yolo off")
+	if c.ModelEffort != "" || c.ModelHardEffort != "" {
+		t.Fatalf("effort keys: %q %q (the fixture leaves them at their built-in defaults)", c.ModelEffort, c.ModelHardEffort)
 	}
 	if c.Skills.SelfManaged == nil || *c.Skills.SelfManaged {
 		t.Fatalf("skills.selfManaged: %v (the fixture pins the key at false)", c.Skills.SelfManaged)
 	}
-	if y, _ := Parse([]byte(`{"yolo": true}`)); !y.Yolo {
-		t.Fatal("yolo key decodes")
+	// The legacy top-level `yolo` flag is gone (v0.7.11): strict decode must
+	// refuse a config that still carries it, rather than silently ignore the
+	// permission switch it was asking for.
+	if _, err := Parse([]byte(`{"yolo": true}`)); err == nil || !strings.Contains(err.Error(), "yolo") {
+		t.Fatalf("a removed `yolo` key must be an unknown-field error, got %v", err)
+	}
+}
+
+// TestEffortsMatchLLM: config.Efforts is the word list modelEffort and
+// modelHardEffort are validated against; llm.Efforts is what the agent clamps
+// against at runtime. config may not import llm (a leaf imports nothing
+// internal), so this test is the pin that keeps the two lists identical.
+func TestEffortsMatchLLM(t *testing.T) {
+	var got []string
+	for _, e := range llm.Efforts {
+		got = append(got, string(e))
+	}
+	if !slices.Equal(Efforts, got) {
+		t.Fatalf("config.Efforts %v != llm.Efforts %v", Efforts, got)
+	}
+}
+
+// TestModelEfforts: the two effort keys (§4, v0.7.11) accept every level,
+// stay empty when absent (the model's own default decides), and reject an
+// unknown word by name.
+func TestModelEfforts(t *testing.T) {
+	c, err := Parse([]byte(`{"model":"opencode-go/glm-5.3-flash","modelEffort":"high","modelHardEffort":"max"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ModelEffort != "high" || c.ModelHardEffort != "max" {
+		t.Fatalf("effort keys: %q %q", c.ModelEffort, c.ModelHardEffort)
+	}
+	if d := Default(); d.ModelEffort != "" || d.ModelHardEffort != "" {
+		t.Fatalf("absent effort keys must stay empty (model default), got %q %q", d.ModelEffort, d.ModelHardEffort)
+	}
+	for _, e := range Efforts {
+		if _, err := Parse([]byte(`{"modelEffort":"` + e + `","modelHardEffort":"` + e + `"}`)); err != nil {
+			t.Errorf("effort %q must be valid: %v", e, err)
+		}
+	}
+	for _, key := range []string{"modelEffort", "modelHardEffort"} {
+		if _, err := Parse([]byte(`{"` + key + `":"turbo"}`)); err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("%s:\"turbo\" must fail naming the key, got %v", key, err)
+		}
 	}
 }
 
@@ -370,11 +415,12 @@ func TestPermissionsBlock(t *testing.T) {
 
 func TestPermissionsValidation(t *testing.T) {
 	bad := map[string]string{
-		`{"permissions":{"defaultMode":"turbo"}}`:            "defaultMode",
-		`{"permissions":{"allow":[""]}}`:                     "empty",
-		`{"yolo":true,"permissions":{"defaultMode":"auto"}}`: "yolo",
-		`{"yolo":true,"permissions":{"defaultMode":"plan"}}`: "yolo",
-		`{"permissions":{"bogus":1}}`:                        "unknown field",
+		`{"permissions":{"defaultMode":"turbo"}}`: "defaultMode",
+		`{"permissions":{"allow":[""]}}`:          "empty",
+		`{"permissions":{"bogus":1}}`:             "unknown field",
+		// The legacy top-level switch is removed (§4, v0.7.11); strict decode
+		// is what tells a config that still sets it.
+		`{"yolo":false}`: "unknown field",
 	}
 	for src, want := range bad {
 		if _, err := Parse([]byte(src)); err == nil || !strings.Contains(err.Error(), want) {
@@ -393,8 +439,8 @@ func TestPermissionsValidation(t *testing.T) {
 			t.Errorf("defaultMode %q resolved to %q", m, c.Mode())
 		}
 	}
-	if c, _ := Parse([]byte(`{"yolo":true}`)); c.Mode() != "yolo" {
-		t.Error("legacy yolo:true must resolve to mode yolo")
+	if c, _ := Parse([]byte(`{"permissions":{"defaultMode":"yolo"}}`)); c.Mode() != "yolo" {
+		t.Error(`"defaultMode":"yolo" must resolve to mode yolo`)
 	}
 	if c, _ := Parse([]byte(`{}`)); c.Mode() != "auto" {
 		t.Error("an unset permissions.defaultMode must resolve to auto (v0.7.2)")
@@ -453,7 +499,7 @@ func TestResolveExecuteMode(t *testing.T) {
 		{"project plan, user unset", "", Config{Project: &ProjectConfig{Permissions: user("plan")}}, "auto"},
 		{"project auto over user plan", "", Config{Permissions: user("plan"), Project: &ProjectConfig{Permissions: user("auto")}}, "auto"},
 		{"flag wins over project plan", "auto", Config{Project: &ProjectConfig{Permissions: user("plan")}}, "auto"},
-		{"legacy yolo", "", Config{Yolo: true}, "yolo"},
+		{"configured yolo", "", Config{Permissions: user("yolo")}, "yolo"},
 	}
 	for _, c := range cases {
 		if got := ResolveExecuteMode(c.flag, c.cfg); got != c.want {

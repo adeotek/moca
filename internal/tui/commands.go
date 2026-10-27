@@ -33,7 +33,7 @@ type Parsed struct {
 }
 
 // BuiltinCommands win over prompt templates on a name collision (§10).
-var BuiltinCommands = []string{"model", "effort", "hard", "mode", "yolo", "plan", "execute", "remember", "clear", "resume", "sessions", "compact", "cost", "undo", "copy", "show", "login", "logout", "clear-models-cache", "help", "exit"}
+var BuiltinCommands = []string{"model", "effort", "hard", "mode", "plan", "execute", "remember", "clear", "resume", "sessions", "compact", "cost", "undo", "copy", "show", "login", "logout", "clear-models-cache", "help", "exit"}
 
 // builtinAliases resolve to their built-in unless a prompt template already
 // owns the name (`/q`, `/quit` → `/exit`) — only the full built-in names are
@@ -44,8 +44,7 @@ var builtinHelp = map[string]string{
 	"model":              "[provider/model]  pick a model or switch (forfeits prompt cache)",
 	"effort":             "[level]  show or set effort (off|minimal|low|medium|high|xhigh|max)",
 	"hard":               "toggle modelHard + high effort",
-	"mode":               "[default|auto|yolo|plan]  show the permission mode or set it (shift+tab cycles default→auto→plan→yolo; between runs only)",
-	"yolo":               "toggle yolo mode: ALL permission checks off (between runs only)",
+	"mode":               "[ask|auto|yolo|plan]  pick the permission mode (no argument opens the picker; shift+tab cycles ask→auto→plan→yolo; between runs only)",
 	"plan":               "[request]  toggle plan mode (runs write an implementation plan to docs/plans/, change nothing else); with a request, plan it now",
 	"execute":            "<plan.md> [instructions]  execute an implementation plan step by step, ticking its - [ ] boxes",
 	"remember":           "<text>  record <text> as a project skill later sessions follow",
@@ -146,6 +145,19 @@ func (m *model) agentSkills() []skills.Skill {
 // heading — sized to the longest name in the block, since a template or skill
 // can be named anything (a hard-coded width broke on `self-knowledge`).
 func HelpText(prompts []skills.Prompt, sk []skills.Skill) string {
+	return renderHelp(prompts, sk, nil)
+}
+
+// StyledHelpText is HelpText with the command column wrapped by cmd — `/help`'s
+// own print (v0.7.11: `helpCmd` blue, descriptions at the terminal's default
+// foreground). The column is measured and padded on the PLAIN text, so the
+// styled output strips back to exactly HelpText and the descriptions stay
+// aligned.
+func StyledHelpText(prompts []skills.Prompt, sk []skills.Skill, cmd func(string) string) string {
+	return renderHelp(prompts, sk, cmd)
+}
+
+func renderHelp(prompts []skills.Prompt, sk []skills.Skill, cmdStyle func(string) string) string {
 	var listedPrompts []skills.Prompt
 	for _, p := range prompts {
 		if !slices.Contains(BuiltinCommands, p.Name) {
@@ -178,7 +190,16 @@ func HelpText(prompts []skills.Prompt, sk []skills.Skill) string {
 	// multi-byte name (`café`, a CJK skill) with its description one column
 	// right of the rest. row keeps at least one separating space.
 	row := func(width int, cmd, desc string) {
-		sb.WriteString(cmd + strings.Repeat(" ", max(width+2-lipgloss.Width(cmd), 1)) + desc + "\n")
+		// Control bytes are neutralized here, at the one place every row goes
+		// through: /help prints with println (styled output must not be
+		// Sanitized at print time), and a skill's or template's name/description
+		// is user-written text.
+		cmd, desc = Sanitize(cmd), Sanitize(desc)
+		pad := strings.Repeat(" ", max(width+2-lipgloss.Width(cmd), 1))
+		if cmdStyle != nil {
+			cmd = cmdStyle(cmd)
+		}
+		sb.WriteString(cmd + pad + desc + "\n")
 	}
 	for _, c := range BuiltinCommands {
 		row(w, "/"+c, builtinHelp[c])
