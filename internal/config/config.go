@@ -75,17 +75,22 @@ var OAuthUnsupported = map[string]string{
 var OAuthProviders = []string{"openai"}
 
 type Config struct {
-	Model     string                    `json:"model"`
-	ModelHard string                    `json:"modelHard"`
-	Providers map[string]ProviderConfig `json:"providers"`
-	Shell     ShellConfig               `json:"shell"`
-	MCP       MCPConfig                 `json:"mcp"`
-	Web       WebConfig                 `json:"web"`
-	Log       LogConfig                 `json:"log"`
-	Snapshot  SnapshotConfig            `json:"snapshot"`
-	Context   ContextConfig             `json:"context"`
-	TUI       TUIConfig                 `json:"tui"`
-	Yolo      bool                      `json:"yolo"` // legacy: all permission checks off by default (§7.5); see Mode
+	Model     string `json:"model"`
+	ModelHard string `json:"modelHard"`
+	// ModelEffort is the effort a fresh session starts at (v0.7.11): empty
+	// keeps the model's own default, and --effort still wins over both.
+	ModelEffort string `json:"modelEffort,omitempty"`
+	// ModelHardEffort is the effort `/hard` escalates to: empty means high,
+	// the level it shipped with (§4).
+	ModelHardEffort string                    `json:"modelHardEffort,omitempty"`
+	Providers       map[string]ProviderConfig `json:"providers"`
+	Shell           ShellConfig               `json:"shell"`
+	MCP             MCPConfig                 `json:"mcp"`
+	Web             WebConfig                 `json:"web"`
+	Log             LogConfig                 `json:"log"`
+	Snapshot        SnapshotConfig            `json:"snapshot"`
+	Context         ContextConfig             `json:"context"`
+	TUI             TUIConfig                 `json:"tui"`
 	// Permissions holds the user-level mode and rules. Project is the trusted
 	// project file's content (set by cmd after the trust decision, never
 	// decoded): its permissions block joins the rule layers, its mcp block
@@ -211,19 +216,24 @@ func (p PermissionsConfig) validate(key string) error {
 	return nil
 }
 
+// Efforts are the model effort levels a config may name (modelEffort,
+// modelHardEffort). llm.Efforts is the runtime list and config may not import
+// llm (it is a leaf that imports nothing internal), so the words are repeated
+// here; TestEffortsMatchLLM pins the two lists together.
+var Efforts = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+
 // Mode is the user-level default permission mode (§11): permissions.defaultMode,
-// else the legacy yolo flag, else **auto** (v0.7.2 — the allowlist-only mode is
-// `ask` now, and a fresh install starts at auto). A configured "plan" is the
-// plan scope — ResolveMode maps any "plan" to (ask, plan=true). CLI flags and
-// a trusted project file are applied on top by cmd. It may return "plan",
-// which is not an agent.PermMode — resolve through ResolveMode/
-// ResolveExecuteMode, never cast.
+// else **auto** (v0.7.2 — the allowlist-only mode is `ask` now, and a fresh
+// install starts at auto). The legacy top-level `yolo` flag was removed in
+// v0.7.11 — `"permissions": {"defaultMode": "yolo"}` is the one way to ask for
+// that mode in a config now, and strict decode reports the removed key. A
+// configured "plan" is the plan scope — ResolveMode maps any "plan" to
+// (ask, plan=true). CLI flags and a trusted project file are applied on top by
+// cmd. It may return "plan", which is not an agent.PermMode — resolve through
+// ResolveMode/ResolveExecuteMode, never cast.
 func (c Config) Mode() string {
-	switch {
-	case c.Permissions.DefaultMode != "":
+	if c.Permissions.DefaultMode != "" {
 		return CanonicalMode(c.Permissions.DefaultMode)
-	case c.Yolo:
-		return "yolo"
 	}
 	return "auto"
 }
@@ -369,6 +379,7 @@ type ThemeColors struct {
 	Warning string `json:"warning,omitempty"` // warning: lines, `?` prompts
 	Accent  string `json:"accent,omitempty"`  // welcome product name, pager selection
 	Plan    string `json:"plan,omitempty"`    // plan-mode notice
+	HelpCmd string `json:"helpCmd,omitempty"` // /help's command column (v0.7.11)
 	DiffAdd string `json:"diffAdd,omitempty"` // edit-diff added lines
 	DiffDel string `json:"diffDel,omitempty"` // edit-diff removed lines
 	// Status-bar roles (status_style.go): a #rrggbb hex or ANSI number per segment.
@@ -603,8 +614,10 @@ func (c Config) Validate() error {
 	if err := c.Permissions.validate("permissions"); err != nil {
 		return err
 	}
-	if c.Yolo && c.Permissions.DefaultMode != "" && c.Permissions.DefaultMode != "yolo" {
-		return fmt.Errorf("yolo: true conflicts with permissions.defaultMode %q; drop one", c.Permissions.DefaultMode)
+	for _, e := range []struct{ key, val string }{{"modelEffort", c.ModelEffort}, {"modelHardEffort", c.ModelHardEffort}} {
+		if e.val != "" && !slices.Contains(Efforts, e.val) {
+			return fmt.Errorf("%s must be one of %s, got %q", e.key, strings.Join(Efforts, ", "), e.val)
+		}
 	}
 	for _, q := range []string{c.Model, c.ModelHard} {
 		if q == "" {

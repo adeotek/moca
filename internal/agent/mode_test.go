@@ -162,7 +162,7 @@ func TestYoloTurnsEveryCheckOff(t *testing.T) {
 		t.Fatal("header records yolo")
 	}
 
-	a.SetYolo(false)
+	a.SetMode(ModeAsk)
 	*evs = nil
 	a.Run(context.Background(), "again")
 	for _, e := range *evs {
