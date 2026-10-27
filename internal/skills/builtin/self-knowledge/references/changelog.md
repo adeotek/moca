@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.7.11 (unreleased)
+
+### A truncated turn is retried once, not answered
+
+A reasoning model can put its entire per-turn output budget into thinking and return nothing at all. On
+TB2's `regex-chess` (2026-10-27) that cost moca the task: three turns of 39 905 / 61 124 / 61 291
+characters of thinking, an empty reply each time, `moca: response truncated (token limit reached)`, exit 1 (`exitRuntime`) —
+43 292 output tokens spent and the requested file never written. The bench scored it 0.0, correctly; the
+agent's reaction was the defect.
+
+- A turn that stops at the output limit (`length`) with no tool call now gets its own nudge — *"…Do not
+  deliberate: reply now with a single tool call that makes progress…"* — instead of the generic *"Your last
+  reply was empty"*, which invited another full-budget deliberation.
+- That retry is the only turn that runs at a lowered effort (one level below the session's, never above
+  `low`, clamped for the model), so the same budget buys an action rather than more reasoning.
+- The rescue is bounded: a second truncation emits `warning: the model kept hitting the output token limit
+  without an answer` and ends the run, and `-p` keeps its `response truncated` / `exitRuntime` contract.
+- No new config key: the per-turn ceiling stays `min(model.maxOutputTokens, context.reserveTokens)`, and a
+  reasoning-heavy model can still be bounded lower per model (`providers.<p>.models.<id>.maxOutputTokens`).
+
 ## v0.7.10 (2026-10-24)
 
 ### The ACP model check runs on a real HTTP client
