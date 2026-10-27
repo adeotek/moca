@@ -8,7 +8,7 @@ import (
 // rtk must never launder a non-allowlisted command: `rtk <cmd>` is unwrapped
 // like env/time, the wrapped name passes the same analysis, and rtk itself
 // must be allowlisted too. Subcommand classes come from the real CLI (rtk
-// 0.51.0) — see rtk.go.
+// 1.1.0, re-checked 2026-10-27) — see rtk.go.
 func TestRtkUnwrap(t *testing.T) {
 	root, _, _ := setup(t)
 	j, _ := NewJail(root, nil, nil)
@@ -60,9 +60,29 @@ func TestRtkUnwrap(t *testing.T) {
 		"rtk test -- -c 'echo hi'": {deny: "option-shaped"},
 		"rtk run -- --shell x":     {deny: "option-shaped"},
 
-		// Pinned probe result (rtk 0.51.0, 2026-10-06): after the command
-		// word, `--shell` is literal argv of that command — the harness spy
-		// never ran; only the option-before-command form executes a string
+		// rtk 1.1.0's new surface stays fail-closed: proxy subcommands are
+		// classified as the tool they wrap (so the tool must be allowlisted),
+		// and the authoring subcommands as themselves — none is rtkSelf, so
+		// `pipeline add`/`plugins build` ask instead of writing silently.
+		"rtk glab mr list":           {need: []string{"glab"}},
+		"rtk aws s3 ls":              {need: []string{"aws"}},
+		"rtk psql -l":                {need: []string{"psql"}},
+		"rtk pnpm install":           {need: []string{"pnpm"}},
+		"rtk dotnet test":            {need: []string{"dotnet"}},
+		"rtk oc get pods":            {need: []string{"oc"}},
+		"rtk wget https://x/y":       {need: []string{"wget"}},
+		"rtk mvn test":               {need: []string{"mvn"}},
+		"rtk gradlew build":          {need: []string{"gradlew"}},
+		"rtk pipeline add --x y":     {need: []string{"pipeline"}},
+		"rtk plugins build":          {need: []string{"plugins"}},
+		"rtk tasks list":             {need: []string{"tasks"}},
+		"rtk methods list":           {need: []string{"methods"}},
+		"rtk mvn test | rtk git log": {need: []string{"mvn"}},
+
+		// Pinned probe result (rtk 0.51.0, 2026-10-06; re-probed on 1.1.0,
+		// 2026-10-27: `rtk test echo A --shell` prints `A --shell`): after the
+		// command word, `--shell` is literal argv of that command — the harness
+		// spy never ran; only the option-before-command form executes a string
 		// and is refused above.
 		"rtk test echo hi --shell sh 'echo x'": {},
 	}
