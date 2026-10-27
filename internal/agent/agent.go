@@ -355,9 +355,14 @@ func (a *Agent) request(choice llm.ToolChoice) llm.Request {
 	a.mu.Lock()
 	msgs := session.MessagesWith(a.entries, planExtra, a.model.KeepsTailThinking())
 	a.mu.Unlock()
+	// The environment block (the prompt's tail) travels apart from the head so
+	// a protocol with explicit cache breakpoints caches the fixed and
+	// per-project text without the per-session date/git lines (§7, §14).
+	system, tail := SplitSystemPrompt(a.opts.System)
 	return llm.Request{
 		Model:      a.model.ID,
-		System:     a.opts.System,
+		System:     system,
+		SystemTail: tail,
 		Messages:   TransformHistory(msgs, a.model.Qualified()),
 		Tools:      a.opts.Tools.Specs(),
 		ToolChoice: choice,

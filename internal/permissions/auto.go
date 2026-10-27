@@ -71,6 +71,9 @@ var readOnlyCmds = map[string]bool{
 	"sort": true, "uniq": true, "diff": true, "which": true, "jq": true, "stat": true, "file": true,
 	"tree": true, "du": true, "df": true, "basename": true, "dirname": true, "realpath": true,
 	"date": true, "find": true,
+	// binary inspection: `read` refuses binaries, so these are the path the
+	// prompt names for them (xxd's reverse mode is guarded in readOnlyVerdict).
+	"xxd": true, "od": true, "hexdump": true,
 }
 
 // confinedCmds: mutators allowed when every operand is literal and confined.
@@ -262,6 +265,11 @@ func readOnlyVerdict(ws []Word, lower string, conf pathFunc) autoVerdict {
 	case "file":
 		if shortFlag(ws, 1, 'C') || hasOpt(ws, 1, "", "--compile") {
 			return autoUnsure
+		}
+	case "xxd":
+		// -r (reverse) writes a file from the dump; plain xxd only reads.
+		if shortFlag(ws, 1, 'r') || hasOpt(ws, 1, "", "--revert") {
+			return autoAsk
 		}
 	}
 	return v.and(readCheck(ws, 1, conf))

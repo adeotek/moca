@@ -31,6 +31,18 @@ data: [DONE]
 
 `
 
+// Every protocol without explicit cache breakpoints sends the prompt as one
+// string: the head and the environment tail rejoin here (§14), byte for byte
+// as the builder rendered them.
+func TestCompletionsJoinsTheSystemTail(t *testing.T) {
+	a := newOpenAICompletions(Model{ID: "glm"}, "http://x/v1", keyCred("K"), http.DefaultClient).(*completionsAdapter)
+	body := a.body(llm.Request{Model: "glm", System: "head", SystemTail: "# Environment\n- Date: d"})
+	msgs := body["messages"].([]map[string]any)
+	if len(msgs) != 1 || msgs[0]["role"] != "system" || msgs[0]["content"] != "head\n\n# Environment\n- Date: d" {
+		t.Fatalf("system message %v", msgs)
+	}
+}
+
 func TestCompletionsStream(t *testing.T) {
 	var body map[string]any
 	var hdr http.Header
