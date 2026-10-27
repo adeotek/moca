@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"slices"
 
 	tea "charm.land/bubbletea/v2"
@@ -79,29 +78,68 @@ func modeNotice(mode agent.PermMode, plan bool) (string, bool) {
 	}
 }
 
-// modeCycleHelp is the /mode cycle line: the current state and the next
-// shift+tab stop.
-func modeCycleHelp(m agent.PermMode, plan bool) string {
-	next, nextPlan := nextMode(m, plan)
-	return fmt.Sprintf("cycle (shift+tab): %s → %s", modeBadgeText(m, plan), modeBadgeText(next, nextPlan))
-}
-
 // modeNames lists the words /mode accepts — the same set as the --mode flag
 // (plan is the scope; it lands at ask, the agent's rule). The legacy "default"
 // is accepted too: it is what every earlier release printed, and a muscle
 // memory should not get a usage line.
 var modeNames = []string{string(agent.ModeAsk), string(agent.ModeAuto), string(agent.ModeYolo), "plan", agent.LegacyModeName}
 
-// runMode is the /mode built-in: no args → the current mode + the cycle;
-// `ask|auto|yolo|plan` → set it (between runs); the legacy `default` is
-// accepted as `ask`. `plan` enters the plan scope (landing at ask, even from a
-// wider mode); `ask` (or `default`) exits plan; auto/yolo drop it through
-// SetMode.
+// modePickItems labels the /mode picker's rows, the current state
+// preselected. `ask` carries the state when plan is on (plan rides on ask),
+// so the plan row is the one marked then.
+func modePickItems(m agent.PermMode, plan bool) ([]pickItem, int) {
+	rows := []struct {
+		key   string
+		label string
+	}{
+		{string(agent.ModeAsk), "ask   — every non-allowlisted command asks"},
+		{string(agent.ModeAuto), "auto  — safe actions run, risky ones ask (workdir + temp only)"},
+		{string(agent.ModeYolo), "yolo  — all permission checks are off"},
+		{"plan", "plan  — runs write a plan to docs/plans/, nothing else changes"},
+	}
+	cur := modeBadgeText(m, plan)
+	items := make([]pickItem, 0, len(rows))
+	cursor := 0
+	for i, r := range rows {
+		label := r.label
+		if pickLabel(r.key, plan) == cur {
+			label += "  — current"
+			cursor = i
+		}
+		items = append(items, pickItem{key: r.key, label: label})
+	}
+	return items, cursor
+}
+
+// pickLabel is the badge word a row selects: plan is its own badge (an ask run
+// under the plan scope), every other row is its mode's badge.
+func pickLabel(key string, plan bool) string {
+	if plan && key == "plan" {
+		return modeBadgeText(agent.ModeAsk, true)
+	}
+	return modeBadgeText(agent.PermMode(key), false)
+}
+
+// runMode is the /mode built-in: no args → a picker over ask|auto|yolo|plan
+// with the current state preselected; `ask|auto|yolo|plan` → set it directly
+// (between runs); the legacy `default` is accepted as `ask`. `plan` enters the
+// plan scope (landing at ask, even from a wider mode); `ask` (or `default`)
+// exits plan; auto/yolo drop it through SetMode.
 func (m *model) runMode(args string) tea.Cmd {
-	st := m.agent.Status()
 	if args == "" {
-		line, _ := modeNotice(m.agent.Mode(), st.Plan)
-		return m.printlnContent(line + "\n" + modeCycleHelp(m.agent.Mode(), st.Plan))
+		if cmd, refused := m.refuseRunning(); refused {
+			return cmd
+		}
+		st := m.agent.Status()
+		p := &pickState{
+			title:      "permission mode for the next run",
+			enterLabel: "switch",
+			cancelNote: "mode unchanged",
+			onChoose:   m.chooseMode,
+		}
+		p.items, p.cursor = modePickItems(m.agent.Mode(), st.Plan)
+		m.openPicker(p)
+		return nil
 	}
 	// Refuse before parsing, like /effort does: mid-run an invalid name gets
 	// the refusal, not a usage line.
@@ -109,15 +147,21 @@ func (m *model) runMode(args string) tea.Cmd {
 		return cmd
 	}
 	if !slices.Contains(modeNames, args) {
-		return m.println("usage: /mode ask|auto|yolo|plan — no args shows the current mode")
+		return m.println("usage: /mode [ask|auto|yolo|plan] — no argument opens the picker")
 	}
-	if args == "plan" {
+	return m.chooseMode(args)
+}
+
+// chooseMode applies a mode name: the picker's choice and /mode <name> share
+// it, so both land at the same state and print the same notice.
+func (m *model) chooseMode(name string) tea.Cmd {
+	switch {
+	case name == "plan":
 		m.agent.SetPlan(true) // ModeChanged prints + refreshes
-		return nil
-	}
-	if m.agent.Plan() && (args == string(agent.ModeAsk) || args == agent.LegacyModeName) {
+	case m.agent.Plan() && (name == string(agent.ModeAsk) || name == agent.LegacyModeName):
 		m.agent.SetPlan(false) // /mode ask exits plan; auto/yolo drop it in SetMode
+	default:
+		m.agent.SetMode(agent.PermMode(name)) // ModeChanged prints + refreshes
 	}
-	m.agent.SetMode(agent.PermMode(args)) // ModeChanged prints + refreshes
 	return nil
 }

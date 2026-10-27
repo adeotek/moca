@@ -123,8 +123,11 @@ func runTUI(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 	promptsDir := config.PromptsDir()
 	pdirs = append(pdirs, skills.Dir{Path: promptsDir, Source: "global"})
 	home, _ := os.UserHomeDir()
+	// DeferSession (§8): opening the TUI writes no session file until the
+	// first prompt arrives, so a launch you quit — or one where you only
+	// switched model or mode — leaves nothing behind to resume.
 	err = tui.Run(ctx, tui.AppOptions{
-		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Mode: agent.PermMode(mode), Plan: plan, Slug: "tui", ConfigPath: cfgPath},
+		Start:      agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model, Trusted: trusted, Mode: agent.PermMode(mode), Plan: plan, Slug: "tui", ConfigPath: cfgPath, DeferSession: true},
 		ConfigPath: cfgPath, Prompts: skills.LoadPrompts(pdirs), PromptDirs: pdirs, Home: home,
 		ResumePath:  resumePath,
 		HintsPath:   filepath.Join(config.DataDir(), "hints.json"),

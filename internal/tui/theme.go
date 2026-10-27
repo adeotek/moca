@@ -41,7 +41,7 @@ func DefaultTheme() Theme {
 			RespBg: "#0a1619", RespFg: "#e9f1fc",
 			CodeBg: "#0c1f27", CodeFg: "#f2c57c",
 			Muted: "#96a0a4", Error: "1", Warning: "3",
-			Accent: "#d97706", Plan: "4",
+			Accent: "#d97706", Plan: "4", HelpCmd: "#60a5fa",
 			DiffAdd: "2", DiffDel: "1",
 			StatusMode: "#8d8f91", StatusModel: "#60a5fa", StatusEffort: "#c4b5fd",
 			StatusPct: "#e6edf3", StatusHint: "#f87171", StatusCwd: "#67e8f9",
@@ -55,7 +55,7 @@ func DefaultTheme() Theme {
 			RespBg: "#c9ddfb", RespFg: "#17304d",
 			CodeBg: "#b6cdee", CodeFg: "#7a3e00",
 			Muted: "#96a0a4", Error: "1", Warning: "3",
-			Accent: "#d97706", Plan: "4",
+			Accent: "#d97706", Plan: "4", HelpCmd: "#1d4ed8",
 			DiffAdd: "2", DiffDel: "1",
 			StatusMode: "#3b434b", StatusModel: "#1d4ed8", StatusEffort: "#6d28d9",
 			StatusPct: "#1f2328", StatusHint: "#b91c1c", StatusCwd: "#0e7490",
@@ -203,6 +203,13 @@ func (t Theme) separatorStyle(dark bool) lipgloss.Style {
 // planStyle is the plan-mode notice color; bold.
 func (t Theme) planStyle(dark bool) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(t.colors(dark).Plan)).Bold(true)
+}
+
+// helpCmdStyle is the command column of `/help` (v0.7.11): the TUI's blue, so
+// a command name reads as a name and not as prose. The descriptions stay at
+// the terminal's default foreground — the help body is text, not chrome.
+func (t Theme) helpCmdStyle(dark bool) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(t.colors(dark).HelpCmd))
 }
 
 func (t Theme) diffAddStyle(dark bool) lipgloss.Style {

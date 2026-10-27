@@ -70,7 +70,7 @@ func TestResumeAfterCrashMidTool(t *testing.T) {
 func TestResumeNeverRestoresYolo(t *testing.T) {
 	s := newScript(t)
 	a, _, _ := startTestWith(t, s, "", "")
-	a.SetYolo(true)
+	a.SetMode(ModeYolo)
 	path := a.Session().Path()
 	a.Session().Close()
 	b, err := Resume(StartOptions{Config: a.opts.Config, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)

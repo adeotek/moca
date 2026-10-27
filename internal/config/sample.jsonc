@@ -12,8 +12,14 @@
   // The model everyday turns use, as <provider>/<model>. There is no default:
   // a config without a model opens the TUI in setup mode (and `-p` exits 2).
   "model": "opencode-go/glm-5.3-flash",
-  // `/hard` (and plan execution) escalate to this one.
+  // The effort a fresh session starts at: off|minimal|low|medium|high|xhigh|max,
+  // clamped to the model's own levels (glm-5.3-flash offers only low|high|max,
+  // so medium lands on low). `--effort` overrides it for one run.
+  "modelEffort": "medium",
+  // `/hard` escalates to this one (plan execution does not switch models).
   "modelHard": "opencode-go/glm-5.3",
+  // …at this effort. Clamped like modelEffort.
+  "modelHardEffort": "high",
 
   // Providers. The five built-in providers below (anthropic, openai,
   // opencode-go, opencode, openrouter) are already known — every one is listed
@@ -56,9 +62,6 @@
     // Auto mode's one-shot classifier for commands the risk tables cannot judge.
     // "auto": { "classifier": true, "model": "opencode-go/glm-5.3-flash" }
   },
-
-  // Legacy spelling of `"defaultMode": "yolo"`; kept so old configs load.
-  "yolo": false,
 
   // ---------------------------------------------------------------------------
   // Shell (SPECS §10). `allow` is the first-word allowlist for the `shell` tool.
