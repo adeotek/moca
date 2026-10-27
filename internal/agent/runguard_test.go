@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/llm"
+	"github.com/adeotek/moca/internal/provider"
 )
 
 func hasWarning(evs *[]Event, sub string) bool {
@@ -201,6 +203,85 @@ func TestPlanModeReserveBeforeWrapUp(t *testing.T) {
 	}
 	if hasWarning(evs, "without a plan file") {
 		t.Fatal("the plan landed; no warning")
+	}
+}
+
+// TestTruncatedTurnGetsOneActingRetry: a turn cut off at the output limit with
+// no tool call is not an answer (TB2 regex-chess 2026-10-27: three turns of
+// 39k-61k characters of thinking, StopLength, nothing written). One retry that
+// forbids deliberation, then the run may end.
+func TestTruncatedTurnGetsOneActingRetry(t *testing.T) {
+	s := newScript(t,
+		truncatedTurn(""),
+		toolTurn([2]string{"write", `{"path":"NOTES.md","content":"x\n"}`}),
+		textTurn("done"),
+	)
+	a, _, evs := startTest(t, s, 40)
+	out, err := a.Run(context.Background(), "fix it")
+	if err != nil || out.Text != "done" || s.bodyCount() != 3 {
+		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
+	}
+	if msg := lastMessageJSON(t, s, 1); !strings.Contains(msg, "output token limit") {
+		t.Fatalf("the retry must name the truncation: %s", msg)
+	}
+	if !hasWarning(evs, "retrying once at a lower effort") {
+		t.Fatal("the rescue must be visible")
+	}
+}
+
+// TestTruncatedTurnIsBounded: a second truncation ends the run with the cause
+// named — the rescue is one turn, never a loop.
+func TestTruncatedTurnIsBounded(t *testing.T) {
+	s := newScript(t, truncatedTurn(""), truncatedTurn(""))
+	a, _, evs := startTest(t, s, 40)
+	out, err := a.Run(context.Background(), "fix it")
+	if err != nil || s.bodyCount() != 2 {
+		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
+	}
+	if out.Text != "" {
+		t.Fatalf("nothing was produced, got %q", out.Text)
+	}
+	if !hasWarning(evs, "kept hitting the output token limit") {
+		t.Fatal("a second truncation must warn")
+	}
+}
+
+// TestTruncatedTextOnlyTurnIsRetried: a half-written answer cut off at the
+// limit is incomplete, not final.
+func TestTruncatedTextOnlyTurnIsRetried(t *testing.T) {
+	s := newScript(t, truncatedTurn("the answer is 4"), textTurn("done"))
+	a, _, _ := startTest(t, s, 40)
+	out, err := a.Run(context.Background(), "fix it")
+	if err != nil || out.Text != "done" || s.bodyCount() != 2 {
+		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
+	}
+	if msg := lastMessageJSON(t, s, 1); !strings.Contains(msg, "output token limit") {
+		t.Fatalf("nudge: %s", msg)
+	}
+}
+
+// TestRescueLevelClampsDown: the retry runs one level below the session, never
+// above low, and is clamped for the model.
+func TestRescueLevelClampsDown(t *testing.T) {
+	full := provider.Model{ThinkingMode: "openai", ThinkingLevelMap: map[llm.Effort]string{
+		llm.EffortOff: "none", llm.EffortMinimal: "minimal", llm.EffortLow: "low",
+		llm.EffortMedium: "medium", llm.EffortHigh: "high",
+	}}
+	plain := provider.Model{} // no levels: clamping is a no-op
+	for _, c := range []struct{ in, want llm.Effort }{
+		{llm.EffortMedium, llm.EffortLow},
+		{llm.EffortHigh, llm.EffortLow},
+		{llm.EffortMax, llm.EffortLow},
+		{llm.EffortLow, llm.EffortLow},
+		{llm.EffortMinimal, llm.EffortMinimal},
+		{llm.EffortOff, llm.EffortOff},
+	} {
+		if got := rescueLevel(c.in, full); got != c.want {
+			t.Fatalf("rescueLevel(%s) = %s, want %s", c.in, got, c.want)
+		}
+	}
+	if got := rescueLevel(llm.EffortHigh, plain); got != llm.EffortOff {
+		t.Fatalf("a model without levels clamps to off, got %s", got)
 	}
 }
 

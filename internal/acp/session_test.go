@@ -9,9 +9,12 @@ import (
 	"time"
 )
 
-// §9.5: the last model turn's stop reason maps onto ACP's StopReason.
+// §9.5: the last model turn's stop reason maps onto ACP's StopReason. A
+// truncated turn is retried once (rev 35), so a run that *ends* on a truncation
+// scripts two of them.
 func TestStopReasonMaxTokens(t *testing.T) {
-	s := newScript(t, `data: {"choices":[{"delta":{"content":"cut off"},"finish_reason":"length"}]}`+"\n\ndata: [DONE]\n\n")
+	cut := `data: {"choices":[{"delta":{"content":"cut off"},"finish_reason":"length"}]}` + "\n\ndata: [DONE]\n\n"
+	s := newScript(t, cut, cut)
 	c := startClient(t, testOptions(t, s))
 	sid := c.newSession(t.TempDir())
 	stop, err := c.prompt(sid, "go")
@@ -20,6 +23,22 @@ func TestStopReasonMaxTokens(t *testing.T) {
 	}
 	if stop != stopMaxTokens {
 		t.Fatalf("stop %q, want %q", stop, stopMaxTokens)
+	}
+}
+
+// A truncated turn that the retry recovers from reports the retry's stop reason:
+// the run finished, and calling it max_tokens would mark a rescued run failed.
+func TestRescuedTruncationEndsClean(t *testing.T) {
+	cut := `data: {"choices":[{"delta":{"content":"cut off"},"finish_reason":"length"}]}` + "\n\ndata: [DONE]\n\n"
+	ok := `data: {"choices":[{"delta":{"content":"here it is"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
+	c := startClient(t, testOptions(t, newScript(t, cut, ok)))
+	sid := c.newSession(t.TempDir())
+	stop, err := c.prompt(sid, "go")
+	if err != nil {
+		t.Fatalf("err %+v", err)
+	}
+	if stop != "end_turn" {
+		t.Fatalf("stop %q, want end_turn after a rescued truncation", stop)
 	}
 }
 
