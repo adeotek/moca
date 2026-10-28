@@ -43,7 +43,7 @@ var builtinAliases = map[string]string{"q": "exit", "quit": "exit"}
 var builtinHelp = map[string]string{
 	"model":              "[provider/model]  pick a model or switch (forfeits prompt cache)",
 	"effort":             "[level]  show or set effort (off|minimal|low|medium|high|xhigh|max)",
-	"hard":               "toggle modelHard + high effort",
+	"hard":               "toggle modelHard at modelHardEffort (default high)",
 	"mode":               "[ask|auto|yolo|plan]  pick the permission mode (no argument opens the picker; shift+tab cycles ask→auto→plan→yolo; between runs only)",
 	"plan":               "[request]  toggle plan mode (runs write an implementation plan to docs/plans/, change nothing else); with a request, plan it now",
 	"execute":            "<plan.md> [instructions]  execute an implementation plan step by step, ticking its - [ ] boxes",
@@ -220,10 +220,12 @@ func renderHelp(prompts []skills.Prompt, sk []skills.Skill, cmdStyle func(string
 		}
 	}
 	if len(autoNames) > 0 {
-		sb.WriteString("auto skills: " + strings.Join(autoNames, ", ") + "\n")
+		// Not a row, so sanitized here: /help prints with println, and an auto
+		// skill's name is repo- or agent-written text.
+		sb.WriteString("auto skills: " + Sanitize(strings.Join(autoNames, ", ")) + "\n")
 	}
 	row(w, "!cmd", "run cmd, output goes to the model   !!cmd  run cmd locally only")
 	sb.WriteString("type / for the command dropdown — ↑/↓ pick · tab completes · enter on an exact name sends\n")
-	sb.WriteString("enter send · shift+enter newline · esc interrupt · shift+tab cycle mode (default/auto/plan/yolo) · ctrl+t cycle effort · ctrl+o pager (latest item) · alt+t read the latest thinking · alt+p paste chips · ctrl+r search history · ctrl+c×2 quit")
+	sb.WriteString("enter send · shift+enter newline · esc interrupt · shift+tab cycle mode (ask/auto/plan/yolo) · ctrl+t cycle effort · ctrl+o pager (latest item) · alt+t read the latest thinking · alt+p paste chips · ctrl+r search history · ctrl+c×2 quit")
 	return sb.String()
 }

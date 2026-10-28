@@ -149,7 +149,14 @@ one() {
   # corpus measured across that change would not be comparable run to run
   # (auto lets commands run that ask-mode denies headless). BASELINE.md's
   # numbers are all ask-mode numbers.
-  flags+=(--mode "${MODE:-ask}")
+  # The pin is a DEFAULT, so it goes before the scenario's own flags: a later
+  # `--mode` wins in flag parsing, and plan's flags file sets `--mode plan`.
+  # Appending it here (v0.7.2 until 2026-10-27) overrode that, so the plan
+  # scenario ran in ask mode and checked "no plan file" on every attempt.
+  # `flags` is empty for a scenario with no flags file, so it is expanded as
+  # ${flags[@]+…} below: bash before 4.4 (macOS's 3.2) treats an empty array
+  # as unbound under `set -u`.
+  local modeargs=(--mode "${MODE:-ask}")
   local prompts=()
   if [ -f "$EVALS/$s/sessions.txt" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
@@ -162,7 +169,7 @@ one() {
   for p in "${prompts[@]}"; do
     i=$((i + 1))
     (cd "$work" && XDG_DATA_HOME="$data" XDG_CONFIG_HOME="$cfg" XDG_STATE_HOME="$data" timeout 900 \
-      "$MOCA" --config "$(scenario_config "$s")" "${flags[@]}" -p "$p" \
+      "$MOCA" --config "$(scenario_config "$s")" "${modeargs[@]}" ${flags[@]+"${flags[@]}"} -p "$p" \
       > "$data/stdout.$i.txt" 2> "$data/stderr.$i.txt")
     last=$?
     [ "$i" = 1 ] && code=$last

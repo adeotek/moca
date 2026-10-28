@@ -224,7 +224,7 @@ func TestTruncatedTurnGetsOneActingRetry(t *testing.T) {
 	if msg := lastMessageJSON(t, s, 1); !strings.Contains(msg, "output token limit") {
 		t.Fatalf("the retry must name the truncation: %s", msg)
 	}
-	if !hasWarning(evs, "retrying once at a lower effort") {
+	if !hasWarning(evs, "retrying once") {
 		t.Fatal("the rescue must be visible")
 	}
 }
@@ -260,8 +260,23 @@ func TestTruncatedTextOnlyTurnIsRetried(t *testing.T) {
 	}
 }
 
-// TestRescueLevelClampsDown: the retry runs one level below the session, never
-// above low, and is clamped for the model.
+// TestRescueAtTheStepLimitDoesNotLeak: a rescue that lands on the last step is
+// spent by the step-limit wrap-up, which returns without passing the loop's
+// clear — the next run must start at the session's own effort.
+func TestRescueAtTheStepLimitDoesNotLeak(t *testing.T) {
+	s := newScript(t, truncatedTurn(""), textTurn("wrapped up"))
+	a, _, _ := startTest(t, s, 1)
+	out, err := a.Run(context.Background(), "fix it")
+	if err != nil || !out.MaxSteps || s.bodyCount() != 2 {
+		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
+	}
+	if a.rescueEffort != "" || a.turnEffort() != a.effort {
+		t.Fatalf("the rescue outlived its run: rescue=%q turn=%q session=%q", a.rescueEffort, a.turnEffort(), a.effort)
+	}
+}
+
+// TestRescueLevelClampsDown: the retry runs at low, or at the session's own
+// level when that is already below low, clamped for the model.
 func TestRescueLevelClampsDown(t *testing.T) {
 	full := provider.Model{ThinkingMode: "openai", ThinkingLevelMap: map[llm.Effort]string{
 		llm.EffortOff: "none", llm.EffortMinimal: "minimal", llm.EffortLow: "low",
