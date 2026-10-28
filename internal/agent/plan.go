@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"slices"
+
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/session"
 )
@@ -34,13 +36,24 @@ func (a *Agent) SetPlan(on bool) {
 	a.applyPlan(on)
 	a.append(session.Entry{Type: session.TypePermissionMode,
 		PermissionMode: &session.PermissionMode{Yolo: a.mode == ModeYolo, Plan: on, Mode: string(a.mode)}})
-	if was && !on {
+	if was && !on && a.sentUnderPlan() {
 		// The envelopes stay in the history — they were part of what the
 		// model received, and the history is append-only. This note tells the
-		// model they no longer apply (the next request carries it once).
+		// model they no longer apply (the next request carries it once). With
+		// no envelope sent there is nothing to retract — and a message entry
+		// would create a deferred session's file before its first prompt (§8).
 		a.append(session.Entry{Type: session.TypeMessage, Message: userText(planOffNote)})
 	}
 	a.emit(PlanChanged{On: on})
+}
+
+// sentUnderPlan reports whether a user message ever went out under the plan
+// envelope. The transcript is append-only (a compaction adds an entry), so
+// the flag survives compaction and resume.
+func (a *Agent) sentUnderPlan() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.ContainsFunc(a.entries, func(e session.Entry) bool { return e.Plan })
 }
 
 // planEnvelope rides user text messages appended while plan mode was on — a

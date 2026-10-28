@@ -271,8 +271,54 @@ func readOnlyVerdict(ws []Word, lower string, conf pathFunc) autoVerdict {
 		if shortFlag(ws, 1, 'r') || hasOpt(ws, 1, "", "--revert") {
 			return autoAsk
 		}
+		// `xxd [opts] infile outfile` writes outfile: the second operand is a
+		// write target, judged like uniq's (a third is a usage error; checking
+		// it too only adds checks).
+		if ops := xxdOperands(ws); len(ops) > 1 {
+			v = writeTargets(ops[1:], conf, false)
+		}
 	}
 	return v.and(readCheck(ws, 1, conf))
+}
+
+// xxdValueLong are the long spellings of xxd's value options; xxd matches
+// them by prefix (`-group` is -groupsize), so they are prefixes here too.
+var xxdValueLong = []string{"-cols", "-group", "-len", "-name", "-offset", "-seek", "-skip"}
+
+// xxdOperands returns xxd's operands, `[infile [outfile]]`, under xxd's own
+// parser rather than getopt's: options come first and end at the first
+// operand (no permutation), `--x` reads as `-x`, `--` ends them, and a value
+// option given bare (`-c 16`, `-len 64`) consumes the next word while an
+// attached one (`-c16`) does not. Treating `16` as an operand would make it
+// the infile and the real infile the outfile — an every-time ask for a plain
+// read outside the workdir. A non-literal word ends the options; readCheck
+// judges it.
+func xxdOperands(ws []Word) []Word {
+	i := 1
+	for ; i < len(ws); i++ {
+		t := ws[i].Text
+		if !ws[i].Literal || t == "-" || !strings.HasPrefix(t, "-") {
+			break
+		}
+		if t == "--" {
+			i++
+			break
+		}
+		if strings.HasPrefix(t, "--") {
+			t = t[1:]
+		}
+		takesValue := len(t) == 2 && strings.IndexByte("cglnosR", t[1]) >= 0
+		for _, p := range xxdValueLong {
+			takesValue = takesValue || strings.HasPrefix(t, p)
+		}
+		if takesValue {
+			i++
+		}
+	}
+	if i >= len(ws) {
+		return nil
+	}
+	return ws[i:]
 }
 
 // rtkVerdict: rtk's own read-only subcommands get the read check on their

@@ -137,8 +137,9 @@ type Agent struct {
 	adapter provider.Adapter
 	effort  llm.Effort
 	// rescueEffort overrides effort for exactly one turn: the retry after a
-	// truncated reply runs a level down, so the same output budget buys an
-	// action instead of more deliberation. Cleared by the next turn (§14).
+	// truncated reply runs at low at most (rescueLevel), so the same output
+	// budget buys an action instead of more deliberation. Cleared by the next
+	// turn and, whatever happens, when the run ends (§14).
 	rescueEffort llm.Effort
 	usage        llm.Usage
 	cost         float64
@@ -381,9 +382,10 @@ func (a *Agent) turnEffort() llm.Effort {
 	return a.effort
 }
 
-// rescueLevel is the effort a truncated-turn retry runs at: one level below the
-// session's, never above low, clamped for the model (a model without levels, or
-// already at off/minimal, comes back unchanged and the nudge carries the turn).
+// rescueLevel is the effort a truncated-turn retry runs at: low, or the
+// session's own level when that is already below low, clamped for the model (a
+// model without levels, or a session already at or below low, comes back
+// unchanged and the nudge carries the turn).
 func rescueLevel(e llm.Effort, m provider.Model) llm.Effort {
 	target := llm.EffortLow
 	if r := e.Rank(); r >= 0 && r < target.Rank() {
@@ -601,6 +603,10 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 		a.opts.Env.SkillHintArmed = true
 	}
 	a.warnedDrop = false
+	// A truncated-turn rescue never outlives its run, whichever way the run
+	// ends: the step-limit wrap-up can be the rescued turn, and a failed
+	// nudge or turn returns before the loop clears it.
+	defer func() { a.rescueEffort = "" }()
 	nudged, verifyNudged, reserved, execNudged, emptyNudged, progressNudged, actionNudged, truncNudged := false, false, false, false, false, false, false, false
 	recordNudged := false
 	// The §14 progress nudge's threshold (context.progressNudgeAt, default 12;
@@ -628,11 +634,10 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 			}
 		}
 		resp, calls, err := a.turnWithRecovery(ctx, llm.ToolChoiceAuto)
+		a.rescueEffort = "" // the rescue is for one turn only
 		if err != nil {
 			return Outcome{}, err
 		}
-		// The rescue effort is for one turn only.
-		a.rescueEffort = ""
 		a.steps = step + 1
 		if len(calls) > 0 {
 			names := make([]string, len(calls))
@@ -653,12 +658,16 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 			if resp.Stop == llm.StopLength {
 				// Cut off at the output limit with nothing to act on: the
 				// budget went into deliberation (or into a half-written
-				// answer). One retry, a level down and told to act; a second
-				// truncation ends the run with the cause named (§14).
+				// answer). One retry at a lowered effort, told to act; a
+				// second truncation ends the run with the cause named (§14).
 				if !truncNudged {
 					truncNudged = true
 					a.rescueEffort = rescueLevel(a.effort, a.model)
-					a.emit(Warning{"the model hit the output token limit without an answer; retrying once at a lower effort"})
+					msg := "the model hit the output token limit without an answer; retrying once"
+					if a.rescueEffort != a.effort {
+						msg += " at a lower effort"
+					}
+					a.emit(Warning{msg})
 					if err := a.nudge("truncated", truncNudge); err != nil {
 						return Outcome{}, err
 					}

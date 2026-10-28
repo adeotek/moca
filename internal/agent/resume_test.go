@@ -387,3 +387,25 @@ func TestResumeRestoresHardMode(t *testing.T) {
 		t.Fatal("a normal session must not resume in hard mode")
 	}
 }
+
+// Leaving a resumed hard mode lands at the default model's normal effort
+// (modelEffort), not at modelHardEffort — the restored pair is the one /hard
+// escalated from.
+func TestResumeRestoresHardModeEffort(t *testing.T) {
+	s := newScript(t)
+	cfg := catalogConfig(t, s, `,"modelEffort":"low","modelHard":"opencode-go/glm-5.3","modelHardEffort":"max"`)
+	a := startCatalog(t, s, cfg)
+	if on, err := a.ToggleHard(); err != nil || !on {
+		t.Fatal(on, err)
+	}
+	path := a.Session().Path()
+	a.Session().Close()
+	b, err := Resume(StartOptions{Config: cfg, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Session().Close()
+	if on, err := b.ToggleHard(); err != nil || on || b.Effort() != llm.EffortLow {
+		t.Fatalf("/hard off after resume: on=%v effort=%q err=%v", on, b.Effort(), err)
+	}
+}

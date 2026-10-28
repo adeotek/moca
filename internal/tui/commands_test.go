@@ -280,6 +280,18 @@ func TestStyledHelpTextPaintsCommandsOnly(t *testing.T) {
 	}
 }
 
+// TestHelpTextNeutralizesSkillControlBytes: /help prints through println (no
+// Sanitize at print time), so repo-written text must be neutralized while the
+// listing is built — the auto-skills line included, which is not a row. The
+// payload is an OSC 52 clipboard write.
+func TestHelpTextNeutralizesSkillControlBytes(t *testing.T) {
+	evil := "x\x1b]52;c;cGF5bG9hZA==\x07"
+	sk := []skills.Skill{{Name: "moca-" + evil, Auto: true}, {Name: "tidy", Description: evil}}
+	if out := HelpText(nil, sk); strings.ContainsAny(out, "\x1b\x07") {
+		t.Fatalf("control bytes reached /help: %q", out)
+	}
+}
+
 // The /help command prints through the trusted path (println), so the color
 // reaches the scrollback; the content path would Sanitize it into literal text.
 func TestHelpCommandPrintsStyled(t *testing.T) {

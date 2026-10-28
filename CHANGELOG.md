@@ -13,8 +13,8 @@ agent's reaction was the defect.
 - A turn that stops at the output limit (`length`) with no tool call now gets its own nudge — *"…Do not
   deliberate: reply now with a single tool call that makes progress…"* — instead of the generic *"Your last
   reply was empty"*, which invited another full-budget deliberation.
-- That retry is the only turn that runs at a lowered effort (one level below the session's, never above
-  `low`, clamped for the model), so the same budget buys an action rather than more reasoning.
+- That retry is the only turn that runs at a lowered effort (`low`, or the session's own level when that is
+  already lower, clamped for the model), so the same budget buys an action rather than more reasoning.
 - The rescue is bounded: a second truncation emits `warning: the model kept hitting the output token limit
   without an answer` and ends the run, and `-p` keeps its `response truncated` / `exitRuntime` contract.
 - No new config key: the per-turn ceiling stays `min(model.maxOutputTokens, context.reserveTokens)`, and a
@@ -37,8 +37,10 @@ on every launch — and the boolean that predated the mode model is retired.
   lists must not drift by hand.
 - **The legacy top-level `"yolo": false` key is removed**, sample included. It had been redundant since
   v0.7.2 (`permissions.defaultMode` is the config's mode) and its `true` conflicted with `defaultMode`
-  anyway. Strict decode is what an old config gets: `json: unknown field "yolo"` with its `line:col`, not a
-  silent permission switch. The fix is one line — `"permissions": { "defaultMode": "yolo" }`.
+  anyway. Strict decode is what an old config gets — `json: unknown field "yolo"` plus the fix for its
+  value, not a silent permission switch. The fix depends on the value: `"yolo": false` (what the v0.7.10
+  sample shipped, so what most configs hold) changed nothing — **delete the line**; only `"yolo": true` becomes
+  `"permissions": { "defaultMode": "yolo" }`.
 - Pinned by `TestConfigEffort` (config level reaches the session header, `/hard` escalates at
   `modelHardEffort`), `TestConfigEffortClampsAndFlagWins` (`medium` clamps to `low`; `--effort max` beats
   `"modelEffort": "low"`), `TestHardEffortDefaultsToHigh`, `TestModelEfforts` (every level accepted, an
@@ -210,6 +212,47 @@ The same run exposed a harness defect that had quietly killed a scenario: `run.s
 parsing — so `plan`, whose flags file is `--mode plan`, ran in ask mode and checked "no plan file" on
 every attempt since v0.7.2. The mode pin is now a default, passed before the scenario flags; `plan`
 passes 3/3 on both arms, and every `plan` row in a label from v0.7.2 to this pass is invalid.
+
+### A review pass over v0.7.10..v0.7.11
+
+The release range re-read end to end, the prompt-review branch included. No tool schema and no config key
+change; each behavior fix below names the pin that fails without it, and the `Smaller` bullet's text and
+failure-path cleanup carry no new `=== RUN` line.
+
+- **A resumed `/hard` session returns to the right effort.** Resume rebuilds hard mode's saved pair from
+  config, and it saved the *hard* effort as the level to return to — so with `"modelEffort": "low"` and
+  `"modelHardEffort": "max"`, leaving `/hard` after a resume put the default model at `max` for every later
+  turn. The saved pair is now what a fresh session starts at (`modelEffort`, else the model's default).
+  Pin: `TestResumeRestoresHardModeEffort`.
+- **The `/mode` picker marks one row.** In plain ask mode the `plan` row matched too (its badge lookup fell
+  through to `Ask`), the cursor landed on it, and `enter` switched into plan mode. The rows now compare
+  the state directly. Pin: `TestModeCommandOpensThePicker` (plain ask).
+- **A TUI session nobody prompted stays off the disk through a plan toggle.** Leaving plan mode appends a
+  note retracting the envelopes earlier messages carried — a message entry, which creates a deferred
+  session's file. Picking `plan` then `ask`, or one shift+tab cycle through plan, therefore wrote a session
+  without a prompt. With no plan-mode message sent there is nothing to retract, so no note is appended.
+  Pin: `TestDeferredSessionSurvivesAPlanRoundTrip`.
+- **The truncation rescue is one turn, always.** The lowered effort was cleared only after a successful
+  turn: a failed or cancelled retry, a failed nudge, or a rescue spent by the step-limit wrap-up carried
+  it into the next run's first turn. It is now also cleared whenever the run ends, and the warning says
+  "at a lower effort" only when the level actually dropped. Pin: `TestRescueAtTheStepLimitDoesNotLeak`.
+- **`xxd in out` writes `out`, and auto mode knows.** The new read-only `xxd` row checked only `-r`, so
+  `xxd a.bin .git/config` or `xxd a.bin /etc/x` overwrote the target without a prompt. The second operand
+  is now a write target (uniq's rule), found with xxd's own parser — options first, `-c -g -l -n -o -s -R`
+  taking a value — so `xxd -c 16 /etc/hosts` stays one read for the classifier, not an every-time ask.
+  Pins: nine new `TestAutoTable` rows.
+- **`/help` neutralizes the auto-skills line.** `/help` moved to the styled print path, which does not
+  sanitize, and every row is sanitized as it is built — but the `auto skills:` line is not a row, so an
+  auto skill's name reached the terminal raw. Pin: `TestHelpTextNeutralizesSkillControlBytes`.
+- **The removed `yolo` key says what to do.** The error was a bare `json: unknown field "yolo"` (no
+  `line:col` — encoding/json reports none for an unknown field), and this entry's own advice pointed every
+  old config at `"defaultMode": "yolo"` — which turns permission checks off for a config whose `false`
+  never did. The error now carries the fix for its value. Pin: `TestSpecExampleDecodesIntact`.
+- **Smaller:** a session file whose header write or lock failed is removed instead of orphaned under a fresh
+  id; `/clear` says "previous stays resumable" only when the previous session has a file; `/help`'s `/hard`
+  and shift+tab lines name `modelHardEffort` and `ask`; `test/evals/run.sh` expands the now-optional
+  `flags` array the way bash 3.2 accepts under `set -u` (the v0.7.10 fix to `publish-channels.sh`).
+- +4 tests (1341).
 
 ## v0.7.10 (2026-10-24)
 
