@@ -116,8 +116,15 @@ func ParseEffort(s string) (Effort, error) {
 // Request is protocol-neutral. Model is the bare model id (no provider
 // prefix). Effort must already be clamped for the model (provider.ClampEffort).
 type Request struct {
-	Model        string
-	System       string
+	Model  string
+	System string
+	// SystemTail is the uncached tail of the system prompt — the environment
+	// block, whose date/git lines are the only bytes that differ between
+	// sessions in one repo (§14). A protocol with explicit cache breakpoints
+	// (anthropic) sends it as a second system block so the breakpoint on the
+	// head covers the fixed and per-project text only (§7); every other
+	// protocol sends FullSystem().
+	SystemTail   string
 	Messages     []Message
 	Tools        []ToolSpec
 	ToolChoice   ToolChoice
@@ -127,6 +134,18 @@ type Request struct {
 	// CacheKey routes a session's requests to the same prompt cache where
 	// the protocol supports it (openai prompt_cache_key); "" sends nothing.
 	CacheKey string
+}
+
+// FullSystem is the system prompt as one string: the head and the tail
+// rejoined by the blank line the prompt builder separates sections with.
+func (r Request) FullSystem() string {
+	switch {
+	case r.SystemTail == "":
+		return r.System
+	case r.System == "":
+		return r.SystemTail
+	}
+	return strings.TrimRight(r.System, "\n") + "\n\n" + r.SystemTail
 }
 
 // Usage is normalized: Input excludes cache reads and writes on every

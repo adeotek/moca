@@ -28,12 +28,22 @@ var ephemeral = map[string]string{"type": "ephemeral"}
 func (a *anthropicAdapter) body(req llm.Request) map[string]any {
 	cache := !req.NoCacheWrite
 	b := map[string]any{"model": req.Model, "max_tokens": req.MaxTokens, "stream": true}
-	if req.System != "" {
-		sys := map[string]any{"type": "text", "text": req.System}
-		if cache {
-			sys["cache_control"] = ephemeral
+	if req.System != "" || req.SystemTail != "" {
+		// Two blocks: the cache breakpoint sits on the head, so the
+		// per-session date/git lines below it never invalidate the cached
+		// prefix (§14). A request without a tail is unchanged — one block.
+		blocks := make([]any, 0, 2)
+		if req.System != "" {
+			head := map[string]any{"type": "text", "text": req.System}
+			if cache {
+				head["cache_control"] = ephemeral
+			}
+			blocks = append(blocks, head)
 		}
-		b["system"] = []any{sys}
+		if req.SystemTail != "" {
+			blocks = append(blocks, map[string]any{"type": "text", "text": req.SystemTail})
+		}
+		b["system"] = blocks
 	}
 	if len(req.Tools) > 0 {
 		tools := make([]map[string]any, len(req.Tools))

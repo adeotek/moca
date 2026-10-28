@@ -252,9 +252,18 @@ func (w *Writer) materializeLocked() error {
 		if err != nil {
 			return err
 		}
-		if err := lockFile(f); err != nil {
+		// A failure from here on leaves no empty or half-written session
+		// behind: the next attempt would find this name taken and orphan it
+		// under a new id. Close precedes Remove — Windows refuses to delete an
+		// open file.
+		discard := func(err error) error {
 			f.Close()
+			os.Remove(w.path)
+			w.f = nil
 			return err
+		}
+		if err := lockFile(f); err != nil {
+			return discard(err)
 		}
 		w.f = f
 		// The header leads, then whatever was buffered behind it — in the
@@ -262,9 +271,7 @@ func (w *Writer) materializeLocked() error {
 		// the same session a prompt-first start would have written.
 		for _, e := range append([]Entry{w.head}, w.pending...) {
 			if err := w.write(e); err != nil {
-				f.Close()
-				w.f = nil
-				return err
+				return discard(err)
 			}
 		}
 		w.pending = nil

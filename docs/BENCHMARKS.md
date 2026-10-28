@@ -71,6 +71,6 @@ make probe                            # one live request per agent, proves the c
 TASK_NAMES=$(tr '\n' ',' < docs/tb2-subset-12.txt | sed 's/,$//') make subset
 ```
 
-`MOCA_VERSION` pins the release under test — **v0.7.9 now**, the newest tag (v0.7.10's PRs are
-merged but the tag is not cut); the rendered Harbor config is copied into every job directory,
+`MOCA_VERSION` pins the release under test — **v0.7.10 now**, the newest tag (v0.7.11's PRs are
+not merged yet); the rendered Harbor config is copied into every job directory,
 so a run records exactly what ran.

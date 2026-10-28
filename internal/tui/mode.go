@@ -97,27 +97,21 @@ func modePickItems(m agent.PermMode, plan bool) ([]pickItem, int) {
 		{string(agent.ModeYolo), "yolo  — all permission checks are off"},
 		{"plan", "plan  — runs write a plan to docs/plans/, nothing else changes"},
 	}
-	cur := modeBadgeText(m, plan)
+	cur := string(m)
+	if plan {
+		cur = "plan"
+	}
 	items := make([]pickItem, 0, len(rows))
 	cursor := 0
 	for i, r := range rows {
 		label := r.label
-		if pickLabel(r.key, plan) == cur {
+		if r.key == cur {
 			label += "  — current"
 			cursor = i
 		}
 		items = append(items, pickItem{key: r.key, label: label})
 	}
 	return items, cursor
-}
-
-// pickLabel is the badge word a row selects: plan is its own badge (an ask run
-// under the plan scope), every other row is its mode's badge.
-func pickLabel(key string, plan bool) string {
-	if plan && key == "plan" {
-		return modeBadgeText(agent.ModeAsk, true)
-	}
-	return modeBadgeText(agent.PermMode(key), false)
 }
 
 // runMode is the /mode built-in: no args → a picker over ask|auto|yolo|plan

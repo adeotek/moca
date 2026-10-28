@@ -735,3 +735,60 @@ Comparability: `v074-2` was measured on the v0.7.4 tree with PR #55 (the two `co
 merged into the working tree; neither command is reachable from the agent's tool path, so the skills
 columns are comparable with `v074-1` — same label family, same model, same n, one checker change
 between them and nothing else.
+
+## v0.7.11 — the prompt review, measured (2026-10-27, `v0711-base` → `v0711-cand`, n=3, 39 rows)
+
+Two arms, one checkout, one checker revision, differing only in the binary: `v0711-base` is `origin/main`
+at the merge (`ce02411`); `v0711-cand` adds this branch's three prompt commits — the fold, the environment
+block as the prompt's tail, `llm.Request.SystemTail` (an uncached second system block on anthropic), the
+`[hint: …]` carve-out, and `xxd`/`od`/`hexdump` in auto mode.
+
+| metric | `v0711-base` | `v0711-cand` |
+|---|---|---|
+| pass | 34/39 | **36/39** |
+| tokens/run (mean ± sd) | 56 230 ± 46 182 | 52 844 ± 25 353 |
+| steps/run | 10.0 ± 5.5 | 9.8 ± 4.0 |
+| cache efficiency | 0.58 | **0.69** |
+| tokens/solved | 64 500 | 57 247 |
+| cost | $0.2046 | $0.1746 |
+| repeated fails | 1 | 0 |
+
+Per-scenario passes moved in two places — `largefile` 2/3 → 3/3 and `skills-inject-output` 2/3 → 3/3 —
+with `skills-inject-paste` (2/3 → 2/3) and `vague` (1/3 → 1/3) unchanged, and **no scenario lost a pass**.
+`go run ./test/evals/evalstats -compare v0711-base-full.jsonl,v0711-cand-full.jsonl`: passes 34 → 36,
+tokens/solved 0.89 [0.71, 1.11], cost/run 0.85 [0.70, 1.06], steps 0.98 [0.85, 1.12] — **underpowered at
+n=3**, so the aggregate reads as "no regression", not as a token win.
+
+The four scenarios that moved were rerun at **n=6** (`v0711-base-moved` → `v0711-cand-moved`, 24 rows):
+
+| scenario | base | cand |
+|---|---|---|
+| `largefile` | 6/6 | 6/6 |
+| `skills-inject-output` | 5/6 | **6/6** |
+| `skills-inject-paste` | 5/6 | **6/6** |
+| `vague` | 1/6 | **3/6** |
+| **total** | 17/24 | **21/24** |
+
+`-compare` over that pair: passes 17 → 21, tokens/solved 0.98 [0.72, 1.29], cost/run 1.26 [0.94, 1.64],
+steps 1.11 [0.91, 1.33] — **inconclusive on volume** at this n. The release read is therefore: the prompt
+work converts to **outcomes** (+4 of 24 on the scenarios that moved, no losses) at flat token volume on
+the moved set and no measurable volume change overall; the -11% aggregate tokens/solved is inside the
+noise band. `vague` stays the row to watch — it is the most volatile scenario in this file, and 3/6 is a
+count it has never shown there.
+
+The cache-efficiency move (0.58 → 0.69) is the mechanical effect the reorder was for, and it is visible
+even at n=3: with the environment block as the prompt's tail, consecutive sessions share the fixed *and*
+per-project text as a prefix.
+
+### The `plan` scenario was measuring nothing
+
+Both arms showed `plan` 0/3 with "no plan file". That is not a prompt effect: `run.sh` appended
+`--mode "${MODE:-ask}"` **after** the scenario's own `flags` file, and a later `--mode` wins in flag
+parsing — so `plan`, whose flags file is `--mode plan`, ran in ask mode on every attempt: it answered the
+plan in prose and never wrote `docs/plans/*.md`. The mode pin is now a default (`modeargs`, passed before
+the scenario flags). Re-measured at n=3 with the fix: `plan` **3/3 on both arms** (25 491 vs 32 413
+tokens/run, 5.3 vs 6.0 steps). **Every `plan` row in a label from v0.7.2 to this pass is invalid** — the
+pin landed with the auto-default change and the scenario has been 0/3 since.
+
+Comparability: the totals above splice those fixed-harness `plan` runs into the n=3 arms
+(`v0711-base-full.jsonl` / `v0711-cand-full.jsonl`, 39 rows each); every other row is the arm as run.

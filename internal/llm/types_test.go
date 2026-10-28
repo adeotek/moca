@@ -29,3 +29,18 @@ func TestUsageAdd(t *testing.T) {
 		t.Fatalf("Add = %+v", got)
 	}
 }
+
+// FullSystem rejoins the environment tail for protocols without explicit
+// cache breakpoints (§14): the split exists only so anthropic can cache the
+// head, every other wire takes the prompt as one string.
+func TestFullSystemJoinsTheTail(t *testing.T) {
+	if got := (Request{System: "head"}).FullSystem(); got != "head" {
+		t.Fatalf("no tail: %q", got)
+	}
+	if got := (Request{System: "head\n", SystemTail: "# Environment"}).FullSystem(); got != "head\n\n# Environment" {
+		t.Fatalf("rejoin: %q", got)
+	}
+	if got := (Request{SystemTail: "tail"}).FullSystem(); got != "tail" {
+		t.Fatalf("empty head: %q", got)
+	}
+}

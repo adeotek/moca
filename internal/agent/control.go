@@ -156,15 +156,16 @@ func (a *Agent) SetEffort(e llm.Effort) (llm.Effort, error) {
 func (a *Agent) HardOn() bool { return a.hard != nil }
 
 // restoreHard re-enters hard mode after a resume: the saved pair is not in
-// the transcript, so it is the configured default model at the configured
-// hard effort (what /hard would have saved). A default that no longer
+// the transcript, so it is the configured default model at the effort a fresh
+// session starts it at (what /hard would have saved — the pair it escalated
+// FROM, not the hard effort it escalated to). A default that no longer
 // resolves leaves hard mode off.
 func (a *Agent) restoreHard() {
 	m, _, err := a.opts.Providers.Resolve(a.opts.Config.Model)
 	if err != nil {
 		return
 	}
-	a.hard = &savedModel{m.Qualified(), m.ClampEffort(hardEffort(a.opts.Config))}
+	a.hard = &savedModel{m.Qualified(), startEffort(m, a.opts.Config, "")}
 }
 
 // hardEffort is the level /hard escalates to: config modelHardEffort, else

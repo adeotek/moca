@@ -1273,7 +1273,13 @@ func (m *model) restartSession() tea.Cmd {
 	if err != nil {
 		return m.printlnError("error: " + err.Error())
 	}
+	// A deferred session that never got a prompt has no file (§8): only a
+	// created one "stays resumable".
+	note := fmt.Sprintf("new session %s", a.Session().ID8())
 	if m.agent != nil {
+		if m.agent.Session().Created() {
+			note += " (previous stays resumable)"
+		}
 		m.agent.Close()
 	}
 	m.agent = a
@@ -1286,7 +1292,7 @@ func (m *model) restartSession() tea.Cmd {
 	m.status.Transient = ""
 	m.refreshStatus()
 	// The bar's branch survives /clear; re-resolve it for the new session.
-	return tea.Sequence(m.printlnMuted(fmt.Sprintf("new session %s (previous stays resumable)", a.Session().ID8())), m.branchCmd())
+	return tea.Sequence(m.printlnMuted(note), m.branchCmd())
 }
 
 // shellCmd runs a `!`/`!!` command off the event loop; a `!` one can be

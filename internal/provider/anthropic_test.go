@@ -150,6 +150,37 @@ func TestAnthropicStreamToolCall(t *testing.T) {
 	}
 }
 
+// The environment tail rides as a second system block without a breakpoint:
+// the cached prefix covers the fixed and per-project head only, so a session's
+// date/git lines cannot invalidate it across sessions (§7, §14).
+func TestAnthropicSystemTailIsUncached(t *testing.T) {
+	a := newAnthropic(Model{Provider: "anthropic", ID: "claude-x"}, "http://x", keyCred("K"), http.DefaultClient).(*anthropicAdapter)
+	req := llm.Request{Model: "claude-x", MaxTokens: 100, System: "head", SystemTail: "# Environment\n- Date: d"}
+	blocks, ok := a.body(req)["system"].([]any)
+	if !ok || len(blocks) != 2 {
+		t.Fatalf("want two system blocks, got %v", a.body(req)["system"])
+	}
+	if blocks[0].(map[string]any)["cache_control"] == nil {
+		t.Fatal("the head must carry the cache breakpoint")
+	}
+	if _, cached := blocks[1].(map[string]any)["cache_control"]; cached {
+		t.Fatal("the environment tail must not be cached")
+	}
+	if blocks[1].(map[string]any)["text"] != req.SystemTail {
+		t.Fatalf("tail text %v", blocks[1])
+	}
+	// A compaction summary writes no cache at all, tail included.
+	req.NoCacheWrite = true
+	if strings.Contains(mustJSON(a.body(req)), "cache_control") {
+		t.Fatal("NoCacheWrite must leave both blocks uncached")
+	}
+	// No tail (a resumed session built before the split, or a caller that
+	// passes one string): one block, exactly as before.
+	if blocks := a.body(llm.Request{Model: "claude-x", MaxTokens: 1, System: "only"}); len(blocks["system"].([]any)) != 1 {
+		t.Fatalf("no tail must stay one block: %v", blocks["system"])
+	}
+}
+
 func TestAnthropicBudgetAndNoCache(t *testing.T) {
 	var body map[string]any
 	srv := sseServer(t, 200, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", &body, nil)

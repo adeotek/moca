@@ -122,3 +122,19 @@ func TestDeferredSessionWaitsForTheFirstPrompt(t *testing.T) {
 		}
 	}
 }
+
+// TestDeferredSessionSurvivesAPlanRoundTrip (§8): leaving plan mode before the
+// first prompt — the shift+tab cycle's plan→yolo step, or the picker's plan
+// then ask — has no envelope to retract, so it appends no off note and the
+// deferred session still writes nothing.
+func TestDeferredSessionSurvivesAPlanRoundTrip(t *testing.T) {
+	s := newScript(t)
+	a, _, _ := startTest(t, s, 40, func(o *StartOptions) { o.DeferSession = true })
+	a.SetPlan(true)
+	a.SetMode(ModeYolo) // drops plan through SetPlan(false)
+	a.SetPlan(true)
+	a.SetPlan(false)
+	if a.Session().Created() {
+		t.Fatal("a plan round trip before the first prompt must not create the session file")
+	}
+}

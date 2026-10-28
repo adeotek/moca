@@ -60,6 +60,24 @@ func TestSpecExampleDecodesIntact(t *testing.T) {
 	if _, err := Parse([]byte(`{"yolo": true}`)); err == nil || !strings.Contains(err.Error(), "yolo") {
 		t.Fatalf("a removed `yolo` key must be an unknown-field error, got %v", err)
 	}
+	// The error says what to do, per value: the v0.7.10 sample's `false` is a
+	// deletion and must never be pointed at yolo mode; `true` moves to
+	// permissions.defaultMode.
+	for src, want := range map[string]string{
+		"{\n  // copied from the v0.7.10 sample\n  \"yolo\": false\n}": "delete the line",
+		`{"yolo": true}`: `"defaultMode": "yolo"`,
+	} {
+		_, err := Parse([]byte(src))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", src, err, want)
+		}
+		if strings.Contains(src, "false") && strings.Contains(err.Error(), "defaultMode") {
+			t.Errorf("a `false` config must not be told to set yolo mode: %v", err)
+		}
+	}
+	if _, err := Parse([]byte(`{"bogus": 1}`)); err == nil || strings.Contains(err.Error(), "v0.7.11") {
+		t.Errorf("another unknown key must not get the yolo hint: %v", err)
+	}
 }
 
 // TestEffortsMatchLLM: config.Efforts is the word list modelEffort and
