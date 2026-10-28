@@ -186,6 +186,18 @@ func TestModeCommandOpensThePicker(t *testing.T) {
 	if !m.agent.Plan() {
 		t.Fatal("esc must leave the mode alone")
 	}
+	// Plain ask (plan off) marks only the ask row: plan must not match it.
+	m.runCommand(Parsed{Kind: KindCommand, Name: "mode", Args: "ask"})
+	m.runCommand(Parsed{Kind: KindCommand, Name: "mode"})
+	if cur := m.pick.items[m.pick.cursor]; cur.key != "ask" {
+		t.Fatalf("ask must be the current row: %q", cur.label)
+	}
+	for _, it := range m.pick.items {
+		if it.key != "ask" && strings.Contains(it.label, "— current") {
+			t.Fatalf("only ask is current, got %q too", it.label)
+		}
+	}
+	drained(m, m.pickKey(keyMsg("esc")))
 	// A picker opened mid-run is refused like every other mode change.
 	m.agent.SetPlan(false)
 	m.running = true

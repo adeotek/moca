@@ -35,8 +35,8 @@ func newOpenAICompletions(m Model, baseURL string, cred CredentialFunc, hc *http
 
 func (a *completionsAdapter) body(req llm.Request) map[string]any {
 	var msgs []map[string]any
-	if req.System != "" {
-		msgs = append(msgs, map[string]any{"role": "system", "content": req.System})
+	if sys := req.FullSystem(); sys != "" {
+		msgs = append(msgs, map[string]any{"role": "system", "content": sys})
 	}
 	for _, m := range req.Messages {
 		var text, reasoning strings.Builder

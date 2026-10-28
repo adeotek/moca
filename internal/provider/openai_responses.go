@@ -76,8 +76,8 @@ func (a *responsesAdapter) body(req llm.Request, oauth bool) map[string]any {
 		// (docs/specs/oauth-verification.md §2.4).
 		b["max_output_tokens"] = req.MaxTokens
 	}
-	if req.System != "" {
-		b["instructions"] = req.System
+	if sys := req.FullSystem(); sys != "" {
+		b["instructions"] = sys
 	}
 	if len(req.Tools) > 0 {
 		tools := make([]map[string]any, len(req.Tools))

@@ -562,7 +562,7 @@ func Parse(data []byte) (Config, error) {
 	dec := json.NewDecoder(bytes.NewReader(std))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&c); err != nil {
-		return Config{}, withPosition(data, err)
+		return Config{}, removedYolo(std, withPosition(data, err))
 	}
 	// T-7: Decode reads one value and stops — `{...} {...}` or `{...} junk`
 	// used to parse as the first object with the rest silently dropped.
@@ -574,6 +574,24 @@ func Parse(data []byte) (Config, error) {
 		return Config{}, err
 	}
 	return c, nil
+}
+
+// removedYolo completes strict decode's error for the top-level `yolo` key
+// v0.7.11 removed: "unknown field" alone does not say what to do, and the fix
+// depends on the value. The v0.7.10 sample shipped `false`, which changed
+// nothing and is a deletion; only `true` moves to permissions.defaultMode —
+// advice a `false` config must never be handed.
+func removedYolo(std []byte, err error) error {
+	var legacy struct {
+		Yolo *bool `json:"yolo"`
+	}
+	if !strings.HasSuffix(err.Error(), `unknown field "yolo"`) || json.Unmarshal(std, &legacy) != nil || legacy.Yolo == nil {
+		return err
+	}
+	if *legacy.Yolo {
+		return fmt.Errorf(`%w: removed in v0.7.11 — replace it with "permissions": {"defaultMode": "yolo"}`, err)
+	}
+	return fmt.Errorf("%w: removed in v0.7.11 — delete the line (false changed nothing)", err)
 }
 
 func withPosition(src []byte, err error) error {

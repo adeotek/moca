@@ -93,6 +93,7 @@ var inspectOnly = map[string]bool{"cat": true, "ls": true, "head": true, "tail":
 	"find": true, "echo": true, "printf": true, "wc": true, "git": true, "pwd": true, "which": true, "sed": true,
 	"awk": true, "diff": true, "stat": true, "file": true, "tree": true, "cd": true, "true": true, "sort": true,
 	"uniq": true, "cut": true, "tr": true, "less": true, "more": true, "type": true, "Get-Content": true,
+	"xxd": true, "od": true, "hexdump": true, "strings": true,
 	"Select-String": true, "Get-ChildItem": true}
 
 // verifies reports whether a shell command line exercises the code (build,
