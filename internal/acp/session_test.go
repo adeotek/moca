@@ -14,7 +14,9 @@ import (
 // scripts two of them.
 func TestStopReasonMaxTokens(t *testing.T) {
 	cut := `data: {"choices":[{"delta":{"content":"cut off"},"finish_reason":"length"}]}` + "\n\ndata: [DONE]\n\n"
-	s := newScript(t, cut, cut)
+	// §14: three rescues are allowed, so a run only ends on a truncation at the
+	// fourth.
+	s := newScript(t, cut, cut, cut, cut)
 	c := startClient(t, testOptions(t, s))
 	sid := c.newSession(t.TempDir())
 	stop, err := c.prompt(sid, "go")
