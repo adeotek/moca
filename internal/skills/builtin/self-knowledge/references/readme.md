@@ -80,6 +80,8 @@ Full uninstall — the binary plus `~/.config/moca`, `~/.local/share/moca` and `
 
 `~/.config/moca/config.jsonc` (JSONC — comments allowed; `$XDG_CONFIG_HOME` is honored). Minimal:
 
+Environment variables can live beside it in `~/.config/moca/.env` — `KEY=VALUE` lines, `#` comments, optional `export`, quoted values; moca loads them at startup and the shell's values win.
+
 ```jsonc
 {
   "model":      "opencode-go/glm-5.3-flash",   // everyday turns — cheap, fast

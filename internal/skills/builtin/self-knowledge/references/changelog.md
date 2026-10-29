@@ -2,6 +2,22 @@
 
 ## v0.7.12 (unreleased)
 
+### Environment variables from `~/.config/moca/.env`
+
+An API key or an MCP server variable no longer has to be exported in every shell that starts moca. The
+user config directory may hold a `.env` beside `config.jsonc` and `auth.json`; moca loads it once at
+startup, before the config is read, so `env:VAR` references and the built-in providers resolve against it.
+
+- `KEY=VALUE` lines, blank lines and `#` comments, an optional `export`, and bare, single-quoted or
+  double-quoted values (double quotes honour `\n`, `\r`, `\t`, `\\` and `\"`; an unquoted ` #` starts a
+  trailing comment, while `a#b` keeps its hash). A UTF-8 BOM is ignored.
+- **The shell wins**: a variable already present in the environment is never overridden. That keeps a
+  one-off `OPENCODE_API_KEY=… moca -p …` and a wrapper's overrides authoritative over the file.
+- The file is optional — absent is not an error. A malformed line warns on stderr with its `path:line` and
+  startup continues, so a typo in an unused line cannot keep moca from opening.
+- The loader is stdlib-only (`config.LoadDotEnv`, `config.DotEnvFile`) — no new dependency just to read
+  `KEY=VALUE`; SPECS §4 documents the syntax.
+
 ### A truncated turn gets room, not just a pep talk
 
 v0.7.11 retried a truncated turn once at a lower effort and called it a day. Twenty more attempts on the

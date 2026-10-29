@@ -17,6 +17,12 @@ import (
 )
 
 func main() {
+	// ~/.config/moca/.env is optional: load it before anything reads a
+	// credential or an env: reference, and let the real environment win.
+	// (In main, not run(), so tests never read a user's file.)
+	if err := loadUserDotEnv(); err != nil {
+		fmt.Fprintln(os.Stderr, "moca: warning: could not load .env:", err)
+	}
 	// Credentials moved to ~/.config/moca/auth.json; a v0.1 store in the data
 	// dir is moved once, before anything reads it. A failure leaves the old
 	// file in place (nothing is lost) and only warns. (In main, not run(), so
@@ -27,6 +33,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	os.Exit(run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}
+
+// loadUserDotEnv loads the optional ~/.config/moca/.env into the process
+// environment. Variables already set are left alone (the shell wins) and a
+// missing file is not an error.
+func loadUserDotEnv() error {
+	_, err := config.LoadDotEnv(config.DotEnvFile())
+	return err
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
