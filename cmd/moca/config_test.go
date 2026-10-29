@@ -116,6 +116,54 @@ func TestConfigCheckProjectTrust(t *testing.T) {
 	}
 }
 
+// `config check` is the file's diagnostic surface: a bad .env line is an
+// issue with its path and line, and a `.env` other users can read is reported
+// as advice without failing the check.
+func TestConfigCheckReportsTheDotEnv(t *testing.T) {
+	isolate(t)
+	cfg := writeCfg(t, `{"model":"opencode-go/glm-5.3-flash"}`)
+
+	code, out, errb := runConfigCmd(t, "--config", cfg, "config", "check")
+	if code != 0 || !strings.Contains(out, "environment file:") || !strings.Contains(out, "not found — optional") {
+		t.Fatalf("a missing .env is fine, exit %d:\n%s%s", code, out, errb)
+	}
+
+	writeDotEnv(t, "# keys\nGOOD_KEY=1\n")
+	code, out, _ = runConfigCmd(t, "--config", cfg, "config", "check")
+	if code != 0 || !strings.Contains(out, "1 variable(s)") || !strings.Contains(out, "no issues") {
+		t.Fatalf("a clean .env must pass, exit %d:\n%s", code, out)
+	}
+
+	path := writeDotEnv(t, "GOOD_KEY=1\nnot an assignment\n")
+	code, out, errb = runConfigCmd(t, "--config", cfg, "config", "check")
+	if code != exitUsage {
+		t.Fatalf("a broken .env must fail the check, exit %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, path+":2: expected KEY=VALUE") {
+		t.Fatalf("the issue must name the file and line:\n%s", out)
+	}
+	if !strings.Contains(errb, "1 issue") {
+		t.Fatalf("stderr must count the issue: %q", errb)
+	}
+	if strings.Contains(errb, "moca: warning:") {
+		// `config check` lists the file's problems itself; the startup warning
+		// would print each one twice.
+		t.Fatalf("the startup warning must not be repeated by `config check`: %q", errb)
+	}
+
+	// A mode other users can read is advice: it does not fail the check.
+	if err := os.WriteFile(path, []byte("GOOD_KEY=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil { // WriteFile keeps the existing mode
+		t.Fatal(err)
+	}
+	code, out, _ = runConfigCmd(t, "--config", cfg, "config", "check")
+	if code != 0 || !strings.Contains(out, "chmod 600") || !strings.Contains(out, "no issues") {
+		t.Fatalf("a loose mode is a note, not an issue, exit %d:\n%s", code, out)
+	}
+}
+
 func mustMkdir(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

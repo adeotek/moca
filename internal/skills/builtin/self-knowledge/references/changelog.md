@@ -5,18 +5,35 @@
 ### Environment variables from `~/.config/moca/.env`
 
 An API key or an MCP server variable no longer has to be exported in every shell that starts moca. The
-user config directory may hold a `.env` beside `config.jsonc` and `auth.json`; moca loads it once at
-startup, before the config is read, so `env:VAR` references and the built-in providers resolve against it.
+user config directory may hold a `.env` beside `config.jsonc` and `auth.json`; moca loads it as the first
+thing `run()` does, before the config is read, so `env:VAR` references and the built-in providers resolve
+against it — in every mode, subcommands included.
 
 - `KEY=VALUE` lines, blank lines and `#` comments, an optional `export`, and bare, single-quoted or
-  double-quoted values (double quotes honour `\n`, `\r`, `\t`, `\\` and `\"`; an unquoted ` #` starts a
-  trailing comment, while `a#b` keeps its hash). A UTF-8 BOM is ignored.
-- **The shell wins**: a variable already present in the environment is never overridden. That keeps a
-  one-off `OPENCODE_API_KEY=… moca -p …` and a wrapper's overrides authoritative over the file.
-- The file is optional — absent is not an error. A malformed line warns on stderr with its `path:line` and
-  startup continues, so a typo in an unused line cannot keep moca from opening.
-- The loader is stdlib-only (`config.LoadDotEnv`, `config.DotEnvFile`) — no new dependency just to read
-  `KEY=VALUE`; SPECS §4 documents the syntax.
+  double-quoted values (double quotes honour `\n`, `\r`, `\t`, `\\` and `\"`; an unquoted `#` is a
+  trailing comment only after whitespace, so `a#b` and `#abc` keep their hash). A UTF-8 BOM is ignored.
+- **The shell wins**: a variable already present in the environment is never overridden (an empty one
+  counts as present), which keeps a one-off `OPENCODE_API_KEY=… moca -p …` and a wrapper authoritative.
+  Within the file the **last** definition of a name wins, as in every other dotenv implementation.
+- **Nothing is fatal.** The file is optional, and a malformed line is reported with its `path:line` while
+  the lines after it still load — one typo costs one line, never the key three lines down (which used to
+  surface as "the credential is not set" with nothing pointing at the typo).
+- `HOME` and `XDG_CONFIG_HOME` are never taken from the file: they decide where the file itself was read
+  from, so applying them would move the config dir (and `auth.json`) away from it; the assignment is
+  reported and skipped.
+- A file a group or the world can read earns a `chmod 600` note (Unix) — it holds the keys `env:`
+  references name. Warnings print on stderr, except under ACP, where stderr belongs to the editor (§9.5)
+  and they go to the log instead; `startLog` puts them in the log in every mode.
+- **Diagnosable without a terminal to watch**: `moca config check` validates the file and lists its
+  issues, the missing-credential error names the file it can live in, and `moca mcp import` points the
+  `env:` references it rewrites at it too.
+- The loader is stdlib-only (`config.LoadDotEnv`; `config.ReadDotEnv` is the parse-only form
+  `moca config check` uses; `config.DotEnvFile`) — no new dependency just to read `KEY=VALUE`; SPECS §4
+  documents the syntax. Pinned by `TestParseDotEnvLine`, `TestLoadDotEnv`,
+  `TestLoadDotEnv{Notes,ReservedNames}`, `TestReadDotEnvParsesWithoutApplying`,
+  `TestConfigCheckReportsTheDotEnv`, and end to end through `run()`: `TestDotEnvFeedsTheCredential` (the
+  file's key reaching the request's `Authorization` header), `TestDotEnvBadLineWarnsAndTheRunGoesOn` and
+  `TestDotEnvStaysSilentUnderACP`.
 
 ### A truncated turn gets room, not just a pep talk
 

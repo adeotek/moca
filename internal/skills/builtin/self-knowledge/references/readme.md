@@ -80,8 +80,6 @@ Full uninstall — the binary plus `~/.config/moca`, `~/.local/share/moca` and `
 
 `~/.config/moca/config.jsonc` (JSONC — comments allowed; `$XDG_CONFIG_HOME` is honored). Minimal:
 
-Environment variables can live beside it in `~/.config/moca/.env` — `KEY=VALUE` lines, `#` comments, optional `export`, quoted values; moca loads them at startup and the shell's values win.
-
 ```jsonc
 {
   "model":      "opencode-go/glm-5.3-flash",   // everyday turns — cheap, fast
@@ -104,6 +102,15 @@ Optional TUI knobs: `"tui": { "notify": "osc9" }` (`osc9` · `bell` · `off`) �
 Web search is keyless by default; to switch engines or lift tavily's rate limit: `"web": { "search": { "provider": "tavily", "apiKey": "env:TAVILY_API_KEY" } }` — `tavily` (default) or `exa` (a key is required). Fetching pages needs no config.
 
 Secrets never appear as literals: `apiKey` is an optional `env:VAR` reference — or drop it and store the credential with `/login` (TUI) / `moca login` below. A stored key wins over the env reference.
+
+**Environment file.** Those variables do not have to be exported in every shell: `~/.config/moca/.env` beside the config holds them — `KEY=VALUE` lines, `#` comments, an optional `export`, bare or quoted values. moca reads it at startup, before anything resolves a credential, so `env:OPENCODE_API_KEY` and an MCP server's `env:` entries find it too. A variable already in your environment wins, and so does a key stored with `/login`; a malformed line is reported with its `file:line` and the rest of the file still loads; `moca config check` validates it on demand. Since it holds keys, keep it yours alone:
+
+```sh
+install -m 600 /dev/null ~/.config/moca/.env   # then edit it
+# ~/.config/moca/.env
+OPENCODE_API_KEY=...
+MOCA_MCP_GITHUB_GITHUB_TOKEN=...               # `moca mcp import` names the ones it rewrote
+```
 
 ### Providers
 
