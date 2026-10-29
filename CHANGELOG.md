@@ -25,15 +25,26 @@ against it — in every mode, subcommands included.
   references name. Warnings print on stderr, except under ACP, where stderr belongs to the editor (§9.5)
   and they go to the log instead; `startLog` puts them in the log in every mode.
 - **Diagnosable without a terminal to watch**: `moca config check` validates the file and lists its
-  issues, the missing-credential error names the file it can live in, and `moca mcp import` points the
-  `env:` references it rewrites at it too.
+  issues — a malformed line, and a `HOME`/`XDG_CONFIG_HOME` assignment a run would refuse (with the
+  environment already setting that name the shell wins first; the check stays quiet too, so the two
+  surfaces never disagree about one file) — the missing-credential error names the file it can live in, and `moca mcp import` points the `env:`
+  references it rewrites at it too. `config check` prints the file's issues itself and so drops only those
+  from its startup warnings; anything else startup ran into (a failed move of the v0.1 auth store) still
+  prints there.
+- **A diagnostic never quotes the line.** A note names the path, the line and the reason: neither the text
+  after a closing quote nor the would-be name before the `=` is echoed, since on a line without a key that
+  "name" is the value itself (a pasted `postgres://user:pass@host/db?x=y`, a padded base64 secret), and
+  notes reach a terminal and the log.
+- **Set but empty is not "not set".** An exported empty variable counts as present, so it shadows the
+  file's line; the `env:` error now says `is set but empty` and the credential hint says to unset it,
+  instead of pointing at a `.env` line that may already be there.
 - The loader is stdlib-only (`config.LoadDotEnv`; `config.ReadDotEnv` is the parse-only form
   `moca config check` uses; `config.DotEnvFile`) — no new dependency just to read `KEY=VALUE`; SPECS §4
   documents the syntax. Pinned by `TestParseDotEnvLine`, `TestLoadDotEnv`,
   `TestLoadDotEnv{Notes,ReservedNames}`, `TestReadDotEnvParsesWithoutApplying`,
-  `TestConfigCheckReportsTheDotEnv`, and end to end through `run()`: `TestDotEnvFeedsTheCredential` (the
-  file's key reaching the request's `Authorization` header), `TestDotEnvBadLineWarnsAndTheRunGoesOn` and
-  `TestDotEnvStaysSilentUnderACP`.
+  `TestConfigCheckReportsTheDotEnv`, `TestStderrNotes`, `TestResolveEnv`, `TestAPIKeyMissingPointsAtTheDotEnv`,
+  and end to end through `run()`: `TestDotEnvFeedsTheCredential` (the file's key reaching the request's
+  `Authorization` header), `TestDotEnvBadLineWarnsAndTheRunGoesOn` and `TestDotEnvStaysSilentUnderACP`.
 
 ### A truncated turn gets room, not just a pep talk
 

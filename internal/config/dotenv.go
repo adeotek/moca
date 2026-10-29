@@ -105,8 +105,8 @@ func LoadDotEnv(path string) (DotEnvReport, error) {
 		if _, exists := os.LookupEnv(v.Name); exists {
 			continue
 		}
-		if dotEnvReserved(v.Name) {
-			rep.Notes = append(rep.Notes, fmt.Errorf("%s:%d: %s is not applied — it decides where moca keeps its files, so it cannot come from the file itself", path, v.Line, v.Name))
+		if note := v.ReservedNote(path); note != nil {
+			rep.Notes = append(rep.Notes, note)
 			continue
 		}
 		if err := os.Setenv(v.Name, v.Value); err != nil {
@@ -118,16 +118,17 @@ func LoadDotEnv(path string) (DotEnvReport, error) {
 	return rep, nil
 }
 
-// dotEnvReserved reports whether name decides where moca keeps its files. Such
-// a variable cannot come from the file it was read from: applying it mid-boot
-// would move the config directory — and auth.json with it — away from the file
-// that asked for the move, so the next start would read a different file.
-func dotEnvReserved(name string) bool {
-	switch name {
+// ReservedNote reports why this assignment never reaches the environment: the
+// name decides where moca keeps its files — and where this very file was read
+// from — so it cannot come from the file itself. It returns nil for a name the
+// file may set. `moca config check` prints the same note from here, so the two
+// surfaces cannot drift apart on the wording or on which names are refused.
+func (v DotEnvVar) ReservedNote(path string) error {
+	switch v.Name {
 	case "HOME", "XDG_CONFIG_HOME":
-		return true
+		return fmt.Errorf("%s:%d: %s is not applied — it decides where moca keeps its files, so it cannot come from the file itself", path, v.Line, v.Name)
 	}
-	return false
+	return nil
 }
 
 // parseDotEnvLine parses one dotenv line: blank lines and `#` comments are
@@ -152,7 +153,10 @@ func parseDotEnvLine(line string) (name, value string, ok bool, err error) {
 	}
 	key = strings.TrimSpace(key)
 	if !validEnvName(key) {
-		return "", "", false, fmt.Errorf("invalid variable name %q", key)
+		// The name is not quoted back: on a line without a key it is the
+		// value itself (a pasted `postgres://u:pass@h/db?x=y`, a padded
+		// base64 secret), and this error reaches a terminal and the log.
+		return "", "", false, errors.New("invalid variable name (letters, digits and _, not starting with a digit)")
 	}
 	value, err = parseDotEnvValue(raw)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -25,8 +26,26 @@ func main() {
 // bootResult is what startup() found: the variables the user .env contributed
 // and every diagnostic collected while booting.
 type bootResult struct {
-	DotEnvVars int
-	Notes      []error
+	DotEnvVars  int
+	DotEnvNotes []error // the .env's own complaints — `moca config check` lists them itself
+	Notes       []error // the rest of the boot (the v0.1 auth-store move)
+}
+
+// all is every boot diagnostic, the .env's first.
+func (b bootResult) all() []error { return slices.Concat(b.DotEnvNotes, b.Notes) }
+
+// stderrNotes is what run() prints before dispatching: nothing under ACP,
+// whose stderr belongs to the editor (§9.5; startLog logs them there), and
+// under `config check` only what that command does not list itself — it
+// reports the .env, not the auth-store move.
+func stderrNotes(o Options, b bootResult) []error {
+	switch {
+	case o.logMode() == "acp":
+		return nil
+	case len(o.Sub) == 2 && o.Sub[0] == "config" && o.Sub[1] == "check":
+		return b.Notes
+	}
+	return b.all()
 }
 
 // startup does the work that has to precede every command — the optional
@@ -37,10 +56,9 @@ type bootResult struct {
 // testable.
 func startup() bootResult {
 	rep, err := config.LoadDotEnv(config.DotEnvFile())
-	var r bootResult
-	r.DotEnvVars, r.Notes = rep.Set, rep.Notes
+	r := bootResult{DotEnvVars: rep.Set, DotEnvNotes: rep.Notes}
 	if err != nil {
-		r.Notes = append(r.Notes, fmt.Errorf("could not read the user .env: %w", err))
+		r.DotEnvNotes = append(r.DotEnvNotes, fmt.Errorf("could not read the user .env: %w", err))
 	}
 	// Credentials moved to ~/.config/moca/auth.json. A failure leaves the old
 	// file in place (nothing is lost) and only warns.
@@ -70,16 +88,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintln(stdout, "moca", config.Version)
 		return exitOK
 	}
-	// `config` reports the file itself (see runConfigCheck), so it would only
-	// print the same thing twice.
-	reportHere := o.logMode() != "acp" && !(len(o.Sub) > 0 && o.Sub[0] == "config")
-	if reportHere {
-		// ACP's stderr belongs to the editor (§9.5); every other mode owns it.
-		// Printed before the config is loaded, so a config error cannot hide a
-		// broken .env line behind it. startLog repeats them into the log.
-		for _, n := range boot.Notes {
-			fmt.Fprintln(stderr, "moca: warning:", n)
-		}
+	// Printed before the config is loaded, so a config error cannot hide a
+	// broken .env line behind it. startLog repeats them into the log.
+	for _, n := range stderrNotes(o, boot) {
+		fmt.Fprintln(stderr, "moca: warning:", n)
 	}
 	if len(o.Sub) > 0 {
 		// `update` runs before the config is loaded: updating the binary

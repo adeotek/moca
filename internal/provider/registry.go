@@ -482,8 +482,14 @@ func (r *Registry) credential(provider string) CredentialFunc {
 		case eerr != nil:
 			// EnvError already names the variable; name the file it most
 			// likely belongs in, since the .env is read at startup for
-			// exactly this reason.
-			return Credential{}, fmt.Errorf("provider %s: %w; add it to %s, or store a key with /login in the TUI or moca login %s", provider, eerr, config.DotEnvFile(), provider)
+			// exactly this reason — unless an empty value in the environment
+			// is what shadows that file's line (the environment wins).
+			fix := "add it to " + config.DotEnvFile()
+			var ee *config.EnvError
+			if errors.As(eerr, &ee) && ee.Empty {
+				fix = "unset it or give it a value (an empty one overrides " + config.DotEnvFile() + ")"
+			}
+			return Credential{}, fmt.Errorf("provider %s: %w; %s, or store a key with /login in the TUI or moca login %s", provider, eerr, fix, provider)
 		case config.IsLocalProvider(provider):
 			// A local server needs no key; one stored with /login (or an
 			// apiKey env reference) is sent when the server sits behind an

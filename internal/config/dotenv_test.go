@@ -145,6 +145,22 @@ func TestLoadDotEnv(t *testing.T) {
 	if len(rep.Notes) != 1 || strings.Contains(rep.Notes[0].Error(), secret) {
 		t.Fatalf("notes = %v, want the pasted text kept out", rep.Notes)
 	}
+
+	// Nor is the text before the `=`: on a line with no key it is the value
+	// itself — a connection string or a padded base64 secret pasted alone.
+	for _, line := range []string{"postgres://app:hunter2@db/prod?sslmode=require", "abc+hunter2/xyz=="} {
+		if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		rep, err = LoadDotEnv(path)
+		if err != nil {
+			t.Fatalf("LoadDotEnv: %v", err)
+		}
+		if len(rep.Notes) != 1 || !strings.Contains(rep.Notes[0].Error(), "invalid variable name") ||
+			strings.Contains(rep.Notes[0].Error(), "hunter2") {
+			t.Fatalf("%q: notes = %v, want an invalid-name note without the pasted text", line, rep.Notes)
+		}
+	}
 }
 
 // TestLoadDotEnvNotes covers the two non-fatal complaints: a file other users

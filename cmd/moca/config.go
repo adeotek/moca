@@ -84,6 +84,18 @@ func runConfigCheck(o Options, stdout, stderr io.Writer) int {
 		for _, e := range d.LineErr {
 			report(false, "  %v", e)
 		}
+		// A name the file may never set: a run refuses it and says so, so the
+		// check reports it — unless the environment already sets it, in which
+		// case the shell wins first and the run is silent (the two surfaces
+		// must agree about the same file).
+		for _, v := range d.Vars {
+			if _, set := os.LookupEnv(v.Name); set {
+				continue
+			}
+			if note := v.ReservedNote(envPath); note != nil {
+				report(false, "  %v", note)
+			}
+		}
 		if d.ModeNote != nil {
 			// Advice, not a defect: the file loads either way.
 			fmt.Fprintf(stdout, "  note: %v\n", d.ModeNote)

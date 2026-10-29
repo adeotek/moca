@@ -56,7 +56,7 @@ func startLog(cfg config.Config, cfgPath string, o Options, stderr io.Writer, bo
 	if boot.DotEnvVars > 0 {
 		slog.Debug("startup: dotenv", "vars", boot.DotEnvVars)
 	}
-	for _, n := range boot.Notes {
+	for _, n := range boot.all() {
 		slog.Warn("startup: warning", "reason", n.Error())
 	}
 	return func() { c.Close() }, nil

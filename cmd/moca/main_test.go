@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -133,5 +135,33 @@ func TestDotEnvStaysSilentUnderACP(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"jsonrpc":"2.0"`) {
 		t.Fatalf("stdout lost its JSON-RPC response: %q", out.String())
+	}
+}
+
+// TestStderrNotes pins who prints the boot diagnostics: ACP never (the editor
+// owns stderr), `config check` only what it does not list itself — a failed
+// auth-store move must not vanish because the user asked to check the .env —
+// and every other command, `config sample` included, all of them.
+func TestStderrNotes(t *testing.T) {
+	dotenv, other := errors.New("dotenv"), errors.New("auth move")
+	boot := bootResult{DotEnvNotes: []error{dotenv}, Notes: []error{other}}
+	tests := []struct {
+		name string
+		o    Options
+		want []error
+	}{
+		{"tui", Options{}, []error{dotenv, other}},
+		{"oneshot", Options{OneShot: true}, []error{dotenv, other}},
+		{"acp", Options{Sub: []string{"acp"}}, nil},
+		{"config check", Options{Sub: []string{"config", "check"}}, []error{other}},
+		{"config sample", Options{Sub: []string{"config", "sample"}}, []error{dotenv, other}},
+		{"mcp", Options{Sub: []string{"mcp", "import"}}, []error{dotenv, other}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stderrNotes(tc.o, boot); !slices.Equal(got, tc.want) {
+				t.Fatalf("stderrNotes = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

@@ -106,10 +106,10 @@ Secrets never appear as literals: `apiKey` is an optional `env:VAR` reference â€
 **Environment file.** Those variables do not have to be exported in every shell: `~/.config/moca/.env` beside the config holds them â€” `KEY=VALUE` lines, `#` comments, an optional `export`, bare or quoted values. moca reads it at startup, before anything resolves a credential, so `env:OPENCODE_API_KEY` and an MCP server's `env:` entries find it too. A variable already in your environment wins, and so does a key stored with `/login`; a malformed line is reported with its `file:line` and the rest of the file still loads; `moca config check` validates it on demand. Since it holds keys, keep it yours alone:
 
 ```sh
-install -m 600 /dev/null ~/.config/moca/.env   # then edit it
+mkdir -p ~/.config/moca && touch ~/.config/moca/.env && chmod 600 ~/.config/moca/.env   # never empties an existing file; then edit it
 # ~/.config/moca/.env
 OPENCODE_API_KEY=...
-MOCA_MCP_GITHUB_GITHUB_TOKEN=...               # `moca mcp import` names the ones it rewrote
+MOCA_MCP_GITHUB_GITHUB_TOKEN=...                             # `moca mcp import` names the ones it rewrote
 ```
 
 ### Providers

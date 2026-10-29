@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -151,7 +152,36 @@ func TestConfigCheckReportsTheDotEnv(t *testing.T) {
 		t.Fatalf("the startup warning must not be repeated by `config check`: %q", errb)
 	}
 
+	// A reserved name is an issue only when a run would refuse it: with the
+	// name already exported (isolate() sets XDG_CONFIG_HOME) the shell wins
+	// first and a run never mentions the line, so the check must not fail on
+	// it either — one file, one verdict, two surfaces.
+	writeDotEnv(t, "GOOD_KEY=1\nXDG_CONFIG_HOME=/elsewhere\n")
+	code, out, _ = runConfigCmd(t, "--config", cfg, "config", "check")
+	if code != 0 || strings.Contains(out, "is not applied") {
+		t.Fatalf("a shell-shadowed reserved line must not fail the check, exit %d:\n%s", code, out)
+	}
+
+	// With the name unset (HOME here — isolate() keeps XDG_CONFIG_HOME, which
+	// is what locates the file) the run would refuse the line and warn, so the
+	// check fails with it.
+	home, hadHome := os.LookupEnv("HOME")
+	os.Unsetenv("HOME")
+	t.Cleanup(func() {
+		if hadHome {
+			os.Setenv("HOME", home)
+		}
+	})
+	writeDotEnv(t, "GOOD_KEY=1\nHOME=/elsewhere\n")
+	code, out, _ = runConfigCmd(t, "--config", cfg, "config", "check")
+	if code != exitUsage || !strings.Contains(out, path+":2: HOME is not applied") {
+		t.Fatalf("a reserved name a run refuses must fail the check with its line, exit %d:\n%s", code, out)
+	}
+
 	// A mode other users can read is advice: it does not fail the check.
+	if runtime.GOOS == "windows" {
+		return // Windows synthesises mode bits; there is nothing to report
+	}
 	if err := os.WriteFile(path, []byte("GOOD_KEY=1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
