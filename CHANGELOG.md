@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.7.12 (unreleased)
+
+### A truncated turn gets room, not just a pep talk
+
+v0.7.11 retried a truncated turn once at a lower effort and called it a day. Twenty more attempts on the
+cell that motivated it showed why that is not enough: the retry truncated **again, immediately** — the two
+truncations arrive 0–4 tool calls apart — and the turn that truncates is usually thinking-only, stopped at
+`min(maxOutputTokens, context.reserveTokens)`. With the defaults that ceiling is **16 384 tokens**, while
+`deepseek-v4.1-flash` can emit **384 000**. The model was not misbehaving; it was being cut off mid-thought,
+and a lowered effort cannot undo a ceiling that is 23× too low.
+
+- The rescue now **raises the ceiling** instead of only lowering the effort: `min(model limit, reserve) ×
+  2^attempt`, capped at the model's own limit — 32 768, 65 536, 131 072 with the defaults, and 384 000 when
+  the model offers it. No new config key: the configured `reserveTokens`/per-model `maxOutputTokens` still
+  set the base, and a model with no headroom simply keeps it.
+- **Up to three rescues per wall**, not one, and the count **resets on progress** (any tool call). A long
+  run may truncate once per phase; only a model that truncates three times with no work between is stopped,
+  and then with the cause named.
+- The nudge escalates with the attempt: the first says *act, don't deliberate, split long output*; the
+  second says *stop re-deriving — emit one small step, a few hundred words at most*. Back-to-back
+  truncations are a re-derivation signal, not a short-ceiling signal.
+- `-p` keeps `response truncated (token limit reached)` / `exitRuntime`, and ACP keeps §9.5: a run that ends
+  because of a truncation reports `max_tokens`, a rescued one reports the retry's reason.
+
+Measured, not assumed: TB2 `regex-chess` at k=10 stood at 2/10 on both v0.7.10 and v0.7.11 — the v0.7.11
+reward claim was noise — but the mechanism held (a truncation ended 6/6 runs at v0.7.10 and 1/6 at
+v0.7.11), and the k=10 sessions are what exposed the ceiling as the binding constraint. Verification here:
+`make test` (four new cases: the raised ceiling, the three-rescue bound, the reset on progress, the budget
+schedule) plus a live run of the built binary against a server that always truncates — four requests,
+ceilings 16 384 → 32 768 → 65 536 → 65 536, exit 1, every retry and the bound on stderr.
+
 ## v0.7.11 (2026-10-27)
 
 ### A truncated turn is retried once, not answered
