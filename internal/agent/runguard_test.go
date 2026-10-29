@@ -10,6 +10,18 @@ import (
 	"github.com/adeotek/moca/internal/provider"
 )
 
+// bodyMaxTokens is the output ceiling the agent asked for in request req.
+func bodyMaxTokens(t *testing.T, s *scriptServer, req int) int {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if req < 0 || req >= len(s.bodies) {
+		t.Fatalf("request %d does not exist (%d recorded)", req, len(s.bodies))
+	}
+	n, _ := s.bodies[req]["max_tokens"].(float64)
+	return int(n)
+}
+
 func hasWarning(evs *[]Event, sub string) bool {
 	for _, e := range *evs {
 		if w, ok := e.(Warning); ok && strings.Contains(w.Text, sub) {
@@ -206,17 +218,17 @@ func TestPlanModeReserveBeforeWrapUp(t *testing.T) {
 	}
 }
 
-// TestTruncatedTurnGetsOneActingRetry: a turn cut off at the output limit with
-// no tool call is not an answer (TB2 regex-chess 2026-10-27: three turns of
-// 39k-61k characters of thinking, StopLength, nothing written). One retry that
-// forbids deliberation, then the run may end.
-func TestTruncatedTurnGetsOneActingRetry(t *testing.T) {
+// TestTruncatedTurnGetsAnActingRetry: a turn cut off at the output limit with no
+// tool call is not an answer (TB2 regex-chess 2026-10-27: three turns of 39k-61k
+// characters of thinking, StopLength, nothing written). One retry that forbids
+// deliberation and raises the ceiling, then the run continues.
+func TestTruncatedTurnGetsAnActingRetry(t *testing.T) {
 	s := newScript(t,
 		truncatedTurn(""),
 		toolTurn([2]string{"write", `{"path":"NOTES.md","content":"x\n"}`}),
 		textTurn("done"),
 	)
-	a, _, evs := startTest(t, s, 40)
+	a, _, evs := startTestWith(t, s, `"model":"fake/m2"`, `"m2":{"contextWindow":65536,"maxOutputTokens":65536}`)
 	out, err := a.Run(context.Background(), "fix it")
 	if err != nil || out.Text != "done" || s.bodyCount() != 3 {
 		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
@@ -224,25 +236,62 @@ func TestTruncatedTurnGetsOneActingRetry(t *testing.T) {
 	if msg := lastMessageJSON(t, s, 1); !strings.Contains(msg, "output token limit") {
 		t.Fatalf("the retry must name the truncation: %s", msg)
 	}
-	if !hasWarning(evs, "retrying once") {
+	if !hasWarning(evs, "retry 1 of 3") {
 		t.Fatal("the rescue must be visible")
+	}
+	// §14: a truncated turn is a thought (or a write) cut in half, so the retry
+	// runs with more room — not less.
+	first, retry := bodyMaxTokens(t, s, 0), bodyMaxTokens(t, s, 1)
+	if retry <= first {
+		t.Fatalf("the retry ceiling must rise: %d then %d", first, retry)
+	}
+	if after := bodyMaxTokens(t, s, 2); after != first {
+		t.Fatalf("the raised ceiling must not outlive the rescue: %d then %d", first, after)
 	}
 }
 
-// TestTruncatedTurnIsBounded: a second truncation ends the run with the cause
-// named — the rescue is one turn, never a loop.
+// TestTruncatedTurnIsBounded: three rescues without progress, then the run ends
+// with the cause named — the rescue is bounded, never a loop.
 func TestTruncatedTurnIsBounded(t *testing.T) {
-	s := newScript(t, truncatedTurn(""), truncatedTurn(""))
-	a, _, evs := startTest(t, s, 40)
+	s := newScript(t, truncatedTurn(""), truncatedTurn(""), truncatedTurn(""), truncatedTurn(""))
+	a, _, evs := startTestWith(t, s, `"model":"fake/m2"`, `"m2":{"contextWindow":65536,"maxOutputTokens":65536}`)
 	out, err := a.Run(context.Background(), "fix it")
-	if err != nil || s.bodyCount() != 2 {
+	if err != nil || s.bodyCount() != 4 {
 		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
 	}
 	if out.Text != "" {
 		t.Fatalf("nothing was produced, got %q", out.Text)
 	}
 	if !hasWarning(evs, "kept hitting the output token limit") {
-		t.Fatal("a second truncation must warn")
+		t.Fatal("the bound must warn")
+	}
+	if bodyMaxTokens(t, s, 1) <= bodyMaxTokens(t, s, 0) {
+		t.Fatal("the first rescue must raise the ceiling")
+	}
+	for i := 2; i < 4; i++ {
+		if bodyMaxTokens(t, s, i) < bodyMaxTokens(t, s, i-1) {
+			t.Fatalf("attempt %d must not lower the ceiling", i)
+		}
+	}
+}
+
+// TestTruncationProgressResetsTheRescueBudget: work between truncations is
+// progress, so a long run may truncate once per phase without being cut off.
+func TestTruncationProgressResetsTheRescueBudget(t *testing.T) {
+	s := newScript(t,
+		truncatedTurn(""), toolTurn([2]string{"read", `{"path":"a.md"}`}),
+		truncatedTurn(""), toolTurn([2]string{"read", `{"path":"b.md"}`}),
+		truncatedTurn(""), toolTurn([2]string{"read", `{"path":"c.md"}`}),
+		truncatedTurn(""), toolTurn([2]string{"read", `{"path":"d.md"}`}),
+		textTurn("done"),
+	)
+	a, _, evs := startTest(t, s, 40)
+	out, err := a.Run(context.Background(), "fix it")
+	if err != nil || out.Text != "done" || s.bodyCount() != 9 {
+		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
+	}
+	if hasWarning(evs, "kept hitting the output token limit") {
+		t.Fatal("progress must reset the rescue budget")
 	}
 }
 
@@ -270,8 +319,31 @@ func TestRescueAtTheStepLimitDoesNotLeak(t *testing.T) {
 	if err != nil || !out.MaxSteps || s.bodyCount() != 2 {
 		t.Fatalf("%+v %v requests=%d", out, err, s.bodyCount())
 	}
-	if a.rescueEffort != "" || a.turnEffort() != a.effort {
+	if a.rescueEffort != "" || a.rescueMaxTokens != 0 || a.turnEffort() != a.effort {
 		t.Fatalf("the rescue outlived its run: rescue=%q turn=%q session=%q", a.rescueEffort, a.turnEffort(), a.effort)
+	}
+}
+
+// TestRescueBudgetEscalatesAndStops: double, quadruple, eight times the configured
+// ceiling, never past the model's own limit, and nothing when there is no headroom.
+func TestRescueBudgetEscalatesAndStops(t *testing.T) {
+	const reserve = 16384
+	big := provider.Model{MaxOutput: 384000}
+	for _, c := range []struct{ attempt, want int }{{1, 32768}, {2, 65536}, {3, 131072}} {
+		if got := rescueBudget(big, reserve, c.attempt); got != c.want {
+			t.Fatalf("attempt %d = %d, want %d", c.attempt, got, c.want)
+		}
+	}
+	small := provider.Model{MaxOutput: 20000}
+	if got := rescueBudget(small, reserve, 1); got != 20000 {
+		t.Fatalf("capped at the model limit, got %d", got)
+	}
+	if got := rescueBudget(small, reserve, 3); got != 20000 {
+		t.Fatalf("still capped at the model limit, got %d", got)
+	}
+	tight := provider.Model{MaxOutput: reserve}
+	if got := rescueBudget(tight, reserve, 1); got != 0 {
+		t.Fatalf("no headroom must mean no override, got %d", got)
 	}
 }
 

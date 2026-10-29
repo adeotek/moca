@@ -28,15 +28,40 @@ const wrapUpText = "You have reached the step limit for this run. Do not call to
 // emptyNudge answers a turn with neither text nor tool calls.
 const emptyNudge = "Your last reply was empty. Continue the task where you left off, or give your final answer."
 
+// maxTruncRescues bounds how many times one run may answer a truncated turn with
+// a rescue turn. Any tool call resets the count, so a long run is not punished for
+// truncating once per phase, while a model stuck on the same wall is stopped after
+// three (§14).
+const maxTruncRescues = 3
+
 // truncNudge answers a turn cut off at the output token limit with neither an
 // answer nor a tool call. A reasoning model can spend the whole per-turn budget
 // thinking and come back with nothing (TB2 regex-chess, 2026-10-27: three turns
 // of 39k-61k characters of thinking, StopLength, no file written), so the retry
-// forbids deliberation and asks for an action (§14).
-const truncNudge = "Your last turn was cut off at the output token limit before it produced an " +
-	"answer or a tool call. Do not deliberate: reply now with a single tool call that makes " +
-	"progress, or with the shortest complete final answer. No preamble, and at most two " +
-	"sentences of reasoning."
+// forbids deliberation and asks for an action (§14). From the second attempt the
+// ceiling has already been raised, so the instruction shifts from "act" to "act
+// small": back-to-back truncations mean the model is re-deriving.
+func truncNudge(attempt int) string {
+	if attempt <= 1 {
+		return "Your last turn was cut off at the output token limit before it produced an answer " +
+			"or a tool call. Do not deliberate: reply now with a single tool call that makes " +
+			"progress, or with the shortest complete final answer. No preamble, at most two " +
+			"sentences of reasoning, and split anything long — write files in chunks and read " +
+			"ranges rather than whole files."
+	}
+	return "Your replies keep hitting the output token limit even though the ceiling has been " +
+		"raised. Do not re-derive what you have already worked out: emit only the next small step " +
+		"— one short tool call, or one chunk of the file you are writing — and keep this turn to a " +
+		"few hundred words. Long content must be split across turns."
+}
+
+// truncNudgeKind labels the persisted nudge so a session shows which attempt it was.
+func truncNudgeKind(attempt int) string {
+	if attempt <= 1 {
+		return "truncated"
+	}
+	return "truncated-again"
+}
 
 // actionNudge answers a run that is ending after a text-only reply without a
 // single tool call: describing an action is not taking it (§14, TB2 round 3 —
@@ -136,15 +161,17 @@ type Agent struct {
 	model   provider.Model
 	adapter provider.Adapter
 	effort  llm.Effort
-	// rescueEffort overrides effort for exactly one turn: the retry after a
-	// truncated reply runs at low at most (rescueLevel), so the same output
-	// budget buys an action instead of more deliberation. Cleared by the next
-	// turn and, whatever happens, when the run ends (§14).
-	rescueEffort llm.Effort
-	usage        llm.Usage
-	cost         float64
-	plan         bool
-	steps        int // steps taken by the current run (run-end log line)
+	// rescueEffort and rescueMaxTokens override the effort and the output ceiling
+	// for exactly one turn: the retry after a truncated reply runs at low at most
+	// (rescueLevel) with a raised ceiling (rescueBudget), so the thought or the
+	// write that was cut in half can finish. Cleared by the next turn and, whatever
+	// happens, when the run ends (§14).
+	rescueEffort    llm.Effort
+	rescueMaxTokens int
+	usage           llm.Usage
+	cost            float64
+	plan            bool
+	steps           int // steps taken by the current run (run-end log line)
 	// warnedDrop gates the once-per-run thinking-drop warning (B1.2); reset
 	// at the start of every run.
 	warnedDrop bool
@@ -368,9 +395,42 @@ func (a *Agent) request(choice llm.ToolChoice) llm.Request {
 		Tools:      a.opts.Tools.Specs(),
 		ToolChoice: choice,
 		CacheKey:   a.cacheKey(),
-		MaxTokens:  a.model.MaxTokens(a.opts.Config.Context.ReserveTokens),
+		MaxTokens:  a.turnMaxTokens(),
 		Effort:     a.turnEffort(),
 	}
+}
+
+// turnMaxTokens is the output ceiling for the next request: the configured one
+// (min(model limit, context.reserveTokens)), raised for a truncation rescue.
+func (a *Agent) turnMaxTokens() int {
+	if a.rescueMaxTokens > 0 {
+		return a.rescueMaxTokens
+	}
+	return a.model.MaxTokens(a.opts.Config.Context.ReserveTokens)
+}
+
+// rescueBudget is the ceiling for rescue attempt n: double, quadruple, then eight
+// times the configured one, never past the model's own limit. A truncated turn is
+// a thought (or a write) cut in half at min(maxOutput, reserveTokens) — 16 384 by
+// default, while deepseek-v4.1-flash can emit 384 000 — so another turn at the
+// same ceiling reproduces the truncation exactly (§14). 0 means no headroom and
+// the configured ceiling stands.
+func rescueBudget(m provider.Model, reserve, attempt int) int {
+	base := m.MaxTokens(reserve)
+	if base <= 0 || attempt < 1 {
+		return 0
+	}
+	n := base
+	for i := 0; i < attempt && n < m.MaxOutput; i++ {
+		n *= 2
+		if n > m.MaxOutput {
+			n = m.MaxOutput
+		}
+	}
+	if n <= base {
+		return 0
+	}
+	return n
 }
 
 // turnEffort is the effort for the next request: the session's, unless a
@@ -606,8 +666,9 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 	// A truncated-turn rescue never outlives its run, whichever way the run
 	// ends: the step-limit wrap-up can be the rescued turn, and a failed
 	// nudge or turn returns before the loop clears it.
-	defer func() { a.rescueEffort = "" }()
-	nudged, verifyNudged, reserved, execNudged, emptyNudged, progressNudged, actionNudged, truncNudged := false, false, false, false, false, false, false, false
+	defer func() { a.rescueEffort, a.rescueMaxTokens = "", 0 }()
+	nudged, verifyNudged, reserved, execNudged, emptyNudged, progressNudged, actionNudged := false, false, false, false, false, false, false
+	truncRescues := 0
 	recordNudged := false
 	// The §14 progress nudge's threshold (context.progressNudgeAt, default 12;
 	// 0 disables it) and the tool batches executed this run.
@@ -634,12 +695,15 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 			}
 		}
 		resp, calls, err := a.turnWithRecovery(ctx, llm.ToolChoiceAuto)
-		a.rescueEffort = "" // the rescue is for one turn only
+		// The rescue overrides are for one turn only.
+		a.rescueEffort, a.rescueMaxTokens = "", 0
 		if err != nil {
 			return Outcome{}, err
 		}
 		a.steps = step + 1
 		if len(calls) > 0 {
+			// Progress: a later truncation is a new wall, not the same one.
+			truncRescues = 0
 			names := make([]string, len(calls))
 			for i, c := range calls {
 				names[i] = c.Name
@@ -658,17 +722,22 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 			if resp.Stop == llm.StopLength {
 				// Cut off at the output limit with nothing to act on: the
 				// budget went into deliberation (or into a half-written
-				// answer). One retry at a lowered effort, told to act; a
-				// second truncation ends the run with the cause named (§14).
-				if !truncNudged {
-					truncNudged = true
+				// answer). Retry with a raised ceiling and a lower effort,
+				// told to act — and told to act small from the second attempt,
+				// because back-to-back truncations mean the model is
+				// re-deriving. Progress resets the count; three rescues
+				// without it end the run with the cause named (§14).
+				if truncRescues < maxTruncRescues {
+					truncRescues++
 					a.rescueEffort = rescueLevel(a.effort, a.model)
-					msg := "the model hit the output token limit without an answer; retrying once"
+					a.rescueMaxTokens = rescueBudget(a.model, a.opts.Config.Context.ReserveTokens, truncRescues)
+					msg := fmt.Sprintf("the model hit the output token limit without an answer; retry %d of %d at %d output tokens",
+						truncRescues, maxTruncRescues, a.turnMaxTokens())
 					if a.rescueEffort != a.effort {
-						msg += " at a lower effort"
+						msg += " and a lower effort"
 					}
 					a.emit(Warning{msg})
-					if err := a.nudge("truncated", truncNudge); err != nil {
+					if err := a.nudge(truncNudgeKind(truncRescues), truncNudge(truncRescues)); err != nil {
 						return Outcome{}, err
 					}
 					continue
