@@ -22,7 +22,7 @@ const acpUsage = "usage: moca acp [--model <provider/model>] [--effort <level>] 
 // runACP serves the Agent Client Protocol on stdin/stdout (`moca acp`):
 // editors launch it as a child process. stdout carries JSON-RPC only;
 // diagnostics go to the log file. Trust is decided per workdir by acpTrust.
-func runACP(ctx context.Context, o Options, cfg config.Config, cfgPath string, stdin io.Reader, stdout, stderr io.Writer) int {
+func runACP(ctx context.Context, o Options, cfg config.Config, cfgPath string, stdin io.Reader, stdout, stderr io.Writer, boot bootResult) int {
 	fs := flag.NewFlagSet("moca acp", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	model := fs.String("model", o.Model, "provider/model")
@@ -63,7 +63,7 @@ func runACP(ctx context.Context, o Options, cfg config.Config, cfgPath string, s
 	// yolo trusts (§7.5); decided without the project layer, as the TUI does.
 	m, _ := config.ResolveMode(*mode, cfg)
 	trust := acpTrust(explicit, m == "yolo", filepath.Join(config.DataDir(), "trust.json"))
-	closeLog, err := startLog(cfg, cfgPath, o, stderr)
+	closeLog, err := startLog(cfg, cfgPath, o, stderr, boot)
 	if err != nil {
 		fmt.Fprintln(stderr, "moca:", err)
 		return exitUsage

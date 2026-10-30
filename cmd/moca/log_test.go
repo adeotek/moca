@@ -213,7 +213,7 @@ func TestStartLogNoStderrUnderACP(t *testing.T) {
 			t.Fatal(err)
 		}
 		var stderr bytes.Buffer
-		closeLog, err := startLog(cfg, "/cfg/config.jsonc", tc.opts, &stderr)
+		closeLog, err := startLog(cfg, "/cfg/config.jsonc", tc.opts, &stderr, bootResult{})
 		if err != nil {
 			t.Fatalf("a log that cannot be opened is a warning, not an error: %v", err)
 		}

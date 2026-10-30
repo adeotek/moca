@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -402,6 +403,33 @@ func TestAPIKeyMissingMentionsLogin(t *testing.T) {
 	// CheckCredential must surface the same gap without any network call.
 	if err := r.CheckCredential("anthropic/claude-haiku-4-5"); err == nil || !strings.Contains(err.Error(), "/login") {
 		t.Fatalf("CheckCredential: %v", err)
+	}
+}
+
+// The .env hint follows the cause: an unset variable belongs in the file, but
+// an empty one in the environment shadows the file's line (the environment
+// wins, an empty value included), so pointing at the file would send the user
+// to a line that may already be there.
+func TestAPIKeyMissingPointsAtTheDotEnv(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := mustCfg(t, `{"model":"anthropic/claude-haiku-4-5","providers":{"anthropic":{"apiKey":"env:MOCA_T_DOTENV_HINT"}}}`)
+	r, err := NewRegistry(cfg, http.DefaultClient, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := "add it to " + config.DotEnvFile()
+
+	os.Unsetenv("MOCA_T_DOTENV_HINT")
+	t.Cleanup(func() { os.Unsetenv("MOCA_T_DOTENV_HINT") })
+	if err := r.CheckCredential("anthropic/claude-haiku-4-5"); err == nil || !strings.Contains(err.Error(), add) {
+		t.Fatalf("unset: %v, want %q", err, add)
+	}
+
+	t.Setenv("MOCA_T_DOTENV_HINT", "")
+	err = r.CheckCredential("anthropic/claude-haiku-4-5")
+	if err == nil || !strings.Contains(err.Error(), "set but empty") || !strings.Contains(err.Error(), "unset it") ||
+		strings.Contains(err.Error(), add) {
+		t.Fatalf("set but empty: %v, want the unset advice instead of %q", err, add)
 	}
 }
 

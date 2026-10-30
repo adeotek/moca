@@ -58,7 +58,8 @@ func runMCPImport(o Options, cfg config.Config, cfgPath string, stdin io.Reader,
 			fmt.Fprintf(stdout, "  %s:\n  %s\n\n", name, b)
 		}
 		if len(vars) > 0 {
-			fmt.Fprintln(stdout, "secrets were replaced by env: references — export these before the servers can start:")
+			fmt.Fprintln(stdout, "secrets were replaced by env: references — set these before the servers can start,")
+			fmt.Fprintf(stdout, "either by exporting them or as KEY=VALUE lines in %s:\n", config.DotEnvFile())
 			for _, v := range vars {
 				fmt.Fprintf(stdout, "  export %s=<value of %s from the %s config>\n", v.Name, v.Key, v.Tool)
 			}

@@ -19,8 +19,11 @@ import (
 // MOCA_LOG overrides log.level for this run; an invalid value is a usage
 // error. A log that cannot be opened only warns: the run goes on without it —
 // except under ACP, where the warning is dropped (see below).
+// The boot diagnostics ride along: the log is the one channel every mode has,
+// and under ACP it is the only one they may reach (§9.5). Metadata only — a
+// note names a path, a line and a reason, never a value.
 // The returned func closes the file.
-func startLog(cfg config.Config, cfgPath string, o Options, stderr io.Writer) (func(), error) {
+func startLog(cfg config.Config, cfgPath string, o Options, stderr io.Writer, boot bootResult) (func(), error) {
 	name := cfg.Log.Level
 	if v := os.Getenv("MOCA_LOG"); v != "" {
 		name = v
@@ -47,5 +50,14 @@ func startLog(cfg config.Config, cfgPath string, o Options, stderr io.Writer) (f
 		"mode", o.logMode(), "config", cfgPath, "level", strings.ToLower(strings.TrimSpace(name)))
 	slog.Debug("config", "model", cfg.Model, "providers", slices.Sorted(maps.Keys(cfg.Providers)),
 		"mcp", slices.Sorted(maps.Keys(cfg.MCP.Servers)), "web", cfg.Web.Search.Provider)
+	// The boot diagnostics (the .env's contribution and everything that went
+	// wrong reading it): logged here because this is the one channel every
+	// mode has — under ACP stderr belongs to the editor (§9.5).
+	if boot.DotEnvVars > 0 {
+		slog.Debug("startup: dotenv", "vars", boot.DotEnvVars)
+	}
+	for _, n := range boot.all() {
+		slog.Warn("startup: warning", "reason", n.Error())
+	}
 	return func() { c.Close() }, nil
 }

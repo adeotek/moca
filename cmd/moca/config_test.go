@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -113,6 +114,83 @@ func TestConfigCheckProjectTrust(t *testing.T) {
 	code, out, _ = runConfigCmd(t, "--config", cfg, "config", "check")
 	if code != exitUsage || !strings.Contains(out, "yolo") {
 		t.Fatalf("a project yolo must fail the check, exit %d:\n%s", code, out)
+	}
+}
+
+// `config check` is the file's diagnostic surface: a bad .env line is an
+// issue with its path and line, and a `.env` other users can read is reported
+// as advice without failing the check.
+func TestConfigCheckReportsTheDotEnv(t *testing.T) {
+	isolate(t)
+	cfg := writeCfg(t, `{"model":"opencode-go/glm-5.3-flash"}`)
+
+	code, out, errb := runConfigCmd(t, "--config", cfg, "config", "check")
+	if code != 0 || !strings.Contains(out, "environment file:") || !strings.Contains(out, "not found — optional") {
+		t.Fatalf("a missing .env is fine, exit %d:\n%s%s", code, out, errb)
+	}
+
+	writeDotEnv(t, "# keys\nGOOD_KEY=1\n")
+	code, out, _ = runConfigCmd(t, "--config", cfg, "config", "check")
+	if code != 0 || !strings.Contains(out, "1 variable(s)") || !strings.Contains(out, "no issues") {
+		t.Fatalf("a clean .env must pass, exit %d:\n%s", code, out)
+	}
+
+	path := writeDotEnv(t, "GOOD_KEY=1\nnot an assignment\n")
+	code, out, errb = runConfigCmd(t, "--config", cfg, "config", "check")
+	if code != exitUsage {
+		t.Fatalf("a broken .env must fail the check, exit %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, path+":2: expected KEY=VALUE") {
+		t.Fatalf("the issue must name the file and line:\n%s", out)
+	}
+	if !strings.Contains(errb, "1 issue") {
+		t.Fatalf("stderr must count the issue: %q", errb)
+	}
+	if strings.Contains(errb, "moca: warning:") {
+		// `config check` lists the file's problems itself; the startup warning
+		// would print each one twice.
+		t.Fatalf("the startup warning must not be repeated by `config check`: %q", errb)
+	}
+
+	// A reserved name is an issue only when a run would refuse it: with the
+	// name already exported (isolate() sets XDG_CONFIG_HOME) the shell wins
+	// first and a run never mentions the line, so the check must not fail on
+	// it either — one file, one verdict, two surfaces.
+	writeDotEnv(t, "GOOD_KEY=1\nXDG_CONFIG_HOME=/elsewhere\n")
+	code, out, _ = runConfigCmd(t, "--config", cfg, "config", "check")
+	if code != 0 || strings.Contains(out, "is not applied") {
+		t.Fatalf("a shell-shadowed reserved line must not fail the check, exit %d:\n%s", code, out)
+	}
+
+	// With the name unset (HOME here — isolate() keeps XDG_CONFIG_HOME, which
+	// is what locates the file) the run would refuse the line and warn, so the
+	// check fails with it.
+	home, hadHome := os.LookupEnv("HOME")
+	os.Unsetenv("HOME")
+	t.Cleanup(func() {
+		if hadHome {
+			os.Setenv("HOME", home)
+		}
+	})
+	writeDotEnv(t, "GOOD_KEY=1\nHOME=/elsewhere\n")
+	code, out, _ = runConfigCmd(t, "--config", cfg, "config", "check")
+	if code != exitUsage || !strings.Contains(out, path+":2: HOME is not applied") {
+		t.Fatalf("a reserved name a run refuses must fail the check with its line, exit %d:\n%s", code, out)
+	}
+
+	// A mode other users can read is advice: it does not fail the check.
+	if runtime.GOOS == "windows" {
+		return // Windows synthesises mode bits; there is nothing to report
+	}
+	if err := os.WriteFile(path, []byte("GOOD_KEY=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil { // WriteFile keeps the existing mode
+		t.Fatal(err)
+	}
+	code, out, _ = runConfigCmd(t, "--config", cfg, "config", "check")
+	if code != 0 || !strings.Contains(out, "chmod 600") || !strings.Contains(out, "no issues") {
+		t.Fatalf("a loose mode is a note, not an issue, exit %d:\n%s", code, out)
 	}
 }
 

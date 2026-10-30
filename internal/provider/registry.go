@@ -480,14 +480,23 @@ func (r *Registry) credential(provider string) CredentialFunc {
 			// actionable one (it says how to reset the file).
 			return Credential{}, fmt.Errorf("provider %s: %w", provider, serr)
 		case eerr != nil:
-			return Credential{}, fmt.Errorf("provider %s: %w; store a key with /login in the TUI or moca login %s", provider, eerr, provider)
+			// EnvError already names the variable; name the file it most
+			// likely belongs in, since the .env is read at startup for
+			// exactly this reason — unless an empty value in the environment
+			// is what shadows that file's line (the environment wins).
+			fix := "add it to " + config.DotEnvFile()
+			var ee *config.EnvError
+			if errors.As(eerr, &ee) && ee.Empty {
+				fix = "unset it or give it a value (an empty one overrides " + config.DotEnvFile() + ")"
+			}
+			return Credential{}, fmt.Errorf("provider %s: %w; %s, or store a key with /login in the TUI or moca login %s", provider, eerr, fix, provider)
 		case config.IsLocalProvider(provider):
 			// A local server needs no key; one stored with /login (or an
 			// apiKey env reference) is sent when the server sits behind an
 			// authenticating proxy.
 			return Credential{}, nil
 		default:
-			return Credential{}, fmt.Errorf("provider %s: no API key stored and providers.%s.apiKey is not set; add one with /login in the TUI or moca login %s", provider, provider, provider)
+			return Credential{}, fmt.Errorf("provider %s: no API key stored and providers.%s.apiKey is not set; add one with /login in the TUI, moca login %s, or a KEY=VALUE line in %s", provider, provider, provider, config.DotEnvFile())
 		}
 	}
 }

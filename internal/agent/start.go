@@ -156,8 +156,8 @@ func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error)
 	// the workdir — needs the user's approval (the write/edit tools ask;
 	// the shell's redirect check does not, so config edits go through
 	// write/edit and its snapshots either way). The config entry is the
-	// FILE, not its directory: auth.json sits beside it and stays
-	// unreachable (pinned by test).
+	// FILE, not its directory: auth.json and the startup .env sit beside it
+	// and stay unreachable from the jail (pinned by test).
 	configFile := config.ConfigFile()
 	// This process's overflow dir is readable too: over-cap tool outputs are
 	// saved there in full and the cut result names the file (tools.Spill).

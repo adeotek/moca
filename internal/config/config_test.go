@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -341,6 +342,16 @@ func TestResolveEnv(t *testing.T) {
 	t.Setenv("MOCA_T_EMPTY", "")
 	if _, err := ResolveEnv("env:MOCA_T_EMPTY"); err == nil || !strings.Contains(err.Error(), "MOCA_T_EMPTY") {
 		t.Fatalf("empty var must name the variable: %v", err)
+	}
+	// Set-but-empty and unset are told apart: an empty value shadows the
+	// user .env, so "add it to the file" would be the wrong advice.
+	var ee *EnvError
+	if _, err := ResolveEnv("env:MOCA_T_EMPTY"); !errors.As(err, &ee) || !ee.Empty || !strings.Contains(err.Error(), "set but empty") {
+		t.Fatalf("set-but-empty: %v", err)
+	}
+	os.Unsetenv("MOCA_T_UNSET")
+	if _, err := ResolveEnv("env:MOCA_T_UNSET"); !errors.As(err, &ee) || ee.Empty || !strings.Contains(err.Error(), "is not set") {
+		t.Fatalf("unset: %v", err)
 	}
 	if v, err := ResolveEnv("literal"); err != nil || v != "literal" {
 		t.Fatal("non-env strings pass through (headers may be literal)")
