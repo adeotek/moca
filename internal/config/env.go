@@ -17,17 +17,25 @@ func ResolveEnv(ref string) (string, error) {
 	if !ok {
 		return ref, nil
 	}
-	v := os.Getenv(name)
+	v, set := os.LookupEnv(name)
 	if v == "" {
-		return "", &EnvError{Name: name, Ref: ref}
+		return "", &EnvError{Name: name, Ref: ref, Empty: set}
 	}
 	return v, nil
 }
 
-// EnvError reports an unset env: reference — a configuration error (exit 2).
-type EnvError struct{ Name, Ref string }
+// EnvError reports an `env:` reference that does not resolve — a configuration
+// error (exit 2). Empty marks one whose variable is set but empty: that still
+// counts as present, so it shadows the user .env (§4) and the fix is different.
+type EnvError struct {
+	Name, Ref string
+	Empty     bool
+}
 
 func (e *EnvError) Error() string {
+	if e.Empty {
+		return fmt.Sprintf("environment variable %s is set but empty (referenced as %q)", e.Name, e.Ref)
+	}
 	return fmt.Sprintf("environment variable %s is not set (referenced as %q)", e.Name, e.Ref)
 }
 
