@@ -69,6 +69,40 @@ func runConfigCheck(o Options, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// The .env beside the config is read at startup and its env: references
+	// are what a provider key resolves against, so a bad line there has to be
+	// diagnosable without watching a TUI's first frame.
+	fmt.Fprintln(stdout, "environment file:")
+	envPath := config.DotEnvFile()
+	d, envErr := config.ReadDotEnv(envPath)
+	switch {
+	case envErr != nil:
+		report(false, "  %s: %v", envPath, envErr)
+	case !d.Found:
+		fmt.Fprintf(stdout, "  %s: not found — optional (env: references then need the shell)\n", envPath)
+	default:
+		for _, e := range d.LineErr {
+			report(false, "  %v", e)
+		}
+		// A name the file may never set: a run refuses it and says so, so the
+		// check reports it — unless the environment already sets it, in which
+		// case the shell wins first and the run is silent (the two surfaces
+		// must agree about the same file).
+		for _, v := range d.Vars {
+			if _, set := os.LookupEnv(v.Name); set {
+				continue
+			}
+			if note := v.ReservedNote(envPath); note != nil {
+				report(false, "  %v", note)
+			}
+		}
+		if d.ModeNote != nil {
+			// Advice, not a defect: the file loads either way.
+			fmt.Fprintf(stdout, "  note: %v\n", d.ModeNote)
+		}
+		fmt.Fprintf(stdout, "  %s: %d variable(s)\n", envPath, len(d.Vars))
+	}
+
 	wd, err := os.Getwd()
 	if err != nil {
 		report(false, "project config: cannot resolve the working directory: %v", err)

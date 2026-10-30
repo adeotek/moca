@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -17,20 +18,59 @@ import (
 )
 
 func main() {
-	// Credentials moved to ~/.config/moca/auth.json; a v0.1 store in the data
-	// dir is moved once, before anything reads it. A failure leaves the old
-	// file in place (nothing is lost) and only warns. (In main, not run(), so
-	// tests never touch a real user store.)
-	if err := provider.MigrateLegacyStore(); err != nil {
-		fmt.Fprintln(os.Stderr, "moca: warning: could not move the old auth store into the config dir:", err)
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	os.Exit(run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
+// bootResult is what startup() found: the variables the user .env contributed
+// and every diagnostic collected while booting.
+type bootResult struct {
+	DotEnvVars  int
+	DotEnvNotes []error // the .env's own complaints — `moca config check` lists them itself
+	Notes       []error // the rest of the boot (the v0.1 auth-store move)
+}
+
+// all is every boot diagnostic, the .env's first.
+func (b bootResult) all() []error { return slices.Concat(b.DotEnvNotes, b.Notes) }
+
+// stderrNotes is what run() prints before dispatching: nothing under ACP,
+// whose stderr belongs to the editor (§9.5; startLog logs them there), and
+// under `config check` only what that command does not list itself — it
+// reports the .env, not the auth-store move.
+func stderrNotes(o Options, b bootResult) []error {
+	switch {
+	case o.logMode() == "acp":
+		return nil
+	case len(o.Sub) == 2 && o.Sub[0] == "config" && o.Sub[1] == "check":
+		return b.Notes
+	}
+	return b.all()
+}
+
+// startup does the work that has to precede every command — the optional
+// ~/.config/moca/.env, then the one-time move of a v0.1 credential store — and
+// returns the diagnostics instead of printing them: the channel depends on the
+// mode, which only parseArgs decides (under ACP stderr belongs to the editor,
+// §9.5). It runs first in run(), not in main(), so the whole boot path is
+// testable.
+func startup() bootResult {
+	rep, err := config.LoadDotEnv(config.DotEnvFile())
+	r := bootResult{DotEnvVars: rep.Set, DotEnvNotes: rep.Notes}
+	if err != nil {
+		r.DotEnvNotes = append(r.DotEnvNotes, fmt.Errorf("could not read the user .env: %w", err))
+	}
+	// Credentials moved to ~/.config/moca/auth.json. A failure leaves the old
+	// file in place (nothing is lost) and only warns.
+	if err := provider.MigrateLegacyStore(); err != nil {
+		r.Notes = append(r.Notes, fmt.Errorf("could not move the old auth store into the config dir: %w", err))
+	}
+	return r
+}
+
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	applog.Discard() // before anything can log: slog's default writes to stderr (the TUI's screen)
+	boot := startup()
 	o, err := parseArgs(args, stdin)
 	if err != nil {
 		if errors.Is(err, errHelp) {
@@ -47,6 +87,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if o.Version {
 		fmt.Fprintln(stdout, "moca", config.Version)
 		return exitOK
+	}
+	// Printed before the config is loaded, so a config error cannot hide a
+	// broken .env line behind it. startLog repeats them into the log.
+	for _, n := range stderrNotes(o, boot) {
+		fmt.Fprintln(stderr, "moca: warning:", n)
 	}
 	if len(o.Sub) > 0 {
 		// `update` runs before the config is loaded: updating the binary
@@ -79,7 +124,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		case "mcp":
 			return runMCP(ctx, o, cfg, path, stdin, stdout, stderr)
 		case "acp":
-			return runACP(ctx, o, cfg, path, stdin, stdout, stderr)
+			return runACP(ctx, o, cfg, path, stdin, stdout, stderr, boot)
 		case "login":
 			return runLogin(ctx, o, cfg, path, stdin, stdout, stderr)
 		case "logout":
@@ -116,7 +161,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(stderr, "moca: no model configured — set \"model\" in %s or pass --model provider/model\n", path)
 		return exitUsage
 	}
-	closeLog, err := startLog(cfg, path, o, stderr)
+	closeLog, err := startLog(cfg, path, o, stderr, boot)
 	if err != nil {
 		fmt.Fprintln(stderr, "moca:", err)
 		return exitUsage
