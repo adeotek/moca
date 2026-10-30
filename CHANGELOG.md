@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.7.12 (unreleased)
+## v0.7.12 (2026-10-30)
 
 ### Environment variables from `~/.config/moca/.env`
 
