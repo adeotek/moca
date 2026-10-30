@@ -71,6 +71,32 @@ make probe                            # one live request per agent, proves the c
 TASK_NAMES=$(tr '\n' ',' < docs/tb2-subset-12.txt | sed 's/,$//') make subset
 ```
 
-`MOCA_VERSION` pins the release under test — **v0.7.11 now**, the newest tag; the rendered Harbor
+`MOCA_VERSION` pins the release under test — **v0.7.12 now**, the newest tag; the rendered Harbor
 config is copied into every job directory,
 so a run records exactly what ran.
+
+## The truncated-turn work, measured end to end
+
+v0.7.11 and v0.7.12 exist because of a finding from this benchmark, and both were measured on it: the cell
+(`regex-chess`), ten attempts per release, one variable at a time. Same model, same 250-step budget, same
+`--mode yolo`.
+
+| release | solves | trials truncated | runs *ended* by a truncation | rescues taken / fatal | median trial | cost / trial |
+|---|---|---|---|---|---|---|
+| v0.7.10 | 2/10 | 8/10 | 8/10 | — | 5 m | $0.035 |
+| v0.7.11 (retry once, lower effort) | 2/10 | 9/10 | 8/10 | 9 / 8 | 7 m | $0.034 |
+| **v0.7.12 (raise the ceiling, 3 rescues/wall)** | **10/10** | 6/10 | **0/10** | **11 / 0** | **32 m** | **$0.107** |
+
+The two releases teach different lessons and the benchmark owns both:
+
+- **v0.7.11's mechanism claim held and its reward claim did not.** A truncation stopped being fatal
+  (6/6 runs ended by one at v0.7.10, 1/6 at v0.7.11, p = 0.015), but at k=10 the cell was 2/10 against
+  2/10 — the k=3 "one cell moved" reading was noise and was retracted rather than quietly dropped.
+- **v0.7.12's diagnosis was the ceiling, and at k=10 that is significant** (10/10 against 2/10, p = 0.0007;
+  fatal truncations 0/10 against 8/10, same p) — but the price sits in the same row. The solves cost 32
+  minutes and $0.107 a trial instead of 5 minutes and $0.035, one run reached the task's 3600 s agent cap
+  after finishing its work, and output tokens per trial went from 33–76 k to 41–260 k. A raised ceiling is
+  not free; it is the difference between being cut off mid-thought and being allowed to finish.
+
+Full per-trial tables, session excerpts and the pre-registration (metrics fixed before the run) live in
+`coding-agent-bench/docs/prereg-2026-10-30-truncation.md` and the two reports there.
