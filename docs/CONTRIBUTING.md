@@ -30,6 +30,13 @@ for the ACP front end. Both are worth running when your change touches permissio
   (`cp README.md internal/skills/builtin/self-knowledge/references/readme.md`).
 - **Commit and PR titles**: `[{type}:{category}] short description`, type
   `feat|fix|chore`, category `global|docs|ui|tui|backend|core` (or an area slug).
+- **No agent authors or co-authors.** CI fails a PR whose commits are authored or carry a
+  `Co-authored-by` trailer for an AI agent (Claude, Copilot, Codex, …) — the deny list lives in
+  `scripts/ci/check-agent-authors.py`, run it locally with
+  `python3 scripts/ci/check-agent-authors.py --range origin/main..HEAD`. This is not cosmetic:
+  GitHub resolves the trailer to the agent's account, shows it in the repository's Contributors
+  widget, and keeps the commit reachable through tags and PR refs, so a later history rewrite does
+  not undo the attribution.
 - **One version bump per PR.** `CHANGELOG.md` gets an entry per release.
 - **Eight tools are frozen.** A PR that adds a ninth needs a design discussion first — see the
   README's non-goals.
