@@ -1,5 +1,7 @@
 # CI — the phase-1 gate set from docs/specs/SPECS.md §2:
 # gofmt, go vet, go build, go test -race. All stdlib-only, no secrets needed.
+# Plus the authorship gate: a PR whose commits are authored or co-authored by
+# an AI agent fails before the Go steps (scripts/ci/check-agent-authors.py).
 name: CI
 
 on:
@@ -23,6 +25,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Full history: the authorship gate walks the PR's commits against
+          # their base, so it needs the base branch, not a shallow head.
+          fetch-depth: 0
+
+      - name: Fetch the PR base branch
+        if: github.event_name == 'pull_request'
+        run: >
+          git fetch --no-tags origin
+          "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+
+      # Runs before the Go steps: an agent-attributed commit is a one-way door
+      # (GitHub keeps crediting it after a rewrite), so fail on it first.
+      - name: Reject agent authors and co-authors
+        if: github.event_name == 'pull_request'
+        run: >
+          python3 scripts/ci/check-agent-authors.py
+          --range "origin/${{ github.base_ref }}..HEAD"
 
       - name: Set up Go (version from go.mod)
         uses: actions/setup-go@v7
