@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.0 (2026-11-11)
+
+### Current compatible dependencies
+
+The Go toolchain moves to **go1.27.4** (the `go 1.27` language line is unchanged) and the TUI stack to
+the current compatible set: Bubble Tea v2.1.1 (upstream's implausible-terminal-resize fix), Lip Gloss
+v2.1.0, ultraviolet `a45b7c86333f` and x/ansi v0.11.9, with go-runewidth, xo/terminfo, x/sync and x/sys
+selected by MVS. No behavior change: the full race suite, the six-target `make release` and both
+existing hermetic gates pass on the new graph.
+
 ## v0.7.12 (2026-10-30)
 
 ### Environment variables from `~/.config/moca/.env`

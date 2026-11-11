@@ -333,7 +333,7 @@ subagents · hooks · LSP · image gen · voice · telemetry · binary plugin sy
 ## Development
 
 ```bash
-mise install        # provisions Go 1.27.1 (pinned once, in go.mod) and gopls
+mise install        # provisions Go 1.27.4 (pinned once, in go.mod) and gopls
 make build          # bin/moca, version-stamped from git describe
 make test           # go test ./... -race -count=1
 make vet            # go vet ./... + gofmt -l . (both must be clean — the CI gate)
