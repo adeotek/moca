@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.8.2 (2026-11-11)
+
+### `/goal` — a bounded session objective
+
+`/goal <objective>` starts work toward one objective and keeps the session on it while an evidence-only
+reviewer judges the result; `/goal pause|resume|clear` controls it. TUI only — ACP advertises no goal
+command and `-p` gets no goal flag.
+
+- The reviewer is one cheap no-tool call (`model`, minimal effort, no cache write, 20 s, ≤200 output
+  tokens) and answers exactly `COMPLETE`, `CONTINUE` or `BLOCKED`; its prose is never stored or fed
+  back. `CONTINUE` continues within 8 automatic rounds and 2 consecutive no-tool rounds; `BLOCKED`,
+  an invalid answer, a provider error, a cancellation, `maxSteps`, `Stuck` or an overflow **pauses**
+  with a fixed reason — `/goal resume` starts a fresh budget, `/compact` is suggested for an overflow.
+- Goal state lives in the append-only transcript as full snapshots; the first stored message is the
+  actual objective (previews stay useful), host continuations carry `goal_*` nudge metadata and replay
+  as moca's text, and clearing or replacing a goal never rewrites an earlier request.
+- A process restart converts an active goal to paused and makes zero provider calls until an explicit
+  `/goal resume`; reviewer spend rides the transcript, so the totals survive a resume.
+
 ## v0.8.1 (2026-11-11)
 
 ### One approval question per composite shell command

@@ -204,6 +204,13 @@ type Agent struct {
 	// picker and /help; ReloadSkills refreshes it between runs.
 	skills    []skills.Skill
 	skillDirs []skills.Dir
+	// goal/goalSet is the live session goal (the latest transcript snapshot),
+	// goalSeq the per-session id sequence, runBatches the tool batches the
+	// last work round executed (the stall signal). All under mu.
+	goal       session.Goal
+	goalSet    bool
+	goalSeq    int
+	runBatches int
 }
 
 func New(o Options) (*Agent, error) {
@@ -229,6 +236,12 @@ func New(o Options) (*Agent, error) {
 			a.usage = a.usage.Add(*e.Usage)
 			a.cost += e.Cost
 		}
+		if e.Type == session.TypeGoal {
+			a.goalSeq++
+		}
+	}
+	if g, ok := session.LatestGoal(o.Prior); ok {
+		a.goal, a.goalSet = *g, true
 	}
 	return a, nil
 }
@@ -378,10 +391,10 @@ func userText(s string) *llm.Message {
 func (a *Agent) request(choice llm.ToolChoice) llm.Request {
 	// Snapshot the transcript under the lock: the TUI may append a `!` note
 	// from another goroutine while a run is in progress. The render carries
-	// the plan envelope per flagged entry (B1.1) and keeps the kept tail's
+	// the plan and goal envelopes per flagged entry and keeps the kept tail's
 	// thinking verbatim on a preserved-thinking route (B1.2).
 	a.mu.Lock()
-	msgs := session.MessagesWith(a.entries, planExtra, a.model.KeepsTailThinking())
+	msgs := a.messagesLocked()
 	a.mu.Unlock()
 	// The environment block (the prompt's tail) travels apart from the head so
 	// a protocol with explicit cache breakpoints caches the fixed and
@@ -621,6 +634,12 @@ type RunOpts struct {
 	// Remember marks a /remember run: the only source of Env.SkillUserSignal
 	// (Decision 11). Set only by Agent.Remember.
 	Remember bool
+	// goalID/goalNudge carry the goal metadata the run's first message gets
+	// (v0.8.0): set only by StartGoal/ResumeGoal and the driver's
+	// continuations, never by a front end. The envelope a request renders is
+	// selected from these; an external RunOpts{Typed: …} stays unchanged.
+	goalID    string
+	goalNudge string
 }
 
 // Run is RunWith with no typed text (unchanged callers: -p, tests).
@@ -628,12 +647,15 @@ func (a *Agent) Run(ctx context.Context, prompt string) (Outcome, error) {
 	return a.RunWith(ctx, prompt, RunOpts{})
 }
 
-// RunWith runs one prompt to completion (§14) and logs its end.
+// RunWith runs one prompt to completion (§14) and logs its end. When the
+// session has an active goal, the work round is followed by bounded
+// review/continuation rounds (goal_run.go) — an inactive goal adds zero
+// model requests.
 func (a *Agent) RunWith(ctx context.Context, prompt string, o RunOpts) (Outcome, error) {
 	t0 := time.Now()
 	u0, c0 := a.Totals()
 	a.steps = 0
-	out, err := a.run(ctx, prompt, o)
+	out, err := a.runGoalLoop(ctx, prompt, o)
 	u, c := a.Totals()
 	attrs := []any{"outcome", outcomeKind(out, err), "steps", a.steps, "duration", time.Since(t0).Round(time.Millisecond),
 		slog.Group("usage", "in", u.Input-u0.Input, "out", u.Output-u0.Output,
@@ -673,10 +695,14 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 	// The §14 progress nudge's threshold (context.progressNudgeAt, default 12;
 	// 0 disables it) and the tool batches executed this run.
 	progressAt, batches := a.opts.Config.Context.ProgressNudge(), 0
+	// The goal driver reads this after a round: a CONTINUE that followed a
+	// round with no tool call is a stall.
+	defer func() { a.runBatches = batches }()
 	if err := a.maybeCompact(ctx); err != nil {
 		return Outcome{}, err
 	}
-	if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(prompt)}); err != nil {
+	if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(prompt),
+		GoalID: o.goalID, Nudge: o.goalNudge}); err != nil {
 		return Outcome{}, err
 	}
 	for step := 0; ; step++ {

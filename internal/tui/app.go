@@ -1020,6 +1020,8 @@ func (m *model) runCommand(c Parsed) tea.Cmd {
 		}
 		m.agent.SetPlan(!m.agent.Plan()) // PlanChanged prints + refreshes
 		return nil
+	case "goal":
+		return m.runGoal(c.Args)
 	case "remember":
 		if cmd, refused := m.refuseRunning(); refused {
 			return cmd
@@ -1445,6 +1447,8 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 			return m.println(m.th.planStyle(m.darkBG).Render("plan mode on: runs write an implementation plan to docs/plans/ — every other write is refused (shell/mcp/web inspect as usual)"))
 		}
 		return m.println("plan mode off")
+	case agent.GoalChanged:
+		return m.goalNotice(e.Goal)
 	}
 	return nil
 }

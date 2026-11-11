@@ -221,9 +221,11 @@ func (w *Writer) Append(e Entry) (Entry, error) {
 
 // preConversation is an entry type that describes the session's settings
 // rather than a turn: it is buffered until a real entry arrives, so changing
-// the model or the mode in a TUI you then quit does not create a session.
+// the model or the mode in a TUI you then quit does not create a session, and
+// a goal snapshot appended before its first objective message does not
+// materialize a deferred session either (§8).
 func preConversation(t string) bool {
-	return t == TypeModelChange || t == TypePermissionMode
+	return t == TypeModelChange || t == TypePermissionMode || t == TypeGoal
 }
 
 // materialize creates the session file (and its lock) and writes the header
