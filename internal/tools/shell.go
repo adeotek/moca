@@ -31,49 +31,98 @@ func (shellTool) Spec() llm.ToolSpec {
 			`"required":["command"],"additionalProperties":false}`)}
 }
 
-func approve(ctx context.Context, env *Env, names []string, command string, canAlways bool) error {
-	lc, _ := env.Commands.(LearnableCommands)
-	for _, n := range names {
-		// A name the checker would ignore (auto mode's unsure `rm`) is not
-		// offered allow-always: the answer could never take effect.
-		always := canAlways && (lc == nil || lc.Learnable(n))
-		ans := Deny
-		if env.Ask != nil {
-			ans = env.Ask(ctx, Question{Kind: "shell", Subject: n, Detail: command, CanAlways: always})
-		}
-		slog.Debug("approval", "name", n, "answer", ans.String())
-		switch ans {
-		case Deny:
-			if always {
-				return fmt.Errorf("refused: `%s` is not allowlisted and the user did not approve it; ask the user to allow it or use another approach", n)
+// uniqueNames deduplicates the classifier's tiers in order: need names
+// first, then ask-every-time names, each once. Empty names are dropped (the
+// analyser never emits one).
+func uniqueNames(tiers ...[]string) []string {
+	var out []string
+	seen := make(map[string]bool)
+	for _, tier := range tiers {
+		for _, n := range tier {
+			if n == "" || seen[n] {
+				continue
 			}
-			return fmt.Errorf("refused: `%s` needs explicit user approval for every call and it was not given", n)
-		case AllowAlways, AllowSession:
-			// T-3: the answer is only offered when the checker will honour it
-			// (CanAlways) — a non-conforming asker returning it anyway must not
-			// persist a permanent allow the rules ignore.
-			//
-			// AllowSession learns the name in the checkers' in-memory rules
-			// only (Rules.Learn; nothing writes to disk here), so a command
-			// approved "for this session" is not asked again — and skips auto
-			// mode's classifier call on the next invocation. The `always`
-			// guard also keeps the make-safety rule honest: it runs only for a
-			// name an allow rule matched.
-			if always {
-				env.Commands.Allow(n)
-			}
-		case AllowOnce:
-			// runs once: nothing to record
-		default:
-			// An out-of-range Answer — a non-conforming asker, or a value a
-			// future front end sends that this build does not know — must
-			// fail closed. The old fixed-size index panicked here (recovered
-			// into an error result); falling through the switch would run
-			// the command unapproved.
-			return fmt.Errorf("refused: `%s` needs explicit user approval and the approval answer was not recognised — ask the user to allow it or use another approach", n)
+			seen[n] = true
+			out = append(out, n)
 		}
 	}
-	return nil
+	return out
+}
+
+// approve asks ONE question for the whole shell invocation (v0.8.0). The
+// classifier still returns the per-segment tiers; the fan-out that used to
+// ask once per name lives here, at the tool's approval boundary, so every
+// front end (TUI, ACP) answers one question per invocation.
+//
+// Subject is the deduplicated constituent list (a single name is unchanged);
+// Detail is always the untouched original command. Allow-always is offered
+// only when there is at least one need name, no ask-every-time constituent
+// and every need name is learnable — an ask-every-time name makes the whole
+// question session-only, keyed by the exact command line. When it is
+// offered, AllowNames carries the need list, so one answer can teach every
+// constituent atomically (the TUI persists them in one config write).
+func approve(ctx context.Context, env *Env, need, every []string, command string) error {
+	names := uniqueNames(need, every)
+	if len(names) == 0 {
+		return nil
+	}
+	subject := strings.Join(names, ", ")
+	lc, _ := env.Commands.(LearnableCommands)
+	canAlways := len(need) > 0 && len(every) == 0
+	if canAlways && lc != nil {
+		for _, n := range need {
+			// A name the checker would ignore (auto mode's unsure `rm`) is
+			// not offered allow-always: the answer could never take effect.
+			if !lc.Learnable(n) {
+				canAlways = false
+				break
+			}
+		}
+	}
+	q := Question{Kind: "shell", Subject: subject, Detail: command, CanAlways: canAlways,
+		// Always the need list: only an AllowAlways/Session answer on an
+		// offered question consumes it, but carrying it on every question
+		// keeps the contract one shape.
+		AllowNames: uniqueNames(need)}
+	ans := Deny
+	if env.Ask != nil {
+		ans = env.Ask(ctx, q)
+	}
+	slog.Debug("approval", "name", subject, "answer", ans.String())
+	switch ans {
+	case AllowOnce:
+		// runs once: nothing to record
+		return nil
+	case AllowAlways, AllowSession:
+		// T-3: the answer is only offered when the checker will honour it
+		// (CanAlways) — a non-conforming asker returning it anyway must not
+		// persist a permanent allow the rules ignore.
+		//
+		// AllowSession learns the names in the checkers' in-memory rules
+		// only (Rules.Learn; nothing writes to disk here), so a command
+		// approved "for this session" is not asked again — and skips auto
+		// mode's classifier call on the next invocation. The `canAlways`
+		// guard also keeps the make-safety rule honest: it runs only for a
+		// name an allow rule matched.
+		if canAlways {
+			for _, n := range q.AllowNames {
+				env.Commands.Allow(n)
+			}
+		}
+		return nil
+	case Deny:
+		if canAlways {
+			return fmt.Errorf("refused: `%s` is not allowlisted and the user did not approve it; ask the user to allow it or use another approach", subject)
+		}
+		return fmt.Errorf("refused: `%s` needs explicit user approval for every call and it was not given", subject)
+	default:
+		// An out-of-range Answer — a non-conforming asker, or a value a
+		// future front end sends that this build does not know — must
+		// fail closed. The old fixed-size index panicked here (recovered
+		// into an error result); falling through the switch would run
+		// the command unapproved.
+		return fmt.Errorf("refused: `%s` needs explicit user approval and the approval answer was not recognised — ask the user to allow it or use another approach", subject)
+	}
 }
 
 func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result {
@@ -125,10 +174,7 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 		}
 		need = append(need, unsure...)
 	}
-	if err := approve(ctx, env, need, a.Command, true); err != nil {
-		return errorf("%v", err)
-	}
-	if err := approve(ctx, env, every, a.Command, false); err != nil {
+	if err := approve(ctx, env, need, every, a.Command); err != nil {
 		return errorf("%v", err)
 	}
 	out, err := RunShell(ctx, env.Root, env.ShellEnv, a.Command, time.Duration(timeout)*time.Second)

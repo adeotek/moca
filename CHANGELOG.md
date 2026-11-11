@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.8.1 (2026-11-11)
+
+### One approval question per composite shell command
+
+`python3 -c pass && rm x.txt` used to ask twice — once for `python3`, once for `rm`. The parsed
+classifier still returns its three tiers; the fan-out at the approval boundary is gone:
+
+- A shell invocation is **one** question in every front end. The question names the deduplicated
+  constituents, shows the untouched command, and allow-always is offered only when every constituent
+  is learnable and none asks every time.
+- Allow always persists **every** eligible constituent in one `config.AppendStrings` transaction —
+  one lock, one `.bak`, one rename, all-or-nothing — and never writes an inert composite rule.
+- Any ask-every-time (or unlearnable) constituent makes the whole question session-only, keyed by the
+  exact command line: the identical invocation runs again, a changed segment asks again.
+- Deny, an unrecognised answer and a missing asker (`-p`) execute nothing.
+
 ## v0.8.0 (2026-11-11)
 
 ### Current compatible dependencies

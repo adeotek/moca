@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -126,6 +127,55 @@ func TestPermissionRedirectHopOffersNoSessionOption(t *testing.T) {
 	}
 	if ends := c.updatesOf(updToolUpdate); len(ends) != 1 || ends[0]["status"] != statusFailed {
 		t.Fatalf("the fetch should have failed: %v", ends)
+	}
+}
+
+// TestPermissionCompositeAsksOnce: one shell invocation is ONE
+// session/request_permission however many constituents the classifier
+// flagged, the whole original command rides the detail, and an exact-tier
+// session answer matches the full line only.
+func TestPermissionCompositeAsksOnce(t *testing.T) {
+	work := t.TempDir()
+	for _, f := range []string{"x.txt", "y.txt"} {
+		if err := os.WriteFile(filepath.Join(work, f), []byte(f), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd1 := "python3 -c pass && rm x.txt"
+	cmd2 := "python3 -c pass && rm y.txt"
+	call := func(c string) [2]string { return [2]string{"shell", `{"command":"` + c + `"}`} }
+	s := newScript(t, toolTurn(call(cmd1)), toolTurn(call(cmd2)), toolTurn(call(cmd1)), textTurn("done"))
+	c := startClient(t, askOptions(t, s))
+	c.onPermission = func(RequestPermissionRequest) RequestPermissionResponse { return selected(optAllowSession) }
+	sid := c.newSession(work)
+	if stop, err := c.prompt(sid, "clean up"); err != nil || stop != stopEndTurn {
+		t.Fatalf("stop %q err %+v", stop, err)
+	}
+	// cmd1 and cmd2 ask; the repeat of cmd1 is remembered for the session.
+	if len(c.perms) != 2 {
+		t.Fatalf("want 2 questions (one per distinct command), got %d", len(c.perms))
+	}
+	for i, want := range []string{cmd1, cmd2} {
+		p := c.perms[i]
+		var in struct {
+			Detail string `json:"detail"`
+		}
+		if err := json.Unmarshal(p.ToolCall.RawInput, &in); err != nil {
+			t.Fatal(err)
+		}
+		if in.Detail != want {
+			t.Fatalf("question %d detail = %q, want the original command %q", i, in.Detail, want)
+		}
+		for _, o := range p.Options {
+			if o.OptionID == optAllowSession && o.Name != "Allow this exact command for this session" {
+				t.Fatalf("question %d session option = %q", i, o.Name)
+			}
+		}
+	}
+	for _, f := range []string{"x.txt", "y.txt"} {
+		if _, err := os.Stat(filepath.Join(work, f)); !os.IsNotExist(err) {
+			t.Fatalf("%s was not removed by the approved composite", f)
+		}
 	}
 }
 

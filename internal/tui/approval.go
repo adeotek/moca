@@ -215,15 +215,25 @@ func (m *model) answerApproval(ans tools.Answer) tea.Cmd {
 	}
 	switch q.Kind {
 	case "shell":
+		// A composite command's one answer teaches every eligible name
+		// (AllowNames); an older/other question keeps its single Subject.
+		// Only AllowAlways reaches here, and the TUI offers it only when
+		// CanAlways is set, so every name in this list is learnable.
+		names := q.AllowNames
+		if len(names) == 0 {
+			names = []string{q.Subject}
+		}
 		// Both in-memory copies, so a /clear restart honours it too (the
 		// running session learned it with the answer).
 		pl := m.projectLayer()
-		m.start.Config.Shell.Allow = append(slices.Clone(m.start.Config.Shell.Allow), q.Subject)
-		pl.Permissions.Allow = append(pl.Permissions.Allow, q.Subject)
-		if err := config.AppendString(path, []string{"permissions", "allow"}, q.Subject, nil); err != nil {
+		m.start.Config.Shell.Allow = append(slices.Clone(m.start.Config.Shell.Allow), names...)
+		pl.Permissions.Allow = append(pl.Permissions.Allow, names...)
+		// One config transaction for the whole list: a composite answer is
+		// either fully saved or not saved at all.
+		if err := config.AppendStrings(path, []string{"permissions", "allow"}, names, nil); err != nil {
 			return m.printlnError("error: allow-always not saved: " + err.Error())
 		}
-		return m.printlnContent(fmt.Sprintf("always allowing %q (saved to %s%s)", q.Subject, path, caveat))
+		return m.printlnContent(fmt.Sprintf("always allowing %s (saved to %s%s)", quotedNames(names), path, caveat))
 	case "mcp":
 		// Subject is server/tool. The running session already learned it
 		// from the AllowAlways answer; the project layer (in memory for
@@ -251,6 +261,15 @@ func (m *model) answerApproval(ans tools.Answer) tea.Cmd {
 		return m.printlnContent(fmt.Sprintf("always allowing %s (saved to %s%s)", q.Subject, path, caveat))
 	}
 	return nil
+}
+
+// quotedNames renders an approval notice's name list: one name keeps the
+// quoted form, several read as a comma list.
+func quotedNames(names []string) string {
+	if len(names) == 1 {
+		return fmt.Sprintf("%q", names[0])
+	}
+	return strings.Join(names, ", ")
 }
 
 // projectPath is the workdir's project config file ("" without a workdir).

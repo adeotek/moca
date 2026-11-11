@@ -58,21 +58,27 @@ type learnableCmds struct {
 
 func (l *learnableCmds) Learnable(n string) bool { return !l.never[n] }
 
-// An unsure name the checker can never learn (auto mode's `rm *.o`) is asked
-// without the allow-always offer: the answer could not take effect.
+// An unsure name the checker can never learn (auto mode's `rm *.o`) makes the
+// whole composite one session-only question (v0.8.0): allow-always is not
+// offered, because the answer could not take effect for every constituent —
+// and a non-conforming AllowAlways teaches nothing.
 func TestShellUnsureNotLearnableNoAlways(t *testing.T) {
 	env, _ := testEnv(t)
-	env.Commands = &learnableCmds{fakeCmds: fakeCmds{unsure: []string{"rm", "npm"}}, never: map[string]bool{"rm": true}}
-	got := map[string]bool{}
+	cmds := &learnableCmds{fakeCmds: fakeCmds{unsure: []string{"rm", "npm"}}, never: map[string]bool{"rm": true}}
+	env.Commands = cmds
+	var asked []Question
 	env.Ask = func(_ context.Context, q Question) Answer {
-		got[q.Subject] = q.CanAlways
-		return AllowOnce
+		asked = append(asked, q)
+		return AllowAlways // non-conforming: the option was not offered
 	}
 	run(t, shellTool{}, env, map[string]any{"command": "true"})
-	if always, ok := got["rm"]; !ok || always {
-		t.Fatalf("rm asked=%v CanAlways=%v, want asked without allow-always", ok, always)
+	if len(asked) != 1 {
+		t.Fatalf("asked %d questions, want one for the composite: %+v", len(asked), asked)
 	}
-	if always, ok := got["npm"]; !ok || !always {
-		t.Fatalf("npm asked=%v CanAlways=%v, want allow-always offered", ok, always)
+	if q := asked[0]; q.CanAlways || q.Subject != "rm, npm" || !q.SessionExact() {
+		t.Fatalf("question = %+v, want one exact-tier question covering rm and npm", q)
+	}
+	if len(cmds.allowed) != 0 {
+		t.Fatalf("an unofferable AllowAlways taught %v", cmds.allowed)
 	}
 }
