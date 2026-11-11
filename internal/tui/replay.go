@@ -81,9 +81,14 @@ func (m *model) replay(msgs []llm.Message, turns int, nudges map[string]string) 
 				continue
 			}
 			// A nudge is moca's own text, not the user's (P3.8): show it as
-			// what it was instead of attributing it to the person.
+			// what it was instead of attributing it to the person. A goal
+			// continuation is a host round marker, named as such.
 			if kind, ok := nudges[text]; ok {
-				cmds = append(cmds, m.printlnMuted(fmt.Sprintf("· moca's %s nudge (not sent by you): %s", kind, firstLine(text))))
+				label := kind + " nudge"
+				if strings.HasPrefix(kind, "goal_") {
+					label = "goal continuation"
+				}
+				cmds = append(cmds, m.printlnMuted(fmt.Sprintf("· moca's %s (not sent by you): %s", label, firstLine(text))))
 				continue
 			}
 			cmds = append(cmds, m.printlnUser(userMarker+text))

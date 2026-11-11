@@ -35,6 +35,27 @@ func TestFlatten(t *testing.T) {
 	}
 }
 
+// ACP advertises no goal surface (v0.8.0): /goal is a TUI built-in, and the
+// advertised command list is built from prompt templates and hand-written
+// skills only — a user template may be named `goal`, nothing else can.
+func TestACPDoesNotAdvertiseGoal(t *testing.T) {
+	for _, c := range buildCommands(nil, nil, false) {
+		if c.Name == "goal" {
+			t.Fatalf("ACP advertised /goal: %+v", c)
+		}
+	}
+	// A prompt template named goal is the user's own command on every
+	// surface, and it is listed once (not a moca built-in).
+	got := buildCommands([]skills.Prompt{{Name: "goal", Description: "my template"}}, nil, false)
+	var names []string
+	for _, c := range got {
+		names = append(names, c.Name)
+	}
+	if strings.Join(names, ",") != "remember,goal" {
+		t.Fatalf("commands %v", names)
+	}
+}
+
 func TestBuildCommandsPrecedence(t *testing.T) {
 	got := buildCommands(
 		[]skills.Prompt{{Name: "review", Description: "Review a file", ArgumentHint: "<file>"}},

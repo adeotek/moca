@@ -119,6 +119,15 @@ func Resume(o StartOptions, path string) (*Agent, error) {
 		w.Close()
 		return nil, fmt.Errorf("resume: %w", err)
 	}
+	// A process restart never resumes a goal autonomously: the recovered
+	// active state becomes a paused transition with a fixed host reason, and
+	// only an explicit /goal resume (a fresh round budget) starts new work.
+	if g, ok := a.Goal(); ok && g.Status == session.GoalActive {
+		if err := a.pauseWithReason(g.ID, "moca restarted while the goal was active"); err != nil {
+			w.Close()
+			return nil, fmt.Errorf("resume: %w", err)
+		}
+	}
 	if model != stored || a.effort != storedEffort {
 		a.recordModel()
 	}

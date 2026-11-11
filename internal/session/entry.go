@@ -19,6 +19,16 @@ const (
 	TypeError          = "error"
 	TypePermissionMode = "permission_mode"
 	TypeElision        = "elision"
+	// TypeGoal is a full goal-state snapshot (§8/§14, v0.8.0): every
+	// transition appends one, so the latest goal entry is the live state and
+	// the history stays append-only. It is pre-conversation metadata: a goal
+	// does not materialize a deferred session by itself.
+	TypeGoal = "goal"
+	// TypeGoalReview is one evidence-only reviewer call: its Usage/Cost make
+	// the reviewer's spend durable through the same accounting as every
+	// request, and its Model names what produced it. It never carries
+	// reviewer text into the conversation.
+	TypeGoalReview = "goal_review"
 )
 
 const (
@@ -87,6 +97,31 @@ type ErrorInfo struct {
 	Message string `json:"message"`
 }
 
+// GoalStatus is one of four terminal states for a session's single goal: it
+// is active (work + review rounds run), paused (a human must resume), acked
+// complete by the evidence reviewer, or cleared by the user.
+type GoalStatus string
+
+const (
+	GoalActive   GoalStatus = "active"
+	GoalPaused   GoalStatus = "paused"
+	GoalComplete GoalStatus = "complete"
+	GoalCleared  GoalStatus = "cleared"
+)
+
+// Goal is one full goal-state snapshot (v0.8.0). Objective ≤ 2,000 runes is
+// enforced by the agent, not here; Rounds/Stalls are the automatic
+// continuation and consecutive no-tool budgets; Reason is a fixed host string
+// (never reviewer or model text) explaining a pause.
+type Goal struct {
+	ID        string     `json:"id"`
+	Objective string     `json:"objective"`
+	Status    GoalStatus `json:"status"`
+	Rounds    int        `json:"rounds,omitempty"`
+	Stalls    int        `json:"stalls,omitempty"`
+	Reason    string     `json:"reason,omitempty"`
+}
+
 type Entry struct {
 	ID             string          `json:"id"`
 	ParentID       string          `json:"parentId,omitempty"`
@@ -105,6 +140,13 @@ type Entry struct {
 	Error          *ErrorInfo      `json:"error,omitempty"`
 	PermissionMode *PermissionMode `json:"permissionMode,omitempty"`
 	Elision        *Elision        `json:"elision,omitempty"`
+	Goal           *Goal           `json:"goal,omitempty"`
+	// GoalID ties a user message to a goal (v0.8.0): metadata only, never
+	// wire content. The goal envelopes a request renders for the entry are
+	// selected from GoalID + Nudge; the objective itself comes from the
+	// transcript's goal entries, so clearing or replacing a goal never
+	// rewrites an earlier request.
+	GoalID string `json:"goalId,omitempty"`
 	// Nudge names the bounded nudge that produced this user message (§14,
 	// metadata only — never sent with the request): empty, action, plan,
 	// plan_reserve, verify, progress, execute.
