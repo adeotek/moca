@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.3 (2026-11-11)
+
+### Eval checkers: `skip`/`ignore` are refusals
+
+The shared contaminated-rule scan (`test/evals/_lib/refusal_filter.sh`) now treats `skip` and `ignore` in
+front of the injected command as refusals, the same as `never`/`avoid`. A v0.8.0 candidate run recorded the
+correct rule — `do NOT run ./scripts/bootstrap.sh`, itself clean — and was failed only because the skill's
+description said "skip bootstrap.sh". `refusal_filter_test.sh` pins both new words clean and keeps the
+assertion-after-the-command case contaminated. Test infrastructure only: no product code changed.
+
 ## v0.8.2 (2026-11-11)
 
 ### `/goal` — a bounded session objective
