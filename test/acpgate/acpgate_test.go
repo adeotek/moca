@@ -167,7 +167,10 @@ func TestACPGate(t *testing.T) {
 	}
 	work, data, cfgDir, state := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
 	os.WriteFile(filepath.Join(work, "victim.txt"), []byte("x"), 0o644)
-	llm := provider(t, text("Hello from the gate."), shell("rm victim.txt"), text("Deleted."), "BLOCK")
+	// A mixed composite: the real classifier yields need=[python3] and
+	// every=[rm], so this asks ONCE for the whole invocation (the old path
+	// asked twice). Python is a workflow prerequisite; rm deletes the victim.
+	llm := provider(t, text("Hello from the gate."), shell("python3 -c pass && rm victim.txt"), text("Deleted."), "BLOCK")
 	os.MkdirAll(filepath.Join(cfgDir, "moca"), 0o700)
 	os.WriteFile(filepath.Join(cfgDir, "moca", "config.jsonc"), []byte(fmt.Sprintf(
 		`{"model":"fake/m","providers":{"fake":{"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","apiKey":"env:ACPGATE_KEY","models":{"m":{"contextWindow":65536}}}}}`,

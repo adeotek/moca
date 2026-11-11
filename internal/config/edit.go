@@ -253,20 +253,47 @@ func rawComma(gap []byte) int {
 	return -1
 }
 
-// AppendString appends value to the string array at keyPath, creating the
-// file and any missing intermediate objects as needed ("allow-always"
-// persistence, §7). Comments, formatting and everything else stay
-// byte-identical; the file (through a symlink, keeping its mode) is written
-// atomically after a .bak copy, and a
-// value already present is a no-op.
+// uniqueStrings drops duplicates and empty values, keeping first-seen order.
+func uniqueStrings(in []string) []string {
+	var out []string
+	seen := make(map[string]bool, len(in))
+	for _, v := range in {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
+}
+
+// AppendString appends value to the string array at keyPath — the one-value
+// wrapper around AppendStrings (allow-always persistence, §7).
 func AppendString(path string, keyPath []string, value string, init []string) error {
+	return AppendStrings(path, keyPath, []string{value}, init)
+}
+
+// AppendStrings appends values to the string array at keyPath in ONE
+// read/merge/write transaction (v0.8.0): a composite allow-always teaches
+// every constituent at once, so a list of rules either lands whole or not at
+// all. Missing files and intermediate objects are created as needed.
+// Comments, formatting and everything else stay byte-identical; the file
+// (through a symlink, keeping its mode) is written atomically after a .bak
+// copy, and values already present are a no-op. An empty values list is a
+// no-op — it never creates a file.
+func AppendStrings(path string, keyPath, values, init []string) error {
+	values = uniqueStrings(values)
+	if len(values) == 0 {
+		return nil
+	}
 	path, mode := prepEdit(path)
 	src, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return err
 		}
-		return os.WriteFile(path, []byte("{\n  "+nested(keyPath, slices.Concat(init, []string{value}))+"\n}\n"), 0o600)
+		all := slices.Concat(init, values)
+		return os.WriteFile(path, []byte("{\n  "+nested(keyPath, uniqueStrings(all))+"\n}\n"), 0o600)
 	}
 	if err != nil {
 		return err
@@ -286,10 +313,21 @@ func AppendString(path string, keyPath []string, value string, init []string) er
 		if err := json.Unmarshal(std[sp.start:sp.end], &cur); err != nil {
 			return fmt.Errorf("%s: %s is not a string array", path, strings.Join(keyPath, "."))
 		}
-		if slices.Contains(cur, value) {
+		var fresh []string
+		for _, v := range values {
+			if !slices.Contains(cur, v) {
+				fresh = append(fresh, v)
+			}
+		}
+		if len(fresh) == 0 {
 			return nil
 		}
-		q, _ := json.Marshal(value)
+		quoted := make([]string, len(fresh))
+		for i, v := range fresh {
+			q, _ := json.Marshal(v)
+			quoted[i] = string(q)
+		}
+		joined := strings.Join(quoted, ", ")
 		closeAt := sp.end - 1 // index of ']'
 		last := closeAt - 1   // last non-space before ']' (comments are spaces in std)
 		for last > sp.start && strings.IndexByte(" \t\r\n", std[last]) >= 0 {
@@ -301,22 +339,26 @@ func AppendString(path string, keyPath []string, value string, init []string) er
 		// comma in src (byte indexes match: Standardize preserves length), skipping
 		// comments: a ',' inside `// a, b` is the user's text, not a trailing comma.
 		gapComma := rawComma(src[last+1 : closeAt])
+		sep := ""
+		if len(cur) > 0 {
+			sep = ", "
+		}
 		switch {
 		case len(cur) == 0:
-			out = concat(src[:closeAt], q, src[closeAt:])
+			out = concat(src[:closeAt], []byte(joined), src[closeAt:])
 		case gapComma >= 0:
 			// trailing comma: insert after the last element, drop the old comma,
 			// keep whatever else follows it (whitespace, comments) up to ']'.
 			commaAt := last + 1 + gapComma
-			out = concat(src[:last+1], []byte(", "+string(q)), src[commaAt+1:])
+			out = concat(src[:last+1], []byte(sep+joined), src[commaAt+1:])
 		default:
-			out = concat(src[:last+1], []byte(", "+string(q)), src[last+1:])
+			out = concat(src[:last+1], []byte(sep+joined), src[last+1:])
 		}
 	} else {
 		if std[sp.start] != '{' {
 			return fmt.Errorf("%s: %s is not an object", path, strings.Join(keyPath[:depth], "."))
 		}
-		ins := "\n  " + nested(keyPath[depth:], slices.Concat(init, []string{value}))
+		ins := "\n  " + nested(keyPath[depth:], uniqueStrings(slices.Concat(init, values)))
 		if strings.TrimSpace(string(std[sp.start+1:sp.end-1])) != "" {
 			ins += ","
 		}

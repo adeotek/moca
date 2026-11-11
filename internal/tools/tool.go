@@ -84,6 +84,13 @@ func (a Answer) Allows() bool {
 type Question struct {
 	Kind, Subject, Detail string
 	CanAlways             bool
+	// AllowNames is the exact checker names an allow-always/session answer
+	// may teach. It matters for a composite shell command: Subject is then
+	// the whole constituent list (one question covers the whole invocation),
+	// while the answer may only persist rules for the names that are
+	// learnable. Nil/empty keeps the single-Subject fallback for MCP, web
+	// and the write prompt.
+	AllowNames []string
 	// NoSession marks a question that must keep asking and must never be
 	// answered "for this session": moca's own config file (it holds the
 	// permission policy itself) and a web fetch's redirect hop (approving a
