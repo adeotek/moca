@@ -37,7 +37,9 @@ for the ACP front end. Both are worth running when your change touches permissio
   GitHub resolves the trailer to the agent's account, shows it in the repository's Contributors
   widget, and keeps the commit reachable through tags and PR refs, so a later history rewrite does
   not undo the attribution.
-- **One version bump per PR.** `CHANGELOG.md` gets an entry per release.
+- **One version bump per release, not per PR.** PRs land without a version stamp; a single release
+  pass moves the accumulated `CHANGELOG.md` entries into one version section, so several PRs share
+  it.
 - **Eight tools are frozen.** A PR that adds a ninth needs a design discussion first — see the
   README's non-goals.
 - **`main` is PR-only**: branch (`phase/N-<slug>`, `feat/<slug>`, `fix/<slug>`, `chore/<slug>`),
