@@ -1,7 +1,7 @@
 # Graph Report - moca  (2026-11-12)
 
 ## Corpus Check
-- 575 files · ~683,479 words
+- 575 files · ~683,650 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 33 file(s) not represented in the graph (top: .jsonc 17, (none) 14, .tape 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `93f01eb5`
+- Built from commit: `20bedc00`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1422,7 +1422,7 @@ Nodes (8): Benchmarks: the truncated-turn work, measured, CI: an agent-authored 
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `README.md - moca` connect `Contributing & Security Docs` to `External Tools Spec (rtk/graphify)`, `system-prompt.md`, `release v0.1.0.alpha`, `Release CI Packaging`, `release v0.4.1.beta`, `SPECS.md — moca normative spec (v0.5.0-beta)`, `release v0.1.1`, `manual Release workflow with checksums`?**
-  _High betweenness centrality (0.253) - this node is a cross-community bridge._
+  _High betweenness centrality (0.248) - this node is a cross-community bridge._
 - **What connects `--continue flag`, `--effort flag`, `exit codes` to the rest of the system?**
   _877 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `NewRegistry` be split into smaller, more focused modules?**
