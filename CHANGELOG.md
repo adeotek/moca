@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.8.0 (2026-11-11)
+## v0.8.0 (2026-11-13)
 
 ### `/goal` — a bounded session objective
 
