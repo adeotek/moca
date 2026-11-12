@@ -263,6 +263,51 @@ func TestGoalResumeNotice(t *testing.T) {
 	}
 }
 
+// Plan mode refuses a start and a resume of a goal on the TUI surface: the
+// user sees the refusal (not a run) and nothing is spent or re-activated. The
+// agent enforces the same rule, so either gate holding is a pass.
+func TestGoalPlanModeRefusalsInTUI(t *testing.T) {
+	s := newGoalServer(t, goalTextTurn("worked"), goalTextTurn("BLOCKED"))
+	work := t.TempDir()
+	m, evs := newGoalModel(t, s, work)
+
+	out := simulateAll(m, tuiCmd(t, m, "/plan")) + drainEvents(m, evs)
+	if !strings.Contains(out, "plan mode on") {
+		t.Fatalf("setup: /plan must turn plan mode on: %q", out)
+	}
+	*evs = nil
+	out = simulateAll(m, tuiCmd(t, m, "/goal make it green")) + drainEvents(m, evs)
+	if !strings.Contains(out, "plan mode is on") {
+		t.Fatalf("a start in plan mode must be refused: %q", out)
+	}
+	if n := s.count(); n != 0 {
+		t.Fatalf("a refused start made %d requests", n)
+	}
+	if g, ok := m.agent.Goal(); ok {
+		t.Fatalf("a refused start created a goal: %+v", g)
+	}
+
+	// Leave plan mode, let a goal pause, then refuse its resume.
+	simulateAll(m, tuiCmd(t, m, "/plan"))
+	out = simulateAll(m, tuiCmd(t, m, "/goal make it green")) + drainEvents(m, evs)
+	if !strings.Contains(out, "goal paused") {
+		t.Fatalf("setup: the BLOCKED verdict must pause the goal: %q", out)
+	}
+	*evs = nil
+	before := s.count()
+	simulateAll(m, tuiCmd(t, m, "/plan"))
+	out = simulateAll(m, tuiCmd(t, m, "/goal resume")) + drainEvents(m, evs)
+	if !strings.Contains(out, "plan mode is on") {
+		t.Fatalf("a resume in plan mode must be refused: %q", out)
+	}
+	if n := s.count() - before; n != 0 {
+		t.Fatalf("a refused resume made %d requests", n)
+	}
+	if g, _ := m.agent.Goal(); g.Status != session.GoalPaused {
+		t.Fatalf("a refused resume re-activated the goal: %+v", g)
+	}
+}
+
 // agentHostContinuation is the stored text of a goal continuation round (the
 // agent's own constant, restated here because it is unexported).
 func agentHostContinuation() string { return "continue working toward the session goal" }

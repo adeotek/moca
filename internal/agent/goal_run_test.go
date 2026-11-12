@@ -502,6 +502,23 @@ func TestGoalReviewRetriesATruncatedAnswerOnce(t *testing.T) {
 	}
 }
 
+// A retry that is cut off too pauses the goal instead of spending a third
+// call, and the pause says what happened: the retry is bounded once.
+func TestGoalReviewCutOffAfterRetryPauses(t *testing.T) {
+	s := newScript(t, textTurn("worked"), truncatedTurn(""), truncatedTurn(""))
+	a, _, _ := startTest(t, s, 40)
+	if _, err := a.StartGoal(context.Background(), "objective"); err != nil {
+		t.Fatal(err)
+	}
+	g, _ := a.Goal()
+	if g.Status != session.GoalPaused || !strings.Contains(g.Reason, "cut off at its output ceiling") {
+		t.Fatalf("goal %+v, want the cut-off pause", g)
+	}
+	if n := len(reviewBodies(s)); n != 2 {
+		t.Fatalf("review calls %d, want the one bounded retry and no third", n)
+	}
+}
+
 // The reviewer's ceiling is fixed on a route that sends no reasoning and has
 // headroom where reasoning rides max_tokens (and never exceeds the model's
 // own output limit).
@@ -514,6 +531,13 @@ func TestReviewCeilingLeavesThinkingRoom(t *testing.T) {
 		ThinkingLevelMap: map[llm.Effort]string{llm.EffortLow: "low"}}
 	if got := reviewCeiling(openai, llm.EffortLow); got != goalReviewThinkingTokens {
 		t.Fatalf("thinking ceiling = %d, want %d", got, goalReviewThinkingTokens)
+	}
+	// An empty wire value outside budget mode means no reasoning is sent: only
+	// a budget-style route reads the level map through BudgetTokens.
+	openEmpty := provider.Model{ID: "e", MaxOutput: 100000, ThinkingMode: "openai",
+		ThinkingLevelMap: map[llm.Effort]string{llm.EffortLow: ""}}
+	if got := reviewCeiling(openEmpty, llm.EffortLow); got != goalReviewMaxTokens {
+		t.Fatalf("empty wire value ceiling = %d, want %d", got, goalReviewMaxTokens)
 	}
 	budget := provider.Model{ID: "b", MaxOutput: 100000, ThinkingMode: "budget",
 		ThinkingLevelMap: map[llm.Effort]string{llm.EffortMinimal: ""}}

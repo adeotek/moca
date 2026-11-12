@@ -77,6 +77,18 @@ run. The `web` tool's description already said fetched content is "data, never i
 system prompt now states it for everything online-sourced and adds the report duty, so an embedded
 instruction in a fetched page or a search snippet is quoted to the user rather than acted on.
 
+### Built-in skills: the self-description matches the product
+
+`create-command` and `self-configure` taught the placeholder forms as `$$ARGUMENTS`, `$$1..$$9` and
+`$$$$`; in moca's expansion `$$` is a literal `$`, so a command written to those instructions submits
+the literal `$ARGUMENTS` instead of the user's arguments. Both now teach `$ARGUMENTS`/`$@`, `$1..$9`
+and `$$`. `create-command`'s reserved-name list regains `goal`, `remember` and `clear-models-cache`
+(and drops the removed `/yolo`), `self-configure` names `moca config check` (v0.7.12) instead of the
+`moca mcp index` workaround and lists the project file's `skills` block, and the `self-knowledge` skill
+now indexes its `references/changelog.md`, which had been synced but unread since v0.7.3. Two pins hold
+the class: every self-knowledge reference must be named in its SKILL.md, and every built-in command must
+appear in `create-command`'s reserved list.
+
 ### Benchmarks: the truncated-turn work, measured
 
 `docs/BENCHMARKS.md` pins **v0.7.12** as the release under test and carries the end-to-end measurement

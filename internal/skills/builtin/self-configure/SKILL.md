@@ -6,18 +6,18 @@ Changing how this moca installation behaves, at the user's request.
 
 ## What you can change
 - **User config** — the live `config.jsonc` (the environment's moca-dirs line names its directory). Read it, then edit it with `edit`/`write`: it is outside the workdir, so moca raises the approval prompt every time — that is expected. If the user denies the write, stop and ask what they want.
-- **Project config** — `<workdir>/.moca/config.jsonc`: permissions only (allow/ask/deny rules, defaultMode). It lives inside the workdir and takes effect only when the project is trusted.
-- **Prompt templates** — `<prompts dir>/<name>.md`, one file per `/name` command (frontmatter `description`, optional `argument-hint`; body placeholders `$$ARGUMENTS`, `$$1..$$9`, `$$$$`). Writes there raise the approval prompt.
+- **Project config** — `<workdir>/.moca/config.jsonc`: `permissions` (allow/ask/deny rules, defaultMode), `mcp` (project servers and approvals) and `skills` (the opt-out switches). It lives inside the workdir and takes effect only when the project is trusted.
+- **Prompt templates** — `<prompts dir>/<name>.md`, one file per `/name` command (frontmatter `description`, optional `argument-hint`; body placeholders `$ARGUMENTS`/`$@` for all arguments as typed, `$1..$9` per argument, `${1}`/`${@:N:L}` and the other brace forms, `$$` for a literal `$` — §12 of the reference has the full set). Writes there raise the approval prompt.
 - **Skills** — `<skills dir>/<name>/SKILL.md` with frontmatter `name` and `description` (optional `argument-hint`); supporting files live beside it. Writes there raise the approval prompt.
 - **The session's permission mode** — suggest the user type `/mode default|auto|yolo|plan` (or shift+tab); never change it yourself.
 
 ## How
 - `read` the file first — `edit` requires it. Use exact replacements: JSONC comments must survive the edit.
-- The config decode is strict: unknown keys are rejected; `apiKey` must be an `env:VAR` reference, never a literal; `permissions.defaultMode` is `default|auto|plan|yolo` (`plan` starts the plan scope); a project's `.moca/config.jsonc` may hold only `permissions` (startup mode `default|auto|plan`, never `yolo`) and `mcp` — `tui` (theme, notify) is user-config only.
+- The config decode is strict: unknown keys are rejected; `apiKey` must be an `env:VAR` reference, never a literal; `permissions.defaultMode` is `default|auto|plan|yolo` (`plan` starts the plan scope); a project's `.moca/config.jsonc` may hold only `permissions` (startup mode `default|auto|plan`, never `yolo`), `mcp` and `skills` (`selfManaged: false` opts the repo out, `recordNudge: false` silences the end-of-run nudge, and a project `true` never enables self-managed skills) — `tui` (theme, notify) is user-config only.
 
 ## Verify
 - Re-read the file after writing.
-- Then run `moca mcp index` via shell: it loads and validates the config up front — exit 2 with a `line:col` position means the file is broken (this is the config check to use; there is no `moca doctor` in this version).
+- Then run `moca config check` via shell: it validates the user config, the `.env` beside it and the trusted project file, lists every issue and exits 2 if there is one (`moca config sample` prints a complete commented config).
 
 ## Never
 - `auth.json` (in the same directory as the config): credentials belong to `/login` or `moca login <provider>` — the user types those. Never ask for, read, write or echo keys.

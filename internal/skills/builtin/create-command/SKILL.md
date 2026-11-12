@@ -16,11 +16,12 @@ Optional frontmatter, then the prompt body that is sent as the user's message wh
     description: One line — what the command does (shown in /help and the dropdown)
     argument-hint: "<name> [what]"   # optional; the usage hint next to the name
     ---
-    The prompt body. Placeholders: $$ARGUMENTS or $$@ (all arguments as typed),
-    $$1..$$9 (whitespace-split arguments), $$$$ (a literal $).
+    The prompt body. Placeholders: $ARGUMENTS or $@ (all arguments as typed),
+    $1..$9 (whitespace-split arguments), $$ (a literal $); ${1} and the other
+    ${…} brace forms also work.
 
 ## Rules
-- The name is the file name without `.md`: one lowercase word or kebab-case. Built-in names win over a template of the same name — never use: model, effort, hard, mode, yolo, plan, execute, clear, resume, sessions, compact, cost, undo, copy, show, login, logout, help, exit (nor the aliases q/quit).
+- The name is the file name without `.md`: one lowercase word or kebab-case. Built-in names win over a template of the same name — never use: model, effort, hard, mode, plan, goal, execute, remember, clear, resume, sessions, compact, cost, undo, copy, show, login, logout, clear-models-cache, help, exit (nor the aliases q/quit).
 - Existing file: `read` it first, keep everything that still applies and change only what the request asks for.
 - The body is a prompt for the agent, not documentation for a person: address the work directly ("Run the tests, then …"), use the placeholders where arguments belong, and keep the command focused on one task (aim for under ~30 lines).
 

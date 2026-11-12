@@ -102,14 +102,18 @@ func retryCeiling(m provider.Model, want int) int {
 }
 
 // reviewSendsThinking reports whether a request with this effort and ceiling
-// would carry reasoning: an openai-style level maps to a wire value, and a
-// budget-style route allocates a thinking budget when the ceiling leaves room
-// for one (BudgetTokens returns 0 otherwise).
+// would carry reasoning. Budget mode has no wire value in the level map (the
+// budget itself is the switch), so only BudgetTokens can answer there — 0 when
+// the ceiling leaves no room to think. Every other thinking mode maps the
+// effort to a wire value, and an empty value means no reasoning is sent.
 func reviewSendsThinking(m provider.Model, e llm.Effort, ceiling int) bool {
 	if m.ThinkingMode == "" || m.ThinkingMode == "none" || e == llm.EffortOff {
 		return false
 	}
-	return m.ThinkingLevelMap[e] != "" || m.BudgetTokens(ceiling, e) > 0
+	if m.ThinkingMode == "budget" {
+		return m.BudgetTokens(ceiling, e) > 0
+	}
+	return m.ThinkingLevelMap[e] != ""
 }
 
 // reviewGoal makes the reviewer call(s) for goal g. It uses the configured

@@ -306,3 +306,40 @@ func TestHelpCommandPrintsStyled(t *testing.T) {
 		t.Fatalf("/help text lost a row or an escape leaked:\n%q\n---\n%q", got, want)
 	}
 }
+
+// TestCreateCommandReservesEveryBuiltin: a user template named after a
+// built-in is shadowed silently (built-ins win), so the create-command
+// skill's reserved list must name every command. The list had drifted by
+// three (goal, remember, clear-models-cache) while still naming the removed
+// /yolo — a model following it could author a /goal command that never runs.
+func TestCreateCommandReservesEveryBuiltin(t *testing.T) {
+	dir, err := skills.ExtractBuiltins(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "create-command", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := ""
+	for _, l := range strings.Split(string(body), "\n") {
+		if strings.Contains(l, "never use:") {
+			line = l
+			break
+		}
+	}
+	if line == "" {
+		t.Fatal("create-command: no reserved-name list (the wording changed — update this pin with it)")
+	}
+	_, list, _ := strings.Cut(line, "never use: ")
+	list, _, _ = strings.Cut(list, " (")
+	reserved := map[string]bool{}
+	for _, tok := range strings.Split(list, ",") {
+		reserved[strings.TrimSpace(tok)] = true
+	}
+	for _, name := range BuiltinCommands {
+		if !reserved[name] {
+			t.Errorf("create-command's reserved list omits the built-in /%s", name)
+		}
+	}
+}
