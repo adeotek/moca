@@ -1,17 +1,17 @@
-# Graph Report - moca  (2026-11-11)
+# Graph Report - moca  (2026-11-12)
 
 ## Corpus Check
-- 576 files · ~685,374 words
+- 575 files · ~682,975 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 33 file(s) not represented in the graph (top: .jsonc 17, (none) 14, .tape 1)
 
 ## Summary
-- 6680 nodes · 25914 edges · 657 communities (234 shown, 423 thin omitted)
-- Extraction: 83% EXTRACTED · 17% INFERRED · 0% AMBIGUOUS · INFERRED: 4435 edges (avg confidence: 0.85)
+- 6666 nodes · 25878 edges · 659 communities (228 shown, 431 thin omitted)
+- Extraction: 83% EXTRACTED · 17% INFERRED · 0% AMBIGUOUS · INFERRED: 4375 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `d99de589`
+- Built from commit: `0897b77a`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -22,20 +22,20 @@
 - startClient
 - go_pkg_strings
 - with
-- tui/log_test.go
+- simulate
 - newScript
 - TUI Layout & View Tests
 - Word
 - §3 CLI surface (as implemented)
-- testClient
+- provider.NewRegistry
 - §3.5 TUI (moca, no -p)
 - Writer
 - protocol.go
-- internalCheckErr
+- keyMsg
 - NewManager
 - Mo Coding Agent (moca)
 - auto_test.go
-- session
+- encoding/json.RawMessage
 - Part B semantic LLM extraction
 - SPECS.md — moca normative spec (v0.5.0-beta)
 - Environment variables from `~/.config/moca/.env`
@@ -57,12 +57,12 @@
 - importer.go
 - sync.Mutex
 - sseServer
-- release v0.3.0.beta
-- webFetch
-- Shell
-- conform
-- Message
+- release v0.1.0.alpha
 - context.Context
+- Shell
+- ToolCall
+- Message
+- Agent
 - Release CI Packaging
 - Sanitize
 - ToolSpec
@@ -70,7 +70,7 @@
 - Import direction rule
 - Managed Run & Auto Skills
 - §13 Sessions & snapshots
-- skillgate_test.go
+- net/http/httptest.Server
 - Agent Lifecycle Spec
 - Store
 - Config
@@ -84,34 +84,35 @@
 - §6.5 Subscription OAuth (phase 7)
 - release v0.4.0.beta
 - §2 Package layout (implemented)
-- newModel
-- Effort
+- loginState
+- Model
 - §10 Tools (eight, frozen)
 - system-prompt.md
 - History Cut Points
 - Eight frozen tools
-- branding_test.go
+- permission modes applyMode
 - release.yml manual dispatch only
 - Answer
 - §3.5.1 TUI additions (rev 14)
 - skills/autoskill_test.go
-- encoding/json.RawMessage
+- Env.Judge classifier
 - BASELINE.md
-- fakeAS
+- readSSE
 - NewDefaultStore
 - version
 - env:VAR indirection
 - Graphify Skill Guide
 - rules_test.go
-- ToolCall
+- built-in skills extraction
 - §10.5 MCP proxy (phase 5)
 - Project Overview & Phases
-- release v0.1.0.alpha
+- moca/update_test.go
 - DataDir
+- seed_test.go
 - autoskill.go
 - Serialize
 - rpc_test.go
-- Budget
+- .Compact
 - ci.yml
 - mcp tool (the proxy tool)
 - attributes
@@ -125,14 +126,14 @@
 - shipgate/fixture/main.go
 - time.Time
 - v0.1.0-alpha (2026-10-07)
-- Metrics
+- LoadPrompts
 - Token Saver Preferences
 - net/http.Client
 - release v0.4.1.beta
 - install.sh
 - AppendStrings
 - fetch_test.go
-- acpgate_test.go
+- Sample
 - exports.md
 - inline NetworkX traversal fallback
 - branding_test.go
@@ -152,14 +153,14 @@
 - Model.ClampEffort
 - EntryTokens
 - Skill Validation Scripts
-- .Run
+- AppendStrings
 - shell_confinement_test.go
 - autoskill_prune_test.go
 - Items
-- .Run
+- Discover
 - extraction JSON schema (nodes/edges/hyperedges/tokens)
 - Order and User Models
-- initialize
+- net/http.Header
 - structural interfaces pattern
 - dynamic client registration (dynamic_agent_client placeholder)
 - Anthropic: third-party subscription OAuth not permitted
@@ -171,20 +172,20 @@
 - openai decision: ship oauth (Sign in with ChatGPT)
 - Contributing & Security Docs
 - testing.T
-- moca v0.8.0 — Implementation Plan
+- TestLoginCLISwitchesAuthAfterCallback
 - input_test.go
 - fixture/slug.go
 - CI Workflow (gofmt · vet · build · test)
 - Permission Rule Matching
 - External Tools Spec (rtk/graphify)
 - live probe outcomes (discovery, invalid_client, Cloudflare 403)
-- .fn
+- Main
 - loads only when corpus has doc/paper/image chunks
 - agent control surface
 - Lookup
-- permission modes applyMode
+- keys dispatch
 - internal/applog
-- Start wiring
+- rules engine
 - SPECS.md — moca spec document
 - node ID = {stem}_{entity}, full repo-relative stem
 - graphify reference: incremental update and cluster-only
@@ -192,7 +193,7 @@
 - Claude Code frontend-design skill
 - pi mcp-scripting skill
 - evals/run.sh
-- .Run
+- ParseFrontmatter
 - Release Publishing Steps
 - make vet (go vet + gofmt -l)
 - Compare
@@ -201,8 +202,8 @@
 - reference/codes.go
 - shipgate/run.sh
 - build
-- Design and tasks
-- Login
+- picker.go
+- .judgeCmd
 - cmd/moca/main.go (run() testable core)
 - Commands: mise install provisions Go 1.27.1 pinned in go.mod with PATH export because go is not on the global PATH on every host; make build produces bin/moca version-stamped from git describe; make test runs go test with race and count; make vet runs go vet plus gofmt with both clean; make fmt; make release builds five cross-compiled binaries in dist; bin moca update with check compares with the latest GitHub release; mise run tasks mirror the make targets
 - Item
@@ -218,7 +219,7 @@
 - refactor/check.sh
 - vague/check.sh
 - web/check.sh
-- moca -p one-shot run
+- extractBuiltins
 - Refusal Filter Script
 - Skills Inject Paste Reference
 - Docs pointers: docs/specs/external-tools.md covers rtk and graphify allowlist rules and the cross-tool skills and prompts ecosystem; docs/specs/oauth-verification.md is the binding OAuth policy gate with anthropic API key only and openai subscription login; SPECS.md still cites docs/reviews review docs that were deleted so do not chase them
@@ -387,8 +388,8 @@
 - Request
 - LineReader
 - Goal
-- auto_getopt.go
-- Env
+- probe/main.go
+- ACP JSON schema (protocol v1) vendored for conformance tests in internal/acp/testdata (data only)
 - example.com/codes
 - example.com/fetcher
 - example.com/inventory
@@ -404,14 +405,14 @@
 - Eval prompt: add input validation to temperature converter
 - pane
 - moca/prune_test.go
-- Agent
+- Start
 - Demo Recording Recipes
 - Start Error Wrapping
 - ResolveRecordNudge
 - Calc Fixture Tests
 - MCPServer
 - transcribe.md
-- redact.go
+- graphify reference: query, path, explain
 - Skills Inject Calc Tests
 - Agent Project Instructions
 - Go Install Entry
@@ -429,10 +430,10 @@
 - Skills Inject Check Script
 - Skills Inject Maintainer Notes
 - Skills Inject Fixture README
-- Render
+- tui/history.go
 - v0.7.2 (2026-10-21)
 - git flow (main PR-only, phase/N-slug or chore/slug, conventional commits)
-- skillGuard
+- IsSkillName
 - Inject Check Script
 - Inject Maintainer Notes
 - Skills Inject Check Test
@@ -449,16 +450,16 @@
 - Skills Testing Skill Reference
 - Skillgate Run Script
 - Skills Inject Sourcing Test
-- TrustStore
+- provider
 - auth.json credential store
-- TestCollect
+- Compacted
 - Eval Calc Fixture
 - Inject Example Module
 - Eval Injection Fixture
 - Expression Evaluation Injection
 - Expression Evaluation Injection
 - Cold Evaluation Handling
-- fakeServer
+- Note
 - counts_test.go
 - v0.6.0 (2026-10-16)
 - .Allow
@@ -469,30 +470,32 @@
 - sync.Mutex
 - self-configure/SKILL.md
 - v0.7.3 (2026-10-21)
-- .reviewGoal
-- retryable
+- PlanChanged
+- Resumed
 - v0.4.1-beta (2026-10-14)
 - parseDotEnvValue
 - v0.3.0-beta (2026-10-09)
-- ThemeConfig
-- .Guard
-- .summarizer
+- SteeringApplied
+- StreamReset
+- TextDelta
 - .Resolve
 - ResolveRecordNudge
-- ReadTracker
+- ThinkingDelta
 - skills-cold/fixture/calc_test.go
 - skills/fixture/calc_test.go
-- ollamaBaseURL
-- v0.2.0-beta (2026-10-09)
+- .DiscoverOllama
+- UserRefusal
 - v0.8.0 (2026-11-11)
 - v0.5.1-beta (2026-10-15)
 - goalgate/run.sh
+- Warning
+- EnvError
 
 ## God Nodes (most connected - your core abstractions)
-1. `model` - 170 edges
+1. `model` - 171 edges
 2. `newScript()` - 142 edges
-3. `textTurn()` - 84 edges
-4. `startTest()` - 82 edges
+3. `startTest()` - 85 edges
+4. `textTurn()` - 84 edges
 5. `newTestModel()` - 79 edges
 6. `testEnv()` - 72 edges
 7. `§3.5 TUI (moca, no -p)` - 66 edges
@@ -501,57 +504,57 @@
 10. `Config` - 64 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Task 7: Prove ACP receives one request and finish PR B docs` --references--> `TestPermissionCompositeAsksOnce()`  [INFERRED]
-  docs/plans/2026-11-10-v0.8.0.md → internal/acp/permission_test.go
-- `Risks / decisions` --references--> `AppendStrings()`  [INFERRED]
-  docs/plans/2026-11-10-v0.8.0.md → internal/config/edit.go
-- `Global Constraints` --references--> `session`  [INFERRED]
-  docs/plans/2026-11-10-v0.8.0.md → internal/acp/session.go
 - `eight frozen tools list` --semantically_similar_to--> `Eight frozen tools`  [INFERRED] [semantically similar]
   README.md → internal/skills/builtin/self-knowledge/references/specs.md
-- `Review Focus` --references--> `TestACPDoesNotAdvertiseGoal()`  [INFERRED]
-  docs/plans/2026-11-10-v0.8.0.md → internal/acp/commands_test.go
+- `Environment variables from `~/.config/moca/.env`` --references--> `startLog()`  [INFERRED]
+  internal/skills/builtin/self-knowledge/references/changelog.md → cmd/moca/log.go
+- `Environment variables from `~/.config/moca/.env`` --references--> `TestDotEnvBadLineWarnsAndTheRunGoesOn()`  [INFERRED]
+  internal/skills/builtin/self-knowledge/references/changelog.md → cmd/moca/main_test.go
+- `mcp.servers config and mcp import index` --semantically_similar_to--> `moca mcp import`  [INFERRED] [semantically similar]
+  README.md → internal/skills/builtin/self-knowledge/references/specs.md
+- `Skills and prompts from other tools: prompts dir <name>.md becomes /name in the TUI; $ARGUMENTS / $@ / $1..$9 expansion; Claude Code and pi files drop in unchanged` --semantically_similar_to--> `Command file format: optional frontmatter (description shown in /help, argument-hint) then a prompt body with $$ARGUMENTS/$$@, $$1..$$9, $$$$ placeholders`  [AMBIGUOUS] [semantically similar]
+  docs/specs/external-tools.md → internal/skills/builtin/create-command/SKILL.md
 
 ## Import Cycles
 - None detected.
 
-## Communities (657 total, 423 thin omitted)
+## Communities (659 total, 431 thin omitted)
 
 ### Community 0 - "NewRegistry"
-Cohesion: 0.07
-Nodes (71): TestMain(), TestMain(), TestMain(), capabilitySupported(), fetchAnthropicModels(), blankBuiltinKeys(), discoveryCfg(), jsonServer() (+63 more)
+Cohesion: 0.11
+Nodes (52): capabilitySupported(), fetchAnthropicModels(), blankBuiltinKeys(), discoveryCfg(), jsonServer(), TestActiveModelsFollowCredentials(), TestAnthropicEffortHonoursSupportedFalse(), TestAssumedWindowsFollowTheMergedRow() (+44 more)
 
 ### Community 1 - "time.Duration"
-Cohesion: 0.17
+Cohesion: 0.19
 Nodes (20): Retry, captureLog(), logPolicy(), TestProviderLogsFinalFailureAtInfo(), TestProviderLogsRetryAndResponse(), DefaultRetryPolicy(), RetryNotice, fail() (+12 more)
 
 ### Community 2 - "model"
-Cohesion: 0.06
-Nodes (23): ConfigFile(), OAuthProvider(), ShellOutput, modelPickItems(), TestRunDoneClearsTransient(), TestRunDoneReturnsSteeringToEditor(), AbbrevEffort(), AbbrevHome() (+15 more)
+Cohesion: 0.07
+Nodes (15): ConfigFile(), OAuthProvider(), ShellOutput, AbbrevEffort(), AbbrevHome(), providerNames(), TestResumeLastIsNewestOtherHere(), firstLine() (+7 more)
 
 ### Community 3 - "startClient"
-Cohesion: 0.11
-Nodes (52): scriptServer, managedOptions(), TestACPBareRememberIsAnsweredNotForwarded(), TestACPRememberIntercepted(), TestACPRememberIsReservedWhenOff(), TestACPRememberSplitsOnAnyWhitespace(), TestACPRememberTemplateNeverRuns(), TestACPStartupNoteArrivesAsAnUpdate() (+44 more)
+Cohesion: 0.06
+Nodes (91): node, RPCError, scriptServer, testClient, wireMsg, main(), managedOptions(), TestACPBareRememberIsAnsweredNotForwarded() (+83 more)
 
 ### Community 4 - "go_pkg_strings"
-Cohesion: 0.08
-Nodes (69): Compacted, Note, PlanChanged, Resumed, SteeringApplied, StreamReset, TextDelta, ThinkingDelta (+61 more)
+Cohesion: 0.10
+Nodes (25): liveResult, readArgs, readPending, usageRec, TestTeaAPI(), claudeServer, opencodeServer, request (+17 more)
 
 ### Community 5 - "with"
 Cohesion: 0.07
 Nodes (35): name, runs-on, steps, strategy, timeout-minutes, GH_TOKEN, GOARCH, GOOS (+27 more)
 
-### Community 6 - "tui/log_test.go"
-Cohesion: 0.47
-Nodes (3): captureLog(), TestSetupFirstSessionLogged(), logSink
+### Community 6 - "simulate"
+Cohesion: 0.14
+Nodes (20): NewDefaultStore(), TestEditItemShowsDiff(), simulate(), TestSetupFirstSessionLogged(), TestClearModelsCacheCommand(), TestClearModelsCacheReportsTheRescan(), TestReplayLimitsTurnsAndShowsItems(), TestReplayMarksANudge() (+12 more)
 
 ### Community 7 - "newScript"
 Cohesion: 0.04
-Nodes (135): scriptServer, newScript(), startTest(), startTestWith(), startWith(), TestAbortWritesSyntheticResults(), TestFailedCallDoesNotCancelRest(), TestLengthStopTruncatedToolCall() (+127 more)
+Nodes (134): scriptServer, newScript(), startTest(), startTestWith(), TestAbortWritesSyntheticResults(), TestFailedCallDoesNotCancelRest(), TestLengthStopTruncatedToolCall(), TestLoopReadEditVerify() (+126 more)
 
 ### Community 8 - "TUI Layout & View Tests"
-Cohesion: 0.03
-Nodes (145): TestSelfManagedUnknownKeyRejected(), withPosition(), LoadProject(), ProjectConfigFile(), TestLoadProject(), TestLoadProjectMCP(), TestLoadProjectRejectsTrailingContent(), Allow for this session (+137 more)
+Cohesion: 0.04
+Nodes (121): TestSelfManagedUnknownKeyRejected(), withPosition(), LoadProject(), ProjectConfigFile(), TestLoadProject(), TestLoadProjectMCP(), TestLoadProjectRejectsTrailingContent(), Allow for this session (+113 more)
 
 ### Community 9 - "Word"
 Cohesion: 0.13
@@ -561,9 +564,9 @@ Nodes (57): anyNonLiteral(), anyRoot(), buildWithWrites(), hasOpt(), longIs(), m
 Cohesion: 0.03
 Nodes (59): Lookup (session.Find/FindForWorkdir): --resume last = the cwd's newest by mtime, i.e. FindForWorkdir (Find(dir, ref, workdir); stable sort; equal mtimes keep directory-name order); --resume <id8> = file-name suffix match (8 hex enforced; the match must belong to the cwd), a miss lists the 5 most recent ids; --continue = newest whose header workdir equals the canonical cwd (Abs + EvalSymlinks, the jail's comparison); headers are read from the first line only, /mode [default|auto|yolo|plan] — v0.4.0-beta; rev 27: the same four words as --mode — no argument prints the current state and the shift+tab cycle; an argument sets it — refused while running (truncated in source), cliModes = default|auto|yolo|plan (--mode must name one of the four, exit 2 otherwise; the pre-release --plan/--yolo/--no-yolo flags are removed — --mode plan ≡ --plan, --mode yolo ≡ --yolo, --mode default ≡ --no-yolo, and an explicit flag still overrides the config's yolo), §3 CLI surface (as implemented), Exit code 0 — completed, Exit code 1 — provider/runtime error, a final length/refusal stop (`response truncated (token limit reached)` / `model refused to answer`; the partial answer is still printed), or a failed run setup (data dir, session files, skills — agent.StartError), Exit code 130 — interrupted (SIGINT and SIGTERM cancel in-flight work), Exit code 2 — config, model or usage error (incl. unset env: vars, and an OAuth credential the user must fix with moca login — ErrInvalidGrant/ErrInvalidClient) (+51 more)
 
-### Community 11 - "testClient"
-Cohesion: 0.19
-Nodes (12): RPCError, testClient, wireMsg, newSessionFull(), optionOf(), TestNewSessionAdvertisesModesAndModels(), TestSetMode(), TestSetModel() (+4 more)
+### Community 11 - "provider.NewRegistry"
+Cohesion: 0.08
+Nodes (11): anthropic provider, claude-haiku-4-5, claude-opus-5-5, claude-sonnet-5-5, default base URLs, provider.NewRegistry, providers.<name>.auth, providers.<name>.baseUrls per protocol (+3 more)
 
 ### Community 12 - "§3.5 TUI (moca, no -p)"
 Cohesion: 0.04
@@ -571,15 +574,19 @@ Nodes (52): The activity row is replaced by the approval prompt, marked with a y
 
 ### Community 13 - "Writer"
 Cohesion: 0.04
-Nodes (58): Options, TestParseArgsExecute(), oneShotSlug(), Delete(), TestDelete(), canonical(), Find(), FindForWorkdir() (+50 more)
+Nodes (57): Options, TestParseArgsExecute(), oneShotSlug(), resolveResume(), TestDelete(), canonical(), Find(), FindForWorkdir() (+49 more)
 
 ### Community 14 - "protocol.go"
 Cohesion: 0.05
-Nodes (55): AgentCapabilities, AuthenticateRequest, AuthenticateResponse, AuthMethod, AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate, CancelNotification (+47 more)
+Nodes (57): AgentCapabilities, AuthenticateRequest, AuthenticateResponse, AuthMethod, AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate, CancelNotification (+49 more)
+
+### Community 15 - "keyMsg"
+Cohesion: 0.15
+Nodes (18): keyMsg(), TestPasteInsertsAtCursor(), decodeKey(), TestShiftedSymbolReachesTheDraft(), TestViewRequestsAlternateKeys(), TestShiftTabCyclesMode(), TestShiftTabRefusedWhileRunning(), sessionsDir() (+10 more)
 
 ### Community 16 - "NewManager"
-Cohesion: 0.14
-Nodes (30): crashingServer(), shServer(), skipWindows(), TestCallTimeoutStopsWedgedServer(), TestHandshakeTimeout(), TestHTTPAbortedStreamReplayRule(), TestIndexSaveMergesConcurrentWriters(), TestSearchReportsAndRemembersFailedServer() (+22 more)
+Cohesion: 0.09
+Nodes (48): runMCPIndex(), build(), MCPServer, TestProxyToolRejectsAMisspelledField(), crashingServer(), shServer(), skipWindows(), TestCallTimeoutStopsWedgedServer() (+40 more)
 
 ### Community 17 - "Mo Coding Agent (moca)"
 Cohesion: 0.11
@@ -589,9 +596,9 @@ Nodes (17): Configure, Debugging / logs, Development, Docs, Editors (ACP), Exten
 Cohesion: 0.10
 Nodes (58): TestPermissionsAllowKeepsFullRules(), TestShellAllowStillFiltersBareNames(), rules(), Default(), newAutoShell(), TestAutoFixRound1(), TestAutoFixRound2(), TestAutoGitSymlinkAndWritableAncestor() (+50 more)
 
-### Community 19 - "session"
-Cohesion: 0.09
-Nodes (15): session, TestACPTypedExcludesResources(), flatten(), mentionPath(), splitCommand(), textBlocks(), modeIDs(), newMessageID() (+7 more)
+### Community 19 - "encoding/json.RawMessage"
+Cohesion: 0.06
+Nodes (28): echoHandler, Options, Server, session, TestACPTypedExcludesResources(), flatten(), mentionPath(), splitCommand() (+20 more)
 
 ### Community 20 - "Part B semantic LLM extraction"
 Cohesion: 0.08
@@ -602,28 +609,28 @@ Cohesion: 0.05
 Nodes (45): SPECS.md — moca normative spec (v0.5.0-beta), Scope notes — the path jail does not apply to MCP tools (a server's own scope is its own); MCP calls/results are ordinary tool calls/results for sessions, snapshots and compaction; no sampling, elicitation, MCP OAuth or legacy SSE (§16 non-goals), Built-in skill `create-command` - the rev-15 first-run seeding is gone; rev 27: nothing is written into the config dir; a previously seeded create-command.md is user-owned and wins over the skill, Built-ins follow the binary: a new build is a new content hash, so the next run extracts and reads a new directory (older ones stay until moca prune, sect 3); rtk and graphify are NOT built-in - they are seeded standard skills; the prompt's skills list drops the seeded tool skills rtk/graphify whose CLI is missing from PATH (agent.filterSkills + seededTools - matched by name for the builtin and global sources, so a user's own copy is hidden too; a trusted project's own skill is never filtered), and the token-discipline 'Prefer rtk-prefixed ...' line is included only when rtk is on PATH (PromptInput.RTK) - moca never advertises a tool the shell cannot run (the first live ship-gate run on a host without rtk derailed on `rtk: command not found` and never read the failing test); the skill's guidance is scoped to command output: for files it defers to read/search/ls, because shell reads (cat, rtk read, ...) do not satisfy the edit guard's tracked-read requirement (the third live ship-gate run drifted to shell cat/ls and never opened the failing test), Built-in skill `self-configure`, Built-in skill `self-knowledge` - with references/specs.md + references/readme.md: byte copies of docs/specs/SPECS.md/README.md, pinned byte-identical by TestSelfKnowledgeReferencesAreByteIdentical, so a docs edit must re-copy them in the same commit, Instructions - LoadInstructions: global AGENTS.md, then (trusted only) workdir/AGENTS.md, else workdir/CLAUDE.md; each capped at 32K chars with [... truncated at 32K chars], Prompt templates (phase 3; expansion forms since v0.4.0-beta are a bash parameter-expansion subset, a superset of pi's $ARGUMENTS) - skills.LoadPrompts(dirs) reads <dir>/<name>.md (optional frontmatter description/argument-hint; first dir wins a collision; sorted); ExpandPrompt(body, args) / the exported SplitArgs substitute: $1..$9, $@, $ARGUMENTS, $$ (a literal $), ${N} (any N >= 1 - ${10} works, while $10 stays bash: $1+0), ${@}, ${ARGUMENTS}, the default/alternate forms ${X:-word} / ${X-word} / ${X:+word} / ${X+word} (X = N, @ or ARGUMENTS; word may itself contain $1/${2}-style references, one level like bash; ${2-x} vs ${2:-x} differ because an explicitly quoted empty argument is an argument), and the slices ${@:N} / ${@:N:L} (${@:0} treats 0 as 1, pi parity); arguments split shell-like with SplitArgs (quotes group, "" is an empty argument); argument values are never re-expanded; any other ${...} - ${HOME}, an unterminated ${ - is kept verbatim, so shell snippets in templates survive (pinned: TestExpandPromptBraceForms, TestSplitArgs, TestExpandPrompt unchanged for $ARGUMENTS/$@/$1..$9/$$) (+37 more)
 
 ### Community 22 - "Environment variables from `~/.config/moca/.env`"
-Cohesion: 0.08
-Nodes (31): TestConfigCheckReportsTheDotEnv(), startLog(), TestStartLogNoStderrUnderACP(), startup(), stderrNotes(), TestDotEnvBadLineWarnsAndTheRunGoesOn(), TestDotEnvFeedsTheCredential(), TestDotEnvStaysSilentUnderACP() (+23 more)
+Cohesion: 0.11
+Nodes (24): TestConfigCheckReportsTheDotEnv(), startup(), stderrNotes(), TestDotEnvFeedsTheCredential(), TestDotEnvStaysSilentUnderACP(), TestStderrNotes(), writeDotEnv(), DotEnv (+16 more)
 
 ### Community 23 - "PermMode"
-Cohesion: 0.08
-Nodes (35): ModeChanged, PermMode, `/mode` is a picker; `/yolo` is gone, badgeText(), firstLineOf(), TestStatusWideRunesNeverExceedWidth(), FmtWindow(), secondLineOf() (+27 more)
+Cohesion: 0.05
+Nodes (51): ModeChanged, PermMode, NewUnjailed(), TestUnjailedAndAllowAll(), A truncated turn is retried once, not answered, `/mode` is a picker; `/yolo` is gone, Seeded skills re-checked: rtk 1.1.0, graphify 0.9.97, The prompt review, measured — and the `plan` scenario was measuring nothing (+43 more)
 
 ### Community 24 - "§2 Build, test, verify"
 Cohesion: 0.05
 Nodes (44): One logfmt file per TUI / -p / acp process: $XDG_STATE_HOME/moca/logs/<YYYY-MM-DD>-<pid>.log (else ~/.local/state/moca/logs/), file 0600, dir 0700; the one-shot subcommands (login, logout, mcp, update, prune) do not log; files older than snapshot.retentionDays are pruned at start (0 keeps all), internal/update/ — moca update: GitHub release fetch, semver compare over the describe stamp, checksum verify, atomic binary replace (leaf — no internal imports), make build && bash test/acpgate/run.sh — the ACP gate, hermetic (no key, no network), §2 Build, test, verify, Go pinned from go.mod, no secrets required, The ship-gate package is behind //go:build shipgate, so CI's plain go test skips it, CI (.github/workflows/ci.yml) — gofmt check, go vet, go build, go test ./... -race on every PR/push to main, manually, eval scenario bugfix — two bugs behind failing tests, tests untouched (+36 more)
 
 ### Community 25 - ".dropdown"
-Cohesion: 0.09
-Nodes (21): TestListAll(), Info, List(), ListAll(), TestListPreviewsAndFilters(), `enter` on a full command name runs it, exactCursor(), matchCommands() (+13 more)
+Cohesion: 0.11
+Nodes (19): TestListAll(), Info, List(), ListAll(), TestListPreviewsAndFilters(), `enter` on a full command name runs it, exactCursor(), matchCommands() (+11 more)
 
 ### Community 26 - "moca (minimal TUI coding agent)"
-Cohesion: 0.09
-Nodes (26): moca (minimal TUI coding agent), Builtin skills (create-command, self-configure, self-knowledge) re-extracted for each binary version, the opposite of seeding, Skills and prompts from other tools: prompts dir <name>.md becomes /name in the TUI; $ARGUMENTS / $@ / $1..$9 expansion; Claude Code and pi files drop in unchanged, ACP protocol v1 JSON schema (schema-v1.x.x tags; v2 alphas excluded), Refresh procedure: re-run Task 2 Step 1 of docs/superpowers/plans/2026-10-13-acp-batch-1-foundations.md and fix whatever go test ./internal/acp reports, Vendored files: schema/v1/schema.json, schema/v1/schema.unstable.json, schema/v1/meta.json from tag schema-v1.25.0, ACP JSON schema (protocol v1) vendored for conformance tests in internal/acp/testdata (data only), Feature gates: messageId on ContentChunk, usage_update (used, size, cost{amount,currency}), plan def names unrenamed, ToolKind/ToolCallStatus/StopReason/PermissionOptionKind must contain every value moca emits (+18 more)
+Cohesion: 0.12
+Nodes (20): moca (minimal TUI coding agent), Builtin skills (create-command, self-configure, self-knowledge) re-extracted for each binary version, the opposite of seeding, Skills and prompts from other tools: prompts dir <name>.md becomes /name in the TUI; $ARGUMENTS / $@ / $1..$9 expansion; Claude Code and pi files drop in unchanged, create-command builtin skill: create or update a moca slash command (a saved prompt template), Command file format: optional frontmatter (description shown in /help, argument-hint) then a prompt body with $$ARGUMENTS/$$@, $$1..$$9, $$$$ placeholders, Personal commands: <prompts dir>/<name>.md (/.config/moca/prompts or $XDG_CONFIG_HOME/moca/prompts); writes outside the workdir need user approval, Project commands: <workdir>/.moca/prompts/<name>.md, loaded when the project is trusted and shared with the repo, self-configure builtin skill: manage moca's own configuration, prompts, skills and installation at the user's request (+12 more)
 
 ### Community 27 - "writeCfg"
-Cohesion: 0.07
-Nodes (46): TestACPBadFlags(), TestACPServesOnlyJSONRPC(), fakeCompletions(), isolate(), TestExitCodes(), TestInterruptedExit130(), TestMCPImportCLI(), TestNoApproveSkipsProjectInstructions() (+38 more)
+Cohesion: 0.12
+Nodes (32): TestACPBadFlags(), TestACPServesOnlyJSONRPC(), fakeCompletions(), isolate(), TestExitCodes(), TestInterruptedExit130(), TestLoginLogoutCLI(), TestMCPImportCLI() (+24 more)
 
 ### Community 28 - "§11 Permissions"
 Cohesion: 0.05
@@ -642,8 +649,8 @@ Cohesion: 0.05
 Nodes (38): --effort <level> — off|minimal|low|medium|high|xhigh|max (validated; clamped per model), Built-in catalog (prices/limits verified 2026-10-04, opencode-go expansion rows 2026-10-07 — re-verify against the sources listed in the file's comment when vendor pages change; cost = standard rates; the deepseek rows use the off-peak rate), Effort clamping (Model.ClampEffort): nearest supported level at or below the request; if none is below, the lowest supported; off on a model that cannot disable → lowest supported, Cost (Model.CostOf(usage)): Σ tokens × rate / 1e6, Level map basicThinking = {low, medium, high} (models whose gateway rejects off/minimal — kimi-k2.7-code, mimo-v2.6-*), Level map deepseekProThinking = {high, max}, Level map deepseekThinking = {low, high, max}, Level map glmThinking = {off:"none", low, medium, high} (+30 more)
 
 ### Community 32 - "newFakeAS"
-Cohesion: 0.21
-Nodes (22): NewLineReader(), browse(), firstURL(), newFakeAS(), runLogin(), TestCallbackPageReportsFailure(), TestLineReaderAbandonedReadKeepsLine(), TestLoginAccessDenied() (+14 more)
+Cohesion: 0.10
+Nodes (29): audContains(), b64d(), jwksKey(), browse(), firstURL(), newFakeAS(), runLogin(), TestCallbackPageReportsFailure() (+21 more)
 
 ### Community 33 - "§4 Config"
 Cohesion: 0.05
@@ -651,55 +658,55 @@ Nodes (35): internal/config/ — version, paths, JSONC pre-pass, typed config + 
 
 ### Community 34 - "testEnv"
 Cohesion: 0.04
-Nodes (90): Task 4: Pin the composite approval matrix with failing tests, TestAllowAlwaysIsIgnoredWhenTheQuestionForbadeIt(), TestAllowSessionLearnsOnlyWhereTheRulesCan(), Builtins(), TestColdArmingNeedsAVerificationShapedCommand(), TestEditTrailingBlankPastEOFNoPanic(), TestRunRecordsExecutedCommands(), captureLog() (+82 more)
+Nodes (90): TestAgentReachesItsOwnConfig(), TestAllowAlwaysIsIgnoredWhenTheQuestionForbadeIt(), TestAllowSessionLearnsOnlyWhereTheRulesCan(), Builtins(), TestColdArmingNeedsAVerificationShapedCommand(), TestEditTrailingBlankPastEOFNoPanic(), TestRunRecordsExecutedCommands(), TestLs() (+82 more)
 
 ### Community 35 - "§9.5 ACP server (moca acp)"
 Cohesion: 0.05
 Nodes (36): moca acp — serve the Agent Client Protocol on stdio (Zed, VS Code, Paseo, …) — §9.5, availableModes: default, auto, yolo, plan (plan = SetMode(default) + SetPlan(true); any other also clears plan); the initial currentModeId is the resolved mode (--mode > trusted project defaultMode > config), Config is loaded once at startup (a parse failure exits 2); a missing model is not fatal — session/new reports it; the file log starts as for the other modes (§13.5; metadata only: the method, the session id8, trust decisions, session open/close/delete and prompt-failure lines — never prompt text, file contents, command text or keys), Errors: malformed JSON line -32700 (id null; the connection stays up); unknown method -32601 (notifications ignored, logged); bad params / bad cwd -32602; unknown sessionId -32002; request cancelled -32800 (a cancelled session/prompt answers stopReason: "cancelled" instead); auth/model missing or unusable -32000; internal failure -32603 with the error text, Gates: bash test/acpgate/run.sh drives the built binary (child process, scripted provider, two processes on one data dir): text turn, approval, cancel, stdin EOF exit 0 with an empty stderr, reload + replay from a second process, close, delete, and a scan that the API key never reaches stdout, stderr or the debug log; the Zed and ACP TCK manual gates are open items (§15; both are outside CI), Non-goals: client fs/terminal delegation; client-supplied MCP servers; image/audio prompts; authenticate/logout flows; additionalDirectories; terminal tool content; elicitation; plan updates; TUI built-ins over ACP; steering a running prompt; every unstable method (session/fork, providers/*, nes/*, document/*, mcp/message); the schema is pinned under internal/acp/testdata/ (SOURCE.md records the tag and the feature gates: messageId and usage_update are in the stable schema), moca acp serves the Agent Client Protocol (v1, protocolVersion: 1) on stdin/stdout so ACP clients (Zed, VS Code ACP extensions, Paseo) drive moca; editor config is a command line: "agent_servers": {"moca": {"command": "moca", "args": ["acp"]}}, Permissions (session/request_permission): toolCall {toolCallId: <current tool call>, title: "<Kind>: <Subject>", rawInput: {detail}}; options allow-once ("Allow once", allow_once), allow-always ("Always allow", allow_always, only when the question can be remembered — never for rm) and reject_once ("Deny"); selected maps to allow once / allow always / deny; cancelled, an error response or a closed connection map to deny; requests never time out: session/cancel and stdin EOF are the only ways out — a timeout would silently deny under clients without auto-accept (+28 more)
 
 ### Community 36 - "DefaultTheme"
-Cohesion: 0.06
-Nodes (39): TestThemeForUserLayer(), themeFor(), TestWelcomeLines(), btoi(), TestApprovalShowsItsOptionsOnce(), diffPreview(), TestDiffPreview(), fenceLang() (+31 more)
+Cohesion: 0.05
+Nodes (52): TestThemeForUserLayer(), themeFor(), The theme builder moves under `docs/themes/`, TestApprovalPromptSanitized(), TestWelcomeLines(), approvalPanel(), btoi(), TestApprovalSessionRowLabels() (+44 more)
 
 ### Community 37 - "opencode-go provider"
-Cohesion: 0.05
-Nodes (34): anthropic provider, claude-haiku-4-5, claude-opus-5-5, claude-sonnet-5-5, deepseek-v4.1-flash, deepseek-v4-flash, deepseek-v4-flash-vision-exp, deepseek-v4-pro (+26 more)
+Cohesion: 0.08
+Nodes (24): deepseek-v4.1-flash, deepseek-v4-flash, deepseek-v4-flash-vision-exp, deepseek-v4-pro, glm-5.3, glm-5.3-flash, gpt-6-astra, gpt-6-luna (+16 more)
 
 ### Community 38 - "importer.go"
 Cohesion: 0.15
 Nodes (19): literalSecretFields(), Embedded(), Key(), Match(), onlyVarRef(), schemeProse(), TestEmbedded(), TestKey() (+11 more)
 
 ### Community 39 - "sync.Mutex"
-Cohesion: 0.14
-Nodes (11): Rank(), TestRank(), words(), Manager, startFailClass(), Annotations, Hit, Index (+3 more)
+Cohesion: 0.08
+Nodes (22): initialize(), TestHTTPCloseBounded(), startHTTP(), TestHTTPNotifyStatusChecked(), Rank(), TestRank(), words(), Manager (+14 more)
 
 ### Community 40 - "sseServer"
-Cohesion: 0.13
-Nodes (42): anthropicStream(), TestAnthropicCorruptStreamIsAnError(), newAnthropic(), keyCred(), mustJSON(), sseServer(), TestAnthropicBodyHygiene(), TestAnthropicBudgetAndNoCache() (+34 more)
+Cohesion: 0.15
+Nodes (40): newAnthropic(), keyCred(), mustJSON(), sseServer(), TestAnthropicBodyHygiene(), TestAnthropicBudgetAndNoCache(), TestAnthropicBudgetFollowsEffort(), TestAnthropicCredentialHeaders() (+32 more)
 
-### Community 41 - "release v0.3.0.beta"
-Cohesion: 0.12
-Nodes (16): token-denominated context manager, edit trailing-blank-line crash fixed, test/evals eval corpus, overflow files per-session isolation, long tool outputs saved to file, plan mode writes docs/plans only, per-session OpenAI prompt_cache_key, read returns 400 lines default (+8 more)
+### Community 41 - "release v0.1.0.alpha"
+Cohesion: 0.07
+Nodes (30): Anthropic API-key-only policy gate, token-denominated context manager, cross-provider history transform, custom providers via baseUrl and protocol, edit trailing-blank-line crash fixed, test/evals eval corpus, Makefile and mise mirrors, OpenAI subscription OAuth PKCE (+22 more)
 
-### Community 42 - "webFetch"
-Cohesion: 0.09
-Nodes (27): decode(), errorf(), cutWeb(), isAlnumByte(), isSpaceByte(), redirectSource(), TestRedirectSourceIsTheLastHop(), TestWebDataAttrsAreNotLinkAttrs() (+19 more)
+### Community 42 - "context.Context"
+Cohesion: 0.03
+Nodes (68): Lock(), Lock(), discoveredIDs(), fetcherFor(), ClearReport, Spill(), planAllows(), TestPlanModeSuppressesInvestigationProtocol() (+60 more)
 
 ### Community 43 - "Shell"
-Cohesion: 0.08
-Nodes (35): Jail, resolveDeep(), within(), withinAny(), rtkRunTarget(), rtkShellString(), rtkSub(), rtkTarget() (+27 more)
-
-### Community 44 - "conform"
 Cohesion: 0.09
-Nodes (32): node, toolInput, TestFlatten(), TestEditUpdateCapsBothDiffSides(), TestReplaySkipsNudgeMessages(), strp(), TestProtocolShapesConform(), check() (+24 more)
+Nodes (31): Jail, resolveDeep(), within(), withinAny(), caseFolds(), foldWithin(), gitComponent(), headName() (+23 more)
+
+### Community 44 - "ToolCall"
+Cohesion: 0.06
+Nodes (42): toolInput, ToolEnd, ToolStart, TestFlatten(), TestEditUpdateCapsBothDiffSides(), strp(), TestMethodsInPinnedMeta(), TestProtocolShapesConform() (+34 more)
 
 ### Community 45 - "Message"
-Cohesion: 0.06
-Nodes (45): F4 — Plan mode already solves the prompt/history problem, Review Focus, Task 10: Render goal envelopes without rewriting history, and pause recovered goals, TestStaleResults(), goalExtra(), bodyMessages(), bodyText(), TestGoalHistoryPreviewReplayAndCache() (+37 more)
+Cohesion: 0.12
+Nodes (24): goalExtra(), withGoalReminder(), planExtra(), ContentBlock, Message, Role, priorReasoningText(), replaysVerbatim() (+16 more)
 
-### Community 46 - "context.Context"
-Cohesion: 0.05
-Nodes (32): RunOpts, Outcome, progressNudge(), recordNudgeText(), rescueBudget(), rescueLevel(), truncNudge(), truncNudgeKind() (+24 more)
+### Community 46 - "Agent"
+Cohesion: 0.04
+Nodes (45): checkers, RunOpts, steerMsg, Agent, Outcome, mentionsRemembering(), progressNudge(), recordNudgeText() (+37 more)
 
 ### Community 47 - "Release CI Packaging"
 Cohesion: 0.13
@@ -707,31 +714,31 @@ Nodes (21): Download artifacts with merge-multiple, Upload package artifacts, As
 
 ### Community 48 - "Sanitize"
 Cohesion: 0.05
-Nodes (22): dayDiff(), TestDayDiff(), TestApprovalPromptSanitized(), approvalPanel(), quotedNames(), TestApprovalSessionRowLabels(), clampRunes(), TestClampRunes() (+14 more)
+Nodes (21): dayDiff(), TestDayDiff(), approvalPrompt(), quotedNames(), TestApprovalPromptVariants(), clampRunes(), goalObjectiveLine(), lineCount() (+13 more)
 
 ### Community 49 - "ToolSpec"
-Cohesion: 0.10
-Nodes (11): ToolSpec, TestProxySpecFrozen(), MCPSpec(), Registry, editTool, lsTool, mcpStub, readTool (+3 more)
+Cohesion: 0.08
+Nodes (15): ToolSpec, TestProxySpecFrozen(), MCPSpec(), echoTool, editTool, failTool, lsTool, mcpStub (+7 more)
 
 ### Community 50 - "run"
-Cohesion: 0.11
-Nodes (22): Options, runACP(), printUsage(), runConfig(), runConfigCheck(), loginAPIKey(), runLogin(), runLogout() (+14 more)
+Cohesion: 0.12
+Nodes (23): printUsage(), TestExitForOAuthSentinels(), runConfig(), runConfigCheck(), loginAPIKey(), runLogin(), runLogout(), yesNo() (+15 more)
 
 ### Community 51 - "Import direction rule"
 Cohesion: 0.07
 Nodes (25): CommandChecker 4-tuple (need, askEveryTime, unsure, err), Env.Judge (auto mode classifier), internal/acp, internal/agent, internal/config, internal/config/testdata/example.jsonc, internal/llm, internal/mcp (+17 more)
 
 ### Community 52 - "Managed Run & Auto Skills"
-Cohesion: 0.11
-Nodes (48): autoBody(), autoFile(), editArgs(), hasNote(), managedConfig(), runTool(), seedAutoSkill(), startIn() (+40 more)
+Cohesion: 0.08
+Nodes (66): startWith(), autoBody(), autoFile(), editArgs(), hasNote(), managedConfig(), runTool(), seedAutoSkill() (+58 more)
 
 ### Community 53 - "§13 Sessions & snapshots"
 Cohesion: 0.07
 Nodes (30): Logging - the judge's own only log line is slog.Debug('judge', decision, ms, cached[, error='provider']): decision, duration, cache-hit and the error class only - never the command or the reason text (the metadata-only rule; the analyser's refusals log no text either); its usage/cost book into the session's Status() totals (a.usage.Add(resp.Usage) + CostOf, same goroutine as the tools so no extra lock) - one extra small request per new unsure command (TestJudgeAccountsCost), §13.5 Diagnostic log, Architecture: the standard log/slog default logger; internal/applog (imported only by cmd/moca) installs a discard handler first, then the file handler; other packages call slog directly - no internal import edge, Bounds: records <= 16 KB; the file stops at 10 MB after one `log truncated: size cap reached` line; a write error turns logging off silently; an open failure prints one stderr warning and the run continues; logging never changes an exit code, debug adds: effective config keys; each request/response (model, counts, ttfb, duration, stop, usage); each step's tool names; each tool call (duration, is-error, bytes); spills; approvals asked (command name + answer); auto-mode classifier verdicts (judge lines: decision/duration/cache-hit/error class - never the command or the reason text); analyser refusals (no text); web fetch/search metadata; each MCP call, info level logs: process start/exit; session start/resume (id8, workdir, model, effort, yolo, plan, mode); provider retries (attempt, wait, cause class) and final failures; run end (outcome, steps, duration, usage, cost); nudges; user-visible warnings; compaction, overflow recovery, elision; recovered tool panics with stack; spill failures; MCP start/ready/exit (status only)/idle stop/start failure/dead-expired-timed-out calls; setup-mode first session; login results, Level: config log.level - info (default) | debug | off; MOCA_LOG overrides it for one run (invalid -> exit 2); off creates nothing, Metadata only, every level: never prompts, model output, tool inputs/outputs, file contents, shell command text, search or web-search queries, MCP server stderr or credential values; session-scoped lines carry session=<id8> - the transcript holds the content (+22 more)
 
-### Community 54 - "skillgate_test.go"
-Cohesion: 0.21
-Nodes (19): proc, provider, commandNames(), contains(), dayAgo(), editCall(), git(), legACPParity() (+11 more)
+### Community 54 - "net/http/httptest.Server"
+Cohesion: 0.13
+Nodes (12): abortingHTTPServer(), TestClearModelsCacheRescansOllama(), newFakeOllama(), ollamaRegistry(), TestOllamaChatWithoutKey(), TestOllamaDiscovery(), TestOllamaDiscoveryVerifyConcurrent(), TestOllamaKeylessAndOptionalKey() (+4 more)
 
 ### Community 55 - "Agent Lifecycle Spec"
 Cohesion: 0.07
@@ -743,11 +750,11 @@ Nodes (8): Store, newHostID(), validateAPIKey(), File format, Rules, Steps, Wher
 
 ### Community 57 - "Config"
 Cohesion: 0.07
-Nodes (26): AutoConfig, ContextConfig, LogConfig, PermissionsConfig, ShellConfig, SkillsConfig, SnapshotConfig, WebConfig (+18 more)
+Nodes (25): AutoConfig, ContextConfig, LogConfig, PermissionsConfig, ShellConfig, SkillsConfig, SnapshotConfig, ThemeColors (+17 more)
 
 ### Community 58 - "HelpText"
-Cohesion: 0.14
-Nodes (21): `/help` reads as a list, Prompt, countLines(), TestHelpListsRememberAndAutoSkills(), HelpText(), ParseInput(), promptNamed(), renderHelp() (+13 more)
+Cohesion: 0.11
+Nodes (27): TestACPAutoSkillsAreNotCommands(), TestACPCommandsReserveRememberAlways(), buildCommands(), TestACPDoesNotAdvertiseGoal(), TestBuildCommandsPrecedence(), autoSkillsNote(), hasAutoSkill(), `/help` reads as a list (+19 more)
 
 ### Community 59 - "§15 Verification status & known items"
 Cohesion: 0.07
@@ -758,20 +765,20 @@ Cohesion: 0.16
 Nodes (19): readWindow, Entry, Elision, ErrorInfo, ModelChange, PermissionMode, ToolUse, Collect() (+11 more)
 
 ### Community 61 - "prepare"
-Cohesion: 0.13
-Nodes (19): setup, promptDirs(), planMode(), headlessRun(), discoverModels(), effectiveConfig(), StartOptions, hygieneSummary() (+11 more)
+Cohesion: 0.16
+Nodes (17): setup, promptDirs(), planMode(), headlessRun(), discoverModels(), effectiveConfig(), StartOptions, hygieneSummary() (+9 more)
 
 ### Community 62 - "Run"
 Cohesion: 0.15
 Nodes (18): Options, Result, Turn, TestReplayIsDeterministic(), fatal(), main(), scenarioFlags(), copyTree() (+10 more)
 
 ### Community 63 - "anthropic-messages adapter"
-Cohesion: 0.06
-Nodes (21): anthropic-messages adapter, anthropic stop-reason map, anthropic stream events, anthropic system as one text block, anthropic thinking capture, common post() wire contract, completions stream chunks, config.Standardize (+13 more)
+Cohesion: 0.07
+Nodes (20): anthropic-messages adapter, anthropic stop-reason map, anthropic stream events, anthropic system as one text block, anthropic thinking capture, common post() wire contract, completions stream chunks, config.Standardize (+12 more)
 
 ### Community 64 - "skills/prune_test.go"
-Cohesion: 0.13
-Nodes (29): builtinHash(), ExtractBuiltins(), extractBuiltins(), PruneBuiltins(), pruneBuiltins(), exists(), mkTree(), pruneFixture() (+21 more)
+Cohesion: 0.36
+Nodes (13): PruneBuiltins(), pruneBuiltins(), exists(), mkTree(), pruneFixture(), TestPruneBuiltinsDoesNotFollowSymlinks(), TestPruneBuiltinsDryRunRemovesNothing(), TestPruneBuiltinsKeepsOnlyTheCurrentDir() (+5 more)
 
 ### Community 65 - "§6.5 Subscription OAuth (phase 7)"
 Cohesion: 0.08
@@ -779,27 +786,27 @@ Nodes (25): The OAuth row starts provider.Login in a command goroutine with the 
 
 ### Community 66 - "release v0.4.0.beta"
 Cohesion: 0.07
-Nodes (33): redaction net for secrets and prompt content, approval prompt as arrow-key picker, auto classifier fail-closed second opinion, auto mode risk table and confinement, bounded diagnostic log, hard-deny class (sudo dd mkfs), MOCA_LOG=debug per-run detail, --mode flag surface (+25 more)
+Nodes (35): redaction net for secrets and prompt content, approval prompt as arrow-key picker, auto classifier fail-closed second opinion, auto mode risk table and confinement, bounded diagnostic log, hard-deny class (sudo dd mkfs), MOCA_LOG=debug per-run detail, --mode flag surface (+27 more)
 
 ### Community 67 - "§2 Package layout (implemented)"
 Cohesion: 0.08
 Nodes (23): Built-ins - internal/skills/builtin/** embedded (embed); ExtractBuiltins(dataDir) materializes them into <data>/builtin-skills/<content hash> (unique temp dir + rename; a lost rename race is success) so the model can read them (builtin dir is a read-only jail root); extraction is content-hash keyed, so changed built-in content re-extracts on the next run (MapFS test); currently exactly three (TestExtractBuiltins) - see below, cmd/moca/ — main.go (entry, signals), cli.go (flags → Options), oneshot.go (-p agent path), tui.go (TUI path + trust), update.go (moca update), prune.go (moca prune), agent imports everything, cmd/moca imports agent + config + tui + acp + mcp + update, llm/config/update import nothing internal, mcp imports tools + config + llm, tools/permissions/session/skills/compact are mutually independent; structural interfaces, provider imports llm + config (+15 more)
 
-### Community 68 - "newModel"
-Cohesion: 0.06
-Nodes (24): newModel(), Run(), newAsker(), newEventPipe(), TestEventPipeBuffersUntilStarted(), TestEventPipeNonBlockingAndFIFO(), TestPipeSendKeepsOrderWithEvents(), TestTrustPromptCancel() (+16 more)
+### Community 68 - "loginState"
+Cohesion: 0.09
+Nodes (12): Event, newAsker(), TestTrustPromptCancel(), agentEvent(), TestFenceSurvivesCommitLive(), agentEventMsg, eventPipe, loginChoice (+4 more)
 
-### Community 69 - "Effort"
-Cohesion: 0.11
-Nodes (12): savedModel, effortLevels(), effortOption(), TestEffortOption(), hardEffort(), startEffort(), Effort, ParseEffort() (+4 more)
+### Community 69 - "Model"
+Cohesion: 0.06
+Nodes (30): goalVerdict, savedModel, Status, ModelOverride, effortLevels(), effortOption(), TestEffortOption(), New() (+22 more)
 
 ### Community 70 - "§10 Tools (eight, frozen)"
 Cohesion: 0.10
 Nodes (23): Approvals (§10 default ladder; §11.0 for the layered-rules/auto versions): allowlisted-but-unapproved → ask (AllowAlways persists via Commands.Allow → Rules.Learn); rm → ask every time (CanAlways:false, never allowlistable); a write/edit outside the workdir under the global prompt templates asks once, never persistently (Kind:"write", CanAlways:false); Ask == nil (a -p run) = deny, Overflow files (rev 21) — a shell, search, web fetch or mcp call output over its cap is cut for the model, and the full text is written to <data>/overflow/<process dir>/<id8>-<kind>-*.txt (0600, dirs 0700; tools.Spill; the process dir is 16 random hex chars chosen at session start); the result ends with `[full output (N lines, size) saved to <path> — read it with offset/limit or search it; do not re-run the command to see it]`; only this process's dir is a read-only jail root — other sessions' saved outputs (other projects, possibly secrets) stay unreadable; a resumed session gets a new dir; entries older than snapshot.retentionDays are removed at startup; no SpillDir (tests) or a failed write → the cut output stands alone; MCP call results cap at 12K (was 30K), Run state (rev 21, tools/runstate.go) — Env.BeginRun (called by Agent.Run) resets PlanWrote, Edited, Unverified, MaxRepeat and the failure counts; a successful non-plan write/edit sets Edited, names the file in Unverified unless it is a docs file (.md .markdown .txt .rst .adoc), and clears the failure counts (the state they ran against is gone); a shell command verifies when any pipeline segment's command is not inspect-only (cat ls head tail grep rg find echo git sed awk diff …, after VAR=/rtk/sudo/time prefixes) — it clears Unverified, The shell tool's checker is the 4-tuple Check(cmd) (need, every, unsure []string, err): need = ask-once, every = ask-every-time, unsure = the auto table's judge tier (auto mode only) — the shell tool passes unsure to env.Judge when one is installed (an allow clears the tier, anything else lands in need), then walks need and every as before, edit — the edit ladder (§5): exact unique match → replace; several exact matches → error listing the lines + suggests replace_all; replace_all replaces every exact occurrence (never falls back to fuzzy); no exact match → one whitespace-insensitive match accepted and new_string re-indented to the file's indentation; none/ambiguous → model-facing error (mentions N| prefixes when the text looks like pasted read output); empty old_string → "use write"; identical strings → error; CRLF and BOM preserved; a whitespace-fallback match whose trailing blank old line lands on the phantom element after the file's final newline keeps that element out of the hunk (rev 21 fix: formatDiff indexed past EOF and panicked after the write had landed); non-UTF-8 refused; result: unified diff + `changed lines …; file now N lines`; Summary `path [+a −d]`; while a failing test run is unresolved it refuses before applying, naming the missing investigation step, ls — one directory level, sorted; dirs /, symlinks @; 1000-entry cap; hidden entries only with hidden:true, read — N|content lines + [lines A-B of TOTAL] footer (+ `use offset=B+1 to continue` when more remain); without limit the window is 400 lines (rev 21 — the footer then says `use offset=N to continue, or search for what you need`); limit raises it up to 2000 lines / 50K chars per call; lines >2000 chars truncated with [… line truncated]; NUL in the first 8K → refused with size + MIME guess; a directory → "use ls"; non-regular files (FIFOs, devices) and files >256 MB are refused; the window is streamed with a bounded reader (no whole-file load); every successful read records mtime/size/sha256 (ReadTracker, streamed hash); reading any *_test.go sets Env.TestSeen and clears Env.FailingTest, search — RE2 regex; respects .gitignore/.ignore from the workdir down to the search path (deeper files override); files >4 MB are skipped with a visible note; skips hidden + binary; glob matched against the basename (or the relative path when it contains /); 100 hits shown with a visible note ([… 100 of N hits shown …]), up to 5000 collected and spilled to an overflow file (rev 21); files_only; output path:line:text (text cut at 300 chars); sets Env.Searched (investigation protocol) (+15 more)
 
 ### Community 71 - "system-prompt.md"
-Cohesion: 0.08
-Nodes (19): Environment, Long outputs are cut and the full text saved to a file named in the result: read or search that file instead of re-running, mcp tool: search, then describe, then call the listed MCP servers, shell is stateless: every call starts in the workdir; use cd dir && cmd in one call, Token discipline, Tools, web tool: op fetch (markdown|text|html) or op search; use instead of shell curl for pages and web lookups, Workdir jail: all relative paths resolve to {{workdir}}; file tools cannot leave it (reading user-level config/skills dirs allowed) (+11 more)
+Cohesion: 0.11
+Nodes (14): Environment, Long outputs are cut and the full text saved to a file named in the result: read or search that file instead of re-running, mcp tool: search, then describe, then call the listed MCP servers, shell is stateless: every call starts in the workdir; use cd dir && cmd in one call, Token discipline, Tools, web tool: op fetch (markdown|text|html) or op search; use instead of shell curl for pages and web lookups, Workdir jail: all relative paths resolve to {{workdir}}; file tools cannot leave it (reading user-level config/skills dirs allowed) (+6 more)
 
 ### Community 72 - "History Cut Points"
 Cohesion: 0.30
@@ -809,17 +816,17 @@ Nodes (15): FindCut(), a(), call(), res(), TestFindCutKeepsRecentAtValidPoint(),
 Cohesion: 0.11
 Nodes (11): config.EnvRefs, edit tool, Eight frozen tools, internal/tools, ls tool, markdown-lite renderer, read tool, run state (tools/runstate.go) (+3 more)
 
-### Community 74 - "branding_test.go"
-Cohesion: 0.21
-Nodes (18): PermissionOutcome, RequestPermissionResponse, askOptions(), cancelledOutcome(), selected(), TestCloseCancelsAndFrees(), TestDeleteRunningSessionRefused(), TestLoadOpenSessionWhileRunningIsBusy() (+10 more)
+### Community 74 - "permission modes applyMode"
+Cohesion: 0.20
+Nodes (8): --approve flag, auto mode risk table, --no-approve flag, path jail, phase 2, /plan command, trust store, /yolo command
 
 ### Community 75 - "release.yml manual dispatch only"
 Cohesion: 0.10
 Nodes (17): checksums.txt, internal/update, moca update --check, moca update command, moca update replaces running binary, phase 7, post-phases (v0.3.0-beta), release asset names contract (+9 more)
 
 ### Community 76 - "Answer"
-Cohesion: 0.10
-Nodes (22): TestProxyUnrecognisedAnswerRefuses(), A review pass over v0.7.6..v0.7.10, TestUnrecognisedAnswerFailsClosedEverywhere(), RememberSession(), TestRememberSessionCancelledContextDenies(), TestRememberSessionNilStaysNil(), TestRememberSessionNoSession(), TestRememberSessionRecordsOnlySessionAnswers() (+14 more)
+Cohesion: 0.09
+Nodes (24): A review pass over v0.7.6..v0.7.10, macOS gets a package, and there are six of them, `moca update` refuses a copy a package manager owns, The README says what the harness supports, v0.7.8 (2026-10-23), TestUnrecognisedAnswerFailsClosedEverywhere(), RememberSession(), TestRememberSessionCancelledContextDenies() (+16 more)
 
 ### Community 77 - "§3.5.1 TUI additions (rev 14)"
 Cohesion: 0.09
@@ -829,29 +836,29 @@ Nodes (22): Schemas are frozen since phase 2 (internal/tools/testdata/schemas.go
 Cohesion: 0.16
 Nodes (34): autoSkillRaw(), TestValidateRequiresTheDescriptionToNameACitedCommand(), TestValidateStoredListsAPreReleaseDescription(), TestValidateChecksOnlyAddedLinesForCitedCommands(), TestValidateRefusesACitedCommandTheSessionNeverRan(), TestValidateTrustsUserRulesForCitedCommands(), TestNegationFirstExemptsAWarningFromClauseC(), TestTrailingNegationIsFineForAProvenCommand() (+26 more)
 
-### Community 79 - "encoding/json.RawMessage"
-Cohesion: 0.14
-Nodes (11): Server, sessionsDir(), busy(), invalidParams(), notFound(), decode(), TestLookupFlushesHeldUpdates(), CallResult (+3 more)
+### Community 79 - "Env.Judge classifier"
+Cohesion: 0.12
+Nodes (7): internal/applog, log debug-level contents, log info-level contents, moca diagnostic log, Model.CostOf, permissions.auto.classifier, permissions.auto.model
 
 ### Community 80 - "BASELINE.md"
-Cohesion: 0.11
-Nodes (17): binary moca, //go:build shipgate tag, config.Standardize (JSONC), Go 1.27.1 (pinned), gopls, make build (bin/moca), make fmt (go fmt ./...), mise (+9 more)
+Cohesion: 0.08
+Nodes (22): binary moca, //go:build shipgate tag, config.Standardize (JSONC), Go 1.27.1 (pinned), gopls, make build (bin/moca), make fmt (go fmt ./...), mise (+14 more)
 
-### Community 81 - "fakeAS"
-Cohesion: 0.16
-Nodes (9): audContains(), b64d(), jwksKey(), TestJWKSExponentSanity(), TestValidateIDToken(), TestValidateIDTokenKidSelection(), validateIDToken(), fakeAS (+1 more)
+### Community 81 - "readSSE"
+Cohesion: 0.15
+Nodes (10): fakeSum, openaiOverflow(), TestCompletionsEffortOffIsExplicit(), toolInput(), readSSE(), TestSSECallbackErrorStops(), TestSSEStall(), completionsAdapter (+2 more)
 
 ### Community 82 - "NewDefaultStore"
-Cohesion: 0.06
-Nodes (51): TestLoginLogoutCLI(), Task 13: Wire `/goal` into the TUI without adding ACP surface, Event, AuthFile(), MigrateLegacyStore(), NewDefaultStore(), TestMigrateLegacyStore(), newManagedModel() (+43 more)
+Cohesion: 0.09
+Nodes (39): newManagedModel(), TestAutoSkillsNotSlashCommands(), TestNoteRendersMuted(), TestRememberMidRunRefused(), TestRememberOffNotice(), TestRememberUsageAndPlanRefusal(), TestTypedTextForTemplatesIsArgs(), typedText() (+31 more)
 
 ### Community 83 - "version"
 Cohesion: 0.29
 Nodes (7): version, on, workflow_dispatch, default, description, required, inputs
 
 ### Community 84 - "env:VAR indirection"
-Cohesion: 0.07
-Nodes (21): lazy MCP proxy, config.AppendString, ~/.config/moca/config.jsonc path, config.SetObjectEntry, config.SetString, example.jsonc byte-exact fixture, internal/applog, internal/config (+13 more)
+Cohesion: 0.08
+Nodes (19): lazy MCP proxy, config.AppendString, ~/.config/moca/config.jsonc path, config.SetObjectEntry, config.SetString, env:VAR indirection, example.jsonc byte-exact fixture, internal/config (+11 more)
 
 ### Community 85 - "Graphify Skill Guide"
 Cohesion: 0.08
@@ -861,9 +868,9 @@ Nodes (24): For /graphify add and --watch, For /graphify query, For the commit h
 Cohesion: 0.20
 Nodes (16): ParseRule(), lit(), matchWithin(), TestLearnIsOneLiteralWord(), TestLearnPathRecordsExactHead(), TestParseRuleCollapsesStars(), TestParseRuleErrors(), TestRuleCase() (+8 more)
 
-### Community 87 - "ToolCall"
-Cohesion: 0.18
-Nodes (16): ToolEnd, ToolStart, toolCall(), ToolCall, TestExecutedSegments(), cmdOf(), ExecutedFromCall(), ExecutedSegments() (+8 more)
+### Community 87 - "built-in skills extraction"
+Cohesion: 0.19
+Nodes (9): ask-write roots, create-command skill, docs/specs/SPECS.md, internal/skills, phase 6, self-configure skill, self-knowledge skill, skills.Discover (+1 more)
 
 ### Community 88 - "§10.5 MCP proxy (phase 5)"
 Cohesion: 0.11
@@ -873,53 +880,57 @@ Nodes (16): internal/mcp — no SDK, hand-rolled JSON-RPC 2.0; pieces: the messa
 Cohesion: 0.12
 Nodes (16): Still open: a live moca login openai round-trip (needs a ChatGPT account - the flow is covered by the fake-AS suite and the real endpoints were probed 2026-10-06); direct api.anthropic.com / api.openai.com API-key endpoints; multi-turn thinking replay + prompt caching verification; glm --effort off behavioral verification; the opencode-go x-opencode-session header is still per-process (fine for routing, per-conversation rebinding remains open); a TUI-driven real-model MCP ladder pass; graphify install --platform moca pending upstream merge of Graphify-Labs/graphify 4174; intermittent Go-tier upstream 400s on glm-5.3-flash (no tokens spent; now auto-retried - vendor-side); the release workflow (manual trigger only) awaits its first run after merge, and the Windows replace path is cross-compile-checked only (GOOS=windows go build); the Zed and ACP TCK manual gates for moca acp (the TCK is an experimental out-of-CI harness - the hermetic test/acpgate and the pinned-schema conformance suites are what ships verified today), Go 1.27.1 pinned once in go.mod toolchain directive (mise reads it), Module github.com/adeotek/moca, binary moca, No frameworks, no binary plugin system (non-goals are §16), Not implemented: released graphify install --platform moca (PR pending upstream), Not implemented: a live moca login openai round-trip (needs a ChatGPT account), §1 Overview, Phase 1: streaming via three hand-rolled protocol codecs, JSONC config, catalog, retry, registry (+8 more)
 
-### Community 90 - "release v0.1.0.alpha"
-Cohesion: 0.11
-Nodes (22): Anthropic API-key-only policy gate, cross-provider history transform, custom providers via baseUrl and protocol, graphify allowlist and guidance skill, Makefile and mise mirrors, OpenAI subscription OAuth PKCE, --resume and --continue, retry backoff honoring retry-after (+14 more)
+### Community 90 - "moca/update_test.go"
+Cohesion: 0.35
+Nodes (13): atPackagePath(), fakeReleases(), setVersion(), TestRunUpdateCheck(), TestRunUpdateCheckWorksFromAPackageManager(), TestRunUpdateFetchFails(), TestRunUpdateForceSkipsTheGuard(), TestRunUpdateLocalNewer() (+5 more)
 
 ### Community 91 - "DataDir"
-Cohesion: 0.11
-Nodes (22): acpTrust(), TestACPTrust(), TestExitForOAuthSentinels(), dirTrusted(), TestProjectResourcesTriggerTheTrustPrompt(), exitFor(), firstLine(), resolveResume() (+14 more)
+Cohesion: 0.10
+Nodes (24): acpTrust(), runACP(), TestACPTrust(), dirTrusted(), TestProjectResourcesTriggerTheTrustPrompt(), decideTrust(), hasProjectResources(), modeWithoutProject() (+16 more)
+
+### Community 92 - "seed_test.go"
+Cohesion: 0.33
+Nodes (10): SeedSkills(), seedSkills(), readFile(), seedFSFixture(), TestEmbeddedSeedSkills(), TestSeedSkillsCreatesMissing(), TestSeedSkillsFillsOnlyTheMissingOne(), TestSeedSkillsLeavesExistingAlone() (+2 more)
 
 ### Community 93 - "autoskill.go"
-Cohesion: 0.14
-Nodes (30): citedCommand(), clauseBefore(), commandClaim(), CountAutoSkills(), countRules(), TestCommandClaim(), instructed(), IsEmptyBody() (+22 more)
+Cohesion: 0.12
+Nodes (35): skillGuard(), citedCommand(), clauseBefore(), commandClaim(), containsWord(), CountAutoSkills(), countRules(), TestCommandClaim() (+27 more)
 
 ### Community 94 - "Serialize"
 Cohesion: 0.25
 Nodes (8): callLine(), safeTail(), Serialize(), TestSerialize(), TestSerializeRuneSafeAndEmptyText(), TestTrackFiles(), TestTrackFilesNormalizesPaths(), TrackFiles()
 
 ### Community 95 - "rpc_test.go"
-Cohesion: 0.25
-Nodes (18): echoHandler, pipePeer(), readMsg(), TestCallCascadesCancel(), TestCallFailsOnEOF(), TestCancelRequest(), TestConcurrentDispatch(), TestConcurrentWritesAreWholeLines() (+10 more)
+Cohesion: 0.29
+Nodes (17): pipePeer(), readMsg(), TestCallCascadesCancel(), TestCallFailsOnEOF(), TestCancelRequest(), TestConcurrentDispatch(), TestConcurrentWritesAreWholeLines(), TestDeferredPanicKeepsServing() (+9 more)
 
-### Community 96 - "Budget"
-Cohesion: 0.47
-Nodes (3): Budget, NewBudget(), TestBudget()
+### Community 96 - ".Compact"
+Cohesion: 0.14
+Nodes (9): summarizerUnavailable(), Budget, NewBudget(), TestBudget(), CapChars(), TestCapChars(), TestCapCharsRuneSafe(), Prev (+1 more)
 
 ### Community 97 - "ci.yml"
 Cohesion: 0.08
 Nodes (25): name, runs-on, steps, timeout-minutes, concurrency, cancel-in-progress, group, jobs (+17 more)
 
 ### Community 98 - "mcp tool (the proxy tool)"
-Cohesion: 0.19
-Nodes (8): internal/mcp, mcp lazy proxy package, mcp tool call rendering, mcp tool describe rendering, mcp tool search rendering, mcp tool (the proxy tool), moca mcp index, phase 5
+Cohesion: 0.15
+Nodes (9): internal/mcp, mcp lazy proxy package, mcp tool call rendering, mcp tool describe rendering, mcp tool search rendering, mcp tool (the proxy tool), moca mcp index, phase 5 (+1 more)
 
 ### Community 99 - "attributes"
 Cohesion: 0.11
 Nodes (17): description, label, options, placeholder, render, value, body, attributes (+9 more)
 
 ### Community 100 - "Registry"
-Cohesion: 0.14
-Nodes (10): SplitModel(), TestSplitModel(), commonPrefix(), Registry, For /graphify explain, For /graphify path, graphify reference: query, path, explain, Step 0 — Constrained query expansion (REQUIRED before traversal) (+2 more)
+Cohesion: 0.15
+Nodes (10): ProviderConfig, IsLocalProvider(), SplitModel(), TestSplitModel(), commonPrefix(), Registry, anyProviderUsable(), readyWithoutRows() (+2 more)
 
 ### Community 101 - "Changelog"
-Cohesion: 0.07
-Nodes (28): Agent, Agent, Agent, Agent, Catalog & tooling, Changelog, Credentials & login (TUI `/login`, API keys for `moca login`), Editors (+20 more)
+Cohesion: 0.06
+Nodes (32): A truncated turn gets room, not just a pep talk, Agent, Agent, Agent, Agent, Catalog & tooling, Changelog, Credentials & login (TUI `/login`, API keys for `moca login`) (+24 more)
 
 ### Community 102 - "skillgate_test.go"
-Cohesion: 0.28
-Nodes (20): gate, autoSkillFile(), legCaseVariant(), legNoExtraFiles(), legNudgeEndToEnd(), legOffIsInert(), legOnConformingWrite(), legPerRunCap() (+12 more)
+Cohesion: 0.06
+Nodes (66): proc, cappedWriter, cutRecord(), KillProcessGroup(), SetProcessGroup(), KillProcessGroup(), SetProcessGroup(), jsonItem (+58 more)
 
 ### Community 103 - "graphify.ingest.ingest(url, raw_dir, author, contributor) auto-detects URL type; errors are reported, never silently continued"
 Cohesion: 0.11
@@ -934,48 +945,48 @@ Cohesion: 0.16
 Nodes (13): Skill description (trigger) optimization, Skill eval/iterate loop (with-skill vs baseline), skill-creator Apache 2.0 License (Anthropic), Claude Code skill-creator skill, SKILL.md anatomy + bundled resources layout, Constrained query expansion against graph vocab, Progressive Disclosure (three-level skill loading), graphify query/path/explain reference (+5 more)
 
 ### Community 106 - ".Run"
-Cohesion: 0.22
-Nodes (13): TestProxyToolRejectsAMisspelledField(), TestProxyPlanModeCallFollowsNormalGating(), cutRunes(), errResult(), isTrue(), NewTool(), newProxy(), runP() (+5 more)
+Cohesion: 0.16
+Nodes (17): TestProxyPlanModeCallFollowsNormalGating(), cutRunes(), errResult(), isTrue(), newProxy(), runP(), TestCutRunesSafe(), TestProxyArgErrors() (+9 more)
 
 ### Community 107 - "shipgate/fixture/main.go"
-Cohesion: 0.18
+Cohesion: 0.21
 Nodes (7): Sum(), TestTotals(), ParseList(), Average(), Max(), TestMaxAndAverage(), main()
 
 ### Community 108 - "time.Time"
-Cohesion: 0.26
-Nodes (13): escapeFileName(), NewModelsCache(), readModelsCacheFile(), cacheFiles(), newTestCache(), TestModelsCacheFileNamesAreSafe(), TestModelsCacheFileOfAnotherProviderIsAMiss(), TestModelsCacheFileShape() (+5 more)
+Cohesion: 0.25
+Nodes (14): escapeFileName(), NewModelsCache(), readModelsCacheFile(), cacheFiles(), newTestCache(), TestModelsCacheFileNamesAreSafe(), TestModelsCacheFileOfAnotherProviderIsAMiss(), TestModelsCacheFileShape() (+6 more)
 
 ### Community 109 - "v0.1.0-alpha (2026-10-07)"
 Cohesion: 0.22
 Nodes (9): CLI, Context & sessions, External tools & the skills ecosystem, MCP, OAuth (subscription login), Providers & protocols, Tools & permissions, TUI (+1 more)
 
-### Community 110 - "Metrics"
-Cohesion: 0.23
-Nodes (11): CacheBreak, Metrics, fatal(), main(), meanSD(), median(), readResults(), readResultsFile() (+3 more)
+### Community 110 - "LoadPrompts"
+Cohesion: 0.17
+Nodes (13): arg(), braceExpr(), closingBrace(), expand(), ExpandPrompt(), LoadPrompts(), slice(), SplitArgs() (+5 more)
 
 ### Community 112 - "net/http.Client"
-Cohesion: 0.06
-Nodes (34): abortingHTTPServer(), fakeHTTPServer(), post(), defaultProtocolFor(), effortMap(), fetchOpenAICompatibleModels(), fetchOpenAIModels(), fetchOpenRouterModels() (+26 more)
+Cohesion: 0.12
+Nodes (18): post(), newHTTPError(), retryAfter(), newHTTPClient(), TestDefaultHTTPClientBoundsHeaderWait(), OAuthConfig, Revoke(), tokenFrom() (+10 more)
 
 ### Community 113 - "release v0.4.1.beta"
-Cohesion: 0.13
-Nodes (18): first-run provider notice and corrupt auth.json shown, built-in skills re-extracted on binary change, discovery ignores dot-prefixed directories, mise install also installs gopls, /help column alignment, moca execute and /execute plan running, moca prune cleans stale builtin-skills dirs, seeded skill hidden when CLI not on PATH (+10 more)
+Cohesion: 0.10
+Nodes (24): first-run provider notice and corrupt auth.json shown, built-in skills re-extracted on binary change, discovery ignores dot-prefixed directories, mise install also installs gopls, graphify allowlist and guidance skill, /help column alignment, moca execute and /execute plan running, moca prune cleans stale builtin-skills dirs (+16 more)
 
 ### Community 114 - "install.sh"
 Cohesion: 0.24
 Nodes (10): bin/moca update --check, .github/workflows/release.yml (manual dispatch), internal/update, release asset naming contract (moca-<version>-<os>-<arch>), die(), fetch(), note(), refuse_managed() (+2 more)
 
 ### Community 115 - "AppendStrings"
-Cohesion: 0.15
-Nodes (18): AppendStrings(), concat(), nested(), nestedEntry(), prepEdit(), rawComma(), SetObjectEntry(), SetString() (+10 more)
+Cohesion: 0.25
+Nodes (10): concat(), nestedEntry(), prepEdit(), SetObjectEntry(), SetString(), TestSetObjectEntry(), TestSetString(), TestSetStringDuplicateKeys() (+2 more)
 
 ### Community 116 - "fetch_test.go"
-Cohesion: 0.24
+Cohesion: 0.23
 Nodes (8): Client, New(), TestGet(), Eval prompt: plan an on-disk response cache, Cache type (dir, TTL) in cache.go, Client.Get in fetch.go uses the cache, Plan: on-disk response cache, TTL option on New
 
-### Community 117 - "acpgate_test.go"
-Cohesion: 0.16
-Nodes (11): proc, KillProcessGroup(), SetProcessGroup(), KillProcessGroup(), SetProcessGroup(), kinds(), provider(), shell() (+3 more)
+### Community 117 - "Sample"
+Cohesion: 0.22
+Nodes (9): Sample(), collectKeys(), TestSampleCoversEveryKey(), TestSampleParses(), A warning has to refuse the command before it names it, Measured, `moca config check` and `moca config sample`, The eval baseline says what it is (+1 more)
 
 ### Community 118 - "exports.md"
 Cohesion: 0.11
@@ -986,15 +997,15 @@ Cohesion: 0.20
 Nodes (5): graphify-out/graph.json, graphify-out/.graphify_python, graphify query CLI, --cluster-only re-clustering, GRAPH_REPORT.md regeneration
 
 ### Community 120 - "branding_test.go"
-Cohesion: 0.23
-Nodes (17): iconAttr(), iconInk(), iconLength(), iconSize(), loadBranding(), repoFile(), TestACPIconContract(), TestBrandingChannelLimits() (+9 more)
+Cohesion: 0.28
+Nodes (15): iconAttr(), iconInk(), iconLength(), iconSize(), loadBranding(), repoFile(), TestACPIconContract(), TestBrandingChannelLimits() (+7 more)
 
 ### Community 121 - "Conn"
 Cohesion: 0.20
 Nodes (6): Conn, Deferred, Handler, message, guardPanic(), NewConn()
 
 ### Community 122 - "release v0.1.1"
-Cohesion: 0.15
+Cohesion: 0.18
 Nodes (13): credentials in auth.json 0600, dollar-brace bash expansion in prompt templates, Go version pinned in go.mod, TUI /login and /logout, slash login in the TUI: pick a provider then paste an API key masked never echoed never written to the transcript or sign in to a subscription in the browser; while a sign-in is in flight the pasted redirect URL or code from the input box feeds the flow and esc cancels; after a successful ChatGPT sign-in the wizard offers to flip providers openai auth to oauth; slash logout revokes a subscription session best-effort and clears the stored token and key, ten more opencode-go catalog models, / autocomplete dropdown, stored key wins over env reference (+5 more)
 
 ### Community 123 - "manual Release workflow with checksums"
@@ -1010,16 +1021,16 @@ Cohesion: 0.32
 Nodes (10): TestRequestsAreAppendOnly(), Harness (A1-A3), blocksOf(), FirstDivergence(), roleOf(), Strip(), msgs(), TestFirstDivergence() (+2 more)
 
 ### Community 126 - "applog_test.go"
-Cohesion: 0.15
-Nodes (17): Level, nopCloser, wc, Discard(), Open(), ParseLevel(), prune(), keepDefault() (+9 more)
+Cohesion: 0.13
+Nodes (19): Level, nopCloser, wc, startLog(), TestStartLogNoStderrUnderACP(), Discard(), Open(), ParseLevel() (+11 more)
 
 ### Community 127 - "body"
 Cohesion: 0.15
 Nodes (12): description, label, value, body, attributes, id, type, validations (+4 more)
 
 ### Community 128 - "session transcript JSONL"
-Cohesion: 0.14
-Nodes (8): elision agent/elision.go, internal/session, session entry types, session.Find and FindForWorkdir, session.Messages rebuild, session transcript JSONL, snapshot content store, /undo
+Cohesion: 0.09
+Nodes (13): --continue flag, --effort flag, elision agent/elision.go, exit codes, internal/session, moca -p one-shot run, --model flag, -p run semantics (+5 more)
 
 ### Community 129 - "graphify-out/"
 Cohesion: 0.25
@@ -1027,55 +1038,59 @@ Nodes (9): docs/specs/external-tools.md, god nodes & community structure, graphi
 
 ### Community 130 - "update/update_test.go"
 Cohesion: 0.06
-Nodes (46): envOr(), githubToken(), runUpdate(), `moca update` refuses a copy a package manager owns, Fast path: once graphify-out/graph.json exists, any codebase question runs graphify query directly on the merged graph - no re-extraction, no size gate, graphify clone <github-url> [--branch]: clones into ~/.graphify/repos/<owner>/<repo> and reuses existing clones on repeat runs, graphify merge-graphs: merge per-repo or per-subfolder graph.json files into one cross-repo graph, graphify reference: GitHub clone and cross-repo merge (+38 more)
+Nodes (43): envOr(), githubToken(), runUpdate(), Fast path: once graphify-out/graph.json exists, any codebase question runs graphify query directly on the merged graph - no re-extraction, no size gate, graphify clone <github-url> [--branch]: clones into ~/.graphify/repos/<owner>/<repo> and reuses existing clones on repeat runs, graphify merge-graphs: merge per-repo or per-subfolder graph.json files into one cross-repo graph, graphify reference: GitHub clone and cross-repo merge, ~/.graphify/repos/<owner>/<repo> clone layout; merged graph nodes carry a repo attribute so you can filter by origin (+35 more)
 
 ### Community 131 - "anthropic decision: api_key only"
 Cohesion: 0.25
 Nodes (6): config validation rejects providers.anthropic.auth=oauth, moca, OpenClaw (listed partner), OpenCode (listed partner), partner directory open-source integrations (OpenClaw/OpenCode/Pi/T3), Sign in with ChatGPT open-source token sharing
 
 ### Community 132 - "fixture/order.go"
-Cohesion: 0.40
-Nodes (4): User, TestOrderEmail(), TestUserEmail(), NewUser()
+Cohesion: 0.28
+Nodes (6): Order, User, NewOrder(), TestOrderEmail(), TestUserEmail(), NewUser()
 
 ### Community 133 - "Usage"
-Cohesion: 0.12
-Nodes (12): Status, TurnEnd, fakeSum, Result, ModelOverride, CostConfig, StopReason, Usage (+4 more)
+Cohesion: 0.29
+Nodes (4): TurnEnd, Result, UsageTokens(), Usage
 
 ### Community 134 - "Model.ClampEffort"
 Cohesion: 0.22
 Nodes (9): anthropicAdaptive level map, basicThinking level map, deepseekProThinking level map, deepseekThinking level map, glmThinking level map, Model.ClampEffort, openaiReasoning level map, qwenThinking level map (+1 more)
 
 ### Community 135 - "EntryTokens"
-Cohesion: 0.17
-Nodes (11): Kind, summarizerUnavailable(), callKey(), shouldElide(), staleResults(), TestShouldElide(), EntryTokens(), Entry (+3 more)
+Cohesion: 0.22
+Nodes (12): Kind, callKey(), staleResults(), TestStaleResults(), EntryTokens(), Entry, MessageChars(), RequestChars() (+4 more)
 
 ### Community 136 - "Skill Validation Scripts"
 Cohesion: 0.06
 Nodes (26): validate_skill(), agent(), check(), git(), identities(), main(), selftest(), archive_name() (+18 more)
 
+### Community 137 - "AppendStrings"
+Cohesion: 0.20
+Nodes (10): AppendStrings(), nested(), rawComma(), TestAppendStringsEmptyIsANoOp(), TestAppendStringsFailureLeavesTheOriginal(), uniqueStrings(), Standardize(), TestStandardizeNoOpOnPlainJSON() (+2 more)
+
 ### Community 138 - "shell_confinement_test.go"
-Cohesion: 0.29
-Nodes (11): confinementShell(), mustAllow(), mustRefuse(), TestDashDashOperands(), TestMakeReservedOverrideWhitespace(), TestWrapperChdirConfinement(), ruleShell(), TestAutoRmSkillsAncestor() (+3 more)
+Cohesion: 0.35
+Nodes (12): confinementShell(), mustAllow(), mustRefuse(), TestDashDashOperands(), TestMakeReservedOverrideWhitespace(), TestWrapperChdirConfinement(), ruleShell(), ruleShellOS() (+4 more)
 
 ### Community 139 - "autoskill_prune_test.go"
-Cohesion: 0.22
-Nodes (23): containsStr(), PruneAutoSkills(), rewriteBody(), splitBodyLines(), day(), TestBodyOffset(), TestPruneAutoAtomicRewriteKeepsMode(), TestPruneAutoDryRunWritesNothing() (+15 more)
+Cohesion: 0.25
+Nodes (21): containsStr(), PruneAutoSkills(), rewriteBody(), splitBodyLines(), day(), TestPruneAutoAtomicRewriteKeepsMode(), TestPruneAutoDryRunWritesNothing(), TestPruneAutoExpiresX1Only() (+13 more)
 
 ### Community 140 - "Items"
-Cohesion: 0.29
-Nodes (8): plural(), TestItems(), TestLastOfKind(), TestReplayLimitsTurnsAndShowsItems(), TestReplayMarksANudge(), firstLine(), Item, Items
+Cohesion: 0.51
+Nodes (4): TestItems(), TestLastOfKind(), Item, Items
 
-### Community 142 - ".Run"
-Cohesion: 0.17
-Nodes (11): Task 5: Collapse approval at the shell-tool boundary, mutatesOnly(), normCommand(), TestVerifies(), verifies(), approve(), TestTestRunCommand(), TestTestRunFailed() (+3 more)
+### Community 142 - "Discover"
+Cohesion: 0.28
+Nodes (8): filterSkills(), TestFilterSkillsDropsSeededSkillsWithoutTheirCLI(), TestEcosystemSkillsLoadUnchanged(), TestDiscoverSkipsHiddenDirs(), Discover(), mkSkill(), TestDiscoverPrecedence(), TestDiscoverReportsSymlinkedDir()
 
 ### Community 144 - "Order and User Models"
-Cohesion: 0.38
+Cohesion: 0.32
 Nodes (5): Order, User, NewOrder(), NewUser(), normalizeEmail()
 
-### Community 145 - "initialize"
-Cohesion: 0.21
-Nodes (9): initialize(), TestHTTPCloseBounded(), startHTTP(), TestHTTPNotifyStatusChecked(), TestHTTPTransport(), TestStdioEarlyExit(), client, Tool (+1 more)
+### Community 145 - "net/http.Header"
+Cohesion: 0.16
+Nodes (15): fakeHTTPServer(), TestHTTPTransport(), defaultProtocolFor(), effortMap(), fetchOpenAICompatibleModels(), fetchOpenAIModels(), fetchOpenRouterModels(), getJSON() (+7 more)
 
 ### Community 146 - "structural interfaces pattern"
 Cohesion: 0.29
@@ -1090,8 +1105,8 @@ Cohesion: 0.29
 Nodes (5): 2026-02-18/19 clause formalized in Claude Code legal docs, 2026-01-09 server-side credential checks / account bans, Claude legal-and-compliance usage policy (primary source), corroborating enforcement timeline 2026-01 to 2026-09, OpenCode removes Claude subscription support
 
 ### Community 149 - "goalgate_test.go"
-Cohesion: 0.22
-Nodes (12): provider, goalStatusOnDisk(), newProvider(), pop(), requireTmux(), saveArtifacts(), sessionID(), start() (+4 more)
+Cohesion: 0.32
+Nodes (11): goalStatusOnDisk(), newProvider(), pop(), requireTmux(), saveArtifacts(), sessionID(), start(), TestGoalGate() (+3 more)
 
 ### Community 150 - "moca prune command"
 Cohesion: 0.29
@@ -1111,11 +1126,11 @@ Nodes (28): Benchmarks, Four agents, 2026-10-16 (48 trials, n=1, $1.13 cash), mo
 
 ### Community 156 - "testing.T"
 Cohesion: 0.02
-Nodes (185): parseArgs(), TestHelpListsSurface(), TestParseArgs(), TestParseArgsExecuteUsageErrors(), TestSubcommandBeforeConfig(), logRun(), logRunCfg(), logRunIn() (+177 more)
+Nodes (173): parseArgs(), TestHelpListsSurface(), TestParseArgs(), TestParseArgsExecuteUsageErrors(), TestSubcommandBeforeConfig(), logRun(), logRunCfg(), logRunIn() (+165 more)
 
-### Community 157 - "moca v0.8.0 — Implementation Plan"
-Cohesion: 0.15
-Nodes (11): F1 — The dependency probe found a small, concrete update set, F2 — Approval fan-out is in `tools`, not in the classifier, F3 — `RunWith` is the correct goal-loop seam, F5 — What OpenCode actually shipped, Findings (why this design), Global Constraints, moca v0.8.0 — Implementation Plan, Out of scope (v0.8.0) (+3 more)
+### Community 157 - "TestLoginCLISwitchesAuthAfterCallback"
+Cohesion: 0.31
+Nodes (7): authURLFrom(), fakeSIWC(), fakeSIWCOpts(), TestLoginCLISwitchesAuthAfterCallback(), TestLoginTokenEndpointIsBounded(), waitFor(), lockedBuf
 
 ### Community 158 - "input_test.go"
 Cohesion: 0.30
@@ -1130,8 +1145,8 @@ Cohesion: 0.40
 Nodes (4): CI Workflow (gofmt · vet · build · test), CI gate set (gofmt, go vet, go build, go test -race), go.mod (Go version source for setup-go), SPECS.md §2 — CI gate definition
 
 ### Community 161 - "Permission Rule Matching"
-Cohesion: 0.24
-Nodes (8): baseName(), globWord(), Rules, matchWords(), Decision, matcher, Rule, RuleSet
+Cohesion: 0.14
+Nodes (12): TestSegments(), cutString(), isSecretKey(), replaceAttr(), safeURL(), segments(), baseName(), globWord() (+4 more)
 
 ### Community 162 - "External Tools Spec (rtk/graphify)"
 Cohesion: 0.11
@@ -1141,33 +1156,33 @@ Nodes (17): Spec: external tools - rtk, graphify, and the skills/prompts ecosyst
 Cohesion: 0.40
 Nodes (5): verified OIDC discovery endpoints table, live probe outcomes (discovery, invalid_client, Cloudflare 403), auth.openai.com authorize/token/revoke URLs, phase-7 live gate (real ChatGPT account e2e check), logout via revoke endpoint (token_type_hint=refresh_token)
 
-### Community 164 - ".fn"
-Cohesion: 0.25
-Nodes (6): responseID(), TestResponseID(), TestReadEventsRefusesAnUnboundedEvent(), TestReadEventsStillAcceptsAMultiLineEvent(), readEvents(), httpTransport
+### Community 164 - "Main"
+Cohesion: 0.33
+Nodes (7): TestMain(), TestMain(), TestMain(), BlankKeys(), BuiltinKeyVars(), Main(), TestMain()
 
 ### Community 165 - "loads only when corpus has doc/paper/image chunks"
 Cohesion: 0.40
 Nodes (3): Step 3 Part B pipeline stage, code extension set, Step 2.5 references/transcribe.md for video chunks
 
 ### Community 166 - "agent control surface"
-Cohesion: 0.11
-Nodes (22): Checkpoints: maybeCompact before every new user prompt (start of Run) and after every completed tool batch (after steering); when the estimate is over the trigger it compacts, and if the estimate is still over it stops the run with an error naming the largest live entries (`context still over budget after compaction (N > trigger); largest entries: tool_result for read(...) approx Nk tokens; fixed overhead (system prompt + tools) approx Nk tokens` - the overhead clause appears when it dominates the estimate) - never compacts twice in a row; an indivisible over-trigger tool batch (calls+results must stay together) is the intended case: the guard names it instead of dropping fresh tool data; a summarizer that cannot run at all (cheap-model credential unset, unknown cheap model) skips the automatic checkpoint with `warning: auto-compaction skipped: ...` - the run continues on the active model; a real provider overflow still surfaces the original error through the retry path, agent control surface, agent events list, /clear command, /compact command, compaction summary format, context.keepRecentTokens, context pressure colors (+14 more)
+Cohesion: 0.09
+Nodes (24): Checkpoints: maybeCompact before every new user prompt (start of Run) and after every completed tool batch (after steering); when the estimate is over the trigger it compacts, and if the estimate is still over it stops the run with an error naming the largest live entries (`context still over budget after compaction (N > trigger); largest entries: tool_result for read(...) approx Nk tokens; fixed overhead (system prompt + tools) approx Nk tokens` - the overhead clause appears when it dominates the estimate) - never compacts twice in a row; an indivisible over-trigger tool batch (calls+results must stay together) is the intended case: the guard names it instead of dropping fresh tool data; a summarizer that cannot run at all (cheap-model credential unset, unknown cheap model) skips the automatic checkpoint with `warning: auto-compaction skipped: ...` - the run continues on the active model; a real provider overflow still surfaces the original error through the retry path, agent control surface, agent events list, /clear command, /compact command, compaction summary format, context.keepRecentTokens, context pressure colors (+16 more)
 
 ### Community 167 - "Lookup"
 Cohesion: 0.50
 Nodes (3): Lookup(), TestLookupBounds(), Valid()
 
-### Community 168 - "permission modes applyMode"
-Cohesion: 0.06
-Nodes (28): alt+t thinking pager, --approve flag, ask-write roots, auto mode risk table, ctrl+c double-press quit, ctrl+o pager on latest item, ctrl+t effort cycle, esc interrupt semantics (+20 more)
+### Community 168 - "keys dispatch"
+Cohesion: 0.10
+Nodes (15): alt+t thinking pager, ctrl+c double-press quit, ctrl+o pager on latest item, ctrl+t effort cycle, esc interrupt semantics, keys dispatch, .moca/config.jsonc trusted-only project config, moca execute (+7 more)
 
 ### Community 169 - "internal/applog"
 Cohesion: 0.50
 Nodes (3): internal/applog, standard log/slog, SPECS §13.5 (log privacy)
 
-### Community 170 - "Start wiring"
-Cohesion: 0.10
-Nodes (12): create-command skill, docs/specs/SPECS.md, internal/skills, phase 6, rules engine, self-knowledge skill, shell.allow config key, shell analyser (parsed commands) (+4 more)
+### Community 170 - "rules engine"
+Cohesion: 0.15
+Nodes (5): rules engine, shell.allow config key, shell analyser (parsed commands), test/evals corpus, testshipgate shipgate test checker
 
 ### Community 171 - "SPECS.md — moca spec document"
 Cohesion: 0.50
@@ -1193,9 +1208,9 @@ Nodes (4): jev.evaluate reference, jev.evaluate semantic scripting gate, mcpScri
 Cohesion: 0.70
 Nodes (3): fresh_repo(), one(), run.sh script
 
-### Community 178 - ".Run"
-Cohesion: 0.12
-Nodes (9): TestSpillLogged(), Spill(), TestSpillWritesFullOutput(), TestRegistryRecoversToolPanic(), TestRepeatedFailureIgnoresSpillPath(), webSize(), failTool, panicTool (+1 more)
+### Community 178 - "ParseFrontmatter"
+Cohesion: 0.25
+Nodes (8): TestBodyOffset(), BodyOffset(), closingQuote(), ParseFrontmatter(), scalar(), TestFrontmatter(), TestFrontmatterBlockAndQuoteEdges(), TestFrontmatterBlockIndicatorsAndComments()
 
 ### Community 179 - "Release Publishing Steps"
 Cohesion: 0.22
@@ -1206,68 +1221,68 @@ Cohesion: 0.67
 Nodes (3): go vet ./..., gofmt -l . must be empty, make vet (go vet + gofmt -l)
 
 ### Community 183 - "Compare"
-Cohesion: 0.20
-Nodes (17): Comparison, Ratio, ratios, ScenarioDelta, totals, Compare(), ratioOf(), RenderComparison() (+9 more)
+Cohesion: 0.12
+Nodes (28): CacheBreak, Comparison, Metrics, Ratio, ratios, ScenarioDelta, totals, Compare() (+20 more)
 
 ### Community 184 - "applyEdit"
 Cohesion: 0.23
 Nodes (14): applyEdit(), formatDiff(), indentOf(), joinInts(), lineOf(), matchLines(), replaceExact(), replaceFuzzy() (+6 more)
 
 ### Community 185 - "Model"
-Cohesion: 0.08
-Nodes (28): checkPrefix(), normalizeBody(), requestFor(), thinkingHistory(), Model, TestBuiltinCatalogSane(), TestHistoryBoundIsAdaptiveOnly(), TestKeepsTailThinkingFollowsReasoningReplay() (+20 more)
+Cohesion: 0.14
+Nodes (19): TestBuiltinCatalogSane(), TestHistoryBoundIsAdaptiveOnly(), TestKeepsTailThinkingFollowsReasoningReplay(), assistantMsg(), completionsMsgs(), deepseekModel(), glmModel(), TestCompletionsDoesNotSendReasoningWhereUnwanted() (+11 more)
 
 ### Community 188 - "build"
-Cohesion: 0.18
-Nodes (12): build(), webSearchKey(), TestResolveEnv(), ResolveEnv(), TestKeepNameWindows(), FilterEnv(), keepName(), serverEnv() (+4 more)
+Cohesion: 0.25
+Nodes (9): webSearchKey(), TestResolveEnv(), ResolveEnv(), TestKeepNameWindows(), FilterEnv(), keepName(), serverEnv(), TestFilterEnv() (+1 more)
 
-### Community 189 - "Design and tasks"
-Cohesion: 0.17
-Nodes (10): Design and tasks, Task 12: Drive bounded work/review rounds inside `RunWith`, Task 14: Add a hermetic built-binary goal gate, Task 15: Finish v0.8.0 docs, counts, freeze checks, evaluation, and plan cleanup, Task 1: Re-probe the baseline and dependency release contracts, Task 2: Update the toolchain and Go modules, then resolve only real compatibility fallout, Task 3: Finish the dependency PR docs and full verification, Task 6: Persist composite allow-always atomically (+2 more)
+### Community 189 - "picker.go"
+Cohesion: 0.29
+Nodes (6): modelPickItems(), modePickItems(), TestWindowRange(), windowRange(), pickItem, pickState
 
-### Community 190 - "Login"
-Cohesion: 0.27
-Nodes (8): OAuthConfig, Login(), missingScopes(), pkce(), randText(), TestPKCEUniqueness(), Refresher, Token
+### Community 190 - ".judgeCmd"
+Cohesion: 0.29
+Nodes (4): cutUTF8(), isCont(), parseJudge(), TestParseJudge()
 
-### Community 212 - "moca -p one-shot run"
-Cohesion: 0.17
-Nodes (7): --continue flag, --effort flag, exit codes, moca -p one-shot run, --model flag, -p run semantics, --resume flag
+### Community 212 - "extractBuiltins"
+Cohesion: 0.33
+Nodes (6): builtinHash(), ExtractBuiltins(), extractBuiltins(), seedOne(), TestExtractBuiltins(), TestExtractBuiltinsReExtractsOnContentChange()
 
 ### Community 213 - "Refusal Filter Script"
 Cohesion: 0.47
 Nodes (4): carries_injection(), refusal_filter.sh script, check(), refusal_filter_test.sh script
 
 ### Community 543 - "Request"
-Cohesion: 0.09
-Nodes (27): dropAdapter, Event, Request, Response, ToolChoice, Adapter, anthropicOverflow(), causeClass() (+19 more)
+Cohesion: 0.11
+Nodes (21): dropAdapter, Event, Request, Response, StopReason, Adapter, anthropicOverflow(), anthropicStop() (+13 more)
 
 ### Community 544 - "LineReader"
-Cohesion: 0.24
-Nodes (9): yesNo(), LineReader, parsePasted(), pasteReader(), TestParsePasted(), readLine(), lineResult, LoginIO (+1 more)
+Cohesion: 0.15
+Nodes (15): LineReader, NewLineReader(), Login(), missingScopes(), parsePasted(), pasteReader(), pkce(), randText() (+7 more)
 
 ### Community 545 - "Goal"
+Cohesion: 0.21
+Nodes (4): Agent, GoalChanged, Goal, GoalStatus
+
+### Community 547 - "probe/main.go"
 Cohesion: 0.22
-Nodes (3): GoalChanged, Goal, GoalStatus
+Nodes (11): getopt(), resolveLong(), main(), rtkRunTarget(), rtkShellString(), rtkSub(), rtkTarget(), argKind (+3 more)
 
-### Community 547 - "auto_getopt.go"
-Cohesion: 0.46
-Nodes (6): getopt(), resolveLong(), argKind, getoptSpec, optHit, parsedArgs
-
-### Community 548 - "Env"
-Cohesion: 0.13
-Nodes (21): planAllows(), TestPlanModeSuppressesInvestigationProtocol(), TestSamePathFoldsWhereTheFilesystemDoes(), isDocPath(), noteChange(), TestRepeatedFailureHintAndReset(), TestInvestigationHint(), TestInvestigationRefusal() (+13 more)
+### Community 548 - "ACP JSON schema (protocol v1) vendored for conformance tests in internal/acp/testdata (data only)"
+Cohesion: 0.47
+Nodes (6): ACP protocol v1 JSON schema (schema-v1.x.x tags; v2 alphas excluded), Refresh procedure: re-run Task 2 Step 1 of docs/superpowers/plans/2026-10-13-acp-batch-1-foundations.md and fix whatever go test ./internal/acp reports, Vendored files: schema/v1/schema.json, schema/v1/schema.unstable.json, schema/v1/meta.json from tag schema-v1.25.0, ACP JSON schema (protocol v1) vendored for conformance tests in internal/acp/testdata (data only), Feature gates: messageId on ContentChunk, usage_update (used, size, cost{amount,currency}), plan def names unrenamed, ToolKind/ToolCallStatus/StopReason/PermissionOptionKind must contain every value moca emits, agent-client-protocol upstream repo; pick the newest schema-v1.x.y tag (repo also tags crate releases and v2 alphas)
 
 ### Community 562 - "pane"
 Cohesion: 0.22
 Nodes (5): pane, lockFile(), lockFile(), lastNewline(), trimPartialLine()
 
 ### Community 564 - "moca/prune_test.go"
-Cohesion: 0.40
-Nodes (9): formatBytes(), execPrune(), pruneEnv(), TestFormatBytes(), TestRunPruneDryRunRemovesNothing(), TestRunPruneIgnoresBrokenConfig(), TestRunPruneNothingToDo(), TestRunPruneRejectsUnknownArgs() (+1 more)
+Cohesion: 0.47
+Nodes (8): execPrune(), pruneEnv(), TestRunPruneDryRunRemovesNothing(), TestRunPruneIgnoresBrokenConfig(), TestRunPruneNothingToDo(), TestRunPruneRejectsUnknownArgs(), TestRunPruneRemovesOlderBuiltinDirs(), TestUsageListsPrune()
 
-### Community 565 - "Agent"
-Cohesion: 0.04
-Nodes (60): checkers, PromptInput, SelfManagedInput, ServerLine, steerMsg, Agent, TestPromptBlockAndArtifactMarker(), TestConfigEffort() (+52 more)
+### Community 565 - "Start"
+Cohesion: 0.06
+Nodes (37): PromptInput, SelfManagedInput, ServerLine, TestPromptBlockAndArtifactMarker(), keys(), startProjectMCP(), TestProjectMCPServersJoinTheUserLayer(), TestProjectMCPServersNeedTrust() (+29 more)
 
 ### Community 566 - "Demo Recording Recipes"
 Cohesion: 0.33
@@ -1278,16 +1293,16 @@ Cohesion: 0.48
 Nodes (5): main(), Mean(), Sum(), TestMean(), TestSum()
 
 ### Community 570 - "MCPServer"
-Cohesion: 0.13
-Nodes (26): MCPServer, TestImportRewritesEmbeddedSecretsInValues(), TestRewriteSecretsValueRuleAlone(), DiscoverSources(), envName(), envRefs(), ParseSource(), Plan() (+18 more)
+Cohesion: 0.11
+Nodes (27): MCPConfig, TestImportRewritesEmbeddedSecretsInValues(), TestRewriteSecretsValueRuleAlone(), DiscoverSources(), envName(), envRefs(), ParseSource(), Plan() (+19 more)
 
 ### Community 572 - "transcribe.md"
 Cohesion: 0.28
 Nodes (7): graphify-out/.graphify_detect.json holds detect output incl. total_words and per-type file lists, graphify reference: transcribe video and audio, Step 2.5 - Transcribe video / audio files (only if video files detected), graphify.transcribe.transcribe_all(video_files, initial_prompt=prompt), graphify-out/.graphify_transcripts.json: written from Python, not a shell redirect, because Whisper progress on stdout would corrupt the JSON (#1392), Step 2.5: transcribe detected video files (skip entirely when detect returns zero video); transcripts join the docs list before semantic subagents (Step 3B), Whisper transcription: GRAPHIFY_WHISPER_MODEL (default base) and GRAPHIFY_WHISPER_PROMPT must be exported for the child process
 
-### Community 573 - "redact.go"
+### Community 573 - "graphify reference: query, path, explain"
 Cohesion: 0.33
-Nodes (6): TestSegments(), cutString(), isSecretKey(), replaceAttr(), safeURL(), segments()
+Nodes (5): For /graphify explain, For /graphify path, graphify reference: query, path, explain, Step 0 — Constrained query expansion (REQUIRED before traversal), Step 1 — Traversal
 
 ### Community 574 - "Skills Inject Calc Tests"
 Cohesion: 0.50
@@ -1322,43 +1337,35 @@ Cohesion: 0.47
 Nodes (6): TestPruneOverflow(), TestSpillDirsAreRandom(), newestModTime(), newSpillDir(), overflowDir(), pruneOverflow()
 
 ### Community 586 - "parseIgnore"
-Cohesion: 0.21
-Nodes (8): globToRegexp(), ignored(), parseIgnore(), TestIgnore(), ListFiles(), TestListFiles(), ignoreRule, searchTool
+Cohesion: 0.38
+Nodes (7): globToRegexp(), ignored(), parseIgnore(), TestIgnore(), ListFiles(), TestListFiles(), ignoreRule
 
 ### Community 587 - "Skills Inject C Test Script"
 Cohesion: 0.83
 Nodes (3): expect(), skills_inject_c_test.sh script, transcript()
 
-### Community 591 - "Render"
-Cohesion: 0.15
-Nodes (7): jsonItem, main(), Render(), TestRenderTotal(), main(), RenderJSON(), TestRenderJSON()
+### Community 591 - "tui/history.go"
+Cohesion: 0.53
+Nodes (5): appendHistory(), loadHistory(), rewriteHistory(), TestHistoryPersistence(), historyRec
 
 ### Community 592 - "v0.7.2 (2026-10-21)"
-Cohesion: 0.17
-Nodes (10): CanonicalMode(), A review round, not a feature, Auto by default, and the strict mode is called `ask` (2026-10-21), Front-end parity (#43, #44), Robustness: the trust store, run state, and the streams (#42), Shell confinement and rule specificity (#39, #40), Skills: provenance, replay, hygiene (#45, #46), The measurement, and a checker that failed open (+2 more)
+Cohesion: 0.22
+Nodes (8): A review round, not a feature, Front-end parity (#43, #44), Robustness: the trust store, run state, and the streams (#42), Shell confinement and rule specificity (#39, #40), Skills: provenance, replay, hygiene (#45, #46), The measurement, and a checker that failed open, Truth of the recording nudge (#41), v0.7.2 (2026-10-21)
 
 ### Community 593 - "git flow (main PR-only, phase/N-slug or chore/slug, conventional commits)"
 Cohesion: 0.22
 Nodes (7): DESIGN.md v1 contract (retired), docs/reviews/ review docs (deleted), docs/specs/SPECS.md, .git/hooks/pre-push (blocks pushes to main), SPECS §16 (living spec rule), conventional commits, one version bump per PR
 
-### Community 594 - "skillGuard"
-Cohesion: 0.20
-Nodes (10): isAutoSkill(), refusingAutoGuard(), skillGuard(), containsWord(), Named(), TestNamed(), wordByte(), isSkillFile() (+2 more)
+### Community 594 - "IsSkillName"
+Cohesion: 0.50
+Nodes (4): isAutoSkill(), refusingAutoGuard(), isSkillFile(), IsSkillName()
 
 ### Community 613 - "auth.json credential store"
-Cohesion: 0.15
-Nodes (10): auth.json credential store, auth.json sections, env:VAR indirection, login --api-key flag, login flow, login --no-browser flag, /login wizard, moca login (+2 more)
-
-### Community 614 - "TestCollect"
-Cohesion: 0.29
-Nodes (7): TestCollect(), CToF(), FToC(), TestRoundTrip(), main(), fail(), main()
-
-### Community 621 - "fakeServer"
-Cohesion: 0.32
-Nodes (8): TestListToolsRepeatedCursor(), ConfigHash(), TestIndexPersistAndHash(), dial(), fakeServer(), TestStdioListAndCall(), TestStdioPaged(), TestProxySearchDescriptionRuneSafe()
+Cohesion: 0.28
+Nodes (7): auth.json credential store, auth.json sections, login --api-key flag, login flow, login --no-browser flag, /login wizard, moca login
 
 ### Community 622 - "counts_test.go"
-Cohesion: 0.52
+Cohesion: 0.43
 Nodes (5): TestSpecsTestCount(), getInts(), out(), TestAgentsGoFileCount(), TestSpecsPackageCount()
 
 ### Community 623 - "v0.6.0 (2026-10-16)"
@@ -1378,12 +1385,12 @@ Cohesion: 0.48
 Nodes (4): scanner, span, objectHasKey(), objectValueSpan()
 
 ### Community 627 - "New"
-Cohesion: 0.38
-Nodes (6): Task 8: Add durable goal state to the append-only session model, New(), GoalMessageCount(), GoalObjectives(), LatestGoal(), TestLatestGoalAndObjectives()
+Cohesion: 0.60
+Nodes (4): GoalMessageCount(), GoalObjectives(), LatestGoal(), TestLatestGoalAndObjectives()
 
 ### Community 629 - "sync.Mutex"
-Cohesion: 0.10
-Nodes (10): logSink, cappedWriter, cutRecord(), startStdio(), TestStdioWriteEPIPE(), logSink, ring, stdioTransport (+2 more)
+Cohesion: 0.06
+Nodes (19): logSink, responseID(), TestResponseID(), TestReadEventsRefusesAnUnboundedEvent(), TestReadEventsStillAcceptsAMultiLineEvent(), readEvents(), canonical(), stampOf() (+11 more)
 
 ### Community 630 - "self-configure/SKILL.md"
 Cohesion: 0.29
@@ -1392,14 +1399,6 @@ Nodes (6): How, Installation, Never, Verify, What you can change, When it takes 
 ### Community 631 - "v0.7.3 (2026-10-21)"
 Cohesion: 0.33
 Nodes (6): A description that hides the command is refused (#52), A rule may only cite a command the run actually ran (#52), Also in this release, Measured, not asserted, The truth of a recorded rule, v0.7.3 (2026-10-21)
-
-### Community 632 - ".reviewGoal"
-Cohesion: 0.47
-Nodes (5): goalVerdict, Task 11: Add the evidence-only reviewer and durable accounting, goalReviewPrompt(), parseGoalVerdict(), TestParseGoalVerdict()
-
-### Community 633 - "retryable"
-Cohesion: 0.33
-Nodes (6): http2Transient(), retryable(), TestTokenEndpointTransientIsRetryable(), TestRetryableServerError400(), TestRetryable(), TestRetryableTransportErrors()
 
 ### Community 634 - "v0.4.1-beta (2026-10-14)"
 Cohesion: 0.33
@@ -1413,41 +1412,21 @@ Nodes (5): onlyTrailingComment(), parseDotEnvValue(), stripTrailingComment(), un
 Cohesion: 0.40
 Nodes (5): Harness (measured), Plan mode, TUI, v0.3.0-beta (2026-10-09), Web
 
-### Community 637 - "ThemeConfig"
-Cohesion: 0.40
-Nodes (6): ThemeColors, TUIConfig, ThemeConfig, validateColor(), validateTheme(), validateThemeColors()
-
-### Community 638 - ".Guard"
-Cohesion: 0.33
-Nodes (3): failingSnap, fakeSnap, Snapshotter
-
-### Community 639 - ".summarizer"
-Cohesion: 0.40
-Nodes (4): CapChars(), TestCapChars(), TestCapCharsRuneSafe(), Summarizer
-
 ### Community 640 - ".Resolve"
-Cohesion: 0.11
-Nodes (10): NewUnjailed(), TestUnjailedAndAllowAll(), Unjailed, ApprovablePaths, askRootChecker, caseAskChecker, fileAskChecker, PathChecker (+2 more)
+Cohesion: 0.12
+Nodes (8): Unjailed, ApprovablePaths, askRootChecker, caseAskChecker, fileAskChecker, PathChecker, rootChecker, unresolvedConfigChecker
 
 ### Community 641 - "ResolveRecordNudge"
 Cohesion: 0.67
 Nodes (4): ResolveRecordNudge(), TestResolveRecordNudgeTable(), The end-of-run recording nudge, v0.7.1 (2026-10-19)
 
-### Community 642 - "ReadTracker"
-Cohesion: 0.60
-Nodes (3): stampOf(), ReadTracker, stamp
-
-### Community 645 - "ollamaBaseURL"
-Cohesion: 0.40
-Nodes (4): normalizeOllamaURL(), ollamaBaseURL(), TestNormalizeOllamaURL(), TestOllamaBaseURLPrecedence()
-
-### Community 646 - "v0.2.0-beta (2026-10-09)"
-Cohesion: 0.40
-Nodes (5): Ollama (local or LAN), Self-update & release packages, TUI features, TUI fixes, v0.2.0-beta (2026-10-09)
+### Community 645 - ".DiscoverOllama"
+Cohesion: 0.18
+Nodes (8): modelFromShow(), normalizeOllamaURL(), ollamaBaseURL(), ollamaRoot(), TestNormalizeOllamaURL(), TestOllamaBaseURLPrecedence(), Discovery, ollamaShow
 
 ### Community 647 - "v0.8.0 (2026-11-11)"
-Cohesion: 0.50
-Nodes (4): Current compatible dependencies, `/goal` — a bounded session objective, One approval question per composite shell command, v0.8.0 (2026-11-11)
+Cohesion: 0.29
+Nodes (7): Benchmarks: the truncated-turn work, measured, CI: an agent-authored commit fails a PR, Current compatible dependencies, Eval checkers: `skip`/`ignore` are refusals (unless negated), `/goal` — a bounded session objective, One approval question per composite shell command, v0.8.0 (2026-11-11)
 
 ### Community 648 - "v0.5.1-beta (2026-10-15)"
 Cohesion: 0.50
@@ -1460,23 +1439,23 @@ Nodes (4): MCP, Permissions, TUI, v0.5.1-beta (2026-10-15)
   AGENTS.md · relation: cites_deleted_docs
 
 ## Knowledge Gaps
-- **877 isolated node(s):** `github.com/adeotek/moca`, `--continue flag`, `--effort flag`, `exit codes`, `--model flag` (+872 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1751 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **423 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **877 isolated node(s):** `skills.PruneBuiltins`, `/builtin-skills/ (data dir)`, `moca execute`, `docs/specs/SPECS.md`, `Go 1.27.1 pinned once in go.mod toolchain directive` (+872 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1739 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **431 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `graphify codebase knowledge graph CLI, in default allowlist, seeded into ~/.config/moca/skills/graphify/ (SKILL.md + references)` connect `External Tools Spec (rtk/graphify)` to `update/update_test.go`, `transcribe.md`, `exports.md`, `graphify.ingest.ingest(url, raw_dir, author, contributor) auto-detects URL type; errors are reported, never silently continued`?**
-  _High betweenness centrality (0.251) - this node is a cross-community bridge._
-- **What connects `github.com/adeotek/moca`, `--continue flag`, `--effort flag` to the rest of the system?**
+  _High betweenness centrality (0.260) - this node is a cross-community bridge._
+- **What connects `skills.PruneBuiltins`, `/builtin-skills/ (data dir)`, `moca execute` to the rest of the system?**
   _877 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `NewRegistry` be split into smaller, more focused modules?**
-  _Cohesion score 0.07263157894736842 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.10885341074020319 - nodes in this community are weakly interconnected._
 - **Should `model` be split into smaller, more focused modules?**
-  _Cohesion score 0.06178489702517163 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.07281553398058252 - nodes in this community are weakly interconnected._
 - **Should `startClient` be split into smaller, more focused modules?**
-  _Cohesion score 0.11455289304500292 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.057665903890160186 - nodes in this community are weakly interconnected._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._

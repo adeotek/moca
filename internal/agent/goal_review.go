@@ -19,8 +19,14 @@ import (
 )
 
 const (
-	goalReviewTimeout   = 20 * time.Second
-	goalReviewMaxTokens = 200
+	goalReviewTimeout = 20 * time.Second
+	// goalReviewMaxTokens is the verdict ceiling on a route that sends no
+	// reasoning. A reasoning route spends its thinking inside max_tokens, so
+	// it gets headroom (goalReviewThinkingTokens) — and an answer still cut
+	// off there is retried once at goalReviewRetryTokens.
+	goalReviewMaxTokens      = 200
+	goalReviewThinkingTokens = 2048
+	goalReviewRetryTokens    = 8192
 )
 
 // goalReviewBudget is the per-call budget — a package var only so tests can
@@ -38,9 +44,10 @@ const goalReviewSystem = "You review one coding session's evidence against its s
 	"Otherwise answer CONTINUE. Reply with exactly one word: COMPLETE, CONTINUE or BLOCKED."
 
 var (
-	errReviewOverflow = errors.New("the review request overflowed the context")
-	errReviewFailed   = errors.New("the reviewer call failed")
-	errReviewInvalid  = errors.New("the reviewer's answer was not one of COMPLETE, CONTINUE, BLOCKED")
+	errReviewOverflow  = errors.New("the review request overflowed the context")
+	errReviewFailed    = errors.New("the reviewer call failed")
+	errReviewInvalid   = errors.New("the reviewer's answer was not one of COMPLETE, CONTINUE, BLOCKED")
+	errReviewTruncated = errors.New("the reviewer's answer was cut off at its output ceiling")
 )
 
 // goalVerdict is the reviewer's control value.
@@ -75,12 +82,46 @@ func goalReviewPrompt(objective string) string {
 		"Answer with exactly one word: COMPLETE, CONTINUE or BLOCKED."
 }
 
-// reviewGoal makes one reviewer call for goal g. It uses the configured cheap
-// model (`model`, never permissions.auto.model or the /hard pair), minimal
-// clamped effort, no tools, no cache write, a 20 s timeout and a 200-token
-// ceiling. Usage and cost are recorded on a TypeGoalReview entry — on a
-// provider-reported error usage too — so the spend survives a resume through
-// the same accounting as every request. No reviewer message is appended.
+// reviewCeiling is one reviewer call's output ceiling: the fixed verdict
+// budget on a route that sends no reasoning, and the headroom ceiling on one
+// whose thinking shares max_tokens (a verdict was never going to fit in 200
+// behind a reasoning block). e is the clamped effort the call will use.
+func reviewCeiling(m provider.Model, e llm.Effort) int {
+	if reviewSendsThinking(m, e, goalReviewThinkingTokens) {
+		return retryCeiling(m, goalReviewThinkingTokens)
+	}
+	return retryCeiling(m, goalReviewMaxTokens)
+}
+
+// retryCeiling clamps a candidate ceiling to the model's own output limit.
+func retryCeiling(m provider.Model, want int) int {
+	if m.MaxOutput > 0 && m.MaxOutput < want {
+		return m.MaxOutput
+	}
+	return want
+}
+
+// reviewSendsThinking reports whether a request with this effort and ceiling
+// would carry reasoning: an openai-style level maps to a wire value, and a
+// budget-style route allocates a thinking budget when the ceiling leaves room
+// for one (BudgetTokens returns 0 otherwise).
+func reviewSendsThinking(m provider.Model, e llm.Effort, ceiling int) bool {
+	if m.ThinkingMode == "" || m.ThinkingMode == "none" || e == llm.EffortOff {
+		return false
+	}
+	return m.ThinkingLevelMap[e] != "" || m.BudgetTokens(ceiling, e) > 0
+}
+
+// reviewGoal makes the reviewer call(s) for goal g. It uses the configured
+// cheap model (`model`, never permissions.auto.model or the /hard pair),
+// minimal clamped effort, no tools, no cache write and a 20 s timeout per
+// call. A route that thinks gets a ceiling with room for reasoning; an answer
+// cut off at that ceiling is retried ONCE at a larger one (a reasoning route
+// can spend the whole budget before writing its word, and a systemic pause
+// every round is worse than one bounded extra call). Usage and cost are
+// recorded on a TypeGoalReview entry per call — on a provider-reported error
+// usage too — so the spend survives a resume through the same accounting as
+// every request. No reviewer message is appended.
 func (a *Agent) reviewGoal(ctx context.Context, g session.Goal) (goalVerdict, error) {
 	m, ad, err := a.opts.Providers.Resolve(a.opts.Config.Model)
 	if err != nil {
@@ -92,10 +133,17 @@ func (a *Agent) reviewGoal(ctx context.Context, g session.Goal) (goalVerdict, er
 	msgs = TransformHistory(msgs, m.Qualified())
 	msgs = append(msgs, llm.Message{Role: llm.RoleUser,
 		Content: []llm.ContentBlock{{Type: llm.BlockText, Text: goalReviewPrompt(g.Objective)}}})
-	maxTok := goalReviewMaxTokens
-	if m.MaxOutput > 0 && m.MaxOutput < maxTok {
-		maxTok = m.MaxOutput
+	effort := m.ClampEffort(llm.EffortMinimal)
+	v, err := a.reviewCall(ctx, m, ad, msgs, effort, reviewCeiling(m, effort))
+	if errors.Is(err, errReviewTruncated) {
+		v, err = a.reviewCall(ctx, m, ad, msgs, effort, retryCeiling(m, goalReviewRetryTokens))
 	}
+	return v, err
+}
+
+// reviewCall is one reviewer request: its usage, its cost and its
+// goal_review entry land whether the call failed or not.
+func (a *Agent) reviewCall(ctx context.Context, m provider.Model, ad provider.Adapter, msgs []llm.Message, effort llm.Effort, maxTok int) (goalVerdict, error) {
 	cctx, cancel := context.WithTimeout(ctx, goalReviewBudget)
 	defer cancel()
 	resp, err := ad.Stream(cctx, llm.Request{
@@ -104,7 +152,7 @@ func (a *Agent) reviewGoal(ctx context.Context, g session.Goal) (goalVerdict, er
 		Messages:     msgs,
 		ToolChoice:   llm.ToolChoiceNone,
 		MaxTokens:    maxTok,
-		Effort:       m.ClampEffort(llm.EffortMinimal),
+		Effort:       effort,
 		NoCacheWrite: true,
 	}, func(llm.Event) {})
 	u := resp.Usage
@@ -123,6 +171,11 @@ func (a *Agent) reviewGoal(ctx context.Context, g session.Goal) (goalVerdict, er
 	}
 	v, perr := parseGoalVerdict(llm.TextOf(resp.Message))
 	if perr != nil {
+		// A cut-off turn is worth one retry at a larger ceiling; an answer
+		// that was delivered but is not the enum fails closed (no retry).
+		if resp.Stop == llm.StopLength {
+			return verdictContinue, errReviewTruncated
+		}
 		return verdictContinue, errReviewInvalid
 	}
 	return v, nil

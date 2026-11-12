@@ -14,8 +14,17 @@ import (
 	"github.com/adeotek/moca/internal/session"
 )
 
-// StartGoal starts a goal and works its first round.
+// goalPlanModeReason is the fixed pause reason for a goal that cannot make
+// progress under plan mode's write confinement.
+const goalPlanModeReason = "plan mode is on (writes are confined to docs/plans/) — turn /plan off, then /goal resume"
+
+// StartGoal starts a goal and works its first round. Plan mode confines
+// writes to docs/plans/*.md, so a goal could never be evidenced there: the
+// start is refused before any state is created (the /execute rule).
 func (a *Agent) StartGoal(ctx context.Context, objective string) (Outcome, error) {
+	if a.Plan() {
+		return Outcome{}, UserRefusal{Msg: "plan mode is on (writes are confined to docs/plans/) — /plan to turn it off, then /goal <objective>"}
+	}
 	g, err := a.setGoal(objective)
 	if err != nil {
 		return Outcome{}, err
@@ -25,8 +34,12 @@ func (a *Agent) StartGoal(ctx context.Context, objective string) (Outcome, error
 
 // ResumeGoal re-activates a paused goal with a fresh round/stall budget and
 // works one round. Only this explicit call restarts goal work after a pause
-// or a process restart.
+// or a process restart. Refused in plan mode for the same reason as a start,
+// leaving the goal paused.
 func (a *Agent) ResumeGoal(ctx context.Context) (Outcome, error) {
+	if a.Plan() {
+		return Outcome{}, UserRefusal{Msg: "plan mode is on (writes are confined to docs/plans/) — /plan to turn it off, then /goal resume"}
+	}
 	g, err := a.resumeGoalState()
 	if err != nil {
 		return Outcome{}, err
@@ -50,6 +63,17 @@ func (a *Agent) runGoalLoop(ctx context.Context, prompt string, o RunOpts) (out 
 	}
 	// The run-end log reports the whole goal run's steps, not the last round's.
 	defer func() { a.steps = total }()
+
+	// Plan mode confines writes to docs/plans/*.md, so a goal cannot make
+	// evidenced progress: an active goal pauses honestly before any review
+	// and the round runs as an ordinary plan-mode run. StartGoal/ResumeGoal
+	// refuse outright; this covers a plan mode turned on after the goal
+	// started (and any caller that skips them).
+	if g, ok := a.Goal(); ok && g.Status == session.GoalActive && a.Plan() {
+		if perr := a.pauseWithReason(g.ID, goalPlanModeReason); perr != nil && !errors.Is(perr, errGoalChanged) {
+			return Outcome{}, perr
+		}
+	}
 
 	out, err = round(prompt, o)
 	for {
@@ -83,8 +107,11 @@ func (a *Agent) runGoalLoop(ctx context.Context, prompt string, o RunOpts) (out 
 		}
 		if rerr != nil {
 			reason := "the goal reviewer failed — /goal resume continues from the current state"
-			if errors.Is(rerr, errReviewOverflow) {
+			switch {
+			case errors.Is(rerr, errReviewOverflow):
 				reason = "the review request overflowed the context — run /compact, then /goal resume"
+			case errors.Is(rerr, errReviewTruncated):
+				reason = "the reviewer's answer was cut off at its output ceiling — /goal resume continues from the current state"
 			}
 			return out, a.pauseJoined(g.ID, reason, err)
 		}

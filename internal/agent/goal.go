@@ -41,9 +41,15 @@ const (
 	GoalMaxObjectiveRunes = goalMaxObjectiveRunes
 )
 
-// GoalChanged is emitted after every committed goal transition. The TUI
-// prints a sanitized notice; ACP and -p ignore it (no goal surface there).
-type GoalChanged struct{ Goal session.Goal }
+// GoalChanged is emitted after every committed goal transition. Prev is the
+// status the transition left — empty when no goal existed before it — so a
+// front end can tell a resume from a fresh start without holding state of its
+// own. The TUI prints a sanitized notice; ACP and -p ignore it (no goal
+// surface there).
+type GoalChanged struct {
+	Goal session.Goal
+	Prev session.GoalStatus
+}
 
 func (GoalChanged) isEvent() {}
 
@@ -115,7 +121,7 @@ func (a *Agent) setGoal(objective string) (session.Goal, error) {
 	if err != nil {
 		return session.Goal{}, err
 	}
-	a.goalEvent(g)
+	a.goalEvent(g, "")
 	return g, nil
 }
 
@@ -183,12 +189,13 @@ func (a *Agent) transition(expectID string, expectStatus session.GoalStatus, nex
 		a.mu.Unlock()
 		return session.Goal{}, err
 	}
+	prev := a.goal.Status
 	err = a.appendGoalLocked(g)
 	a.mu.Unlock()
 	if err != nil {
 		return session.Goal{}, err
 	}
-	a.goalEvent(g)
+	a.goalEvent(g, prev)
 	return g, nil
 }
 
@@ -205,10 +212,10 @@ func (a *Agent) appendGoalLocked(g session.Goal) error {
 }
 
 // goalEvent emits the transition after it committed; metadata only in the log
-// (never the objective).
-func (a *Agent) goalEvent(g session.Goal) {
-	a.logger().Info("goal", "status", string(g.Status), "rounds", g.Rounds, "stalls", g.Stalls)
-	a.emit(GoalChanged{Goal: g})
+// (never the objective). prev is the status it left, "" for a fresh goal.
+func (a *Agent) goalEvent(g session.Goal, prev session.GoalStatus) {
+	a.logger().Info("goal", "status", string(g.Status), "prev", string(prev), "rounds", g.Rounds, "stalls", g.Stalls)
+	a.emit(GoalChanged{Goal: g, Prev: prev})
 }
 
 // --- request rendering -----------------------------------------------------

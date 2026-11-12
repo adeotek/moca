@@ -235,6 +235,34 @@ func TestGoalReplayDoesNotInventUserText(t *testing.T) {
 	}
 }
 
+// A resume announces itself as a resume, not as a fresh start: the budgets
+// reset to 0, so the notice cannot key on the round counter.
+func TestGoalResumeNotice(t *testing.T) {
+	s := newGoalServer(t,
+		goalTextTurn("worked"), goalTextTurn("BLOCKED"), // start → paused
+		goalTextTurn("worked on"), goalTextTurn("COMPLETE"), // resume → complete
+	)
+	work := t.TempDir()
+	m, evs := newGoalModel(t, s, work)
+
+	out := simulateAll(m, tuiCmd(t, m, "/goal make the fixture green")) + drainEvents(m, evs)
+	if !strings.Contains(out, "goal paused") {
+		t.Fatalf("the BLOCKED verdict must pause the goal: %q", out)
+	}
+	*evs = nil
+
+	out = simulateAll(m, m.runCommand(Parsed{Kind: KindCommand, Name: "goal", Args: "resume"})) + drainEvents(m, evs)
+	if !strings.Contains(out, "goal resumed") {
+		t.Fatalf("resume notice: %q", out)
+	}
+	if strings.Contains(out, "goal started") {
+		t.Fatalf("a resume must not announce a start: %q", out)
+	}
+	if g, ok := m.agent.Goal(); !ok || g.Status != session.GoalComplete {
+		t.Fatalf("goal %+v ok=%v", g, ok)
+	}
+}
+
 // agentHostContinuation is the stored text of a goal continuation round (the
 // agent's own constant, restated here because it is unexported).
 func agentHostContinuation() string { return "continue working toward the session goal" }

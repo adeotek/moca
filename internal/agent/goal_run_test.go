@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/adeotek/moca/internal/llm"
+	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
 )
 
@@ -395,5 +396,133 @@ func TestGoalResumeRequiresExplicitCommand(t *testing.T) {
 	}
 	if g, _ := b.Goal(); g.Status != session.GoalComplete {
 		t.Fatalf("explicit resume must work: %+v", g)
+	}
+}
+
+// Plan mode confines writes to docs/plans/*.md, so a goal could never be
+// evidenced there: a start is refused before any state exists, and a resume
+// is refused with the goal left paused — both make zero provider calls.
+func TestGoalRefusedInPlanMode(t *testing.T) {
+	t.Run("start", func(t *testing.T) {
+		s := newScript(t, textTurn("planned"))
+		a, _, _ := startTest(t, s, 40, func(o *StartOptions) { o.Plan = true })
+		_, err := a.StartGoal(context.Background(), "make it green")
+		if err == nil || !strings.Contains(err.Error(), "plan mode") {
+			t.Fatalf("StartGoal in plan mode: %v", err)
+		}
+		if g, ok := a.Goal(); ok {
+			t.Fatalf("a refused start created a goal: %+v", g)
+		}
+		if n := s.bodyCount(); n != 0 {
+			t.Fatalf("a refused start made %d requests", n)
+		}
+	})
+
+	t.Run("resume", func(t *testing.T) {
+		s := newScript(t, textTurn("worked"), textTurn("BLOCKED"))
+		a, _, _ := startTest(t, s, 40)
+		if _, err := a.StartGoal(context.Background(), "objective"); err != nil {
+			t.Fatal(err)
+		}
+		if g, _ := a.Goal(); g.Status != session.GoalPaused {
+			t.Fatalf("setup: the BLOCKED verdict must pause the goal: %+v", g)
+		}
+		a.SetPlan(true)
+		before := s.bodyCount()
+		_, err := a.ResumeGoal(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "plan mode") {
+			t.Fatalf("ResumeGoal in plan mode: %v", err)
+		}
+		if g, _ := a.Goal(); g.Status != session.GoalPaused {
+			t.Fatalf("a refused resume re-activated the goal: %+v", g)
+		}
+		if n := s.bodyCount() - before; n != 0 {
+			t.Fatalf("a refused resume made %d requests", n)
+		}
+	})
+}
+
+// A goal left active when plan mode turns on pauses before any review: the
+// round runs as an ordinary plan-mode run, and no reviewer call is spent on
+// work the confinement made impossible.
+func TestGoalPausesWhenPlanModeIsOn(t *testing.T) {
+	s := newScript(t, textTurn("looked around"), textTurn("no plan to write"))
+	a, _, _ := startTest(t, s, 40)
+	if _, err := a.setGoal("make it green"); err != nil {
+		t.Fatal(err)
+	}
+	a.SetPlan(true)
+	if _, err := a.Run(context.Background(), "look around"); err != nil {
+		t.Fatal(err)
+	}
+	g, _ := a.Goal()
+	if g.Status != session.GoalPaused || !strings.Contains(g.Reason, "plan mode") {
+		t.Fatalf("goal %+v, want a plan-mode pause", g)
+	}
+	if n := len(reviewBodies(s)); n != 0 {
+		t.Fatalf("a plan-mode round was reviewed: %d review calls", n)
+	}
+}
+
+// An answer cut off at the reviewer's ceiling is retried ONCE at a larger
+// one: a reasoning route can spend the whole budget on thinking, and a
+// systemic pause every round is worse than one bounded extra call.
+func TestGoalReviewRetriesATruncatedAnswerOnce(t *testing.T) {
+	s := newScript(t, textTurn("worked"), truncatedTurn(""), textTurn("COMPLETE"))
+	a, _, _ := startTest(t, s, 40)
+	if _, err := a.StartGoal(context.Background(), "objective"); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := a.Goal(); g.Status != session.GoalComplete {
+		t.Fatalf("the retry's verdict must complete the goal: %+v", g)
+	}
+	reviews := reviewBodies(s)
+	if len(reviews) != 2 {
+		t.Fatalf("review calls %d, want the one bounded retry", len(reviews))
+	}
+	if got := reviews[0]["max_tokens"]; got != float64(goalReviewMaxTokens) {
+		t.Fatalf("first ceiling = %v, want %d", got, goalReviewMaxTokens)
+	}
+	if got := reviews[1]["max_tokens"]; got != float64(goalReviewRetryTokens) {
+		t.Fatalf("retry ceiling = %v, want %d", got, goalReviewRetryTokens)
+	}
+	// Both calls are accounted: the spend rides the transcript per call.
+	entries, err := session.ReadFile(a.Session().Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		if e.Type == session.TypeGoalReview {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Fatalf("goal_review entries %d, want one per call", n)
+	}
+}
+
+// The reviewer's ceiling is fixed on a route that sends no reasoning and has
+// headroom where reasoning rides max_tokens (and never exceeds the model's
+// own output limit).
+func TestReviewCeilingLeavesThinkingRoom(t *testing.T) {
+	plain := provider.Model{ID: "m", MaxOutput: 100000}
+	if got := reviewCeiling(plain, llm.EffortOff); got != goalReviewMaxTokens {
+		t.Fatalf("plain ceiling = %d, want %d", got, goalReviewMaxTokens)
+	}
+	openai := provider.Model{ID: "t", MaxOutput: 100000, ThinkingMode: "openai",
+		ThinkingLevelMap: map[llm.Effort]string{llm.EffortLow: "low"}}
+	if got := reviewCeiling(openai, llm.EffortLow); got != goalReviewThinkingTokens {
+		t.Fatalf("thinking ceiling = %d, want %d", got, goalReviewThinkingTokens)
+	}
+	budget := provider.Model{ID: "b", MaxOutput: 100000, ThinkingMode: "budget",
+		ThinkingLevelMap: map[llm.Effort]string{llm.EffortMinimal: ""}}
+	if got := reviewCeiling(budget, llm.EffortMinimal); got != goalReviewThinkingTokens {
+		t.Fatalf("budget ceiling = %d, want %d", got, goalReviewThinkingTokens)
+	}
+	small := provider.Model{ID: "s", MaxOutput: 1024, ThinkingMode: "openai",
+		ThinkingLevelMap: map[llm.Effort]string{llm.EffortLow: "low"}}
+	if got := reviewCeiling(small, llm.EffortLow); got != 1024 {
+		t.Fatalf("ceiling past the model limit = %d, want 1024", got)
 	}
 }

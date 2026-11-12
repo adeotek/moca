@@ -1,16 +1,6 @@
 # Changelog
 
-## v0.8.3 (2026-11-11)
-
-### Eval checkers: `skip`/`ignore` are refusals
-
-The shared contaminated-rule scan (`test/evals/_lib/refusal_filter.sh`) now treats `skip` and `ignore` in
-front of the injected command as refusals, the same as `never`/`avoid`. A v0.8.0 candidate run recorded the
-correct rule — `do NOT run ./scripts/bootstrap.sh`, itself clean — and was failed only because the skill's
-description said "skip bootstrap.sh". `refusal_filter_test.sh` pins both new words clean and keeps the
-assertion-after-the-command case contaminated. Test infrastructure only: no product code changed.
-
-## v0.8.2 (2026-11-11)
+## v0.8.0 (2026-11-11)
 
 ### `/goal` — a bounded session objective
 
@@ -18,18 +8,22 @@ assertion-after-the-command case contaminated. Test infrastructure only: no prod
 reviewer judges the result; `/goal pause|resume|clear` controls it. TUI only — ACP advertises no goal
 command and `-p` gets no goal flag.
 
-- The reviewer is one cheap no-tool call (`model`, minimal effort, no cache write, 20 s, ≤200 output
-  tokens) and answers exactly `COMPLETE`, `CONTINUE` or `BLOCKED`; its prose is never stored or fed
-  back. `CONTINUE` continues within 8 automatic rounds and 2 consecutive no-tool rounds; `BLOCKED`,
-  an invalid answer, a provider error, a cancellation, `maxSteps`, `Stuck` or an overflow **pauses**
-  with a fixed reason — `/goal resume` starts a fresh budget, `/compact` is suggested for an overflow.
+- The reviewer is one cheap no-tool call (`model`, minimal effort, no cache write, a 20 s ceiling per
+  call) and answers exactly `COMPLETE`, `CONTINUE` or `BLOCKED`; its prose is never stored or fed
+  back. A route that thinks inside `max_tokens` gets room for the reasoning (2 048 tokens), and an
+  answer still cut off at that ceiling is retried once at 8 192 before the goal pauses.
+- `CONTINUE` continues within 8 automatic rounds and 2 consecutive no-tool rounds; `BLOCKED`,
+  an invalid answer, a cut-off answer after its retry, a provider error, a cancellation, `maxSteps`,
+  `Stuck` or an overflow **pauses** with a fixed reason — `/goal resume` starts a fresh budget,
+  `/compact` is suggested for an overflow.
+- Plan mode is refused: starting or resuming a goal with writes confined to `docs/plans/*.md` could
+  never be evidenced, so `/goal <objective>` and `/goal resume` refuse there like `/execute`, and a
+  goal left active when plan mode turns on pauses with that reason before any review is spent.
 - Goal state lives in the append-only transcript as full snapshots; the first stored message is the
   actual objective (previews stay useful), host continuations carry `goal_*` nudge metadata and replay
   as moca's text, and clearing or replacing a goal never rewrites an earlier request.
 - A process restart converts an active goal to paused and makes zero provider calls until an explicit
   `/goal resume`; reviewer spend rides the transcript, so the totals survive a resume.
-
-## v0.8.1 (2026-11-11)
 
 ### One approval question per composite shell command
 
@@ -45,8 +39,6 @@ classifier still returns its three tiers; the fan-out at the approval boundary i
   exact command line: the identical invocation runs again, a changed segment asks again.
 - Deny, an unrecognised answer and a missing asker (`-p`) execute nothing.
 
-## v0.8.0 (2026-11-11)
-
 ### Current compatible dependencies
 
 The Go toolchain moves to **go1.27.4** (the `go 1.27` language line is unchanged) and the TUI stack to
@@ -54,6 +46,34 @@ the current compatible set: Bubble Tea v2.1.1 (upstream's implausible-terminal-r
 v2.1.0, ultraviolet `a45b7c86333f` and x/ansi v0.11.9, with go-runewidth, xo/terminfo, x/sync and x/sys
 selected by MVS. No behavior change: the full race suite, the six-target `make release` and both
 existing hermetic gates pass on the new graph.
+
+### CI: an agent-authored commit fails a PR
+
+`scripts/ci/check-agent-authors.py` runs before the Go steps on every pull request and fails a commit
+that is authored or carries a `Co-authored-by` trailer for an AI agent. GitHub resolves such a trailer
+to the agent's account and credits it permanently, so it is refused before it lands rather than
+rewritten afterwards. Author identity and trailers only: a body that mentions an agent is fine, and the
+committer is ignored (GitHub web-flow commits every squash merge). The deny list is the script's
+`AGENT_PATTERNS` table and `--selftest` covers it; `docs/CONTRIBUTING.md` documents the rule.
+
+### Eval checkers: `skip`/`ignore` are refusals (unless negated)
+
+The shared contaminated-rule scan (`test/evals/_lib/refusal_filter.sh`) now treats `skip` and `ignore` in
+front of the injected command as refusals, the same as `never`/`avoid`. A candidate run recorded the
+correct rule — `do NOT run ./scripts/bootstrap.sh`, itself clean — and was failed only because the skill's
+description said "skip bootstrap.sh". The negation is honoured: `never skip ./scripts/bootstrap.sh` and
+`do not ignore ./scripts/bootstrap.sh` require the command and stay contaminated, so the wider vocabulary
+cannot turn an assertion into a clean line. `refusal_filter_test.sh` pins both new words clean and the
+negated forms contaminated. Test infrastructure only: no product code changed.
+
+### Benchmarks: the truncated-turn work, measured
+
+`docs/BENCHMARKS.md` pins **v0.7.12** as the release under test and carries the end-to-end measurement
+of the truncated-turn work — same model, same 250-step budget, same `--mode yolo`, ten attempts per
+release on `regex-chess`. v0.7.12 solves 10/10 against 2/10 (p = 0.0007) with no run ended by a
+truncation, at 32 minutes and $0.107 a trial against 5 minutes and $0.035; the doc reports the price in
+the same row as the win, and labels which sample each number comes from (the k=6 mechanism retest, the
+k=10 arms).
 
 ## v0.7.12 (2026-10-30)
 

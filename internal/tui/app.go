@@ -1448,7 +1448,7 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		}
 		return m.println("plan mode off")
 	case agent.GoalChanged:
-		return m.goalNotice(e.Goal)
+		return m.goalNotice(e)
 	}
 	return nil
 }
