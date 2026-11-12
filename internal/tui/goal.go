@@ -45,6 +45,12 @@ func (m *model) runGoal(args string) tea.Cmd {
 	if g, ok := m.agent.Goal(); ok && (g.Status == session.GoalActive || g.Status == session.GoalPaused) {
 		return m.println(fmt.Sprintf("a goal is already set (%s) — /goal pause to stop it, or /goal clear to replace it", g.Status))
 	}
+	// Plan mode confines writes to docs/plans/*.md, so a goal could never be
+	// evidenced there — the same refusal /execute makes, before any run
+	// header prints (the agent enforces it too).
+	if m.agent.Plan() {
+		return m.printlnError("error: plan mode is on (writes are confined to docs/plans/) — /plan to turn it off, then /goal")
+	}
 	a := m.agent
 	return m.startRunWith("/goal "+arg, func(ctx context.Context) (agent.Outcome, error) {
 		return a.StartGoal(ctx, arg)
@@ -69,10 +75,14 @@ func (m *model) goalPause() tea.Cmd {
 
 // goalResume re-activates a paused goal with a fresh round/stall budget and
 // starts a round — the only way goal work restarts after a pause or a
-// restart.
+// restart. Refused in plan mode (the goal could not be evidenced there),
+// leaving it paused.
 func (m *model) goalResume() tea.Cmd {
 	if cmd, refused := m.refuseRunning(); refused {
 		return cmd
+	}
+	if m.agent.Plan() {
+		return m.printlnError("error: plan mode is on (writes are confined to docs/plans/) — /plan to turn it off, then /goal resume")
 	}
 	a := m.agent
 	return m.startRunWith("/goal resume", func(ctx context.Context) (agent.Outcome, error) {
@@ -121,16 +131,17 @@ func (m *model) printGoalStatus() tea.Cmd {
 }
 
 // goalNotice renders one committed transition. The objective is sanitized
-// and cut to one line: it is user text and can be long.
-func (m *model) goalNotice(g session.Goal) tea.Cmd {
+// and cut to one line: it is user text and can be long. Prev tells a resume
+// (the budgets restarted from 0) from a fresh start.
+func (m *model) goalNotice(e agent.GoalChanged) tea.Cmd {
+	g, prev := e.Goal, e.Prev
 	switch g.Status {
 	case session.GoalActive:
-		if g.Rounds == 0 {
-			obj := []rune(strings.Join(strings.Fields(g.Objective), " "))
-			if len(obj) > goalNoticeWidth {
-				obj = append(obj[:goalNoticeWidth], '…')
-			}
-			return m.printlnContent(fmt.Sprintf("goal started: %s — bounded rounds, an evidence reviewer decides when it is complete (/goal pause|clear)", Sanitize(string(obj))))
+		switch prev {
+		case "":
+			return m.printlnContent(fmt.Sprintf("goal started: %s — bounded rounds, an evidence reviewer decides when it is complete (/goal pause|clear)", goalObjectiveLine(g.Objective)))
+		case session.GoalPaused:
+			return m.printlnContent(fmt.Sprintf("goal resumed: %s — /goal pause stops the next round", goalObjectiveLine(g.Objective)))
 		}
 		return m.printlnMuted(fmt.Sprintf("goal round %d/%d", g.Rounds, agent.GoalMaxRounds))
 	case session.GoalPaused:
@@ -144,4 +155,14 @@ func (m *model) goalNotice(g session.Goal) tea.Cmd {
 		return m.printlnMuted("goal cleared")
 	}
 	return nil
+}
+
+// goalObjectiveLine flattens an objective to one notice line: whitespace
+// collapsed, capped at goalNoticeWidth runes, control bytes sanitized.
+func goalObjectiveLine(objective string) string {
+	obj := []rune(strings.Join(strings.Fields(objective), " "))
+	if len(obj) > goalNoticeWidth {
+		obj = append(obj[:goalNoticeWidth], '…')
+	}
+	return Sanitize(string(obj))
 }

@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -32,6 +34,36 @@ func TestSelfKnowledgeReferencesAreByteIdentical(t *testing.T) {
 		}
 		if !bytes.Equal(got, src) {
 			t.Errorf("%s differs from %s (%d vs %d bytes) — re-copy the reference", c.embedded, c.source, len(got), len(src))
+		}
+	}
+}
+
+// TestSelfKnowledgeReferencesAreIndexed: a reference the skill body never
+// names is data the model will not read. The changelog sat synced but
+// unindexed from v0.7.3 (when the reference was added) to v0.8.0 — the
+// byte-identity guard above would not have caught a new orphan either. Both
+// directions: every embedded reference is named, and every name resolves.
+func TestSelfKnowledgeReferencesAreIndexed(t *testing.T) {
+	const dir = "builtin/self-knowledge/references"
+	body, err := fs.ReadFile(builtinFS, "builtin/self-knowledge/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := fs.ReadDir(builtinFS, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if !strings.Contains(string(body), "references/"+e.Name()) {
+			t.Errorf("self-knowledge/SKILL.md never names references/%s — the model is told to read the references and this one is invisible", e.Name())
+		}
+	}
+	for _, ref := range regexp.MustCompile(`references/[A-Za-z0-9._-]+`).FindAllString(string(body), -1) {
+		if _, err := fs.Stat(builtinFS, "builtin/self-knowledge/"+ref); err != nil {
+			t.Errorf("self-knowledge/SKILL.md names %s, which does not exist", ref)
 		}
 	}
 }

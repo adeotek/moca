@@ -89,9 +89,12 @@ v0.7.11 and v0.7.12 exist because of a finding from this benchmark, and both wer
 
 The two releases teach different lessons and the benchmark owns both:
 
-- **v0.7.11's mechanism claim held and its reward claim did not.** A truncation stopped being fatal
-  (6/6 runs ended by one at v0.7.10, 1/6 at v0.7.11, p = 0.015), but at k=10 the cell was 2/10 against
-  2/10 — the k=3 "one cell moved" reading was noise and was retracted rather than quietly dropped.
+- **v0.7.11's mechanism claim is a k=6 result that did not replicate.** In the two-arm retest
+  (2 cells × 3 attempts) a truncation stopped being fatal — 6/6 runs ended by one at v0.7.10, 1/6 at
+  v0.7.11, p = 0.015 — but the k=10 arms in the table, run the same day, have 8/10 runs on **both**
+  releases still ending on a truncation and the same cell solved 2/10 against 2/10 (p = 1.00). The k=3
+  "one cell moved" reading was noise and was retracted rather than quietly dropped; what the k=6 sample
+  measured, the k=10 arms do not reproduce.
 - **v0.7.12's diagnosis was the ceiling, and at k=10 that is significant** (10/10 against 2/10, p = 0.0007;
   fatal truncations 0/10 against 8/10, same p) — but the price sits in the same row. The solves cost 32
   minutes and $0.107 a trial instead of 5 minutes and $0.035, one run reached the task's 3600 s agent cap

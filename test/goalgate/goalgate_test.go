@@ -132,6 +132,7 @@ var ansi = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 type pane struct {
 	t    *testing.T
 	name string
+	id   string // the pane id: capture-pane/send-keys target THIS, never the session name
 	log  *os.File
 }
 
@@ -149,7 +150,10 @@ func requireTmux(t *testing.T) {
 }
 
 // start launches the TUI in a detached tmux session through a script (the
-// tmux server would otherwise own the environment).
+// tmux server would otherwise own the environment). The pane id is resolved
+// once and every capture/send targets it: a session-name target can resolve
+// through the window table and land on another pane under a custom tmux
+// configuration.
 func start(t *testing.T, name, work, script string) *pane {
 	t.Helper()
 	tmux(t, "kill-session", "-t", name)
@@ -158,11 +162,16 @@ func start(t *testing.T, name, work, script string) *pane {
 		t.Fatalf("tmux new-session: %v %s", err, out)
 	}
 	t.Cleanup(func() { tmux(t, "kill-session", "-t", name) })
-	return &pane{t: t, name: name}
+	out, err := exec.Command("tmux", "list-panes", "-t", name, "-F", "#{pane_id}").Output()
+	id := strings.TrimSpace(strings.Split(string(out), "\n")[0])
+	if err != nil || id == "" {
+		t.Fatalf("tmux list-panes %s: %v %s", name, err, out)
+	}
+	return &pane{t: t, name: name, id: id}
 }
 
 func (p *pane) capture() string {
-	out, _ := exec.Command("tmux", "capture-pane", "-p", "-t", p.name).Output()
+	out, _ := exec.Command("tmux", "capture-pane", "-p", "-t", p.id).Output()
 	return ansi.ReplaceAllString(string(out), "")
 }
 
@@ -180,8 +189,8 @@ func (p *pane) waitFor(want string, timeout time.Duration) string {
 
 func (p *pane) send(line string) {
 	p.t.Helper()
-	exec.Command("tmux", "send-keys", "-t", p.name, "-l", line).Run()
-	exec.Command("tmux", "send-keys", "-t", p.name, "Enter").Run()
+	exec.Command("tmux", "send-keys", "-t", p.id, "-l", line).Run()
+	exec.Command("tmux", "send-keys", "-t", p.id, "Enter").Run()
 }
 
 func (p *pane) kill() { tmux(p.t, "kill-session", "-t", p.name) }
