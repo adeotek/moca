@@ -8,7 +8,7 @@ import (
 )
 
 // rtk subcommand classes, captured from `rtk --help` and `rtk <sub> --help`
-// (rtk 1.1.0, 2026-10-27, linuxbrew install; first captured on 0.51.0,
+// (rtk 1.2.0, 2026-11-13, linuxbrew install; first captured on 0.51.0,
 // 2026-10-06), plus execution probes:
 // `rtk test echo x` and `rtk test -- echo x` both run the command directly;
 // `rtk err`, `rtk summary` and `rtk run` take the command as the first
@@ -30,6 +30,19 @@ import (
 // are likewise left out of rtkSelf so they ask instead of running silently.
 // tasks/methods are read-only today (`list` only) but stay fail-closed too: a
 // later `tasks run` would otherwise inherit rtkSelf's silence.
+//
+// The 1.2.0 re-check (2026-11-13) moved one class: `bypass` — 1.1.0's
+// `proxy`, renamed, with `proxy` kept as a deprecated alias that behaves
+// identically (`rtk bypass echo hi` and `rtk proxy echo hi` both run it) —
+// joins rtkRun. Left on the generic rule it would be classified as a command
+// named `bypass`, so an allowlist rule for the subcommand rather than for the
+// tool it wraps would launder whatever it runs. `bypass` has no
+// command-string option (`--skip-env` is its only flag and is skipped above),
+// so the string refusal does not apply to it. Everything else classifies as
+// before: the expanded proxy and runner set (cargo, npm, pip, uv, go, pytest,
+// tsc, jest, ruff, …) stays on the generic rule — the wrapped tool must be
+// allowlisted — and the configuration/authoring subcommands stay out of
+// rtkSelf.
 //
 // The analyser's contract (§7/§10): `rtk <cmd>` is unwrapped like env/time —
 // the wrapped command passes the same analysis — and rtk itself must be
@@ -61,8 +74,9 @@ var (
 
 	// rtkRun: the first positional word (or the word after `--`) is a command
 	// to execute — `rtk test go test ./...`, `rtk err npm …`, `rtk summary …`,
-	// `rtk run ./tool …`, `rtk proxy curl …`.
-	rtkRun = map[string]bool{"test": true, "err": true, "summary": true, "proxy": true, "run": true}
+	// `rtk run ./tool …`, `rtk bypass curl …` (1.2.0's rename of `proxy`,
+	// which stays as an alias).
+	rtkRun = map[string]bool{"test": true, "err": true, "summary": true, "bypass": true, "proxy": true, "run": true}
 )
 
 // rtkTarget consumes the words after `rtk` at args[i] and returns the index
@@ -108,12 +122,12 @@ func rtkSub(args []*syntax.Word, i int) (sub string, j int, err error) {
 }
 
 // rtkRunTarget finds the command word after a runner subcommand (`test`,
-// `err`, `summary`, `proxy`, `run`). rtk's value-less flags are skipped, `--`
-// ends option parsing, and a command-string option (`-c`/`--command` on run,
-// `--shell`) or an unknown option refuses the whole command — the analyser
-// cannot see inside a shell string, and guessing at an unknown option could
-// misplace the command word. self=true means nothing was left to run (rtk
-// itself errors out, e.g. "command is required").
+// `err`, `summary`, `bypass`/`proxy`, `run`). rtk's value-less flags are
+// skipped, `--` ends option parsing, and a command-string option
+// (`-c`/`--command` on run, `--shell`) or an unknown option refuses the whole
+// command — the analyser cannot see inside a shell string, and guessing at an
+// unknown option could misplace the command word. self=true means nothing was
+// left to run (rtk itself errors out, e.g. "command is required").
 func rtkRunTarget(args []*syntax.Word, i int, sub string) (int, bool, error) {
 	for j := i + 1; j < len(args); {
 		w, ok := wordLit(args[j])

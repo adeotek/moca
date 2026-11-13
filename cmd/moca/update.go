@@ -19,21 +19,32 @@ const updateAPIBaseEnv = "MOCA_UPDATE_API"
 // point the package-manager guard at a path that is not the test binary.
 var updateExe = func() (string, error) { return os.Executable() }
 
-// runUpdate implements `moca update [--check] [--force]`. It runs before the
-// config is loaded: updating the binary must not depend on a parseable config —
-// a broken config may be exactly what the update is meant to fix.
+// runUpdate implements `moca update [--check] [--force]` and its
+// `moca update skills` subcommand. It runs before the config is loaded:
+// updating the binary must not depend on a parseable config — a broken config
+// may be exactly what the update is meant to fix.
 func runUpdate(ctx context.Context, o Options, stdout, stderr io.Writer) int {
 	check, force := false, false
+	subSkills := false
 	for _, a := range o.Sub[1:] {
 		switch a {
 		case "--check":
 			check = true
 		case "--force":
 			force = true
+		case "skills":
+			subSkills = true
 		default:
-			fmt.Fprintln(stderr, "moca: usage: moca update [--check] [--force]")
+			fmt.Fprintln(stderr, "moca: usage: moca update [--check] [--force] | moca update skills [--check]")
 			return exitUsage
 		}
+	}
+	if subSkills {
+		if force {
+			fmt.Fprintln(stderr, "moca: usage: moca update skills [--check]")
+			return exitUsage
+		}
+		return runUpdateSkills(check, stdout, stderr)
 	}
 	cur, err := update.ParseVersion(config.Version)
 	if err != nil {

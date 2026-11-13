@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Seeded skills re-checked: rtk 1.2.0, graphify 0.9.108
+
+- **rtk 1.1.0 → 1.2.0 (released 2026-11-08).** 1.2.0 renames `proxy` to `bypass` — the old name stays as a deprecated alias that behaves identically — and the shell analyser puts `bypass` in the run class: `rtk bypass <cmd>` is checked as `rtk` **and** `<cmd>`, so an allowlist rule for the subcommand can no longer launder what it wraps (`TestRtkUnwrap` pins the class; no other class moved). The seeded skill teaches `rtk bypass` for raw output and names the runner proxies the CLI carries.
+- **graphify 0.9.97 → 0.9.108 (released 2026-11-12).** Re-generated upstream's `claude` bundle from 0.9.108 and diffed it against the seed: `SKILL.md` and four references moved (`extraction-spec`, `hooks`, `query`, `update`) — the bundle now reads the scan root from the trusted `graphify-out/.graphify_root` instead of substituting a path into its code blocks (a scan root with quotes or shell metacharacters can no longer be re-interpreted as code), `--force` and the "when a graph is worth building" fast path arrive, node IDs casefold Unicode before normalising, the source-read freshness check is documented, the query step gains a hub bypass check, and `--update` clears a stale partial list. The other four references are byte-identical.
+- **`moca update skills [--check]`** — startup seeding is create-only, so a seeded copy never followed a newer binary; this is the explicit refresh. A bundled file that differs is rewritten (temp sibling + rename, so a reader never sees half a file), a bundled file you deleted is restored, files you added are kept and named, and a symlinked skill is reported instead of written through. `--check` reports and writes nothing; `--force` is a usage error.
+- An existing seeded copy is still **not** refreshed on start: `~/.config/moca/skills/{rtk,graphify}/` is planted only when missing. Run `moca update skills` after upgrading to make the bundled files follow the binary, or replace the directory by hand (`graphify install --platform claude` then copy it).
+
 ## v0.8.0 (2026-11-13)
 
 ### `/goal` — a bounded session objective
