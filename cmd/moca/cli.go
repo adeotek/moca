@@ -45,6 +45,8 @@ usage:
   moca update                  replace the binary with the latest GitHub release package
     --check                    only report whether a newer release exists
     --force                    replace even a copy installed by a package manager
+  moca update skills           refresh the seeded standard skills (rtk, graphify) from the binary
+    --check                    only report what would change
   moca prune                   remove built-in skill extractions left behind by previous versions
     --dry-run                  only list what would be removed
   moca config check            validate the user config and the trusted project one

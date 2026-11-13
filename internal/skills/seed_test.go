@@ -175,3 +175,176 @@ func TestEmbeddedSeedSkills(t *testing.T) {
 		}
 	}
 }
+
+// updateFSFixture is a seed tree whose bundle moved on from the copy on disk:
+// rtk's SKILL.md and one reference changed, a reference is new, and old.md no
+// longer exists in the bundle.
+func updateFSFixture() fstest.MapFS {
+	return fstest.MapFS{
+		"seed/rtk/SKILL.md":          &fstest.MapFile{Data: []byte("v2 skill\n")},
+		"seed/rtk/references/a.md":   &fstest.MapFile{Data: []byte("ref a v2\n")},
+		"seed/rtk/references/new.md": &fstest.MapFile{Data: []byte("brand new\n")},
+	}
+}
+
+// UpdateSeedSkills is the explicit refresh behind `moca update skills`: a dry
+// run reports and writes nothing, a real run rewrites the bundled files,
+// restores a deleted one, keeps the user's own files, and the next run is a
+// no-op.
+func TestUpdateSeedSkillsRefreshesAndKeeps(t *testing.T) {
+	dir := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(dir, "rtk", filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("SKILL.md", "v1 skill\n")
+	write("references/a.md", "ref a v1\n")
+	write("references/old.md", "dropped from the bundle\n")
+	write("notes.md", "mine\n")
+
+	ups, err := updateSeedSkills(updateFSFixture(), dir, true)
+	if err != nil || len(ups) != 1 {
+		t.Fatalf("ups=%+v err=%v", ups, err)
+	}
+	up := ups[0]
+	if want := []string{"SKILL.md", "references/a.md", "references/new.md"}; !reflect.DeepEqual(up.Changed, want) {
+		t.Fatalf("changed = %v, want %v", up.Changed, want)
+	}
+	if want := []string{"notes.md", "references/old.md"}; !reflect.DeepEqual(up.Kept, want) {
+		t.Fatalf("kept = %v, want %v", up.Kept, want)
+	}
+	if up.Created || up.Skipped != "" {
+		t.Fatalf("%+v", up)
+	}
+	// A dry run writes nothing.
+	if got := readFile(t, filepath.Join(dir, "rtk", "SKILL.md")); got != "v1 skill\n" {
+		t.Fatalf("dry run wrote SKILL.md: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "rtk", "references", "new.md")); !os.IsNotExist(err) {
+		t.Fatalf("dry run created new.md: %v", err)
+	}
+
+	ups, err = updateSeedSkills(updateFSFixture(), dir, false)
+	if err != nil || len(ups) != 1 || len(ups[0].Changed) != 3 {
+		t.Fatalf("ups=%+v err=%v", ups, err)
+	}
+	if got := readFile(t, filepath.Join(dir, "rtk", "SKILL.md")); got != "v2 skill\n" {
+		t.Fatalf("SKILL.md = %q", got)
+	}
+	if got := readFile(t, filepath.Join(dir, "rtk", "references", "new.md")); got != "brand new\n" {
+		t.Fatalf("new.md = %q", got)
+	}
+	if got := readFile(t, filepath.Join(dir, "rtk", "notes.md")); got != "mine\n" {
+		t.Fatalf("user note was touched: %q", got)
+	}
+	if got := readFile(t, filepath.Join(dir, "rtk", "references", "old.md")); got != "dropped from the bundle\n" {
+		t.Fatalf("dropped reference was deleted: %q", got)
+	}
+
+	// Idempotent: the second run changes nothing and still reports the extras.
+	ups, err = updateSeedSkills(updateFSFixture(), dir, false)
+	if err != nil || len(ups) != 1 || len(ups[0].Changed) != 0 {
+		t.Fatalf("ups=%+v err=%v", ups, err)
+	}
+	if want := []string{"notes.md", "references/old.md"}; !reflect.DeepEqual(ups[0].Kept, want) {
+		t.Fatalf("kept = %v, want %v", ups[0].Kept, want)
+	}
+}
+
+// A missing skill is planted whole, same as SeedSkills would.
+func TestUpdateSeedSkillsCreatesMissing(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "skills")
+	ups, err := updateSeedSkills(updateFSFixture(), dir, false)
+	if err != nil || len(ups) != 1 || !ups[0].Created {
+		t.Fatalf("ups=%+v err=%v", ups, err)
+	}
+	if got := readFile(t, filepath.Join(dir, "rtk", "references", "new.md")); got != "brand new\n" {
+		t.Fatalf("new.md = %q", got)
+	}
+	ups, err = updateSeedSkills(updateFSFixture(), dir, false)
+	if err != nil || ups[0].Created || len(ups[0].Changed) != 0 {
+		t.Fatalf("second run: ups=%+v err=%v", ups, err)
+	}
+}
+
+// A symlink (the user's arrangement) and a plain file where the skill dir
+// should be are reported and never written through.
+func TestUpdateSeedSkillsSkipsWhatItCannotOwn(t *testing.T) {
+	dir := t.TempDir()
+	target := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "rtk"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// rtk is a symlink to a real skill elsewhere.
+	if err := os.Remove(filepath.Join(dir, "rtk")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "rtk")); err != nil {
+		t.Fatal(err)
+	}
+	// graphify is a plain file where the directory should be.
+	if err := os.WriteFile(filepath.Join(dir, "graphify"), []byte("not a skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fsys := fstest.MapFS{
+		"seed/rtk/SKILL.md":      &fstest.MapFile{Data: []byte("rtk v2\n")},
+		"seed/graphify/SKILL.md": &fstest.MapFile{Data: []byte("graphify v2\n")},
+	}
+	ups, err := updateSeedSkills(fsys, dir, false)
+	if err != nil || len(ups) != 2 {
+		t.Fatalf("ups=%+v err=%v", ups, err)
+	}
+	if ups[0].Name != "graphify" || ups[0].Skipped != "not a directory" {
+		t.Fatalf("%+v", ups[0])
+	}
+	if ups[1].Name != "rtk" || ups[1].Skipped != "symlink" {
+		t.Fatalf("%+v", ups[1])
+	}
+	if entries, _ := os.ReadDir(target); len(entries) != 0 {
+		t.Fatalf("wrote through the symlink: %v", entries)
+	}
+}
+
+// The shipped bundle round-trips: a tampered or deleted file comes back
+// byte-identical on the next UpdateSeedSkills.
+func TestUpdateSeedSkillsMirrorsTheEmbeddedBundle(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := SeedSkills(dir); err != nil {
+		t.Fatal(err)
+	}
+	skill := filepath.Join(dir, "rtk", "SKILL.md")
+	want, err := os.ReadFile(skill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skill, []byte("tampered\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := filepath.Join(dir, "graphify", "references", "query.md")
+	if err := os.Remove(ref); err != nil {
+		t.Fatal(err)
+	}
+	ups, err := UpdateSeedSkills(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var changed int
+	for _, u := range ups {
+		changed += len(u.Changed)
+	}
+	if changed != 2 {
+		t.Fatalf("changed = %d across %+v, want 2", changed, ups)
+	}
+	if got, _ := os.ReadFile(skill); string(got) != string(want) {
+		t.Fatal("SKILL.md was not restored to the embedded bytes")
+	}
+	if _, err := os.Stat(ref); err != nil {
+		t.Fatalf("deleted reference was not restored: %v", err)
+	}
+}

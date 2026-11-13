@@ -69,8 +69,9 @@ the source-read freshness check, adds a hub bypass check to the query step and
 clears a stale partial list in `--update`; the other four references are
 byte-identical) in `~/.config/moca/skills/graphify/` when
 nothing exists at that path. An existing skill — yours, or an empty directory
-kept as an opt-out — is never touched, and moca never refreshes it, so to
-pick up a newer graphify skill replace it with one of the routes below.
+kept as an opt-out — is never touched, and moca never refreshes it on its own:
+run `moca update skills` after upgrading (bundled files follow the binary, your
+own files are kept), or replace it with one of the routes below.
 
     graphify install --platform moca
 
@@ -98,12 +99,15 @@ about a repo that has `graphify-out/graph.json` can be answered with
 `rtk` and `graphify` are standard skills that moca creates, not built-ins: on
 start, for each one, if nothing exists at `~/.config/moca/skills/<name>`
 moca writes the bundled copy there, otherwise it does nothing — so edits and
-overrides survive every update. (The built-ins — `create-command`,
-`self-configure`, `self-knowledge` — are the opposite: re-extracted for each
-binary version, see SPECS §12.) Deleting a seeded skill brings it back on the
-next start; keep an empty `~/.config/moca/skills/<name>/` to opt out. A
-seeded skill is left out of the system prompt on a host where its CLI is not
-on `PATH`.
+overrides survive every update. `moca update skills [--check]` is the explicit
+refresh: bundled files that differ are rewritten (atomically, per file), a
+bundled file you deleted comes back, files you added are kept and named, and a
+symlinked skill is reported instead of written through. (The built-ins —
+`create-command`, `self-configure`, `self-knowledge` — are the opposite:
+re-extracted for each binary version, see SPECS §12.) Deleting a seeded skill
+brings it back on the next start; keep an empty `~/.config/moca/skills/<name>/`
+to opt out. A seeded skill is left out of the system prompt on a host where its
+CLI is not on `PATH`.
 
 ## Skills and prompts from other tools
 
