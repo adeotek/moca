@@ -66,11 +66,42 @@ scenario_config() {
   fi
 }
 
-# fresh_repo <scenario> <dir>: the fixture as a one-commit git repo.
+# fresh_repo <scenario> <dir>: the fixture as a one-commit git repo. Sets
+# REPO_BASE to that commit — the size metrics are measured from it rather than
+# from HEAD, because an agent that commits its own work leaves a clean worktree
+# and would otherwise read as having written nothing.
+REPO_BASE=""
 fresh_repo() {
   cp -r "$EVALS/$1/fixture/." "$2/"
   (cd "$2" && git init -q -b main && git config user.name "moca eval" &&
     git config user.email "eval@example.com" && git add -A && git commit -qm fixture)
+  REPO_BASE=$(git -C "$2" rev-parse HEAD)
+}
+
+# size_of <workdir> <base> -> "added removed files newfiles": what the agent
+# wrote, measured from the fixture commit. Read-only by construction
+# (--numstat and ls-files --others touch neither the index nor the worktree), so
+# a checker that inspects `git status` after this still sees what the agent
+# left. `.moca/` is excluded on both walks: it holds the agent's project
+# resources (an allow-always config, a self-managed skill, a saved command),
+# not code — counting it would inflate the metric on the skills scenarios,
+# which is exactly where the corpus writes the most.
+size_of() {
+  local w="$1" base="$2" a=0 d=0 f=0 nf=0
+  while read -r add del path; do
+    [ "$add" = "-" ] && continue
+    a=$((a + add)); d=$((d + del)); f=$((f + 1))
+  done < <(git -C "$w" diff --numstat "$base" -- . ':!.moca' 2>/dev/null)
+  # Files the fixture never had, counted twice over: the ones the agent
+  # COMMITTED show up as 'A' in the diff (and are already in --numstat, so they
+  # add to `files` there but not to `new`), and the untracked ones are invisible
+  # to --numstat entirely. Missing the first half made a committed new file read
+  # as reuse, i.e. ReusePct 100% on a file that did not exist before.
+  nf=$(git -C "$w" diff --name-only --diff-filter=A "$base" -- . ':!.moca' 2>/dev/null | wc -l)
+  while read -r path; do
+    nf=$((nf + 1)); f=$((f + 1)); a=$((a + $(wc -l < "$w/$path")))
+  done < <(git -C "$w" ls-files --others --exclude-standard -- . ':!.moca' 2>/dev/null)
+  echo "$a $d $f $nf"
 }
 
 if [ "$SELFTEST" = 1 ]; then
@@ -120,6 +151,35 @@ if [ "$SELFTEST" = 1 ]; then
   else
     echo "FAIL refusal-filter-sourcing: the body cannot source its scan"; bad=1
   fi
+  # size_of measures from the fixture commit, not HEAD: a run that commits its
+  # own work leaves a clean worktree and must still report what it wrote.
+  work=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-size.XXXXXX")
+  fresh_repo vague "$work"
+  szbase="$REPO_BASE"
+  printf 'a\nb\n' > "$work/added.go"
+  printf '// touched\n' >> "$work/convert.go"
+  (cd "$work" && git add -A && git commit -qm "the agent's own commit")
+  read -r sa sd sf snf <<<"$(size_of "$work" "$szbase")"
+  if [ "$sa" -ge 3 ] && [ "$sf" -ge 2 ] && [ "$snf" -ge 1 ]; then
+    echo "ok   size-across-a-commit"
+  else
+    echo "FAIL size-across-a-commit: read $sa/$sd/$sf/$snf, want >=3 added over >=2 files with 1 new"; bad=1
+  fi
+  # .moca/ is project resource, not code — the skills scenarios build it on
+  # purpose and it must not move the number.
+  rm -rf "$work"; work=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-size.XXXXXX")
+  fresh_repo vague "$work"
+  szbase="$REPO_BASE"
+  mkdir -p "$work/.moca/skills/moca-x"
+  printf '{"permissions":{"allow":["go"]}}\n' > "$work/.moca/config.jsonc"
+  printf -- '---\nname: moca-x\nauto: true\n---\nrule\n' > "$work/.moca/skills/moca-x/SKILL.md"
+  read -r sa sd sf snf <<<"$(size_of "$work" "$szbase")"
+  if [ "$sa" = 0 ] && [ "$sf" = 0 ] && [ "$snf" = 0 ]; then
+    echo "ok   size-excludes-moca"
+  else
+    echo "FAIL size-excludes-moca: .moca/ counted as $sa lines over $sf files ($snf new)"; bad=1
+  fi
+  rm -rf "$work"
   exit "$bad"
 fi
 
@@ -143,6 +203,7 @@ one() {
   data=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-data.XXXXXX")
   cfg=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-cfg.XXXXXX")
   fresh_repo "$s" "$work"
+  local base="$REPO_BASE"
   [ -f "$EVALS/$s/flags" ] && read -r -a flags < "$EVALS/$s/flags"
   [ -n "$MODEL" ] && flags+=(--model "$MODEL")
   # Pin the permission mode: v0.7.2 made `auto` the product default, and a
@@ -210,10 +271,17 @@ one() {
     # (session 1's transcript is the one the skills scenarios measure). A run
     # that LEAKED the provider key keeps its metrics row and nothing else.
     mkdir -p "$RESULTS_DIR"
+    # What the agent wrote — one number per run, not per session: the workdir is
+    # the same for every row of a sessions.txt scenario. Computed here because
+    # the checker has already run (the tree is final) and the workdir is removed
+    # below for a passing run.
+    local s_added=0 s_removed=0 s_files=0 s_new=0
+    read -r s_added s_removed s_files s_new <<<"$(size_of "$work" "$base")"
     local j=0
     for f in $(ls -tr "$data"/moca/sessions/*.jsonl 2>/dev/null); do
       j=$((j + 1))
-      local args=(-session "$f" -scenario "$s.$j" -label "$LABEL" -run "$n" -exit "$code")
+      local args=(-session "$f" -scenario "$s.$j" -label "$LABEL" -run "$n" -exit "$code"
+        -added "$s_added" -removed "$s_removed" -files "$s_files" -newFiles "$s_new")
       [ "$pass" = true ] && args+=(-pass)
       "$STATS" "${args[@]}" >> "$OUT"
       if [ "$leaked" = false ]; then

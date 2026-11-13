@@ -31,6 +31,15 @@ type ScenarioDelta struct {
 	TokensPerSolved Ratio
 	CostPerRun      Ratio
 	Steps           Ratio
+	// ChurnPerRun is lines added+removed per run, candidate / base. It is
+	// REPORTED only: the verdict switch below reads TokensPerSolved and the
+	// pass counts, so a size change can never flip a ship decision on its own.
+	// ChurnMeasured is false when the base side carries no size data (a label
+	// recorded before the fields existed, so there is nothing to divide by) —
+	// the row then prints "—" rather than a NaN, because a NaN inside this
+	// struct makes two identical Comparisons compare unequal.
+	ChurnPerRun   Ratio
+	ChurnMeasured bool
 }
 
 // Comparison is the base-vs-candidate read of two labeled result files.
@@ -42,7 +51,7 @@ type Comparison struct {
 
 type totals struct {
 	tokens, passes, runs int
-	cost, steps          float64
+	cost, steps, lines   float64
 }
 
 func (t *totals) add(m Metrics) {
@@ -53,9 +62,13 @@ func (t *totals) add(m Metrics) {
 	t.runs++
 	t.cost += m.Cost
 	t.steps += float64(m.Steps)
+	t.lines += float64(m.Churn())
 }
 
-type ratios struct{ tps, cost, steps float64 }
+type ratios struct {
+	tps, cost, steps, lines float64
+	linesSet                bool
+}
 
 // ratioOf reports candidate/base. Tokens-per-solved is the primary lever; a
 // side that solved nothing while the other solved something reads as the best
@@ -78,6 +91,13 @@ func ratioOf(b, c totals) ratios {
 	}
 	if b.steps > 0 && b.runs > 0 {
 		r.steps = (c.steps / float64(c.runs)) / (b.steps / float64(b.runs))
+	}
+	// A base that wrote nothing gives no ratio to divide by (an unmeasured
+	// side, or a row from before the size fields existed): leave the ratio
+	// unset, and the row renders "—".
+	if b.lines > 0 && b.runs > 0 {
+		r.lines = (c.lines / float64(c.runs)) / (b.lines / float64(b.runs))
+		r.linesSet = true
 	}
 	return r
 }
@@ -133,18 +153,20 @@ func Compare(base, cand []Metrics, iters int, seed int64) Comparison {
 				tc.add(m)
 			}
 			ob.tokens, ob.passes, ob.runs = ob.tokens+tb.tokens, ob.passes+tb.passes, ob.runs+tb.runs
-			ob.cost, ob.steps = ob.cost+tb.cost, ob.steps+tb.steps
+			ob.cost, ob.steps, ob.lines = ob.cost+tb.cost, ob.steps+tb.steps, ob.lines+tb.lines
 			oc.tokens, oc.passes, oc.runs = oc.tokens+tc.tokens, oc.passes+tc.passes, oc.runs+tc.runs
-			oc.cost, oc.steps = oc.cost+tc.cost, oc.steps+tc.steps
+			oc.cost, oc.steps, oc.lines = oc.cost+tc.cost, oc.steps+tc.steps, oc.lines+tc.lines
 			r := ratioOf(tb, tc)
 			deltas[n] = ScenarioDelta{Name: n, PassBase: tb.passes, PassCand: tc.passes,
 				Runs: [2]int{tb.runs, tc.runs}, TokensPerSolved: Ratio{Point: r.tps},
-				CostPerRun: Ratio{Point: r.cost}, Steps: Ratio{Point: r.steps}}
+				CostPerRun: Ratio{Point: r.cost}, Steps: Ratio{Point: r.steps},
+				ChurnPerRun: Ratio{Point: r.lines}, ChurnMeasured: r.linesSet}
 		}
 		ro := ratioOf(ob, oc)
 		return deltas, ScenarioDelta{Name: "∑ all", PassBase: ob.passes, PassCand: oc.passes,
 			Runs: [2]int{ob.runs, oc.runs}, TokensPerSolved: Ratio{Point: ro.tps},
-			CostPerRun: Ratio{Point: ro.cost}, Steps: Ratio{Point: ro.steps}}, ob, oc
+			CostPerRun: Ratio{Point: ro.cost}, Steps: Ratio{Point: ro.steps},
+			ChurnPerRun: Ratio{Point: ro.lines}, ChurnMeasured: ro.linesSet}, ob, oc
 	}
 
 	deltas, overall, _, _ := point()
@@ -185,7 +207,8 @@ func Compare(base, cand []Metrics, iters int, seed int64) Comparison {
 		}
 	}
 	tpsAcc, costAcc, stepsAcc := map[string][]float64{}, map[string][]float64{}, map[string][]float64{}
-	var oTps, oCost, oSteps []float64
+	linesAcc := map[string][]float64{}
+	var oTps, oCost, oSteps, oLines []float64
 	unusable := 0
 	for it := 0; it < iters; it++ {
 		perB, perC := map[string]totals{}, map[string]totals{}
@@ -194,15 +217,18 @@ func Compare(base, cand []Metrics, iters int, seed int64) Comparison {
 			tb, tc := resample(baseBy[n], bPass[n]), resample(candBy[n], cPass[n])
 			perB[n], perC[n] = tb, tc
 			ob2.tokens, ob2.passes, ob2.runs = ob2.tokens+tb.tokens, ob2.passes+tb.passes, ob2.runs+tb.runs
-			ob2.cost, ob2.steps = ob2.cost+tb.cost, ob2.steps+tb.steps
+			ob2.cost, ob2.steps, ob2.lines = ob2.cost+tb.cost, ob2.steps+tb.steps, ob2.lines+tb.lines
 			oc2.tokens, oc2.passes, oc2.runs = oc2.tokens+tc.tokens, oc2.passes+tc.passes, oc2.runs+tc.runs
-			oc2.cost, oc2.steps = oc2.cost+tc.cost, oc2.steps+tc.steps
+			oc2.cost, oc2.steps, oc2.lines = oc2.cost+tc.cost, oc2.steps+tc.steps, oc2.lines+tc.lines
 		}
 		for _, n := range names {
 			r := ratioOf(perB[n], perC[n])
 			pushMap(tpsAcc, n, r.tps)
 			pushMap(costAcc, n, r.cost)
 			pushMap(stepsAcc, n, r.steps)
+			if r.linesSet {
+				pushMap(linesAcc, n, r.lines)
+			}
 		}
 		ro := ratioOf(ob2, oc2)
 		if math.IsInf(ro.tps, 0) {
@@ -212,6 +238,9 @@ func Compare(base, cand []Metrics, iters int, seed int64) Comparison {
 		}
 		push(&oCost, ro.cost)
 		push(&oSteps, ro.steps)
+		if ro.linesSet {
+			push(&oLines, ro.lines)
+		}
 	}
 	ci := func(xs []float64) (float64, float64) {
 		if len(xs) == 0 {
@@ -228,11 +257,21 @@ func Compare(base, cand []Metrics, iters int, seed int64) Comparison {
 		d.TokensPerSolved.Lo, d.TokensPerSolved.Hi = ci(tpsAcc[n])
 		d.CostPerRun.Lo, d.CostPerRun.Hi = ci(costAcc[n])
 		d.Steps.Lo, d.Steps.Hi = ci(stepsAcc[n])
+		if lo, hi := ci(linesAcc[n]); math.IsNaN(lo) {
+			d.ChurnMeasured = false // a point estimate without bounds is not a report
+		} else {
+			d.ChurnPerRun.Lo, d.ChurnPerRun.Hi = lo, hi
+		}
 		deltas[n] = d
 	}
 	overall.TokensPerSolved.Lo, overall.TokensPerSolved.Hi = ci(oTps)
 	overall.CostPerRun.Lo, overall.CostPerRun.Hi = ci(oCost)
 	overall.Steps.Lo, overall.Steps.Hi = ci(oSteps)
+	if lo, hi := ci(oLines); math.IsNaN(lo) {
+		overall.ChurnMeasured = false
+	} else {
+		overall.ChurnPerRun.Lo, overall.ChurnPerRun.Hi = lo, hi
+	}
 
 	var scen []ScenarioDelta
 	for _, n := range names {
@@ -262,12 +301,16 @@ func Compare(base, cand []Metrics, iters int, seed int64) Comparison {
 // RenderComparison prints the per-scenario table and the verdict.
 func RenderComparison(c Comparison) string {
 	var sb strings.Builder
-	sb.WriteString("| scenario | passes base→cand | runs | tokens/solved [lo, hi] | cost/run [lo, hi] | steps [lo, hi] |\n")
-	sb.WriteString("|---|---|---|---|---|---|\n")
+	sb.WriteString("| scenario | passes base→cand | runs | tokens/solved [lo, hi] | cost/run [lo, hi] | steps [lo, hi] | lines/run [lo, hi] |\n")
+	sb.WriteString("|---|---|---|---|---|---|---|\n")
 	row := func(d ScenarioDelta) {
-		fmt.Fprintf(&sb, "| %s | %d→%d | %d→%d | %s | %s | %s |\n",
+		churn := "—"
+		if d.ChurnMeasured {
+			churn = d.ChurnPerRun.String()
+		}
+		fmt.Fprintf(&sb, "| %s | %d→%d | %d→%d | %s | %s | %s | %s |\n",
 			d.Name, d.PassBase, d.PassCand, d.Runs[0], d.Runs[1],
-			d.TokensPerSolved, d.CostPerRun, d.Steps)
+			d.TokensPerSolved, d.CostPerRun, d.Steps, churn)
 	}
 	for _, d := range c.Scenarios {
 		row(d)

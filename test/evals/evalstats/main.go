@@ -94,6 +94,32 @@ type Metrics struct {
 	SkillWrites       int  `json:"skillWrites,omitempty"`
 	SkillWriteRefused int  `json:"skillWriteRefused,omitempty"`
 	SkillListed       bool `json:"skillListed,omitempty"`
+
+	// Size (v0.9.0, task 1): what the agent WROTE, measured from the fixture
+	// commit to the final tree by run.sh's size_of. These are measurements —
+	// no checker reads them, so a run cannot fail for writing more code — and
+	// they are additive, so an older results row decodes to zero.
+	// Added/Removed are line counts over tracked files; Files counts files
+	// with at least one changed line; NewFiles counts files the fixture never
+	// had. `.moca/` is excluded at the source: it holds project resources
+	// (an allow-always config, a self-managed skill, a saved command), not code.
+	Added    int `json:"added,omitempty"`
+	Removed  int `json:"removed,omitempty"`
+	Files    int `json:"files,omitempty"`
+	NewFiles int `json:"newFiles,omitempty"`
+}
+
+// Churn is every line the run added or removed.
+func (m Metrics) Churn() int { return m.Added + m.Removed }
+
+// ReusePct is the share of touched files that already existed — how much of
+// the change landed in code that was already there. A run that touched nothing
+// reads 0, never NaN.
+func (m Metrics) ReusePct() float64 {
+	if m.Files <= 0 {
+		return 0
+	}
+	return 100 * float64(m.Files-m.NewFiles) / float64(m.Files)
 }
 
 // skillListedRe matches a moca-* skill line in the system prompt's listing.
@@ -385,6 +411,10 @@ func main() {
 	run := flag.Int("run", 0, "run number")
 	pass := flag.Bool("pass", false, "the scenario checker passed")
 	exit := flag.Int("exit", 0, "moca exit code")
+	added := flag.Int("added", 0, "lines the run added (run.sh size_of, .moca/ excluded)")
+	removed := flag.Int("removed", 0, "lines the run removed")
+	files := flag.Int("files", 0, "files with at least one changed line")
+	newFiles := flag.Int("newFiles", 0, "files the fixture did not have")
 	flag.Parse()
 	switch {
 	case *compare != "":
@@ -402,6 +432,7 @@ func main() {
 		}
 		m := Collect(entries)
 		m.Scenario, m.Label, m.Run, m.Pass, m.Exit = *scenario, *label, *run, *pass, *exit
+		m.Added, m.Removed, m.Files, m.NewFiles = *added, *removed, *files, *newFiles
 		b, _ := json.Marshal(m)
 		fmt.Println(string(b))
 	default:
@@ -484,17 +515,19 @@ func Summarize(rows []Metrics) string {
 		return keys[i].scenario < keys[j].scenario
 	})
 	var sb strings.Builder
-	sb.WriteString("| label | scenario | runs | pass | tokens (mean ± sd) | steps (mean ± sd) | cache eff | first-hit | breaks/run | redundant read tok | cost $ | tokens/solved | repeated fails | skill writes | skill listed |\n")
-	sb.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
+	sb.WriteString("| label | scenario | runs | pass | tokens (mean ± sd) | steps (mean ± sd) | lines (mean ± sd) | new files | cache eff | first-hit | breaks/run | redundant read tok | cost $ | tokens/solved | repeated fails | skill writes | skill listed |\n")
+	sb.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, k := range keys {
 		g := groups[k]
-		var toks, steps, firstHit []float64
-		passes, rep, breaks, redundant, skillWrites, skillListed := 0, 0, 0, 0, 0, 0
+		var toks, steps, firstHit, churn []float64
+		passes, rep, breaks, redundant, skillWrites, skillListed, newFiles := 0, 0, 0, 0, 0, 0, 0
 		cost, total, eff := 0.0, 0, 0.0
 		for _, m := range g {
 			toks = append(toks, float64(m.Tokens()))
 			steps = append(steps, float64(m.Steps))
 			firstHit = append(firstHit, float64(m.FirstCacheRead))
+			churn = append(churn, float64(m.Churn()))
+			newFiles += m.NewFiles
 			if m.Pass {
 				passes++
 			}
@@ -515,9 +548,11 @@ func Summarize(rows []Metrics) string {
 		}
 		tm, ts := meanSD(toks)
 		sm, ss := meanSD(steps)
+		cm, cs := meanSD(churn)
 		n := float64(len(g))
-		fmt.Fprintf(&sb, "| %s | %s | %d | %d/%d | %.0f ± %.0f | %.1f ± %.1f | %.2f | %.0f | %.1f | %.0f | %.4f | %s | %d | %d | %d/%d |\n",
+		fmt.Fprintf(&sb, "| %s | %s | %d | %d/%d | %.0f ± %.0f | %.1f ± %.1f | %.0f ± %.0f | %.0f | %.2f | %.0f | %.1f | %.0f | %.4f | %s | %d | %d | %d/%d |\n",
 			k.label, k.scenario, len(g), passes, len(g), tm, ts, sm, ss,
+			cm, cs, float64(newFiles)/n,
 			eff/n, median(firstHit), float64(breaks)/n, float64(redundant)/n, cost, perSolved, rep, skillWrites, skillListed, len(g))
 	}
 	return sb.String()
