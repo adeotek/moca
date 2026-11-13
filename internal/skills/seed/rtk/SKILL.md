@@ -21,6 +21,6 @@ For files use moca's read/search/ls tools — reads are windowed and tracked
 read`, …) do not count. rtk is for command output.
 
 Rules:
-- If rtk output is unusable (empty when output was expected, garbled, or contradicting the exit code), re-run as `rtk proxy <cmd>` for the raw output.
-- `rtk` is allowlisted, but so must be the command it runs: the analyser unwraps `rtk <cmd>` — `rtk proxy python x` needs `python` allowlisted. Its own read-only subcommands (`rtk read`, `rtk gain`, …) need only `rtk`; `rtk ls`/`find`/`grep`/`tree` need that tool allowlisted too, and so do the wrappers 1.1.0 added (`glab`, `aws`, `psql`, `pnpm`, `dotnet`, `oc`, `wget`, `mvn`, `gradlew`) — each asks once on a default config.
+- If rtk output is unusable (empty when output was expected, garbled, or contradicting the exit code), re-run as `rtk bypass <cmd>` (its older name `rtk proxy <cmd>` still works) for the raw output.
+- `rtk` is allowlisted, but so must be the command it runs: the analyser unwraps `rtk <cmd>` — `rtk bypass python x` needs `python` allowlisted. Its own read-only subcommands (`rtk read`, `rtk gain`, …) need only `rtk`; `rtk ls`/`find`/`grep`/`tree` need that tool allowlisted too, and so do the wrapper proxies (`glab`, `aws`, `psql`, `pnpm`, `dotnet`, `oc`, `wget`, `mvn`, `gradlew`, `cargo`, `npm`, `pip`, `uv`, `pytest`, `tsc`, `jest`, `ruff`, …) — each asks once on a default config.
 - Don't wrap commands whose full output you must parse exactly (e.g. `git diff` you will apply as a patch).

@@ -8,7 +8,7 @@ import (
 // rtk must never launder a non-allowlisted command: `rtk <cmd>` is unwrapped
 // like env/time, the wrapped name passes the same analysis, and rtk itself
 // must be allowlisted too. Subcommand classes come from the real CLI (rtk
-// 1.1.0, re-checked 2026-10-27) — see rtk.go.
+// 1.2.0, re-checked 2026-11-13) — see rtk.go.
 func TestRtkUnwrap(t *testing.T) {
 	root, _, _ := setup(t)
 	j, _ := NewJail(root, nil, nil)
@@ -32,6 +32,10 @@ func TestRtkUnwrap(t *testing.T) {
 		"rtk summary make test":          {},
 		"rtk run make build":             {},
 		"rtk proxy tee out.txt":          {},
+		"rtk bypass tee out.txt":         {}, // 1.2.0: proxy renamed; same run class
+		"rtk bypass --skip-env python x": {need: []string{"python"}},
+		"rtk bypass rm -rf build":        {every: []string{"rm"}},
+		"rtk bypass timeout 5 rm x":      {every: []string{"rm"}},
 		"rtk python x.py":                {need: []string{"python"}},
 		"rtk tsc --noEmit":               {need: []string{"tsc"}},
 		"rtk proxy python x":             {need: []string{"python"}},
@@ -64,6 +68,7 @@ func TestRtkUnwrap(t *testing.T) {
 		// classified as the tool they wrap (so the tool must be allowlisted),
 		// and the authoring subcommands as themselves — none is rtkSelf, so
 		// `pipeline add`/`plugins build` ask instead of writing silently.
+		// (1.2.0 adds `bypass` to the run class above and leaves the rest.)
 		"rtk glab mr list":           {need: []string{"glab"}},
 		"rtk aws s3 ls":              {need: []string{"aws"}},
 		"rtk psql -l":                {need: []string{"psql"}},
@@ -118,6 +123,8 @@ func TestRtkUnwrap(t *testing.T) {
 		"rtk json j.json":                     nil,
 		"rtk smart f.go":                      nil,
 		"rtk env":                             nil,
+		"rtk bypass tee out.txt":              {"tee"}, // 1.2.0 rename: the wrapped tool, not `bypass`
+		"rtk bypass git status":               nil,
 		"rtk git status | rtk find . -type f": {"find"},
 	}
 	for cmd, want := range narrowCases {
