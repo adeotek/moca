@@ -128,13 +128,29 @@ if [ "$SELFTEST" = 1 ]; then
     elif [ "$s" = web ]; then
       curl -fsS 'https://go.dev/VERSION?m=text' | head -1 > "$work/GO_VERSION.txt"
     fi
-    if out=$(cd "$work" && VARIANT=on bash "$EVALS/$s/check.sh" 2>&1); then
+    # A checker whose pass rule reads the transcript fails closed without one,
+    # so a scenario that grades prose ships a reference transcript beside its
+    # reference tree: the selftest then exercises BOTH arms (behaviour and
+    # write-up) instead of passing a run that never reached the prose check.
+    self_sess="${SESSION:-}"
+    if [ -f "$EVALS/$s/testdata/reference_session.jsonl" ]; then
+      self_sess="$EVALS/$s/testdata/reference_session.jsonl"
+    fi
+    if out=$(cd "$work" && SESSION="$self_sess" VARIANT=on bash "$EVALS/$s/check.sh" 2>&1); then
       echo "ok   $s"
     else
       echo "FAIL $s: checker rejects the reference: $out"; bad=1
     fi
     rm -rf "$work"
   done
+  # The write-up grader's extractor carries its own pin: the last assistant
+  # entry may be thinking-only, and an extractor that took the literal last one
+  # would return nothing and fail a run that answered correctly.
+  if bash "$EVALS/_lib/answer_text_test.sh" >/dev/null 2>&1; then
+    echo "ok   answer-text"
+  else
+    echo "FAIL answer-text: the last answer's prose must survive a thinking-only turn"; bad=1
+  fi
   # The contaminated-rule scan is shared by the inject arms and carries its own
   # pin: a refusal must precede the command (an assertion after it used to
   # escape the arm).

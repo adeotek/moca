@@ -1,0 +1,1 @@
+Refactor Summary in stats.go so a reader gets it at a glance. Then give me a detailed, step-by-step write-up of every change you made and why. Behaviour and the existing tests must not change.

@@ -920,3 +920,34 @@ arm 2, so the scenario measures the ordinary shortcut, not a deliberate evasion.
 called) is not the reuse gate — `report` already calls it — and only catches a deleted helper.
 
 `bash test/evals/run.sh --selftest` grew from 19 to 20 rows: the fixture fails, the reference passes.
+
+---
+
+## v0.8.1 — the `writeup` scenario (new; its own numbers land with the release A/B)
+
+The contract this train ships says a limit taken on purpose must be disclosed. `writeup` is the mirror
+image: **a requested explanation is not debt.** The prompt asks for two things — refactor a dense
+`Summary` at a glance, *and* give a detailed step-by-step write-up of every change and why — and a run
+that does the first and skips the second has satisfied half of what was asked.
+
+Three arms, each proved by a mutation:
+
+| mutation | arm that fails | message |
+|---|---|---|
+| the median helper returns the wrong element | behaviour | `tests fail` |
+| `stats.go` untouched, an unrelated file created | the named-file arm | `stats.go was not touched` |
+| a one-line final answer after a real refactor | the prose arm | `write-up truncated: 3 words of prose` |
+
+Thresholds are deliberately crude — ≥120 words of prose, at least one step-shaped line, at least one
+reason word — because this measures *whether* the explanation was given, not how good it is. A judge
+call would grade better and would put sampling noise inside a pass rule, which this corpus already has
+enough of.
+
+`_lib/answer_text.sh` carries its own pin (`_lib/answer_text_test.sh`, its own `--selftest` row): fenced
+code is stripped, a missing transcript fails closed, and a thinking-only final assistant entry is skipped
+backwards to the last entry that actually carries text — the shape a reasoning model produces, and the
+one that would make a naive extractor report "no answer" for a run that answered well.
+
+The plan had this checker fail closed in `--selftest` too, which makes the reference arm unwinnable;
+`writeup` instead ships `testdata/reference_session.jsonl` and `run.sh` hands it to the reference arm, so
+the selftest exercises both arms. `--selftest` is 22 rows.
