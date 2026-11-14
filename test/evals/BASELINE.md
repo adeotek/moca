@@ -1022,3 +1022,70 @@ Two consequences, both of which the train already felt: `vague`'s 62 % line vari
 4× the mean, which is why an n=6 sign flip was possible on the same code, and **`bugfix` is the noisier row**,
 not `vague` — nobody had said so before measuring. Any scenario above ~20 % CV needs n≥6 for a 15 % effect and
 n≥9 for 10 %; n=3 verdicts on those rows are noise regardless of how tidy the table looks.
+
+---
+
+## v0.8.1 — the release A/B: the shipped tree against `v0.8.0`
+
+Six rows fixed **in advance** (`vague bugfix feature refactor skills plan`), n=6 per arm, chosen for noise
+and for proximity to the change rather than for what looked promising: the noisiest row (`bugfix`), the row
+that already flipped sign once (`vague`), the two the prompt touches most (`feature`, `refactor`), the two
+that exercise the skill machinery (`skills`), and the plan scenario. Base is the `v0.8.0` tag binary, built
+in a worktree (`moca v0.8.0`); candidate is the release commit (`moca v0.8.0-11-g52dd753`). `review` is
+excluded from the A/B because it cannot pass on a binary that has no `review` skill — it is measured on the
+candidate alone, below.
+
+| row | passes | tokens/solved [CI] | cost [CI] | steps [CI] | lines [CI] |
+|---|---|---|---|---|---|
+| bugfix.1 | 6→6 | **0.72 [0.55, 0.98]** | 0.77 [0.61, 0.98] | 0.72 [0.57, 0.94] | 1.00 [0.74, 1.40] |
+| feature.1 | 5→6 | **0.44 [0.28, 0.86]** | 0.60 [0.43, 0.96] | 0.60 [0.42, 0.98] | 0.87 [0.71, 1.03] |
+| plan.1 | 6→6 | 1.10 [0.98, 1.24] | 1.13 [0.96, 1.33] | 1.04 [0.93, 1.16] | 0.77 [0.61, 1.00] |
+| refactor.1 | 6→6 | 1.20 [0.98, 1.48] | **1.17 [1.01, 1.36]** | 1.11 [0.94, 1.32] | 1.01 [1.00, 1.02] |
+| skills.1 | **6→5** | 1.44 [0.97, 2.06] | 1.14 [0.84, 1.53] | 1.11 [0.80, 1.48] | 1.17 [0.77, 1.71] |
+| skills.2 | **6→5** | **1.35 [1.18, 1.54]** | 1.02 [0.81, 1.25] | 1.03 [0.91, 1.18] | 1.17 [0.79, 1.69] |
+| vague.1 | 3→3 | 0.73 [0.41, 1.42] | 0.78 [0.49, 1.34] | 0.74 [0.47, 1.23] | 1.05 [0.58, 1.92] |
+| **∑** | **38→37** | **0.87 [0.72, 1.08]** | 0.88 [0.77, 1.03] | 0.85 [0.73, 1.00] | 0.95 [0.81, 1.12] |
+
+**Verdict: underpowered — the interval [0.72, 1.08] spans 1.0 — and no regression reproduces.** Nominally the
+shipped tree is 13 % cheaper per solved run; `feature` alone is 56 % cheaper and gains the run the base arm
+lost. Two rows move unfavourably with intervals clear of 1.0, and both are understood:
+
+- **`skills.2` +35 % tokens/solved [1.18, 1.54].** The three built-in skills are indexed in the system
+  prompt, and the index is paid on every request: `systemPromptTokens` went **2 381 → 2 680** (+299, +12.6 %)
+  in `skills.1` and **2 389 → 2 688** in `skills.2`. That is the permanent price of `/debt`, `/review` and
+  `/audit` for every user in every session, and it is the number to put against them the next time a
+  built-in is proposed.
+- **`refactor.1` cost +17 % [1.01, 1.36]** while its lines are flat (`1.01 [1.00, 1.02]`). The release does
+  not rewrite the refactor prompt, so this reads as the same token-cost-without-size-effect shape the ladder
+  experiment found — recorded, not explained.
+
+**The two pass losses are one failure mode, and it is a product finding.** Both are run 2, both in `skills`:
+the agent edited the skill's **description** to satisfy the write guard (`description names no command…`),
+was refused three times, and on the fourth attempt changed only the description line — leaving the stale
+rule in the body, which is the checker's `(e) the stale rule still stands`. The guard's demand is doing the
+opposite of its job in this case: it tells the model its description is wrong while the *body* is the thing
+that is wrong. Worth fixing in the guard's wording (point at the stale rule, not just the description), and
+it is a candidate for the next release rather than a blocker here: 1 run of 6 in a row whose token CV is 22 %.
+
+**Known blind spot, now measured:** the 6 200-byte ceiling in `TestBuildSystemPromptLineBudget` counts the
+template and the environment skeleton. The skill index is added at runtime and is not covered by it, so the
++299 tokens above would pass the byte test unnoticed. A pin on the index size belongs with the next
+built-in.
+
+## v0.8.1 — `review` on its own (candidate only, n=6)
+
+| row | passes | tokens/run | steps | lines | cost/run |
+|---|---|---|---|---|---|
+| review.1 | **5/6** | 28 514 ± 3 590 | 5.0 ± 0.6 | **0** | $0.0172 |
+
+Headless adoption works: five of six runs took `/review`'s shape and found at least three of the four planted
+defects, in five steps with **zero lines written** — the report-only arm held. The scenario's earlier
+"unmeasured at release time" caveat is resolved by this run.
+
+**The one failure is the arm working correctly.** Run 4 found **all four** defects — more than the 3-of-4 bar —
+but wrote its own structure: a `**Bugs (will misbehave or crash)**` group, numbered findings with inline
+code spans, and a `internal/store/store.go:93-97` locator that is not the bold `**path:lines**` title the skill
+prescribes, and no `Must fix`/`Verdict:`. It scored 0 of 3 shape markers while scoring 4 of 4 findings, so it
+fails on adoption, not on review quality. That is the discriminating case the scenario was built for: a model
+that reviews well but does not read the skill is exactly what "0/6 means nobody adopts it" was blind to, and
+5/6 with one clean rejection is a usable signal at n=6.
