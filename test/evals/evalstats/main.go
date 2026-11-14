@@ -95,7 +95,7 @@ type Metrics struct {
 	SkillWriteRefused int  `json:"skillWriteRefused,omitempty"`
 	SkillListed       bool `json:"skillListed,omitempty"`
 
-	// Size (v0.9.0, task 1): what the agent WROTE, measured from the fixture
+	// Size (v0.8.1, task 1): what the agent WROTE, measured from the fixture
 	// commit to the final tree by run.sh's size_of. These are measurements —
 	// no checker reads them, so a run cannot fail for writing more code — and
 	// they are additive, so an older results row decodes to zero.
