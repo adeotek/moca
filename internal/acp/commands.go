@@ -180,21 +180,15 @@ func splitCommand(t string) (name, args string) {
 	return name, args
 }
 
-// expand applies a leading /name the TUI's way: a template expands, a skill
-// becomes its load-and-follow message, `//` escapes; anything else is sent
+// expand applies a leading /name the TUI's way, through skills.ExpandCommand
+// so the ACP surface and `moca -p` cannot drift: a template expands, a skill
+// becomes its load-and-follow message, `//` escapes, and anything else is sent
 // as written (the model sees an unknown /word as text). The second return
 // marks a /remember expansion: it starts a run of its own (Agent.Remember),
 // which a plain string return could not (L5).
 func (s *session) expand(text string) (string, bool) {
 	t := strings.TrimSpace(text)
-	if strings.HasPrefix(t, "//") {
-		return t[1:], false
-	}
-	if !strings.HasPrefix(t, "/") {
-		return text, false
-	}
-	name, args := splitCommand(t)
-	if name == "remember" {
+	if name, args := splitCommand(t); strings.HasPrefix(t, "/") && !strings.HasPrefix(t, "//") && name == "remember" {
 		// N-10/N-17: reserved on ACP unconditionally. It used to fall through
 		// when the feature was off or no rule was typed, so a user prompt named
 		// `remember` ran instead — or the raw "/remember" went to the model.
@@ -205,18 +199,6 @@ func (s *session) expand(text string) (string, bool) {
 	s.cmdMu.Lock()
 	prompts, sk := s.prompts, s.agent.Skills()
 	s.cmdMu.Unlock()
-	for _, p := range prompts {
-		if p.Name == name {
-			return skills.ExpandPrompt(p.Body, args), false
-		}
-	}
-	for _, k := range sk {
-		if k.Auto {
-			continue
-		}
-		if k.Name == name {
-			return skills.SkillMessage(k, args), false
-		}
-	}
-	return text, false
+	out, _, _ := skills.ExpandCommand(text, prompts, sk)
+	return out, false
 }

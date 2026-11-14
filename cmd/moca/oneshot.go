@@ -15,6 +15,7 @@ import (
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
+	"github.com/adeotek/moca/internal/skills"
 )
 
 func exitFor(ctx context.Context, err error) int {
@@ -144,6 +145,24 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		return exitUsage
 	}
 	defer a.Close()
+	// -p is a headless surface: it never runs the TUI's ParseInput, so a
+	// leading /name is expanded here with the same rule ACP uses (a second
+	// copy of that rule is how the two drifted apart). Unknown words stay
+	// text — "/etc/hosts is wrong" is a message, not a typo to reject.
+	var pdirs []skills.Dir
+	if trusted {
+		pdirs = append(pdirs, skills.Dir{Path: filepath.Join(wd, ".moca", "prompts"), Source: "project"})
+	}
+	pdirs = append(pdirs, skills.Dir{Path: config.PromptsDir(), Source: "global"})
+	if msg, name, kind := skills.ExpandCommand(o.Prompt, skills.LoadPrompts(pdirs), a.Skills()); kind != "" {
+		switch kind {
+		case skills.ExpandSkill:
+			fmt.Fprintf(stderr, "note: /%s → the %s skill\n", name, name)
+		case skills.ExpandTemplate:
+			fmt.Fprintf(stderr, "note: /%s → template\n", name)
+		}
+		o.Prompt = msg
+	}
 	var out agent.Outcome
 	if o.Execute != "" {
 		out, err = a.RunPlan(ctx, o.Execute, o.Prompt)
