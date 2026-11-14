@@ -1,6 +1,6 @@
 package main
 
-// Size metrics (v0.9.0, task 1): the corpus measures what the agent wrote, not
+// Size metrics (v0.8.1, task 1): the corpus measures what the agent wrote, not
 // only what it spent. Every field here is a MEASUREMENT — no checker reads it,
 // so a round that writes more code cannot fail because of this file. The one
 // exception is the reuse percentage, which is a report too: it must read 0 on a
