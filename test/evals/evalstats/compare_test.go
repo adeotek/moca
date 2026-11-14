@@ -95,3 +95,70 @@ func TestRenderComparisonShowsVerdict(t *testing.T) {
 		}
 	}
 }
+
+// mkRun is the compact row builder the pinning tests use.
+func mkRun(scen string, tokens int) Metrics {
+	return Metrics{Scenario: scen, Pass: true, Input: tokens, Cost: float64(tokens) / 100000, Steps: 5}
+}
+
+// A tight interval pins the size: the row reports cv and the runs needed, and
+// the verdict carries no caveat.
+func TestComparePinsATightInterval(t *testing.T) {
+	base := []Metrics{mkRun("a", 1000), mkRun("a", 1010), mkRun("a", 990), mkRun("a", 1005), mkRun("a", 995), mkRun("a", 1000)}
+	cand := []Metrics{mkRun("a", 900), mkRun("a", 909), mkRun("a", 891), mkRun("a", 904), mkRun("a", 895), mkRun("a", 900)}
+	c := Compare(base, cand, 2000, 1)
+	if !c.Overall.Pinned {
+		t.Fatalf("a 10%% effect at cv %.2f must pin, got need=%d", c.Overall.CV, c.Overall.NeededN)
+	}
+	if !strings.HasPrefix(c.Verdict, "better") || strings.Contains(c.Verdict, "no size claim") {
+		t.Fatalf("verdict = %q, want an unconditional better", c.Verdict)
+	}
+	if out := RenderComparison(c); !strings.Contains(out, "| cv |") || !strings.Contains(out, "✓") {
+		t.Fatalf("the table must show cv and a pinned need:\n%s", out)
+	}
+}
+
+// The release A/B shape: a direction the interval supports and a size it does
+// not. The verdict keeps the direction and refuses the percentage.
+func TestCompareRefusesTheSizeWhenUnpinned(t *testing.T) {
+	var base, cand []Metrics
+	for _, n := range []int{1000, 1800, 2600, 3400, 900, 2000} {
+		base = append(base, mkRun("a", n))
+	}
+	for _, n := range []int{500, 900, 1300, 1700, 450, 1000} {
+		cand = append(cand, mkRun("a", n))
+	}
+	c := Compare(base, cand, 2000, 1)
+	if c.Overall.Pinned {
+		t.Fatalf("a 50%% effect at cv %.2f cannot be pinned at 6 runs", c.Overall.CV)
+	}
+	if !strings.HasPrefix(c.Verdict, "better") {
+		t.Fatalf("the direction must survive, verdict = %q", c.Verdict)
+	}
+	for _, want := range []string{"direction only, no size claim", "runs/arm would pin it"} {
+		if !strings.Contains(c.Verdict, want) {
+			t.Fatalf("verdict must refuse the size (%q missing): %s", want, c.Verdict)
+		}
+	}
+}
+
+// pinning is the arithmetic the verdict reads: n runs scale a half-width h by
+// 1/sqrt(n), so pinning an effect to ±50 % needs n*(h/(effect/2))^2.
+func TestPinningScalesWithTheInterval(t *testing.T) {
+	d := ScenarioDelta{Runs: [2]int{6, 6}}
+	d.TokensPerSolved = Ratio{Point: 0.90, Lo: 0.72, Hi: 0.98}
+	pinning(&d)
+	if d.Pinned {
+		t.Fatal("half-width 0.18 on a 0.10 effect is not pinned")
+	}
+	// 6 * (0.18/0.05)^2 = 77.76 -> 78
+	if d.NeededN != 78 {
+		t.Fatalf("needed n = %d, want 78", d.NeededN)
+	}
+	tight := ScenarioDelta{Runs: [2]int{6, 6}}
+	tight.TokensPerSolved = Ratio{Point: 0.90, Lo: 0.88, Hi: 0.92}
+	pinning(&tight)
+	if !tight.Pinned || tight.NeededN > 6 {
+		t.Fatalf("a ±0.02 interval on a 0.10 effect pins at 6 runs: pinned=%v need=%d", tight.Pinned, tight.NeededN)
+	}
+}

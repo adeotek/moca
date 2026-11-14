@@ -40,6 +40,20 @@ type ScenarioDelta struct {
 	// struct makes two identical Comparisons compare unequal.
 	ChurnPerRun   Ratio
 	ChurnMeasured bool
+	// CV is the pooled per-run spread of token volume (sd/mean over both
+	// sides): the number that says how much of this row is noise. Effect is
+	// |point-1|; NeededN is the runs per arm that would pin that effect to
+	// within a factor of two, derived from the bootstrap's own interval width
+	// (a half-width h around n runs shrinks as 1/sqrt(n), so pinning needs
+	// n*(h/(effect/2))^2). Pinned is the same statement as NeededN <= runs.
+	//
+	// Why two numbers and not one: the interval answers "which way", the
+	// pinning answers "how much". They are different claims, and conflating
+	// them is how a 13 % read at n=6 got reported as a 13 % saving.
+	CV      float64
+	Effect  float64
+	NeededN int
+	Pinned  bool
 }
 
 // Comparison is the base-vs-candidate read of two labeled result files.
@@ -105,6 +119,55 @@ func ratioOf(b, c totals) ratios {
 // minRuns is the review-pass floor: a bootstrap over fewer than three runs per
 // side cannot say anything, so the comparison refuses a verdict instead.
 const minRuns = 3
+
+// cvOf is sd/mean; NaN when there is nothing to spread.
+func cvOf(xs []float64) float64 {
+	if len(xs) < 2 {
+		return math.NaN()
+	}
+	mu, sd := meanSD(xs)
+	if mu == 0 || math.IsNaN(sd) {
+		return math.NaN()
+	}
+	return sd / mu
+}
+
+// pooledCV is the token-volume spread of both sides together: a per-row noise
+// figure that does not depend on which arm produced it.
+func pooledCV(base, cand []Metrics) float64 {
+	xs := make([]float64, 0, len(base)+len(cand))
+	for _, r := range append(append([]Metrics{}, base...), cand...) {
+		xs = append(xs, float64(r.Tokens()))
+	}
+	return cvOf(xs)
+}
+
+// pinning fills Effect, NeededN and Pinned from the bootstrap interval the row
+// already has. It adds no assumption the comparison did not make: the interval
+// width is what it is, and n runs scale it by 1/sqrt(n).
+func pinning(d *ScenarioDelta) {
+	p := d.TokensPerSolved.Point
+	if math.IsNaN(p) || math.IsInf(p, 0) || math.IsNaN(d.TokensPerSolved.Lo) {
+		return
+	}
+	d.Effect = math.Abs(p - 1)
+	hw := math.Max(d.TokensPerSolved.Hi-p, p-d.TokensPerSolved.Lo)
+	per := min(d.Runs[0], d.Runs[1])
+	if per < 1 || math.IsNaN(hw) || hw <= 0 {
+		return
+	}
+	// Pinned = the interval already puts the effect within a factor of two:
+	// half-width <= effect/2. Anything looser is a direction, not a size.
+	d.Pinned = hw <= d.Effect/2
+	if d.Effect < 0.02 {
+		return // no effect to pin: the row is at parity, not unpinned
+	}
+	n := float64(per) * math.Pow(hw/(d.Effect/2), 2)
+	if n > 9999 {
+		n = 9999
+	}
+	d.NeededN = max(minRuns, int(math.Ceil(n)))
+}
 
 // Compare bootstraps base vs candidate, stratified by scenario: within each
 // scenario the runs are resampled with replacement, for both sides
@@ -254,6 +317,7 @@ func Compare(base, cand []Metrics, iters int, seed int64) Comparison {
 	}
 	for _, n := range names {
 		d := deltas[n]
+		d.CV = pooledCV(baseBy[n], candBy[n])
 		d.TokensPerSolved.Lo, d.TokensPerSolved.Hi = ci(tpsAcc[n])
 		d.CostPerRun.Lo, d.CostPerRun.Hi = ci(costAcc[n])
 		d.Steps.Lo, d.Steps.Hi = ci(stepsAcc[n])
@@ -262,8 +326,10 @@ func Compare(base, cand []Metrics, iters int, seed int64) Comparison {
 		} else {
 			d.ChurnPerRun.Lo, d.ChurnPerRun.Hi = lo, hi
 		}
+		pinning(&d)
 		deltas[n] = d
 	}
+	overall.CV = pooledCV(base, cand)
 	overall.TokensPerSolved.Lo, overall.TokensPerSolved.Hi = ci(oTps)
 	overall.CostPerRun.Lo, overall.CostPerRun.Hi = ci(oCost)
 	overall.Steps.Lo, overall.Steps.Hi = ci(oSteps)
@@ -272,6 +338,7 @@ func Compare(base, cand []Metrics, iters int, seed int64) Comparison {
 	} else {
 		overall.ChurnPerRun.Lo, overall.ChurnPerRun.Hi = lo, hi
 	}
+	pinning(&overall)
 
 	var scen []ScenarioDelta
 	for _, n := range names {
@@ -285,6 +352,12 @@ func Compare(base, cand []Metrics, iters int, seed int64) Comparison {
 			strings.Join(thin, ", ") + "; run those scenarios at -n " + fmt.Sprint(minRuns) + " first"
 	case math.IsNaN(o.Lo) || math.IsNaN(o.Hi):
 		c.Verdict = fmt.Sprintf("underpowered — no usable resamples (%d/%d had no solved run on a side)", unusable, iters)
+	// A note on what is NOT here: an interval that sits clear of 1.00 at a
+	// small n is always tight (Hi<1.00 forces a narrow bootstrap spread,
+	// which pins the size), so there is no reachable branch where a clear
+	// interval coexists with an unpinned magnitude. The size claim is
+	// therefore refused by the annotation below, not by a verdict case: the
+	// direction can be true and the percentage still unmeasurable.
 	case o.Hi < 1.0 && overall.PassCand >= overall.PassBase-1:
 		c.Verdict = fmt.Sprintf("better — tokens/solved Hi %.2f < 1.00 with passes %d→%d", o.Hi, overall.PassBase, overall.PassCand)
 	case o.Lo > 1.05 || overall.PassCand <= overall.PassBase-2:
@@ -295,21 +368,39 @@ func Compare(base, cand []Metrics, iters int, seed int64) Comparison {
 	default:
 		c.Verdict = fmt.Sprintf("inconclusive — point %.2f, CI [%.2f, %.2f]; no material effect at this n", o.Point, o.Lo, o.Hi)
 	}
+	// A direction that stands on the interval still does not report a size
+	// unless the interval pinned one. This is the sentence the release A/B
+	// needed and did not have.
+	if !overall.Pinned && overall.NeededN > 0 && (strings.HasPrefix(c.Verdict, "better") || strings.HasPrefix(c.Verdict, "worse")) {
+		c.Verdict += fmt.Sprintf(" · direction only, no size claim: %.0f%% ±%.2f at %d runs/arm, and %d runs/arm would pin it",
+			overall.Effect*100, math.Max(overall.TokensPerSolved.Hi-o.Point, o.Point-overall.TokensPerSolved.Lo),
+			min(overall.Runs[0], overall.Runs[1]), overall.NeededN)
+	}
 	return c
 }
 
 // RenderComparison prints the per-scenario table and the verdict.
 func RenderComparison(c Comparison) string {
 	var sb strings.Builder
-	sb.WriteString("| scenario | passes base→cand | runs | tokens/solved [lo, hi] | cost/run [lo, hi] | steps [lo, hi] | lines/run [lo, hi] |\n")
-	sb.WriteString("|---|---|---|---|---|---|---|\n")
+	sb.WriteString("| scenario | passes base→cand | runs | cv | need n | tokens/solved [lo, hi] | cost/run [lo, hi] | steps [lo, hi] | lines/run [lo, hi] |\n")
+	sb.WriteString("|---|---|---|---|---|---|---|---|---|\n")
 	row := func(d ScenarioDelta) {
 		churn := "—"
 		if d.ChurnMeasured {
 			churn = d.ChurnPerRun.String()
 		}
-		fmt.Fprintf(&sb, "| %s | %d→%d | %d→%d | %s | %s | %s | %s |\n",
-			d.Name, d.PassBase, d.PassCand, d.Runs[0], d.Runs[1],
+		cv, need := "—", "—"
+		if !math.IsNaN(d.CV) {
+			cv = fmt.Sprintf("%.0f%%", d.CV*100)
+		}
+		if d.NeededN > 0 {
+			need = fmt.Sprint(d.NeededN)
+			if d.Pinned {
+				need += " ✓"
+			}
+		}
+		fmt.Fprintf(&sb, "| %s | %d→%d | %d→%d | %s | %s | %s | %s | %s | %s |\n",
+			d.Name, d.PassBase, d.PassCand, d.Runs[0], d.Runs[1], cv, need,
 			d.TokensPerSolved, d.CostPerRun, d.Steps, churn)
 	}
 	for _, d := range c.Scenarios {
