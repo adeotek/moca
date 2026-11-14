@@ -98,8 +98,16 @@ size_of() {
   # to --numstat entirely. Missing the first half made a committed new file read
   # as reuse, i.e. ReusePct 100% on a file that did not exist before.
   nf=$(git -C "$w" diff --name-only --diff-filter=A "$base" -- . ':!.moca' 2>/dev/null | wc -l)
+  # Untracked files are counted the way git counts a binary: `--no-index` against
+  # /dev/null reports '-' for a non-text file, and a bare `wc -l` used to count
+  # the newlines INSIDE a compiled binary (one `go build -o temp` read as 12 193
+  # lines of code, which is not a leaner or fatter agent). A binary still counts
+  # as a new file — it is something the run left behind — but contributes no lines.
   while read -r path; do
-    nf=$((nf + 1)); f=$((f + 1)); a=$((a + $(wc -l < "$w/$path")))
+    nf=$((nf + 1)); f=$((f + 1))
+    add=$(git -C "$w" diff --no-index --numstat /dev/null "$w/$path" 2>/dev/null | cut -f1)
+    case "$add" in ''|-) add=0 ;; esac
+    a=$((a + add))
   done < <(git -C "$w" ls-files --others --exclude-standard -- . ':!.moca' 2>/dev/null)
   echo "$a $d $f $nf"
 }
@@ -179,6 +187,25 @@ if [ "$SELFTEST" = 1 ]; then
   else
     echo "FAIL size-excludes-moca: .moca/ counted as $sa lines over $sf files ($snf new)"; bad=1
   fi
+  # A compiled binary is something the run left behind, not lines it wrote: it
+  # counts as a new file and contributes no lines. A bare `wc -l` counted the
+  # newlines inside one (`go build -o temp` read as 12 193 lines of code).
+  rm -rf "$work"; work=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-size.XXXXXX")
+  fresh_repo vague "$work"
+  szbase="$REPO_BASE"
+  head -c 4096 /dev/zero > "$work/temp"
+  # …and newlines too: a real Go binary is full of 0x0A, which is exactly why
+  # `wc -l` reported 12 193. A pin without one would pass on the broken code.
+  printf 'line\nline\nline\n' >> "$work/temp"
+  read -r sa sd sf snf <<<"$(size_of "$work" "$szbase")"
+  if [ "$sa" = 0 ] && [ "$snf" = 1 ] && [ "$sf" = 1 ]; then
+    echo "ok   size-skips-a-binary"
+  else
+    echo "FAIL size-skips-a-binary: a binary read as $sa lines over $sf files ($snf new), want 0 lines, 1 file"; bad=1
+  fi
+  # Mutation check, in place: the pre-fix line counted those newlines.
+  old=$(wc -l < "$work/temp")
+  [ "$old" = 3 ] || { echo "FAIL size-skips-a-binary: the pin's own binary has $old newlines, want 3 (it would not catch the bug)"; bad=1; }
   rm -rf "$work"
   exit "$bad"
 fi
