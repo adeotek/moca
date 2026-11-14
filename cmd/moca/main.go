@@ -105,6 +105,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.Sub[0] == "prune" {
 			return runPrune(o, stdout, stderr)
 		}
+		// `skills` lists and forks skill dirs: read-only over the skills
+		// dirs, no config and no model.
+		if o.Sub[0] == "skills" {
+			return runSkills(o.Sub[1:], stdout, stderr)
+		}
 		// `config` reads (and prints) configuration: `check` must work when
 		// the config is exactly what is broken, and `sample` needs none.
 		if o.Sub[0] == "config" {

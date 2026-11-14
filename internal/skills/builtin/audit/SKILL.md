@@ -3,6 +3,8 @@ name: audit
 description: Audit the whole repository in the same four-bullet shape — what it does, the load it expects, and the findings that matter at scale.
 argument-hint: "[path|package|focus]"
 ---
+<!-- built into moca: this copy follows the binary and an edit here does not survive an update. `moca skills fork audit` copies it into your own skills dir, where the copy shadows it. -->
+
 Audit the repository; change no code. Map before you judge: the README, the build and deploy config, the dependencies, the entry points, the test layout. State the load the project actually expects (one user on a laptop, or many processes against one database) — the README is the evidence, not your guess.
 
 Then trace the main flows end to end, and read **in full** the paths that carry user input, money, authentication, data writes, background jobs and shared state. Those are where an audit finds something a diff review cannot.

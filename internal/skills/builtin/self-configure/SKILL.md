@@ -2,6 +2,8 @@
 name: self-configure
 description: Manage moca's own configuration and installation when the user asks to change settings, modes, permission rules, models, prompts or skills — or to update the binary. Config edits need the user's approval; auth.json and the running binary are off-limits.
 ---
+<!-- built into moca: this copy follows the binary and an edit here does not survive an update. `moca skills fork self-configure` copies it into your own skills dir, where the copy shadows it. -->
+
 Changing how this moca installation behaves, at the user's request.
 
 ## What you can change

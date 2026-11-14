@@ -3,6 +3,8 @@ name: create-command
 description: Create or update a moca slash command (a saved prompt template) when the user asks for a new /command or to change an existing one.
 argument-hint: "<name> [what it should do]"
 ---
+<!-- built into moca: this copy follows the binary and an edit here does not survive an update. `moca skills fork create-command` copies it into your own skills dir, where the copy shadows it. -->
+
 Create or update a moca slash command: a saved prompt template that runs as `/<name>` in the TUI.
 
 ## Where commands live

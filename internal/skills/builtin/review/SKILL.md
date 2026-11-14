@@ -3,6 +3,8 @@ name: review
 description: Review the current changes like the senior dev who gets paged when they break — bugs, risk, scale, missing tests, speed, and what to cut.
 argument-hint: "[uncommitted|staged|branch|pr <url>|files…]"
 ---
+<!-- built into moca: this copy follows the binary and an edit here does not survive an update. `moca skills fork review` copies it into your own skills dir, where the copy shadows it. -->
+
 Review the change; change no code. The user names the target in plain words; with none, review the uncommitted change, or the last commit when the tree is clean. Get the diff with `shell` (`git diff`, `git diff --staged`, `git diff <base>...HEAD`, `git log -1 -p`).
 
 Read first, review second. For every changed function, read its callers — a change can break code it does not touch — and the tests that cover it. Read the project instructions and the README for the load the project expects (one user, or many processes).
