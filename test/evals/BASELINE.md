@@ -1089,3 +1089,41 @@ prescribes, and no `Must fix`/`Verdict:`. It scored 0 of 3 shape markers while s
 fails on adoption, not on review quality. That is the discriminating case the scenario was built for: a model
 that reviews well but does not read the skill is exactly what "0/6 means nobody adopts it" was blind to, and
 5/6 with one clean rejection is a usable signal at n=6.
+
+## v0.8.2 — marker adoption, measured with a tool instead of an eye
+
+The leanness contract asks a run to mark a deliberately accepted limit in code as
+`shortcut: <the limit>, revisit when <trigger>`, and `/debt` harvests it. Adoption was
+"measured" twice by hand before this, and both readings were wrong:
+
+- the first scan reported **0 markers in 84 transcripts** — it grepped whole session files, which
+  embed the system prompt, so it counted the *instruction* wherever it saw it and then concluded
+  the instruction was inert;
+- the corrected scan read raw JSON looking for the marker in reply text and still found nothing,
+  because the marker normally lands as a **code comment inside a `write`/`edit` payload**.
+
+`_lib/markers.sh` (pinned by `_lib/markers_test.sh`, six cases, no model) counts only what an
+assistant wrote: `tool_use` payloads plus assistant text/thinking, never the user's words and never
+the session header. It reports `markers`, `with-trigger`, `no-trigger` and the files touched.
+
+**Measured on the release A/B (84 transcripts, six scenarios, n=6 per arm):**
+
+| arm | markers | with trigger | transcripts with ≥1 |
+|---|---|---|---|
+| `v081rel-base` (v0.8.0, no contract line) | 0 | 0 | **0/42** |
+| `v081rel-cand` (v0.8.1, contract line) | 1 | 0 | **1/42** |
+
+One marker in 42 runs, and it names no trigger — the `no-trigger` case `/debt` exists to surface.
+(The earlier 3-of-45 reading came from a different, smaller sample and is superseded.)
+
+**Decision: no prompt pressure.** Adding a second instruction to raise a 1/42 rate costs every
+session of every user and buys an unmeasured maybe — the ladder experiment is the standing evidence
+for how that trade goes. The marker stays a **low-frequency, high-value** signal.
+
+**The fix went into the skill instead, where it costs nothing until invoked:** `/debt` now harvests
+the deferral words a codebase already carries (`TODO`, `FIXME`, `HACK`, `XXX`, "for now",
+"temporarily") beside the marker, tags which word matched, and files a TODO that names no limit as a
+*note* rather than debt. A ledger that only reads the marker would report a clean repo while real
+deferrals sat three lines away.
+
+Baseline for any future change: **re-run `markers.sh` over a fresh label and beat 1/42.**
