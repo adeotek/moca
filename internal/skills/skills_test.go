@@ -47,26 +47,35 @@ func TestExtractBuiltins(t *testing.T) {
 		t.Fatalf("extraction must be idempotent: %q vs %q, %v", dir, again, err)
 	}
 	got, errs := Discover([]Dir{{dir, "builtin"}})
-	if len(errs) != 0 || len(got) != 3 {
+	// The pin is by name, not by index: every new built-in used to shift
+	// got[0..2] and cost a rewrite of the assertions below. rtk and graphify
+	// are seeded standard skills, not built-ins — the built-in tree
+	// (content-hashed, rewritten with every binary) must not carry them, or a
+	// user's override would be shadowed on update.
+	want := []string{"audit", "create-command", "debt", "review", "self-configure", "self-knowledge"}
+	if len(errs) != 0 || len(got) != len(want) {
 		t.Fatalf("%+v %v", got, errs)
 	}
-	// rtk and graphify are seeded standard skills, not built-ins: the
-	// built-in tree (content-hashed, rewritten with every binary) must not
-	// carry them, or a user's override would be shadowed on update.
-	if got[0].Name != "create-command" || got[1].Name != "self-configure" || got[2].Name != "self-knowledge" {
-		t.Fatalf("builtin skill set: %+v", got)
+	byName := make(map[string]Skill, len(got))
+	for _, s := range got {
+		byName[s.Name] = s
+	}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Fatalf("builtin skill set: %+v", got)
+		}
 	}
 	// create-command ships embedded (it used to be seeded into the config
 	// dir): its frontmatter must parse — the description feeds /help and
 	// the picker, and the argument-hint survives for /help.
-	if strings.TrimSpace(got[0].Description) == "" || got[0].ArgumentHint == "" {
-		t.Fatalf("create-command frontmatter lost: %+v", got[0])
+	if strings.TrimSpace(byName["create-command"].Description) == "" || byName["create-command"].ArgumentHint == "" {
+		t.Fatalf("create-command frontmatter lost: %+v", byName["create-command"])
 	}
-	// The self-* skills carry a description too (they are the answer-the-
-	// user surfaces).
-	for _, s := range got[1:] {
-		if strings.TrimSpace(s.Description) == "" {
-			t.Fatalf("%s frontmatter lost: %+v", s.Name, s)
+	// Every built-in carries a description — it is the one line /help and the
+	// picker show, to a user deciding whether to run it.
+	for _, name := range want {
+		if strings.TrimSpace(byName[name].Description) == "" {
+			t.Fatalf("%s frontmatter lost: %+v", name, byName[name])
 		}
 	}
 }

@@ -136,6 +136,54 @@ func TestParseInputSkills(t *testing.T) {
 	}
 }
 
+// The leanness commands are skills, not built-ins. A built-in would own the
+// name for good — BuiltinCommands wins resolution before any skill is
+// consulted — so the reservation is asserted here rather than discovered by a
+// user whose /review stopped loading their own template.
+func TestLeanCommandsResolveAsSkills(t *testing.T) {
+	names := []string{"debt", "review", "audit"}
+	sk := make([]skills.Skill, 0, len(names))
+	for _, n := range names {
+		if slices.Contains(BuiltinCommands, n) {
+			t.Fatalf("/%s must not be a built-in command name", n)
+		}
+		sk = append(sk, skills.Skill{Name: n, Path: "/cfg/debt/" + n + "/SKILL.md", Description: "d-" + n})
+	}
+	for _, n := range names {
+		p, err := ParseInput("/"+n+" some args", nil, sk)
+		if err != nil || p.Kind != KindSkill || p.Name != n || p.Args != "some args" {
+			t.Fatalf("/%s must resolve to a skill, got %+v err=%v", n, p, err)
+		}
+	}
+	h := HelpText(nil, sk)
+	// The rows are column-aligned, so compare with runs of spaces folded.
+	flat := strings.Join(strings.Fields(h), " ")
+	for _, n := range names {
+		if !strings.Contains(flat, "/"+n+" d-"+n) {
+			t.Fatalf("help must list /%s under the skills heading:\n%s", n, h)
+		}
+	}
+}
+
+// A user's own <prompts dir>/review.md must still beat the built-in skill of
+// the same name: the resolution order is built-in command, prompt template,
+// skill, and shipping three new skill names must not change it.
+func TestAUserTemplateShadowsABuiltInCommandSkill(t *testing.T) {
+	names := []string{"debt", "review", "audit"}
+	var prompts []skills.Prompt
+	var sk []skills.Skill
+	for _, n := range names {
+		prompts = append(prompts, skills.Prompt{Name: n, Body: "my own " + n})
+		sk = append(sk, skills.Skill{Name: n, Path: "/cfg/builtin/" + n + "/SKILL.md"})
+	}
+	for _, n := range names {
+		p, err := ParseInput("/"+n, prompts, sk)
+		if err != nil || p.Kind != KindPrompt {
+			t.Fatalf("/%s: a user template must win over the built-in skill, got %+v err=%v", n, p, err)
+		}
+	}
+}
+
 // /help lines up descriptions in one column per block, whatever the names are
 // called: the built-ins and prompt templates share a column sized to the
 // longest of them, the skills get their own under their heading. A fixed
