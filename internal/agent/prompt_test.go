@@ -8,6 +8,19 @@ import (
 	"github.com/adeotek/moca/internal/skills"
 )
 
+func TestBuildSystemPromptLineBudget(t *testing.T) {
+	// The prompt is the cached head of every request: its size is a cost every
+	// user pays on every session. The measure is BuildSystemPrompt's own output
+	// with an empty PromptInput — the template (42 lines) plus the environment
+	// block's fixed skeleton, which is what goes on the wire and into the
+	// session. 51 is the v0.9.0 ceiling: one line of headroom over the ladder's
+	// 50. Raise it only with a measured reason, never to fit a new rule
+	// (TestBuildSystemPrompt's 60-newline cap is the older, looser guard).
+	if n := strings.Count(BuildSystemPrompt(PromptInput{}), "\n"); n > 51 {
+		t.Fatalf("core prompt built to %d lines (ceiling 51)", n)
+	}
+}
+
 func TestBuildSystemPrompt(t *testing.T) {
 	p := BuildSystemPrompt(PromptInput{
 		Workdir: "/w", OS: "Linux", Arch: "x86_64", Date: "2026-10-04", Git: "branch main, 2 uncommitted changes", Version: "0.1.0",
@@ -28,6 +41,13 @@ func TestBuildSystemPrompt(t *testing.T) {
 		"an approval step stays pending until the user actually answers it",
 		"nothing takes effect before that",
 		"a handoff (mail, queue, daemon) lands where the recipient reads it",
+		// the leanness ladder (v0.9.0): the procedure, its never-cut bound,
+		// the debt marker and the reply footer
+		"Smallest complete change first", "does it need to exist", "already in this codebase",
+		"an installed dependency, never a new one for a few lines",
+		"Never cut: trust-boundary validation", "leaves one small test",
+		"shortcut: <the limit>, revisit when <trigger>",
+		"what you skipped or did not check",
 		"a build that compiles proves nothing",
 		"Work on copies, never on the data a task hands you",
 		"An inconsistency you notice is a defect to investigate",
