@@ -892,3 +892,31 @@ So the short form is shipped for what it is — a **disclosure contract**, not a
 never-cut list stops "be minimal" being read as licence to drop validation, and the footer makes a skip
 say so. None of those three claims is "fewer lines", and this measurement does not support one. What it
 does support is that neither has a systematic cost worth reverting for.
+
+---
+
+## v0.8.1 — the `reuse` scenario (new; its own numbers land with the release A/B)
+
+No other scenario can fail a *duplicate implementation*: `refactor` starts with duplicates present and
+asks for them to be extracted, which is the opposite case. `reuse` ships a module where the helper already
+exists and is already used — `internal/human.Bytes` formats sizes, its own test pins
+`512 B` / `1.5 KiB` / `2.0 MiB`, and `report` calls it — and the task is a `--sizes` flag on `list`. The
+only lean answer is to call the helper.
+
+Three arms, and the mutations that prove each one fires:
+
+| mutation | arm that fails | message |
+|---|---|---|
+| `human.Bytes` replaced by `strconv.FormatInt(n, 10)+" B"` | 1 — the exact strings | `tiny.bin not rendered as 1.5 KiB: … 1536 B` |
+| a local formatter that reproduces the spelling (`n/1024`, `n/1048576`) | 2 — the divisor scan | `re-implemented size formatting (a 1024 divisor outside internal/human): ./cmd/inventory/main.go:75` |
+| `--sizes` dropped | 1 — the run | `--sizes fails: flag provided but not defined: -sizes` |
+
+Arm 1 pins the rendering rather than a shape: `[0-9.]+(B|KiB|MiB)` is satisfied by `1536 B`, so a
+raw-bytes formatter would pass a shape check and pass arm 2 as well (no unit string, no divisor needed).
+Arm 2 keys on the arithmetic instead of the unit strings on purpose — a help string saying "show sizes in
+KiB" must not fail an agent that reused the helper, and a duplicate formatter cannot produce IEC units
+without a 1024 divisor. Its known hole is stated in the checker: `1 << 10` or a divisor table slips past
+arm 2, so the scenario measures the ordinary shortcut, not a deliberate evasion. Arm 3 (`human.Bytes(` is
+called) is not the reuse gate — `report` already calls it — and only catches a deleted helper.
+
+`bash test/evals/run.sh --selftest` grew from 19 to 20 rows: the fixture fails, the reference passes.
