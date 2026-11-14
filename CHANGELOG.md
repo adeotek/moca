@@ -1,6 +1,79 @@
 # Changelog
 
-## Unreleased
+## v0.8.1 (2026-11-14)
+
+### The leanness contract, three commands, and a corpus that measures size
+
+A patch release: the plan proposed a minor bump on the strength of a rewritten system prompt, and that
+rewrite was measured and rejected. What ships is the disclosure contract the measurement pointed at.
+
+### The leanness contract (one prompt line)
+
+The working style now states what a shortcut must disclose, and what leanness is *not* allowed to cut.
+
+- A limit accepted on purpose gets one comment — `shortcut: <the limit>, revisit when <trigger>` — which
+  `/debt` harvests. Measured: **0 of 45** transcripts emit a marker without the instruction, **9 markers
+  across 3 of 45** with it, all as code comments in `edit`/`write` payloads; 4 of the 9 name no trigger,
+  which is the `no-trigger` case `/debt` exists to surface.
+- The never-cut floor: trust-boundary validation, error handling that prevents data loss, security,
+  accessibility, hardware calibration, anything the user asked for, and one small test for new
+  non-trivial logic. Trivial changes need none.
+- The reply's footer names what was skipped or not checked and the risk the user must know, replacing
+  "assumptions, anything left open".
+- `TestBuildSystemPromptLineBudget` now holds **two** ceilings — 51 lines and 6 200 bytes — because lines
+  are a proxy: a 200-byte line costs ten times a 20-byte one. The built prompt is 6 144 bytes.
+
+### The ordered ladder was rejected (recorded, not shipped)
+
+The plan's headline was a ladder of ever-smaller changes. Against a fresh `main` arm it held
+**65.2 vs 65.2 lines/run** on the scenario it targets (n=6) while costing **26–31 % more tokens** and
+16 % more cost, and the pass-rate delta sat inside the corpus noise floor. `test/evals/BASELINE.md`
+carries both experiments, including the first wrong verdict and its correction.
+
+### `/debt`, `/review`, `/audit` — built-in skills, not commands
+
+Six built-ins now. The three are **skills** deliberately: a reserved command name wins resolution before
+any skill, so `/review` as a command would override a user's own `review.md` template and could never be
+taken back. `TestLeanCommandsResolveAsSkills` holds the reservation and `TestAUserTemplateShadowsABuiltInCommandSkill`
+the order.
+
+- `/debt` harvests `shortcut:` markers (or a word you name) into a ledger grouped by file, tagging the
+  ones that name no trigger; report-only.
+- `/review` reads the target you name, else the uncommitted diff, else the last commit, and reads callers
+  before the diff. Findings carry a bold `file:lines` title and four bullets (`What this is`, `Problem`,
+  `Fix`, `If we skip it`), grouped `Must fix` / `Should fix` / `Nice to have`, and close with `Verdict:`,
+  `Lean: -N lines possible.` and `Not checked:`.
+- `/audit` is the same body at repository scope: map first, cap 20 findings, search the tree before
+  calling anything unused.
+- All three are TUI-only, like `/goal`: `ParseInput` never reaches `cmd/moca`, so `-p "/review"` sends the
+  literal string rather than expanding the skill.
+
+### The corpus measures what the agent wrote
+
+- **Size metrics**, stage 2: lines added and removed per run, from the fixture's own git state, in the
+  summary table and in every result row. Measurement only — no checker reads them.
+- `size_of` **stops counting a compiled binary as lines of code**: a `go build -o temp` artifact read as
+  12 193 newlines and invented `churn 2099 ± 4547`. A binary still counts as a file the run left behind,
+  and contributes zero lines. Pinned by a fixture with 4 096 NUL bytes *and* three real newlines, because
+  a pure-binary pin passes on the broken code.
+- **`reuse`** — the gate that fails a duplicate implementation: `internal/human.Bytes` already formats
+  sizes and `report` already calls it, so a `--sizes` flag on `list` is only lean if it reuses the helper.
+  The checker pins the rendering (`1.5 KiB`, `2.0 MiB`) plus the absence of an IEC divisor outside
+  `internal/human`, so a duplicate fails even when it reproduces the spelling.
+- **`writeup`** — a requested explanation is not debt: refactor a dense `Summary` *and* give a
+  step-by-step write-up. The prose must be ≥120 words, step-shaped, carry a reason, and name the functions
+  the diff introduced; the tree must show `stats.go` itself changed.
+- **`review`** — the only arm that grades a built-in skill's effect on a run: four defects planted in a
+  store package whose happy-path test is green, with the pass rule at 3 of 4 found, two of three `/review`
+  shape markers, and an untouched tree.
+- `--selftest` grew 19 → 23 rows; the twelve-to-fifteen scenario count and every checker's arms are
+  mutation-proved, which is how two of these changes were caught being wrong.
+
+### Measured noise, recorded rather than assumed
+
+Run-to-run variance on identical binaries (9–15 runs per scenario, coefficient of variation): `bugfix` is
+the noisiest row at **61 % tokens / 66 % steps**, not `vague`, whose **62 % line variance** is why an
+n=6 sign flip was possible on unchanged code. Any scenario above ~20 % CV needs n≥6 for a 15 % effect.
 
 ### Seeded skills re-checked: rtk 1.2.0, graphify 0.9.108
 
