@@ -16,7 +16,7 @@ func TestValidateRequiresTheDescriptionToNameACitedCommand(t *testing.T) {
 
 	err := ValidateSkill(autoSkillRaw("moca-x", "How the Go suite runs here",
 		"- **Strict mode**: run `make test` with CALC_STRICT=1 (×1, 2026-10-18)\n"), ctx)
-	if err == nil || !strings.Contains(err.Error(), "names no command") || !strings.Contains(err.Error(), "make test") {
+	if err == nil || !strings.Contains(err.Error(), "does not name it") || !strings.Contains(err.Error(), "make test") {
 		t.Fatalf("a description that hides the command must be refused naming it: %v", err)
 	}
 
@@ -48,7 +48,7 @@ func TestValidateRequiresTheDescriptionToNameACitedCommand(t *testing.T) {
 	ctx2.Executed = []string{"make test CALC_STRICT=1"}
 	err2 := ValidateSkill(autoSkillRaw("moca-x", "How the Go suite runs here",
 		"- **Strict mode**: run `make test` with CALC_STRICT=1 (×1, 2026-10-01)\n- **Env**: `CALC_STRICT=1` is required (×1, 2026-10-18)\n"), ctx2)
-	if err2 == nil || !strings.Contains(err2.Error(), "names no command") {
+	if err2 == nil || !strings.Contains(err2.Error(), "does not name it") {
 		t.Fatalf("a stored description that hides the command must be re-judged on a write: %v", err2)
 	}
 	if err := ValidateSkill(autoSkillRaw("moca-x", "How the Go suite runs — make test with CALC_STRICT=1",
@@ -85,4 +85,34 @@ func TestValidateStoredListsAPreReleaseDescription(t *testing.T) {
 // about the description itself.
 func autoSkillRaw(name, desc, body string) []byte {
 	return []byte("---\nname: " + name + "\ndescription: " + desc + "\nauto: true\n---\n" + body)
+}
+
+// The guard must offer both remedies, because either side can be the defect.
+// Measured on the release A/B (skills.1/skills.2 run 2, v081rel-cand): the
+// agent renamed the description three times, was refused each time, and never
+// touched the stale body rule that was actually wrong.
+func TestTheGuardNamesTheBodyRuleAsWellAsTheDescription(t *testing.T) {
+	prev := autoSkillRaw("moca-x", "How the Go suite runs here",
+		"- **Suite**: run `go test ./...` directly (×1, 2026-10-01)\n")
+	ctx := wc("moca-x")
+	ctx.Prev = prev
+
+	// The wrong guess the measurement caught: name a *different* command in the
+	// description and leave the stale body rule standing.
+	err := ValidateSkill(autoSkillRaw("moca-x", "How the suite runs — make test",
+		"- **Suite**: run `go test ./...` directly (×1, 2026-10-01)\n- **Env**: `CALC_STRICT=1` (×1, 2026-10-18)\n"), ctx)
+	if err == nil {
+		t.Fatal("naming a different command must not satisfy the guard")
+	}
+	for _, want := range []string{"`go test`", "correct that body rule"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal must name the body cite and the body fix (%q missing): %v", want, err)
+		}
+	}
+
+	// The way out: correct the body rule and name the command that replaced it.
+	if err := ValidateSkill(autoSkillRaw("moca-x", "How the suite runs — make test",
+		"- **Suite**: run `make test` (×1, 2026-10-18)\n- **Env**: `CALC_STRICT=1` (×1, 2026-10-18)\n"), ctx); err != nil {
+		t.Fatalf("a write that fixes the body and the description must land: %v", err)
+	}
 }
