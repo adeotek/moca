@@ -12,13 +12,21 @@ func TestBuildSystemPromptLineBudget(t *testing.T) {
 	// The prompt is the cached head of every request: its size is a cost every
 	// user pays on every session. The measure is BuildSystemPrompt's own output
 	// with an empty PromptInput — the template plus the environment block's
-	// fixed skeleton, which is what goes on the wire and into the session. 51 is
-	// the v0.8.1 ceiling (the leanness contract landed at 50, +1 on the
-	// never-cut bullet) and one line of headroom. Raise it only with a measured
-	// reason, never to fit a new rule; TestBuildSystemPrompt's 60-newline cap is
-	// the older, looser guard.
-	if n := strings.Count(BuildSystemPrompt(PromptInput{}), "\n"); n > 51 {
+	// fixed skeleton, which is what goes on the wire and into the session.
+	//
+	// Two ceilings, because lines are a proxy and bytes are the thing paid for:
+	// a 200-byte line and a 20-byte line cost ten times apart. 51 lines is the
+	// leanness contract's landing point (50, +1 on the never-cut bullet) plus one
+	// of headroom; 6200 bytes is the built prompt (6144) plus less than one
+	// short line, so it still refuses a new rule while tolerating a reword.
+	// Raise either only with a measured reason, never to fit a new rule;
+	// TestBuildSystemPrompt's 60-newline cap is the older, looser guard.
+	built := BuildSystemPrompt(PromptInput{})
+	if n := strings.Count(built, "\n"); n > 51 {
 		t.Fatalf("core prompt built to %d lines (ceiling 51)", n)
+	}
+	if n := len(built); n > 6200 {
+		t.Fatalf("core prompt built to %d bytes (ceiling 6200)", n)
 	}
 }
 

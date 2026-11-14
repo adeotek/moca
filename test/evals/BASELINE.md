@@ -951,3 +951,74 @@ one that would make a naive extractor report "no answer" for a run that answered
 The plan had this checker fail closed in `--selftest` too, which makes the reference arm unwinnable;
 `writeup` instead ships `testdata/reference_session.jsonl` and `run.sh` hands it to the reference arm, so
 the selftest exercises both arms. `--selftest` is 22 rows.
+
+---
+
+## v0.8.1 — hardening before the tag
+
+Four checkers were tightened and one scenario added, after the train's own lesson (a measurement-scope bug read
+as model behaviour) suggested auditing the instruments rather than trusting them.
+
+**`reuse`, arm 2 — the documented hole is closed.** It scanned for a `1024` divisor; `1 << 10` slipped past
+and is exactly what a faithful duplicate would use. The scan is now
+`\b(1024|1048576)\b|<<10\b|>>10\b`. Proof: a duplicate built on `1<<10`/`1<<20` renders `1.5 KiB` and
+`2.0 MiB` correctly — arm 1 passes — and is caught by arm 2
+(`re-implemented size formatting … ./cmd/inventory/main.go:74: if n < 1<<10 {`). A first attempt at this
+mutation was mathematically wrong and failed arm 1 instead, which proves nothing; it was rewritten until only
+the intended arm could fail.
+
+**The prompt budget now measures bytes.** Lines are a proxy: a 200-byte line and a 20-byte line cost ten times
+apart. `TestBuildSystemPromptLineBudget` keeps the 51-line ceiling and adds a 6200-byte one (the built prompt is
+6144). Proof: appending one long bullet takes it to **6297 bytes while still passing the line ceiling** — the
+byte arm fires where the line arm does not.
+
+**`writeup` grades content, not length.** ≥120 words passes on padding ("I improved readability" ×6), so the
+prose must now name the functions the diff introduced, extracted from `+func` lines of the diff itself — any
+correct refactor supplies its own list. Proof: a padded six-step answer that names nothing fails with
+`write-up never names the new function(s): average medianOf stdDev`. The same commit fixed a false negative:
+the touched-file arm diffed the worktree, so an agent that **committed** its refactor read as untouched; it now
+diffs from the root commit and passes (verified both ways).
+
+**`review` — the only arm that grades a built-in skill's effect on a run.** Slash commands are TUI-only
+(`ParseInput` never reaches `cmd/moca`), so `-p "/review"` would send the literal string to the model. The prompt
+therefore asks in words, and the shape arms measure whether the skill shaped the answer headlessly — previously
+untested beyond name resolution and help text, so the output contract could rot with the suite green.
+
+The fixture hides four defects in a store package whose own happy-path test is **green on purpose**: `Save`
+discards the write error and returns nil (silent data loss); `replace` allocates `len(tasks)-1` then loops to
+`len(tasks)` (`index out of range [1] with length 1`); `Export` defers `Close` inside a loop; `Index` assigns
+into an uninitialised map (`assignment to entry in nil map`). The last two are pinned by running them — a
+fixture whose bugs are only asserted in its own test would be a fixture nobody checked.
+
+Six arms, each proved by a mutation:
+
+| mutation | arm that fails | message |
+|---|---|---|
+| an answer finding 2 of 4 defects | findings | `review found 2 of 4 planted defects (missed: defer-in-loop nil-map)` |
+| correct prose with no structure | shape | `review did not take the /review shape (0 of 3 markers)` |
+| the agent fixes what it found | untouched tree | `the review edited the repo:` |
+| no transcript | fail closed | `no session (selftest arm)` |
+| bold locators + one group label, no verdict | none — 2 of 3 markers pass by design | — |
+| the reference transcript | none | — |
+
+Requiring 3 of 4 findings and 2 of 3 shape markers is a deliberate looseness: 4 of 4 would turn a wording
+choice into a failed run, and 1 of 3 would pass on any reply with a bold line. **The scenario's pass rate on a
+real run is unmeasured at the time of writing** — it lands with the release A/B, and a 0/6 there is a finding
+about headless skill adoption, not a regression.
+
+**Run-to-run noise, measured** (same binaries, 9–15 runs per scenario, coefficient of variation):
+
+| scenario | tokens | lines | steps | cost |
+|---|---|---|---|---|
+| bugfix | 61 % | 37 % | 66 % | 69 % |
+| vague | 36 % | **62 %** | 52 % | 62 % |
+| largefile | 29 % | 0 % | 12 % | 28 % |
+| web | 26 % | 0 % | 0 % | 25 % |
+| feature | 22 % | 16 % | 25 % | 23 % |
+| inject / skills-inject | 14–22 % | 0 % | 6–24 % | 8–25 % |
+| plan | 12 % | 13 % | 12 % | 9 % |
+
+Two consequences, both of which the train already felt: `vague`'s 62 % line variance means ±2σ spans roughly
+4× the mean, which is why an n=6 sign flip was possible on the same code, and **`bugfix` is the noisier row**,
+not `vague` — nobody had said so before measuring. Any scenario above ~20 % CV needs n≥6 for a 15 % effect and
+n≥9 for 10 %; n=3 verdicts on those rows are noise regardless of how tidy the table looks.
