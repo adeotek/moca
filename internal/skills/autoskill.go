@@ -329,7 +329,12 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 	// fixing both in one write is the way out.
 	if auto && !stored {
 		if cmd, ok := citedCommand(string(body)); ok && !namesCommand(desc, cmd) {
-			return fmt.Errorf("refused: %s's description names no command, and it is the only line the next session sees — say how this repo is checked (e.g. \"... with %s\"), or state the rule without a backticked command", name, cmd)
+			// The message has to offer both remedies. Measured on the release
+			// A/B (`skills.1`/`skills.2` run 2, v081rel-cand): the agent kept
+			// "fixing" the description — three refusals in a row — while the
+			// body's stale rule was the actual defect, and it never got out.
+			// A refusal that only asks for the command names half the fix.
+			return fmt.Errorf("refused: %s's body cites `%s` and the description does not name it — the description is the only line the next session sees. Fix whichever is wrong: if `%s` is not how this repo is checked, correct that body rule; otherwise name it in the description (e.g. \"... with %s\")", name, cmd, cmd, cmd)
 		}
 	}
 	if class, ok := newContentSecret(data, wc.Prev); ok {
