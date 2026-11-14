@@ -1,5 +1,68 @@
 # Changelog
 
+## v0.8.2 (2026-11-14)
+
+### The six built-ins become first-class: provenance, a fork, and `/name` everywhere
+
+A patch on top of v0.8.1, aimed at what the release measurement and a review pass found wrong rather than at
+new surface.
+
+### `/name` works outside the TUI
+
+`moca -p "/review src/store"` sent the literal string: the skill was in the system prompt, the model had no
+idea it was being asked to follow it, and the run looked like a bad answer instead of a missing feature. The
+expansion rule now lives in one place (`skills.ExpandCommand`) and every headless surface calls it — `-p` and
+an ACP `session/prompt` — because ACP already had its own copy and the two had already drifted. `//word`
+escapes, `/template args` expands the template, `/skill args` becomes the skill's load-and-follow message, an
+`auto` skill is never invocable by name, and an unmatched `/word` stays text: `/etc/hosts is wrong` is a
+message, not a typo the tool can correct. The TUI's own commands (`/model`, `/goal`, `/help`) act on the
+running interface and stay TUI-only.
+
+### The write guard names the body rule
+
+Three refusals in the release A/B came from one loop: the agent reworded the *description* three times and
+never touched the stale rule in the *body* the guard was complaining about. The refusal now names both halves
+— the body line that cites the command, and the description that does not — and both remedies, because the
+measurement showed the model only ever fixes what the refusal mentions.
+
+### `moca skills`, `moca skills fork`, and provenance where you look
+
+The six built-ins are not seeded files: they are extracted from the binary per content hash and follow it, so
+an edit to them is overwritten by the next update. That flexibility existed and was invisible, so:
+
+- `moca skills` lists every skill that resolves, in resolution order, with its source (project, global,
+  built-in, seeded) and a fork hint; `moca skills fork <name>` copies a built-in into your own skills dir,
+  where first-name-wins makes your copy shadow it. Never overwrites, refuses symlinks, names the skill if it
+  does not exist.
+- `/help` marks built-in commands and skills once per block instead of leaving you to guess.
+- each built-in `SKILL.md` opens with a one-line note saying the copy follows the binary and naming its fork
+  command.
+
+### Instruments, after auditing the instrument
+
+- `evalstats` separates *which way* from *how much*: every comparison now carries `cv` and `need n`, and a
+  verdict whose interval is unpinned refuses a size claim ("direction only, no size claim: 13% ±0.18 at 6
+  runs/arm, and 35 runs/arm would pin it"). The A/B that read "+13 % cheaper" at six runs per arm was exactly
+  this mistake, made by hand.
+- **The runtime skill index has its own ceiling.** The prompt's byte ceiling holds the template, and the skill
+  index is appended at runtime — which is how the three new built-ins added **+299 system-prompt tokens**
+  (2 381 → 2 680) without tripping it. `TestTheSkillIndexFitsItsBudget` pins the index at 2 150 bytes (six
+  built-ins measure 1 980) and was watched failing at 2 175 with a seventh added.
+- **Marker adoption is measured with a tool now.** `test/evals/_lib/markers.sh` counts only what an assistant
+  wrote — tool payloads plus assistant text, never the user's words and never the embedded system prompt. On
+  the release A/B: **0 of 42** transcripts before the instruction, **1 of 42** with it, that one naming no
+  trigger. The earlier 3-of-45 reading came from a smaller sample and is superseded. No new prompt pressure
+  was added for a 1-in-42 rate; `/debt` instead harvests the `TODO`/`FIXME`/`HACK` deferrals a repository
+  already carries, beside the marker, so a clean-looking ledger is not a lie of omission.
+
+### Where the `refactor` cost went
+
+The release A/B's one unexplained row (`refactor`, +17 % tokens with lines flat at `1.01 [1.00, 1.02]`) is
+diagnosed in `BASELINE.md`: tool calls per run are unchanged (8.83 → 9.00) and output per step is flat, so the
+delta is **per-step cost** — the +299-token index charged on every request, plus two of six runs emitting a
+narration line that pays a full context resend for nothing. Nothing in the working style reshapes refactors;
+the lever is the index, and the ceiling above is what holds it.
+
 ## v0.8.1 (2026-11-14)
 
 ### The leanness contract, three commands, and a corpus that measures size

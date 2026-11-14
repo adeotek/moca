@@ -44,6 +44,8 @@ Re-running is safe — an existing installation is updated in place, never an er
 moca update           # replace the binary with the latest release package for this platform
 moca update --check   # only report whether a newer release exists
 moca update skills    # refresh the seeded rtk/graphify skills from this binary (--check: report only)
+moca skills           # list every skill that resolves, and where each one came from
+moca skills fork review   # copy a built-in skill into your own dir, where your copy wins
 ```
 
 `moca update` verifies the package against the release's `checksums.txt` when published, then swaps the binary in place (atomic) — your config, credentials and sessions are never touched, and a running session keeps working (the new version starts on the next launch).
@@ -267,10 +269,49 @@ Prompt templates (`~/.config/moca/prompts/<name>.md` becomes `/name`) and skills
 
 ## Extend
 
-- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged, and every skill you add is invokable from the TUI as `/name` unless it is an agent-recorded `auto` note (the `/` picker tags skills `skill:`). moca ships six built-in skills that update with the binary: `create-command`, `self-knowledge` (answers questions about moca itself from embedded copies of these docs), `self-configure` (edits your config, commands and skills when you ask — config writes raise the approval prompt, and `auth.json` stays out of reach), and `debt`, `review` and `audit` — harvest every `shortcut:` marker into a debt ledger, or review a change (or the whole repo) for bugs, risk, scale and missing tests, all report-only and all shaped as the same four-bullet finding. Each of the six is invokable as `/name` and none of them reserves the name: your own `review.md` template still wins. It also plants two standard skills, `rtk` and `graphify`, in `~/.config/moca/skills/` on start when they are missing — they are yours from then on: edit or replace them (moca never rewrites an existing one), or keep an empty `~/.config/moca/skills/<name>/` to opt out; `moca update skills` is the on-demand refresh (bundled files follow the binary, files you added are kept). A seeded skill is hidden from the model on a host where its CLI is not installed. See [docs/specs/external-tools.md](docs/specs/external-tools.md).
+- **Skills** — `SKILL.md` directories in `~/.config/moca/skills/` (global) or `<repo>/.moca/skills/` (trusted projects). Any skill written for pi, Claude Code or OpenCode loads unchanged, and every skill you add is invokable from the TUI as `/name` unless it is an agent-recorded `auto` note (the `/` picker tags skills `skill:`). moca ships six built-in skills that update with the binary: `create-command`, `self-knowledge` (answers questions about moca itself from embedded copies of these docs), `self-configure` (edits your config, commands and skills when you ask — config writes raise the approval prompt, and `auth.json` stays out of reach), and `debt`, `review` and `audit` — the report-only trio ([below](#review-audit-and-debt--the-three-leanness-skills)). Each of the six is invokable as `/name` and none of them reserves the name: your own `review.md` template still wins. It also plants two standard skills, `rtk` and `graphify`, in `~/.config/moca/skills/` on start when they are missing — they are yours from then on: edit or replace them (moca never rewrites an existing one), or keep an empty `~/.config/moca/skills/<name>/` to opt out; `moca update skills` is the on-demand refresh (bundled files follow the binary, files you added are kept). A seeded skill is hidden from the model on a host where its CLI is not installed. See [docs/specs/external-tools.md](docs/specs/external-tools.md).
 - **MCP** — `mcp.servers` in the config (stdio + streamable HTTP), plus `mcp.servers` in a trusted project's `.moca/config.jsonc` and the project's own Claude Code / OpenCode / Pi files (`.mcp.json`, `opencode.json[c]`, `.pi/mcp.json`) — a project server starts only while that workdir is trusted, your config wins a name both define, and a duplicate warns with both file paths. Lazy by design: one fixed ~200-token `mcp` proxy tool, server tool lists never enter the prompt, servers start on first use and stop when idle. `moca mcp import` imports Claude Code / OpenCode / Pi server configs; `moca mcp index` prebuilds the discovery index from the CLI.
 - **Project instructions** — `AGENTS.md` / `CLAUDE.md`, loaded only in trusted projects (`--approve`).
 - **External tools** — `rtk` (token-compressed CLI output) and `graphify` (codebase knowledge graph) are allowlisted, and a skill teaching each is seeded into your skills dir on start (see Skills above). See [docs/specs/external-tools.md](docs/specs/external-tools.md).
+
+### Review, audit and debt — the three leanness skills
+
+Three built-in skills that only ever report, and the tooling half of the leanness contract: the agent marks
+what it deliberately deferred, and these turn the marks into something with an owner.
+
+| | target | what you get |
+|---|---|---|
+| **`/review`** | a change | the diff **and its callers**: bugs, risk, scale, risky logic without a test, speed, lean |
+| **`/audit`** | the repository | map first (README, build and deploy config, entry points, tests), then the same findings at repo scale, capped at 20 |
+| **`/debt`** | the deferrals | `shortcut:` markers **and** the `TODO`/`FIXME`/`HACK` a codebase already carries, as a ledger with a trigger per row |
+
+`/review src/store` reviews that path; a bare `/review` takes the uncommitted change, or the last commit when
+the tree is clean. `/audit` takes a path, a package or a focus. `/debt` takes the one word to harvest.
+
+**One finding shape, on purpose.** A review that reads like an essay does not get acted on, and a finding
+without a fix is a complaint. Every finding in all three is a bold `**path:lines**` title and exactly four
+bullets — `What this is` · `Problem` · `Fix` · `If we skip it` — grouped `Must fix` / `Should fix` /
+`Nice to have`, most important first. `/review` opens with what the change does and the load it assumed and
+closes with `Verdict:`; `/audit` opens with what the repo does and the flows it traced; `/debt` closes with
+`N markers, M without a trigger.`
+
+**Report-only is the feature.** None of them edits a file or runs anything that mutates: a review that fixes
+its own findings is unfalsifiable, and a ledger the agent tidies up is not a ledger. They also refuse to
+invent — `/review` re-reads the lines before writing a finding, `/audit` searches the whole tree and says
+what it searched before calling anything dead, `/debt` never invents a trigger for a marker that names none.
+A `shortcut:` comment that names its limit is a decision, not a finding.
+
+**Where the markers come from.** The working style asks the agent to leave `shortcut: <the limit>, revisit when
+<trigger>` in the code it wrote; `/debt` harvests those. The rate is low — measured, 1 run of 42 emitted one,
+and it named no trigger — so `/debt` also reads the deferral words a repository already carries instead of
+pretending the marker is a census.
+
+**Headless too.** Since v0.8.2 `moca -p "/review src/store"` and an ACP `session/prompt` expand `/name` the
+way the TUI does — one rule (`skills.ExpandCommand`), not a second copy that drifts.
+
+**Make one yours.** `moca skills` lists every skill with where it came from. `moca skills fork review` copies a
+built-in into `~/.config/moca/skills/review/`, and your copy shadows the built-in from then on — the three are
+tuned against the eval corpus, so a fork is how you keep your own shape while the binary keeps moving.
 
 ### Self-managed skills
 

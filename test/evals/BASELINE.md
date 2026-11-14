@@ -1055,9 +1055,8 @@ lost. Two rows move unfavourably with intervals clear of 1.0, and both are under
   in `skills.1` and **2 389 → 2 688** in `skills.2`. That is the permanent price of `/debt`, `/review` and
   `/audit` for every user in every session, and it is the number to put against them the next time a
   built-in is proposed.
-- **`refactor.1` cost +17 % [1.01, 1.36]** while its lines are flat (`1.01 [1.00, 1.02]`). The release does
-  not rewrite the refactor prompt, so this reads as the same token-cost-without-size-effect shape the ladder
-  experiment found — recorded, not explained.
+- **`refactor.1` cost +17 % [1.01, 1.36]** while its lines are flat (`1.01 [1.00, 1.02]`) — diagnosed
+  below: it is per-step cost, not more work.
 
 **The two pass losses are one failure mode, and it is a product finding.** Both are run 2, both in `skills`:
 the agent edited the skill's **description** to satisfy the write guard (`description names no command…`),
@@ -1127,3 +1126,27 @@ the deferral words a codebase already carries (`TODO`, `FIXME`, `HACK`, `XXX`, "
 deferrals sat three lines away.
 
 Baseline for any future change: **re-run `markers.sh` over a fresh label and beat 1/42.**
+
+### A3 — the `refactor` +17 % is per-step cost, and two runs narrating
+
+The row moved without changing what the runs did: tool calls per run 8.83 → 9.00 (the same `edit`/`read`/
+`shell` mix), output tokens per step 108 → 101, lines written 52 → 53. What moved is the **cost of a step**
+and, slightly, how many steps there are:
+
+| measure | base | candidate |
+|---|---|---|
+| steps/run | 7.5 | 8.3 |
+| (input + cache-read) per step | 5 029 | 5 484 |
+| assistant text messages/run | 1.00 | 1.33 |
+
+- **Per-step cost (+455 tokens)** is the built-in skill index measured in the v0.8.1 A/B: +299 system-prompt
+  tokens charged on *every* request, plus slightly larger tool results. 299 × 8.3 ≈ 2.5 k of the row's
+  +7.8 k delta.
+- **The extra steps are narration turns**, in 2 of 6 runs: `"Extracting:"` and `"order.go no longer uses
+  \`strings\`:"` — a one-line text message before the final tool call, which still pays a full context resend
+  (~4.3 k) and buys nothing. Base runs in this fixture never narrated.
+
+So the row is not evidence that the contract reshapes refactors — it is the index's per-request price plus a
+model habit that costs a full step when it fires. The lever, if this is worth one, is the index (a smaller
+description per built-in), not the working style. Anything that *removes* a built-in shrinks this row; nothing
+in the prompt does.
