@@ -850,6 +850,63 @@ write guard (teach the negation-first form), as SPECS §15 already files it.
 
 ---
 
+## v0.8.1 — the leanness ladder (measured 2026-11-14, **negative, not shipped**)
+
+The plan's task 2 replaced the working-style bullet "Keep changes minimal and in the style of the
+surrounding code" with an ordered ladder (does it need to exist → already here → stdlib or platform →
+installed dependency → one readable line → the minimum that works) plus a never-cut bound and the
+`shortcut:` marker. It was measured before merging and **it buys nothing and costs a quarter more
+tokens**: the amount of code it writes is unchanged, the deliberation before writing it is not.
+
+Labels `v090b-base` (a fresh `origin/main` worktree, `594dd10`) → `v090b-ladder` (the branch head), n=3,
+the full default scenario list, 39 rows each, same model and corpus config:
+
+| metric | base | ladder | delta |
+|---|---|---|---|
+| passes | 35/39 | 37/39 | +2 (one row: `vague` 0/3 → 1/3) |
+| tokens / run | 47 530 ± 18 668 | 59 899 ± 41 584 | **+26 %** |
+| steps / run | 9.1 ± 3.6 | 10.5 ± 5.4 | +15 % |
+| lines / run | 20 ± 27 | 21 ± 28 | +6 % total churn (788 → 838) |
+| cost / run | $0.1262 | $0.1468 | +16 % |
+
+**The size effect dissolves on inspection; the token cost does not.** Per scenario at n=3 the movement is
+not uniform: `feature` 81.7 → 70.0 (−14 %), `refactor` 54 → 53, `skills-inject-output` 3.3 → 3.0, four
+scenarios unchanged, `plan` 29 → 32, three `skills` rows +1 each, `vague` 57.3 → 80.7 — and an earlier
+draft of this section said "nothing got smaller", which was simply wrong. Every one of those cells is n=3
+and inside this corpus's documented noise floor, so the focused n=6 re-run is the read that counts — and
+there the scenario the ladder *exists for* comes out **exactly even**:
+
+| `vague`, n=6 | base | ladder |
+|---|---|---|
+| lines / run | 65.2 (15, 25, 141, 58, 15, 137) | 65.2 (69, 55, 26, 71, 105) |
+| tokens / run | 76 128 | **99 848 (+31 %)** |
+| passes | 2/6 | 4/6 |
+
+(The ladder's list drops one run of 12 266 lines — a `go build -o temp` artifact the first cut of the
+metric counted as code; `fix:evals` `594dd10` fixed that, see the instrument note below.)
+
+Read: **rejected.** The ladder does not change how much code the agent writes — identical on its own
+target scenario at n=6, and the aggregate +6 % is spread across twelve moving cells — while it raises
+tokens by 26–31 % and cost by 16 %, and it would spend one prefix-cache reset for every existing user to
+do it. The pass-rate delta is inside the noise floor and cannot carry it either way.
+
+The n=6 focused re-run agrees on outcomes and contradicts nothing: `skills-inject` 6/6 → 6/6, and
+`vague`'s 2/6 → 4/6 sits inside the corpus's documented noise floor (which read an *identical*
+configuration as 1.12 [0.94, 1.32]).
+
+The ladder is kept for the record, not merged. What is *not* rejected by this measurement: the never-cut
+bound and the `shortcut:` marker, which were bundled into the same edit and therefore cannot be separated
+from this result — testing them alone needs its own arm (a short bullet, no ladder enumeration), and that
+is the next experiment if the idea is revisited.
+
+**Instrument note.** The first cut of this measurement was wrong for a different reason: the size metric
+counted a compiled `go build -o temp` artifact as 12 193 lines of code (`wc -l` on a binary), which made
+`vague` read 2 099 ± 4 547 lines. `fix:evals` (`594dd10`) taught `size_of` to let git call a file binary
+and re-measured; the table above is the clean pair. Both arms in the rejected run used the corrected
+metric.
+
+---
+
 ## v0.8.1 — the leanness contract without the ladder (measured 2026-11-14, **shipped as a contract, not a size win**)
 
 After the ladder was rejected above, the same idea was measured in its short form: keep the existing
