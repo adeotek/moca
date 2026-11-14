@@ -3,6 +3,8 @@ name: debt
 description: Harvest every `shortcut:` comment into a debt ledger, so a deferred limit cannot rot into "later means never".
 argument-hint: "[marker|word]  the deferral word to look for (default: shortcut)"
 ---
+<!-- built into moca: this copy follows the binary and an edit here does not survive an update. `moca skills fork debt` copies it into your own skills dir, where the copy shadows it. -->
+
 Report only. Change no code, write no file, run nothing that mutates.
 
 1. Harvest. Search the whole tree for `shortcut:` (the user may name another word — any deferral marker of the same shape counts). Use the search tool, not a shell grep, so the hits are windowed and tracked. Skip hits that are not deferrals — a keyboard-shortcut note, a doc quoting the syntax.

@@ -216,8 +216,18 @@ func renderHelp(prompts []skills.Prompt, sk []skills.Skill, cmdStyle func(string
 			sw = max(sw, lipgloss.Width(k.Name))
 		}
 		sb.WriteString("skills (invoke with /name — the agent loads and follows them):\n")
+		builtins := 0
 		for _, k := range listedSkills {
 			row(sw, "/"+k.Name, k.Description)
+			if k.Source == "builtin" {
+				builtins++
+			}
+		}
+		// Provenance, once per block rather than per row: a built-in follows
+		// the binary, so an edit to its file does not survive an update. The
+		// fork command is the way to own one, and /help is where a user looks.
+		if builtins > 0 {
+			sb.WriteString("  built-in skills follow the binary — `moca skills fork <name>` copies one into your own skills dir\n")
 		}
 	}
 	if len(autoNames) > 0 {

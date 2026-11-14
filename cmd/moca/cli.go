@@ -47,6 +47,8 @@ usage:
     --force                    replace even a copy installed by a package manager
   moca update skills           refresh the seeded standard skills (rtk, graphify) from the binary
     --check                    only report what would change
+  moca skills                  list the skills discovery loads, in resolution order (project, global, built-in)
+  moca skills fork <name>      copy a built-in skill into your own skills dir, to customise it
   moca prune                   remove built-in skill extractions left behind by previous versions
     --dry-run                  only list what would be removed
   moca config check            validate the user config and the trusted project one
@@ -198,7 +200,7 @@ func parseArgs(args []string, stdin io.Reader) (Options, error) {
 		return o, usageError{errors.New("--resume and --continue are mutually exclusive")}
 	}
 	o.Sub = fs.Args()
-	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp" || o.Sub[0] == "update" || o.Sub[0] == "acp" || o.Sub[0] == "prune" || o.Sub[0] == "config") {
+	if len(o.Sub) > 0 && !(o.Sub[0] == "login" || o.Sub[0] == "logout" || o.Sub[0] == "mcp" || o.Sub[0] == "update" || o.Sub[0] == "skills" || o.Sub[0] == "acp" || o.Sub[0] == "prune" || o.Sub[0] == "config") {
 		return o, usageError{fmt.Errorf("unknown command %q", o.Sub[0])}
 	}
 	return o, nil
