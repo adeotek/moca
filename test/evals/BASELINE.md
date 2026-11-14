@@ -847,3 +847,48 @@ Read: **no prompt-attributable change**; the n=3 "worse" is the checker's docume
 one volatile row. The release proceeds on this arm. The false positive stays open by design — loosening
 the scan to honour a negation anywhere in the clause re-opens the `v0.7.2` escape; the fix belongs in the
 write guard (teach the negation-first form), as SPECS §15 already files it.
+
+---
+
+## v0.8.1 — the leanness contract without the ladder (measured 2026-11-14, **shipped as a contract, not a size win**)
+
+After the ladder was rejected above, the same idea was measured in its short form: keep the existing
+"minimal change" bullet, add only the never-cut bound, the `shortcut: <the limit>, revisit when
+<trigger>` marker and the reply footer that names what was skipped — **+1 line**, no ladder enumeration.
+
+`v081-base` (fresh `origin/main` worktree, `594dd10`) → `v081-short` (the branch head), n=3, full default
+corpus, 39 rows each:
+
+| metric | base | short | delta |
+|---|---|---|---|
+| passes | 36/39 | 36/39 | — |
+| tokens / run | 60 177 | 53 462 | −11 % |
+| steps / run | 10.7 | 9.8 | −8 % |
+| lines / run | 21 | 20 | −5 % |
+| cost / run | $0.1542 | $0.1449 | −6 % |
+
+`-compare`: tokens/solved 0.89 [0.72, 1.10], cost/run 0.94 [0.81, 1.09], steps 0.91 [0.79, 1.05], lines
+0.98 [0.85, 1.12] — every interval spans 1.0, and the tool's own verdict is **underpowered**. One row
+moved: `vague` 1/3 → 0/3.
+
+**The n=6 re-run of that row reverses the sign**, which is the finding:
+
+| `vague`, n=6 | base | short |
+|---|---|---|
+| passes | 2/6 | **4/6** |
+| tokens / run | 39 741 | 87 371 (**2.2×**) |
+| lines / run | 23 | 79 (**3.4×**) |
+| tokens / solved run | 119 223 | 131 057 (+10 %) |
+
+Read: **inconclusive on cost, and not a size play.** The n=3 aggregate points slightly cheaper; the one
+scenario with six samples under it shows the opposite — two more passes bought with more than twice the
+tokens and three times the code, i.e. `vague` rewards doing more, so the contract neither saves nor clearly
+costs. The `vague` row also moved by ~2× between measurement rounds on the *same* binary (76 128 tokens
+and 65 lines earlier in this file, 39 741 and 23 here), which is the noise floor that makes a 39-row n=3
+aggregate unable to settle a 5–11 % effect.
+
+So the short form is shipped for what it is — a **disclosure contract**, not a leanness metric: the
+`shortcut:` marker is the input `/debt` harvests (a deferral that is invisible is one that rots), the
+never-cut list stops "be minimal" being read as licence to drop validation, and the footer makes a skip
+say so. None of those three claims is "fewer lines", and this measurement does not support one. What it
+does support is that neither has a systematic cost worth reverting for.
