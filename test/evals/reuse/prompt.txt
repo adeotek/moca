@@ -1,0 +1,1 @@
+Add a --sizes flag to the inventory command's list subcommand: for each entry it prints, show the size as a human-readable KiB/MiB value beside the name.
