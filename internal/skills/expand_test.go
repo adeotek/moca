@@ -1,13 +1,15 @@
 package skills
 
 import (
-	"strings"
 	"testing"
 )
 
 func expandFixture() ([]Prompt, []Skill) {
 	return []Prompt{
 			{Name: "ship", Body: "Release it. Notes: $ARGUMENTS", Description: "release"},
+			// A user template of the same name must never shadow the reserved
+			// command: /remember is the user's rule, not a template (§3).
+			{Name: "remember", Body: "TEMPLATE BODY $ARGUMENTS", Description: "a trap"},
 		},
 		[]Skill{
 			{Name: "review", Description: "read a target", Path: "/x/review/SKILL.md", Source: "builtin"},
@@ -26,6 +28,13 @@ func TestExpandCommand(t *testing.T) {
 		{"/review", "Load and follow the review skill (/x/review/SKILL.md).", ExpandSkill, "review"},
 		{"/ship 1.2.0", "Release it. Notes: 1.2.0", ExpandTemplate, "ship"},
 		{"/ship", "Release it. Notes: ", ExpandTemplate, "ship"},
+		// A user template of that name must not shadow the reserved command:
+		// expansion reports the kind and hands the rule to Agent.Remember.
+		{"/remember fix the build", "/remember fix the build", ExpandRemember, "remember"},
+		// Whitespace after the name is any whitespace on every surface: a tab
+		// used to expand on ACP only, and never for a skill (§3).
+		{"/review	src/store", "Load and follow the review skill (/x/review/SKILL.md) for this request: src/store", ExpandSkill, "review"},
+		{"/ship	1.2.0", "Release it. Notes: 1.2.0", ExpandTemplate, "ship"},
 		// An auto skill is not a command: it rides the artifacts (§12).
 		{"/moca-testing", "/moca-testing", ExpandNone, ""},
 		// A message that starts with a path is prose, not a typo.
@@ -47,7 +56,7 @@ func TestExpandCommand(t *testing.T) {
 // The escape names the word it unescaped, so a caller can log it.
 func TestExpandCommandEscapeReportsTheWord(t *testing.T) {
 	_, name, kind := ExpandCommand("//remember this", nil, nil)
-	if kind != ExpandEscape || name != "remember" || !strings.HasPrefix(name, "remember") {
+	if kind != ExpandEscape || name != "remember" {
 		t.Fatalf("escape = (%q, %q), want the escaped word", name, kind)
 	}
 }

@@ -6,9 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/adeotek/moca/internal/config"
 )
 
 // `moca -p` never runs the TUI's ParseInput, so a leading /name used to reach
@@ -55,6 +59,47 @@ func TestPExpandsASkillCommand(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "note: /review → the review skill") {
 		t.Fatalf("stderr must say what expanded:\n%s", errb.String())
+	}
+}
+
+// `/remember` is reserved on `-p` too: a user template named remember.md must
+// never run instead. The refusal the reserved command produces is the proof —
+// with self-managed skills off, Agent.Remember refuses before any request.
+func TestPReservesRememberOverAUserTemplate(t *testing.T) {
+	isolate(t)
+	pdir := config.PromptsDir()
+	if err := os.MkdirAll(pdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pdir, "remember.md"), []byte("TEMPLATE BODY $ARGUMENTS\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	called := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called++
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"+
+			"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	cfg := writeCfg(t, `{"model":"loc/m","providers":{"loc":{"baseUrl":"`+srv.URL+`","protocol":"openai-completions",`+
+		`"auth":"api_key","apiKey":"env:MOCA_T_REMEMBER_KEY","models":{"m":{"contextWindow":32768}}}}}`)
+	t.Setenv("MOCA_T_REMEMBER_KEY", "k")
+
+	var out, errb bytes.Buffer
+	code := run(context.Background(), []string{"--config", cfg, "-p", "/remember fix the build"}, nil, &out, &errb)
+	if code == 0 {
+		t.Fatalf("a /remember with self-managed skills off must refuse, got exit 0\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "TEMPLATE BODY") || strings.Contains(errb.String(), "note: /remember → template") {
+		t.Fatalf("a user template named remember shadowed the reserved command:\n%s\n%s", out.String(), errb.String())
+	}
+	if !strings.Contains(errb.String(), "/remember") {
+		t.Fatalf("the refusal must name /remember: %s", errb.String())
+	}
+	if called != 0 {
+		t.Fatalf("the reserved command must not run a model turn when it refuses; provider called %d times", called)
 	}
 }
 

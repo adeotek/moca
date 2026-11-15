@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -72,7 +73,10 @@ var (
 	// mirrored in the guard): the same shape list the eval checkers score, so
 	// the guard and the corpus agree on what counts as a command claim.
 	commandTokenRe = regexp.MustCompile("`([^`]+)`")
-	cmdHeadRe      = regexp.MustCompile(`^(\./|make |go |pytest|npm |cargo |dotnet |bash |sh |docker |python3? |node |yarn |pnpm |mvn |gradle )`)
+	// The single-word heads carry a word boundary: without it `pytest` also
+	// matched `pytests`, so a plural in a rule made the guard treat prose as a
+	// command citation (and a description saying "run pytests" satisfied it).
+	cmdHeadRe = regexp.MustCompile(`^(\./|make |go |pytest\b|npm |cargo |dotnet |bash |sh |docker |python3? |node |yarn |pnpm |mvn |gradle )`)
 	// An ASCII x is accepted for × — weaker models type it, and refusing
 	// over the glyph teaches nothing.
 	provRe = regexp.MustCompile(`\(([×x][0-9]+|user), ([0-9]{4}-[0-9]{2}-[0-9]{2})\)\s*$`)
@@ -328,13 +332,30 @@ func validate(data []byte, wc WriteContext, stored bool) error {
 	// that keeps a description that hides the body's command is refused, and
 	// fixing both in one write is the way out.
 	if auto && !stored {
-		if cmd, ok := citedCommand(string(body)); ok && !namesCommand(desc, cmd) {
-			// The message has to offer both remedies. Measured on the release
-			// A/B (`skills.1`/`skills.2` run 2, v081rel-cand): the agent kept
-			// "fixing" the description — three refusals in a row — while the
-			// body's stale rule was the actual defect, and it never got out.
-			// A refusal that only asks for the command names half the fix.
-			return fmt.Errorf("refused: %s's body cites `%s` and the description does not name it — the description is the only line the next session sees. Fix whichever is wrong: if `%s` is not how this repo is checked, correct that body rule; otherwise name it in the description (e.g. \"... with %s\")", name, cmd, cmd, cmd)
+		if cmds := citedCommands(string(body)); len(cmds) > 0 {
+			named := false
+			for _, c := range cmds {
+				if namesCommand(desc, c) {
+					named = true
+					break
+				}
+			}
+			if !named {
+				// The message has to offer both remedies. Measured on the release
+				// A/B (`skills.1`/`skills.2` run 2, v081rel-cand): the agent kept
+				// "fixing" the description — three refusals in a row — while the
+				// body's stale rule was the actual defect, and it never got out.
+				// A refusal that only asks for the command names half the fix.
+				// Every citation is quoted: a body that names two commands and a
+				// description that names one of them is fine, and an example in a
+				// fence or a comment never counts at all (§12.1).
+				quoted := "`" + strings.Join(cmds, "`, `") + "`"
+				why := "does not name it"
+				if len(cmds) > 1 {
+					why = "names none of them"
+				}
+				return fmt.Errorf("refused: %s's body cites %s and the description %s — the description is the only line the next session sees. Fix whichever is wrong: if %s is not how this repo is checked, correct that body rule; otherwise name it in the description (e.g. \"... with %s\")", name, quoted, why, cmds[0], cmds[0])
+			}
 		}
 	}
 	if class, ok := newContentSecret(data, wc.Prev); ok {
@@ -581,12 +602,44 @@ func provAttempt(text string) (string, bool) {
 	return "", false
 }
 
-// citedCommand returns the first command-shaped backticked token in body,
-// reduced to the first two words — the form a description is expected to name
-// (`make test`, `go test`, `./scripts/bootstrap.sh`), and the same pair the
-// eval corpus compares (SPECS §15 clause (b)).
-func citedCommand(body string) (string, bool) {
-	for _, m := range commandTokenRe.FindAllStringSubmatch(body, -1) {
+// maskExamples blanks HTML comments and the backslash of an escaped backtick,
+// in place: the result has the same length as the input, so a caller's byte
+// offsets (negation order, the text-in-line lookup) stay valid.
+func maskExamples(text string) string {
+	b := []byte(text)
+	for i := 0; i+1 < len(b); i++ {
+		if b[i] == '\\' && b[i+1] == '`' {
+			b[i] = ' '
+		}
+	}
+	for {
+		i := bytes.Index(b, []byte("<!--"))
+		if i < 0 {
+			break
+		}
+		j := bytes.Index(b[i+4:], []byte("-->"))
+		end := len(b)
+		if j >= 0 {
+			end = i + 4 + j + 3
+		}
+		for k := i; k < end; k++ {
+			b[k] = ' '
+		}
+	}
+	return string(b)
+}
+
+// citedCommands returns every command-shaped backticked token in body, in
+// order, reduced to the first two words — the form a description is expected
+// to name (`make test`, `go test`, `./scripts/bootstrap.sh`), and the same
+// pair the eval corpus compares (SPECS §15 clause (b)). Fenced code blocks and
+// HTML comments are examples, not citations, and a backslash-escaped backtick
+// is prose the author wrote on purpose: neither may hijack which command the
+// guard checks.
+func citedCommands(body string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range commandTokenRe.FindAllStringSubmatch(proseWithoutCode(body), -1) {
 		f := strings.Fields(m[1])
 		if len(f) == 0 || !cmdHeadRe.MatchString(strings.Join(f, " ")) {
 			continue
@@ -594,9 +647,60 @@ func citedCommand(body string) (string, bool) {
 		if len(f) > 2 {
 			f = f[:2]
 		}
-		return strings.Join(f, " "), true
+		cmd := strings.Join(f, " ")
+		if !seen[cmd] {
+			seen[cmd] = true
+			out = append(out, cmd)
+		}
 	}
-	return "", false
+	return out
+}
+
+// citedCommand is the first citation: kept for callers that only quote one
+// (the refusal message and the test fixtures). Validation uses citedCommands.
+func citedCommand(body string) (string, bool) {
+	cmds := citedCommands(body)
+	if len(cmds) == 0 {
+		return "", false
+	}
+	return cmds[0], true
+}
+
+// proseWithoutCode drops fenced regions and HTML comments and unescapes \`
+// — the parts of a body that cite a command the reader is meant to act on.
+func proseWithoutCode(body string) string {
+	var b strings.Builder
+	fence := ""
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimSpace(line)
+		if fence == "" {
+			if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+				fence = t[:3]
+				continue
+			}
+		} else {
+			if strings.HasPrefix(t, fence) {
+				fence = ""
+			}
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	s := b.String()
+	for {
+		i := strings.Index(s, "<!--")
+		if i < 0 {
+			break
+		}
+		j := strings.Index(s[i+4:], "-->")
+		if j < 0 {
+			s = s[:i]
+			break
+		}
+		s = s[:i] + s[i+4+j+3:]
+	}
+	return strings.ReplaceAll(s, "\\`", "`")
 }
 
 // namesCommand reports whether desc names cmd, whitespace- and case-insensitive:
@@ -607,18 +711,16 @@ func namesCommand(desc, cmd string) bool {
 	if c == "" {
 		return true
 	}
-	if strings.Contains(d, c) {
-		return true
+	if strings.Contains(c, " ") {
+		return strings.Contains(d, c)
 	}
-	// Single-word commands (`pytest`) may be written with a trailing
-	// call form: "run pytest" contains it; "pytests" must not.
-	if !strings.Contains(c, " ") {
-		for _, w := range strings.FieldsFunc(d, func(r rune) bool {
-			return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '/' || r == '-' || r == '_')
-		}) {
-			if w == c {
-				return true
-			}
+	// A single-word command (`pytest`) is matched as a whole token, never as a
+	// substring: "run pytest" names it, "run pytests" does not.
+	for _, w := range strings.FieldsFunc(d, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '/' || r == '-' || r == '_')
+	}) {
+		if w == c {
+			return true
 		}
 	}
 	return false
@@ -700,6 +802,10 @@ func proven(cmd string, executed []string) bool {
 // v0.7.4 refusal; nothing at all → clause (c). Bare paths are only judged for
 // the trailing case.
 func commandClaim(text, line string, executed []string) (string, claimClass) {
+	// Comments and escaped backticks are prose: blank them in place (same
+	// length, so the negation-order offsets and the text-in-line lookup still
+	// line up) before any command token is collected (F11).
+	text, line = maskExamples(text), maskExamples(line)
 	type cited struct {
 		tok  string
 		at   int

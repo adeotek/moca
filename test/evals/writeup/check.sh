@@ -31,14 +31,15 @@ words=$(wc -w <<<"$text")
 
 grep -qE '^(1[.)]|[-*]) ' <<<"$text" || { echo "write-up not step-shaped"; exit 1; }
 
-grep -qiE 'why|because|so that|instead of' <<<"$text" || { echo "write-up states no reason"; exit 1; }
+grep -qiE 'why|because|so that|instead of|since|therefore|hence' <<<"$text" || { echo "write-up states no reason"; exit 1; }
 
 # Word count is padding-friendly: 120 words of "I improved readability" passes
 # it. Naming the helpers the refactor introduced is not — a write-up that never
 # mentions them is a summary of refactoring in general rather than of this
 # change, and the names come from the diff, so any correct refactor supplies
-# its own list.
-newfuncs=$(sed -n 's/^+func \([A-Za-z_][A-Za-z0-9_]*\).*/\1/p' <<<"$diff" | sort -u)
+# its own list. Receiver-form funcs count too: a methods-only refactor used to
+# be invisible here, so generic prose passed every gate.
+newfuncs=$(sed -nE 's/^\+func (\([^)]*\) )?([A-Za-z_][A-Za-z0-9_]*)\(.*/\2/p' <<<"$diff" | sort -u)
 if [ -n "$newfuncs" ]; then
   missing=""
   for f in $newfuncs; do

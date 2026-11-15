@@ -3,7 +3,7 @@
 **Read the last section, not the first table.** This file accumulates one section per measured
 change; each section names its label, its n and its checker revision, and a rate quoted without
 those is not comparable to anything else here. The newest measurements are at the bottom
-(`v0.7.3` at the time of writing); SPECS §15 carries the release-level numbers and the reasons.
+(`v0.8.2` at the time of writing); SPECS §15 carries the release-level numbers and the reasons.
 
 The first table below is the **rev-21 baseline** (2026-10-09, `opencode-go/glm-5.3-flash`, 3 runs
 per scenario, `vague` 6 — its pass rate swings the most, `bash test/evals/run.sh -n 3 -j 4`), kept
@@ -1170,7 +1170,7 @@ the session header. It reports `markers`, `with-trigger`, `no-trigger` and the f
 | `v081rel-cand` (v0.8.1, contract line) | 1 | 0 | **1/42** |
 
 One marker in 42 runs, and it names no trigger — the `no-trigger` case `/debt` exists to surface.
-(The earlier 3-of-45 reading came from a different, smaller sample and is superseded.)
+(The earlier 3-of-45 reading came from a different sample, whose composition is not recorded here, and is superseded.)
 
 **Decision: no prompt pressure.** Adding a second instruction to raise a 1/42 rate costs every
 session of every user and buys an unmeasured maybe — the ladder experiment is the standing evidence

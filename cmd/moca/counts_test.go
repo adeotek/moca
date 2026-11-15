@@ -67,8 +67,13 @@ func getInts(t *testing.T, re *regexp.Regexp, parts ...string) []int {
 // TestAgentsGoFileCount keeps AGENTS.md's file count honest: it is measured
 // with `git ls-files '*.go'`, so an untracked scratch file does not move it —
 // only a file the change actually adds does, which is what the doc counts.
+// The package half is pinned here too: "N `internal/` packages" drifted from
+// 17 to 18 (`internal/permissions/probe`) while the file number held, and a
+// directory walk cannot reproduce `go list` (it skips a dir whose files are all
+// behind a build tag).
 func TestAgentsGoFileCount(t *testing.T) {
-	want := getInts(t, agentsFiles, "AGENTS.md")[0]
+	nums := getInts(t, agentsFiles, "AGENTS.md")
+	want, wantPkgs := nums[0], nums[1]
 	tracked := 0
 	for _, f := range strings.Split(out(t, "git", "git", "ls-files", "*.go"), "\n") {
 		if strings.HasSuffix(f, ".go") {
@@ -77,6 +82,15 @@ func TestAgentsGoFileCount(t *testing.T) {
 	}
 	if tracked != want {
 		t.Fatalf("AGENTS.md says %d Go files, the tree tracks %d — update the opening line of AGENTS.md", want, tracked)
+	}
+	pkgs := 0
+	for _, line := range strings.Split(out(t, "the Go toolchain", "go", "list", "./internal/..."), "\n") {
+		if strings.TrimSpace(line) != "" {
+			pkgs++
+		}
+	}
+	if pkgs != wantPkgs {
+		t.Fatalf("AGENTS.md says %d `internal/` packages, `go list ./internal/...` finds %d — update the opening line", wantPkgs, pkgs)
 	}
 }
 

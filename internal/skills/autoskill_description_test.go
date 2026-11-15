@@ -87,6 +87,62 @@ func autoSkillRaw(name, desc, body string) []byte {
 	return []byte("---\nname: " + name + "\ndescription: " + desc + "\nauto: true\n---\n" + body)
 }
 
+// The cite rule reads the command a rule states, not an example that happens to
+// sit earlier in the body. A fenced block, an HTML comment and an escaped
+// backtick all used to hijack the cite: the refusal demanded the example's
+// command while the real rule was correct (F11).
+func TestCitedCommandsSkipExamplesAndComments(t *testing.T) {
+	ctx := wc("moca-x")
+	ctx.Executed = []string{"make test"}
+
+	fenced := autoSkillRaw("moca-x", "How the suite runs — make test",
+		"```\ngo vet ./...\n```\n- **Suite**: run `make test` (×1, 2026-10-18)\n")
+	if got := citedCommands(string(fenced)); len(got) != 1 || got[0] != "make test" {
+		t.Fatalf("a fenced example hijacked the cite: %q", got)
+	}
+	// The body rule is still what the guard judges: the fence itself is not a
+	// rule, so the write is refused for the fence, never for a phantom cite.
+	err := ValidateSkill(fenced, ctx)
+	if err == nil || !strings.Contains(err.Error(), "is not a rule") {
+		t.Fatalf("a fenced body must be refused by the body rule, not the cite: %v", err)
+	}
+
+	commented := autoSkillRaw("moca-x", "How the suite runs — make test",
+		"- **Suite**: <!-- the old hook ran `go vet ./...` --> run `make test` (×1, 2026-10-18)\n")
+	if err := ValidateSkill(commented, ctx); err != nil {
+		t.Fatalf("an HTML comment hijacked the cite: %v", err)
+	}
+
+	escaped := autoSkillRaw("moca-x", "How the suite runs — make test",
+		"- **Suite**: run \\`make test\\` (×1, 2026-10-18)\n")
+	if got := citedCommands(string(escaped)); len(got) != 1 || got[0] != "make test" {
+		t.Fatalf("an escaped backtick broke the cite: %q", got)
+	}
+
+	// Two citations: naming either one satisfies the description, naming
+	// neither must quote both.
+	twoCtx := wc("moca-x")
+	twoCtx.Executed = []string{"make test", "go test ./..."}
+	two := autoSkillRaw("moca-x", "How the suite runs — go test",
+		"- **Suite**: run `make test` (×1, 2026-10-18)\n- **Direct**: run `go test ./...` (×1, 2026-10-18)\n")
+	if err := ValidateSkill(two, twoCtx); err != nil {
+		t.Fatalf("naming one of two cited commands must pass: %v", err)
+	}
+	err = ValidateSkill(autoSkillRaw("moca-x", "How the suite runs",
+		"- **Suite**: run `make test` (×1, 2026-10-18)\n- **Direct**: run `go test ./...` (×1, 2026-10-18)\n"), twoCtx)
+	if err == nil || !strings.Contains(err.Error(), "`make test`, `go test`") {
+		t.Fatalf("a description naming neither cite must quote both: %v", err)
+	}
+
+	// A plural is prose, not a command citation (§F12).
+	if got := citedCommands("- **Suite**: run pytests (×1, 2026-10-18)\n"); len(got) != 0 {
+		t.Fatalf("`pytests` is not a `pytest` citation: %q", got)
+	}
+	if namesCommand("run pytests", "pytest") || !namesCommand("run pytest now", "pytest") {
+		t.Fatal("a single-word command must match as a whole token")
+	}
+}
+
 // The guard must offer both remedies, because either side can be the defect.
 // Measured on the release A/B (skills.1/skills.2 run 2, v081rel-cand): the
 // agent renamed the description three times, was refused each time, and never

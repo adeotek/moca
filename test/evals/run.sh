@@ -103,12 +103,14 @@ size_of() {
   # the newlines INSIDE a compiled binary (one `go build -o temp` read as 12 193
   # lines of code, which is not a leaner or fatter agent). A binary still counts
   # as a new file — it is something the run left behind — but contributes no lines.
-  while read -r path; do
+  # NUL-delimited: a path with a space is one file, not two (`while read` split
+  # `my notes.txt` into two entries and counted both as new).
+  while IFS= read -r -d '' path; do
     nf=$((nf + 1)); f=$((f + 1))
     add=$(git -C "$w" diff --no-index --numstat /dev/null "$w/$path" 2>/dev/null | cut -f1)
     case "$add" in ''|-) add=0 ;; esac
     a=$((a + add))
-  done < <(git -C "$w" ls-files --others --exclude-standard -- . ':!.moca' 2>/dev/null)
+  done < <(git -C "$w" ls-files -z --others --exclude-standard -- . ':!.moca' 2>/dev/null)
   echo "$a $d $f $nf"
 }
 
@@ -222,6 +224,68 @@ if [ "$SELFTEST" = 1 ]; then
   # Mutation check, in place: the pre-fix line counted those newlines.
   old=$(wc -l < "$work/temp")
   [ "$old" = 3 ] || { echo "FAIL size-skips-a-binary: the pin's own binary has $old newlines, want 3 (it would not catch the bug)"; bad=1; }
+  # A path with a space is one new file, not two: the untracked walk used
+  # `while read`, which split `my notes.txt` into two entries.
+  rm -rf "$work"; work=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-size.XXXXXX")
+  fresh_repo vague "$work"
+  szbase="$REPO_BASE"
+  printf 'one\ntwo\n' > "$work/my notes.txt"
+  read -r sa sd sf snf <<<"$(size_of "$work" "$szbase")"
+  if [ "$sa" = 2 ] && [ "$sf" = 1 ] && [ "$snf" = 1 ]; then
+    echo "ok   size-keeps-a-space-in-a-name"
+  else
+    echo "FAIL size-keeps-a-space-in-a-name: read $sa/$sd/$sf/$snf, want 2/0/1/1"; bad=1
+  fi
+  # The reuse leak: a runtime-identical duplicate whose divisor is written
+  # 2*512 and whose only human.Bytes reference sits in a _test.go file. Before
+  # the fix (test files counted, shifts other than <<10 unmatched) it passed
+  # every arm.
+  rm -rf "$work"; work=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-reuse.XXXXXX")
+  fresh_repo reuse "$work"
+  cp -r "$EVALS/reuse/testdata/reference/." "$work/"
+  cp -r "$EVALS/reuse/testdata/leak/." "$work/"
+  if out=$(cd "$work" && VARIANT=on bash "$EVALS/reuse/check.sh" 2>&1); then
+    echo "FAIL reuse-leak: a test-only helper reference plus a 2*512 duplicate passed"; bad=1
+  elif ! grep -q "existing helper not called" <<<"$out"; then
+    echo "FAIL reuse-leak: the checker failed for the wrong reason: $out"; bad=1
+  else
+    echo "ok   reuse-leak"
+  fi
+  rm -rf "$work"
+  # The review leak: naming the nil-map and the defer plus a bare "panics" used
+  # to credit the off-by-one arm, scoring 3 of 4 with two defects missed.
+  work=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-review.XXXXXX")
+  fresh_repo review "$work"
+  if out=$(cd "$work" && SESSION="$EVALS/review/testdata/leak_session.jsonl" VARIANT=on bash "$EVALS/review/check.sh" 2>&1); then
+    echo "FAIL review-leak: nil-map + defer + a bare panic passed as 3 findings"; bad=1
+  elif ! grep -q "found 2 of 4" <<<"$out"; then
+    echo "FAIL review-leak: the checker failed for the wrong reason: $out"; bad=1
+  else
+    echo "ok   review-leak"
+  fi
+  rm -rf "$work"
+  # A review that writes only .moca/ (an allow-always config, a project skill)
+  # did not edit the repo: run.sh's size_of excludes it, and so must this arm.
+  work=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-review.XXXXXX")
+  fresh_repo review "$work"
+  mkdir -p "$work/.moca"
+  printf '{"permissions":{"allow":["go"]}}\n' > "$work/.moca/config.jsonc"
+  if out=$(cd "$work" && SESSION="$EVALS/review/testdata/reference_session.jsonl" VARIANT=on bash "$EVALS/review/check.sh" 2>&1); then
+    echo "ok   review-ignores-moca"
+  else
+    echo "FAIL review-ignores-moca: a project resource failed the untouched-tree arm: $out"; bad=1
+  fi
+  rm -rf "$work"
+  # A correct write-up whose reason is stated with "therefore": fails-closed
+  # wording is still a failed run, and the reason regex used to reject it.
+  work=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-writeup.XXXXXX")
+  fresh_repo writeup "$work"
+  cp -r "$EVALS/writeup/testdata/reference/." "$work/"
+  if out=$(cd "$work" && SESSION="$EVALS/writeup/testdata/reference_session_therefore.jsonl" VARIANT=on bash "$EVALS/writeup/check.sh" 2>&1); then
+    echo "ok   writeup-therefore"
+  else
+    echo "FAIL writeup-therefore: a correct write-up using \"therefore\" was failed: $out"; bad=1
+  fi
   rm -rf "$work"
   exit "$bad"
 fi

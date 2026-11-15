@@ -6,9 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"unicode"
 
-	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/skills"
 )
@@ -169,36 +167,16 @@ func (s *session) sendCommands() {
 	s.send(AvailableCommandsUpdate{SessionUpdate: updCommands, AvailableCommands: cmds})
 }
 
-// splitCommand splits a trimmed "/name args" at the first whitespace of any
-// kind (a newline after the name counts): the one split expand and the
-// typed-text extraction share, so they cannot disagree on what was typed.
-func splitCommand(t string) (name, args string) {
-	name = strings.TrimPrefix(t, "/")
-	if i := strings.IndexFunc(name, unicode.IsSpace); i >= 0 {
-		name, args = name[:i], strings.TrimSpace(name[i:])
-	}
-	return name, args
-}
-
 // expand applies a leading /name the TUI's way, through skills.ExpandCommand
 // so the ACP surface and `moca -p` cannot drift: a template expands, a skill
-// becomes its load-and-follow message, `//` escapes, and anything else is sent
-// as written (the model sees an unknown /word as text). The second return
-// marks a /remember expansion: it starts a run of its own (Agent.Remember),
-// which a plain string return could not (L5).
+// becomes its load-and-follow message, `/remember` is reserved (the caller
+// starts an Agent.Remember run), `//` escapes, and anything else is sent as
+// written (the model sees an unknown /word as text). The second return marks
+// a /remember expansion: it starts a run of its own.
 func (s *session) expand(text string) (string, bool) {
-	t := strings.TrimSpace(text)
-	if name, args := splitCommand(t); strings.HasPrefix(t, "/") && !strings.HasPrefix(t, "//") && name == "remember" {
-		// N-10/N-17: reserved on ACP unconditionally. It used to fall through
-		// when the feature was off or no rule was typed, so a user prompt named
-		// `remember` ran instead — or the raw "/remember" went to the model.
-		// Agent.Remember owns every refusal (empty rule, plan, feature off) and
-		// returns them as UserRefusal.
-		return agent.RememberRequest(args), true
-	}
 	s.cmdMu.Lock()
 	prompts, sk := s.prompts, s.agent.Skills()
 	s.cmdMu.Unlock()
-	out, _, _ := skills.ExpandCommand(text, prompts, sk)
-	return out, false
+	out, _, kind := skills.ExpandCommand(text, prompts, sk)
+	return out, kind == skills.ExpandRemember
 }

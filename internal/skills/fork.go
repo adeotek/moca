@@ -44,7 +44,9 @@ func BuiltinNames(dir string) []string {
 //
 // It refuses an unknown name and never overwrites: an existing skill is the
 // user's, and a fork that quietly replaced it would be the one destructive
-// thing this command could do. A partial copy is removed on failure.
+// thing this command could do. The tree is copied into a hidden temp directory
+// and renamed into place (the seedOne shape): a destination that appears while
+// the copy runs makes the rename lose, and is never removed or merged into.
 func Fork(builtinDir, dir, name string) (string, error) {
 	if !forkNameRe.MatchString(name) || strings.Contains(name, "..") {
 		return "", fmt.Errorf("%q is not a skill directory name (lowercase, digits, '.', '_' or '-')", name)
@@ -63,8 +65,23 @@ func Fork(builtinDir, dir, name string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	if err := copySkillTree(src, dst); err != nil {
-		os.RemoveAll(dst)
+	tmp, err := os.MkdirTemp(dir, ".fork-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp)                      // no-op after a successful rename
+	if err := os.Chmod(tmp, 0o755); err != nil { // MkdirTemp is 0700; a skill is plain user files
+		return "", err
+	}
+	if err := copySkillTree(src, tmp); err != nil {
+		return "", err // the temp tree is ours alone; the destination was never touched
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		if _, serr := os.Lstat(dst); serr == nil {
+			// Another process forked the same name first: the destination is
+			// theirs, and this copy is discarded with the temp dir.
+			return "", fmt.Errorf("%s already exists — it is yours; delete or rename it to fork again", dst)
+		}
 		return "", err
 	}
 	return dst, nil

@@ -64,8 +64,9 @@ const skillsUsage = `usage: moca skills [list]           list the skills discove
        moca skills fork <name>      copy a built-in skill into your own skills dir, to customise it
 
 A built-in skill follows the binary: editing it in the data dir does not survive
-an update. Fork it instead, and the copy (in the global skills dir, or
-<repo>/.moca/skills for a team) shadows the built-in by name.
+an update. Fork it instead: the copy goes into your global skills dir and
+shadows the built-in by name. (A copy placed in <repo>/.moca/skills shadows it
+the same way, for a team — fork writes the global dir.)
 `
 
 // listSkills prints what discovery would load, in resolution order. The project

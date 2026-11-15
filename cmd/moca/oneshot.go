@@ -154,20 +154,27 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		pdirs = append(pdirs, skills.Dir{Path: filepath.Join(wd, ".moca", "prompts"), Source: "project"})
 	}
 	pdirs = append(pdirs, skills.Dir{Path: config.PromptsDir(), Source: "global"})
-	if msg, name, kind := skills.ExpandCommand(o.Prompt, skills.LoadPrompts(pdirs), a.Skills()); kind != "" {
-		switch kind {
-		case skills.ExpandSkill:
-			fmt.Fprintf(stderr, "note: /%s → the %s skill\n", name, name)
-		case skills.ExpandTemplate:
-			fmt.Fprintf(stderr, "note: /%s → template\n", name)
-		}
-		o.Prompt = msg
+	msg, name, kind := skills.ExpandCommand(o.Prompt, skills.LoadPrompts(pdirs), a.Skills())
+	switch kind {
+	case skills.ExpandSkill:
+		fmt.Fprintf(stderr, "note: /%s → the %s skill\n", name, name)
+	case skills.ExpandTemplate:
+		fmt.Fprintf(stderr, "note: /%s → template\n", name)
 	}
 	var out agent.Outcome
-	if o.Execute != "" {
-		out, err = a.RunPlan(ctx, o.Execute, o.Prompt)
-	} else {
-		out, err = a.Run(ctx, o.Prompt)
+	switch {
+	case kind == skills.ExpandRemember:
+		// `/remember` is the TUI's command, reserved on every headless surface
+		// through the shared expansion rule: the rule text is the user's own
+		// and Agent.Remember owns every refusal (empty rule, plan, switch off),
+		// so a user template named `remember` can never shadow it (§3).
+		_, rule := skills.SplitCommand(strings.TrimSpace(o.Prompt))
+		fmt.Fprintln(stderr, "note: /remember → recording a project rule")
+		out, err = a.Remember(ctx, rule)
+	case o.Execute != "":
+		out, err = a.RunPlan(ctx, o.Execute, msg)
+	default:
+		out, err = a.Run(ctx, msg)
 	}
 	u, cost := a.Totals()
 	defer fmt.Fprintf(stderr, "tokens %d/%d · $%.4f\n", u.Input+u.CacheRead+u.CacheWrite, u.Output, cost)

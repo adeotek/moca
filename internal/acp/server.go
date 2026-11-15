@@ -15,6 +15,7 @@ import (
 	"github.com/adeotek/moca/internal/agent"
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/provider"
+	"github.com/adeotek/moca/internal/skills"
 )
 
 // Options configures Serve; cmd/moca fills it from the config and flags.
@@ -370,13 +371,13 @@ func (srv *Server) prompt(ctx context.Context, params json.RawMessage) (any, err
 		// "/remember <args>" — the rule is the user's own text blocks, split the
 		// way expand split it; an attachment never supplies it, so text blocks
 		// holding only "/remember" leave nothing to record (Agent.Remember refuses).
-		_, args := splitCommand(strings.TrimSpace(typedSrc))
+		_, args := skills.SplitCommand(strings.TrimSpace(typedSrc))
 		expanded = agent.RememberRequest(args)
 		out, err = s.agent.Remember(runCtx, args) // the run STARTS here; the signal is structural (C4)
 	} else {
 		typed := strings.TrimSpace(typedSrc)
 		if strings.HasPrefix(typed, "/") && !strings.HasPrefix(typed, "//") && expanded != text {
-			_, typed = splitCommand(typed) // a template/skill expansion: only its args were typed (a `//` escape is plain text)
+			_, typed = skills.SplitCommand(typed) // a template/skill expansion: only its args were typed (a `//` escape is plain text)
 		}
 		out, err = s.agent.RunWith(runCtx, expanded, agent.RunOpts{Typed: typed})
 	}
