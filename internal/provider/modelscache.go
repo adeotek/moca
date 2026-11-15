@@ -29,7 +29,10 @@ const (
 	// ModelsCacheTTL is how long a fetched model list is considered fresh.
 	ModelsCacheTTL = 24 * time.Hour
 	// modelsCacheVersion is the normalized-shape version stored in each file.
-	modelsCacheVersion = 1
+	// v2: CachedModel gained Reasons and the OpenAI-compatible fetcher started
+	// reading the gateway's window/price/effort metadata — a v1 file would
+	// serve rows that predate it, so it reads as a miss and refetches once.
+	modelsCacheVersion = 2
 )
 
 // CachedModel is one provider model, normalized. An empty Protocol means "the
@@ -37,15 +40,20 @@ const (
 // an assumed window and flags it); CostKnown false means the provider publishes
 // no price, which the UI renders as `—` rather than `$0.00`.
 type CachedModel struct {
-	ID        string            `json:"id"`
-	Protocol  string            `json:"protocol,omitempty"`
-	Mode      string            `json:"mode,omitempty"` // thinking mode: "" | "none" | "effort-object" | "adaptive" | "budget"
-	Ctx       int               `json:"ctx,omitempty"`
-	MaxOut    int               `json:"maxOut,omitempty"`
-	Cost      config.CostConfig `json:"cost,omitempty"`
-	CostKnown bool              `json:"costKnown,omitempty"`
-	Efforts   []string          `json:"efforts,omitempty"` // wire effort values the model accepts
-	Mandatory bool              `json:"mandatory,omitempty"`
+	ID       string            `json:"id"`
+	Protocol string            `json:"protocol,omitempty"`
+	Mode     string            `json:"mode,omitempty"` // thinking mode: "" | "none" | "effort-object" | "adaptive" | "budget"
+	Ctx      int               `json:"ctx,omitempty"`
+	MaxOut   int               `json:"maxOut,omitempty"`
+	Cost     config.CostConfig `json:"cost,omitempty"`
+	// CostKnown marks a price the payload published — including a published
+	// zero (a free model), which is a fact and not a gap.
+	CostKnown bool `json:"costKnown,omitempty"`
+	// Reasons is the payload's "this model can think" flag; Efforts is the
+	// wire effort values it accepts (empty when it publishes none).
+	Reasons   bool     `json:"reasons,omitempty"`
+	Efforts   []string `json:"efforts,omitempty"`
+	Mandatory bool     `json:"mandatory,omitempty"`
 }
 
 // modelsCacheFile is one provider's file. Provider repeats the name the file

@@ -220,11 +220,19 @@ func TestDiscoverModelsFailOpen(t *testing.T) {
 	}
 }
 
-func TestMergePrecedenceKeepsCuratedMetadata(t *testing.T) {
-	// The go catalog's curated glm-5.3 row must survive a thin discovered
-	// payload (no window, no price) for the same id.
+// TestQuirkOverlaysThePayload: the provider's payload supplies the facts, and
+// a quirk only corrects what it states wrongly — it widens glm-5.3's effort
+// list (the payload omits "medium") and clamps kimi-k3's output, but never
+// replaces a published window or price.
+func TestQuirkOverlaysThePayload(t *testing.T) {
 	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
-		return 200, `{"data":[{"id":"glm-5.3"},{"id":"new-model"}]}`
+		return 200, `{"data":[
+			{"id":"glm-5.3","limit":{"context":200000,"output":65536},
+			 "cost":{"text":{"input":{"price":1.1,"cache":{"read":0.2}},"output":{"price":3.3}}},
+			 "capabilities":{"tools":{"supported":true},"reasoning":{"supported":true,"effort":["low","high","max"]}}},
+			{"id":"kimi-k3","limit":{"context":800000,"output":1048576},
+			 "cost":{"text":{"input":{"price":3},"output":{"price":15}}},
+			 "capabilities":{"reasoning":{"supported":true,"effort":["max"]}}}]}`
 	})
 	blankBuiltinKeys(t)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
@@ -235,25 +243,33 @@ func TestMergePrecedenceKeepsCuratedMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg.DiscoverModels(context.Background())
-	glm, ok := reg.models["opencode-go/glm-5.3"]
-	if !ok {
-		t.Fatal("curated row present")
+	glm := reg.models["opencode-go/glm-5.3"]
+	if glm.ContextWindow != 200000 || glm.WindowAssumed || glm.MaxOutput != 65536 {
+		t.Fatalf("the payload's limits must stand: %+v", glm)
 	}
-	if glm.Cost.Input != 1.4 || glm.ContextWindow != 1_000_000 || glm.ThinkingMode != "openai" || !glm.CostKnown {
-		t.Fatalf("curated metadata must win over a thin discovered row: %+v", glm)
+	if !glm.CostKnown || glm.Cost.Input != 1.1 || glm.Cost.CacheRead != 0.2 || glm.Cost.Output != 3.3 {
+		t.Fatalf("the payload's price must stand: %+v", glm.Cost)
 	}
-	if _, ok := reg.models["opencode-go/new-model"]; !ok {
-		t.Fatal("a discovered-only id is added")
+	if _, ok := glm.ThinkingLevelMap[llm.EffortMedium]; !ok {
+		t.Fatalf("the quirk's effort set must apply: %v", glm.ThinkingLevelMap)
 	}
-	fresh, _ := reg.models["opencode-go/new-model"]
-	if fresh.CostKnown || !fresh.WindowAssumed || fresh.ContextWindow != config.MinContextWindow {
-		t.Fatalf("unknown metadata stays visibly unknown: %+v", fresh)
+	kimi := reg.models["opencode-go/kimi-k3"]
+	if kimi.MaxOutput != 131072 {
+		t.Fatalf("the quirk's output clamp must apply: %d", kimi.MaxOutput)
+	}
+	if _, ok := kimi.ThinkingLevelMap[llm.EffortOff]; !ok {
+		t.Fatal("kimi-k3 can disable thinking (the quirk's set, not the payload's [max])")
 	}
 }
 
-func TestZenBorrowsTheGoCatalog(t *testing.T) {
+// TestZenPricedFromItsOwnPayload: zen publishes its own prices, and they are
+// not the go tier's (deepseek-v4.1-flash is twice the go rate) — the payload
+// wins, so a run's cost is priced on the surface it actually billed.
+func TestZenPricedFromItsOwnPayload(t *testing.T) {
 	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
-		return 200, `{"data":[{"id":"glm-5.3"},{"id":"zen-only"}]}`
+		return 200, `{"data":[{"id":"glm-5.3","limit":{"context":1000000,"output":131072},
+			"cost":{"text":{"input":{"price":2.5,"cache":{"read":0.5}},"output":{"price":5}}},
+			"capabilities":{"reasoning":{"supported":true,"effort":["low","high","max"]}}}]}`
 	})
 	blankBuiltinKeys(t)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
@@ -263,19 +279,19 @@ func TestZenBorrowsTheGoCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reg.DiscoverModels(context.Background())
 	if err := reg.Verify(); err != nil {
 		t.Fatal(err)
 	}
-	reg.DiscoverModels(context.Background())
 	m, ok := reg.models["opencode/glm-5.3"]
 	if !ok {
-		t.Fatal("seeded row present")
+		t.Fatal("the listed row is present")
 	}
-	if m.Provider != "opencode" || m.Cost.Input != 1.4 || m.ThinkingMode != "openai" || len(m.ThinkingLevelMap) == 0 {
-		t.Fatalf("zen borrows the go metadata with its own provider: %+v", m)
+	if m.Provider != "opencode" || m.Cost.Input != 2.5 || m.Cost.Output != 5 || !m.CostKnown {
+		t.Fatalf("zen's own price must stand: %+v", m.Cost)
 	}
-	if m := reg.models["opencode/zen-only"]; m.CostKnown {
-		t.Fatalf("an unseeded zen id stays unpriced: %+v", m)
+	if m.ThinkingMode != "openai" || len(m.ThinkingLevelMap) == 0 {
+		t.Fatalf("the vendor quirk applies on zen too: %+v", m)
 	}
 }
 
@@ -453,12 +469,12 @@ func TestVerifiedModelsStayResolvable(t *testing.T) {
 	}
 }
 
-// TestAssumedWindowsFollowTheMergedRow: a provider whose payload carries no
-// window must not flag a curated model as a guess — the merged row has the
-// real window, and only rows that actually substituted 16384 are assumed.
-func TestAssumedWindowsFollowTheMergedRow(t *testing.T) {
+// TestAssumedWindowsFollowThePayload: a window the payload publishes is not a
+// guess — even when the id carries a quirk — and an id with no window at all
+// is flagged so the startup warning can name it.
+func TestAssumedWindowsFollowThePayload(t *testing.T) {
 	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
-		return 200, `{"data":[{"id":"glm-5.3"},{"id":"brand-new"}]}`
+		return 200, `{"data":[{"id":"glm-5.3","limit":{"context":1000000,"output":131072}},{"id":"brand-new"}]}`
 	})
 	blankBuiltinKeys(t)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
@@ -470,7 +486,7 @@ func TestAssumedWindowsFollowTheMergedRow(t *testing.T) {
 	}
 	d, _ := reg.DiscoverModels(context.Background()).Provider("opencode-go")
 	if slices.Contains(d.Assumed, "glm-5.3") {
-		t.Fatal("a curated window is not a guess")
+		t.Fatal("a published window is not a guess")
 	}
 	if !slices.Contains(d.Assumed, "brand-new") {
 		t.Fatalf("a discovered-only id with no window is a guess: %v", d.Assumed)
@@ -543,27 +559,57 @@ func TestDeclaredCustomListIgnoresTheCache(t *testing.T) {
 	}
 }
 
-// TestZenSeedsNeedABaseURL: zen is chat-completions only, so go rows on the
-// other protocols are not cloned — they would be listed but never resolve.
-func TestZenSeedsNeedABaseURL(t *testing.T) {
+// TestProtocolWithoutABaseURLFallsBack: zen serves chat completions only, so a
+// model advertising just the messages surface must not resolve to a route zen
+// has no base URL for.
+func TestProtocolWithoutABaseURLFallsBack(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
+		return 200, `{"data":[{"id":"qwen3.8-flash","limit":{"context":1000000,"output":131072},
+			"api":{"messages":{"base_url":"https://inference.invalid/v1"}},
+			"capabilities":{"reasoning":{"supported":true,"effort":["low","medium","xhigh"]}}}]}`
+	})
 	blankBuiltinKeys(t)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	reg, err := NewRegistry(mustCfg(t, `{}`), http.DefaultClient, nil)
+	t.Setenv("MOCA_ZEN_KEY", "k")
+	cfg := mustCfg(t, `{"providers":{"opencode":{"baseUrls":{"openai-completions":"`+srv.URL+`"},"apiKey":"env:MOCA_ZEN_KEY"}}}`)
+	reg, err := NewRegistry(cfg, srv.Client(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := 0
-	for q, m := range reg.models {
-		if m.Provider != "opencode" {
-			continue
-		}
-		n++
-		if _, _, err := reg.Resolve(q); err != nil {
-			t.Fatalf("a seeded zen row must resolve: %v", err)
-		}
+	reg.DiscoverModels(context.Background())
+	m := reg.models["opencode/qwen3.8-flash"]
+	if m.Protocol != "openai-completions" {
+		t.Fatalf("a wire zen cannot serve must fall back to its default: %q", m.Protocol)
 	}
-	if n == 0 {
-		t.Fatal("the completions rows are still seeded")
+	if m.ThinkingMode != "openai" || len(m.ThinkingLevelMap) == 0 {
+		t.Fatalf("the effort list survives on the completions route: %+v", m)
+	}
+}
+
+// TestMessagesOnlyModelUsesTheMessagesRoute: on the go tier the advertised
+// messages surface is served, so the row takes the anthropic wire — and the
+// thinking knob that wire has (a budget), not reasoning_effort.
+func TestMessagesOnlyModelUsesTheMessagesRoute(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
+		return 200, `{"data":[{"id":"minimax-m3","limit":{"context":1000000,"output":131072},
+			"api":{"messages":{"base_url":"https://inference.invalid/v1"}},
+			"capabilities":{"reasoning":{"supported":true}}}]}`
+	})
+	blankBuiltinKeys(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("MOCA_GO_TEST_KEY", "k")
+	cfg := mustCfg(t, `{"providers":{"opencode-go":{"baseUrl":"`+srv.URL+`","apiKey":"env:MOCA_GO_TEST_KEY"}}}`)
+	reg, err := NewRegistry(cfg, srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.DiscoverModels(context.Background())
+	m := reg.models["opencode-go/minimax-m3"]
+	if m.Protocol != "anthropic-messages" || m.ThinkingMode != "budget" {
+		t.Fatalf("a messages-only model takes the budget route: %+v", m)
+	}
+	if _, ok := m.ThinkingLevelMap[llm.EffortOff]; !ok {
+		t.Fatal("the budget route can always think less or not at all")
 	}
 }
 
@@ -675,10 +721,11 @@ func TestRevalidateMissingBypassesAFreshCache(t *testing.T) {
 	}
 }
 
-// TestZenSeedsFollowItsList: once zen's own list is known, only the go rows
-// it lists are seeded — the go catalog does not prove zen serves a model.
-func TestZenSeedsFollowItsList(t *testing.T) {
-	srv := jsonServer(t, nil, func(*http.Request) (int, string) { return 200, `{"data":[{"id":"glm-5.3"}]}` })
+// TestQuirksDoNotInventModels: a quirk describes a model, it does not prove
+// the provider serves one. Only the payload's list may add a row, which is
+// what keeps retired ids out of the picker.
+func TestQuirksDoNotInventModels(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) { return 200, `{"data":[{"id":"glm-5.3-flash"}]}` })
 	blankBuiltinKeys(t)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("MOCA_ZEN_KEY", "k")
@@ -689,12 +736,106 @@ func TestZenSeedsFollowItsList(t *testing.T) {
 	}
 	reg.DiscoverModels(context.Background())
 	for _, m := range reg.Models() {
-		if m.Provider == "opencode" && m.ID != "glm-5.3" {
-			t.Fatalf("a go row zen does not list was seeded: %s", m.Qualified())
+		if m.Provider == "opencode" && m.ID != "glm-5.3-flash" {
+			t.Fatalf("a quirk-only id was added: %s", m.Qualified())
 		}
 	}
-	if m, ok := reg.Lookup("opencode/glm-5.3"); !ok || !m.CostKnown {
-		t.Fatalf("a listed id keeps the go metadata: %+v", m)
+	for _, q := range []string{"opencode/kimi-k3", "opencode/deepseek-v4.1-flash", "opencode/mimo-v2.6-flash"} {
+		if _, ok := reg.Lookup(q); ok {
+			t.Fatalf("%s: quirked but not listed, must not exist", q)
+		}
+	}
+	if m, ok := reg.Lookup("opencode/glm-5.3-flash"); !ok || len(m.ThinkingLevelMap) == 0 {
+		t.Fatalf("the listed id keeps the vendor quirk: %+v", m)
+	}
+}
+
+// TestFallbackOnlyWithoutAList: the small fallback set stands in for a list
+// that was never read (no credential, or a failed first fetch), and a
+// successful fetch replaces it — even an empty one, which is an answer.
+func TestFallbackOnlyWithoutAList(t *testing.T) {
+	blankBuiltinKeys(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	reg, err := NewRegistry(mustCfg(t, `{"providers":{"opencode-go":{"auth":"api_key","apiKey":"env:MOCA_NO_SUCH_KEY"}}}`), http.DefaultClient, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No credential → discovery never reads the list → the fallback rows are
+	// all the provider has, and they resolve.
+	var n int
+	for _, m := range reg.Models() {
+		if m.Provider == "opencode-go" {
+			n++
+			if _, _, err := reg.Resolve(m.Qualified()); err != nil {
+				t.Fatalf("a fallback row must resolve: %v", err)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("the fallback set is empty")
+	}
+
+	// A reachable provider that lists nothing: the fallback set must not
+	// stand in for an answer (an empty list is a fact).
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) { return 200, `{"data":[]}` })
+	t.Setenv("MOCA_GO_TEST_KEY", "k")
+	cfg := mustCfg(t, `{"providers":{"opencode-go":{"baseUrl":"`+srv.URL+`","apiKey":"env:MOCA_GO_TEST_KEY"}}}`)
+	reg2, err := NewRegistry(cfg, srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg2.DiscoverModels(context.Background())
+	for _, m := range reg2.Models() {
+		if m.Provider == "opencode-go" {
+			t.Fatalf("an empty list must not fall back: %s", m.Qualified())
+		}
+	}
+}
+
+// TestFetchOpenAICompatibleModelsReadsThePayload: the gateway's full shape
+// lands in CachedModel — window, output, prices (cache read/write included),
+// effort levels, the advertised wire — and a thin id-only payload keeps the
+// old answer: unknown window, unknown price, no efforts.
+func TestFetchOpenAICompatibleModelsReadsThePayload(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
+		return 200, `{"data":[
+			{"id":"rich","object":"model","limit":{"context":1000000,"output":65536},
+			 "cost":{"text":{"input":{"price":2,"cache":{"read":0.1,"write":2.5}},"output":{"price":10}}},
+			 "capabilities":{"tools":{"supported":true},
+				"reasoning":{"supported":true,"effort":["low","high","max"]}},
+			 "api":{"chat-completions":{"base_url":"https://inference.invalid/v1"}}},
+			{"id":"thin"},
+			{"id":"embed","capabilities":{"tools":{"supported":false}}},
+			{"id":"free","cost":{"text":{"input":{"price":0},"output":{"price":0}}}}]}`
+	})
+	got, err := fetchOpenAICompatibleModels(context.Background(), srv.Client(), srv.URL, http.Header{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]CachedModel{}
+	for _, m := range got {
+		byID[m.ID] = m
+	}
+	if _, ok := byID["embed"]; ok {
+		t.Fatal("a tools:false model is not a model here")
+	}
+	rich := byID["rich"]
+	if rich.Ctx != 1000000 || rich.MaxOut != 65536 || rich.Protocol != "openai-completions" {
+		t.Fatalf("limits/wire: %+v", rich)
+	}
+	if !rich.CostKnown || rich.Cost.Input != 2 || rich.Cost.Output != 10 || rich.Cost.CacheRead != 0.1 || rich.Cost.CacheWrite != 2.5 {
+		t.Fatalf("cost: %+v", rich.Cost)
+	}
+	if !rich.Reasons || strings.Join(rich.Efforts, ",") != "low,high,max" {
+		t.Fatalf("reasoning: %+v", rich)
+	}
+	thin := byID["thin"]
+	if thin.Ctx != 0 || thin.CostKnown || thin.Reasons || len(thin.Efforts) != 0 {
+		t.Fatalf("an id-only payload stays unknown: %+v", thin)
+	}
+	// A published zero is a price, not a gap.
+	if free := byID["free"]; !free.CostKnown || free.Cost.Input != 0 {
+		t.Fatalf("a free model is priced at zero: %+v", free)
 	}
 }
 
