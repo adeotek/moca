@@ -337,7 +337,7 @@ func TestClearModelsCacheRescansTheActiveProvider(t *testing.T) {
 	if rep.Rescan.Provider != "gw" || rep.Rescan.Err != nil || strings.Join(rep.Rescan.Models, ",") != "m" {
 		t.Fatalf("rescan report: %+v", rep.Rescan)
 	}
-	if _, fresh := reg.cache.Load("gw", rep.Rescan.Base); !fresh {
+	if _, _, fresh := reg.cache.Load("gw", rep.Rescan.Base); !fresh {
 		t.Fatal("the re-read recreates the provider's cache file")
 	}
 	if _, _, err := reg.Resolve("gw/m"); err != nil {
@@ -837,6 +837,28 @@ func TestFallbackOnlyWithoutAList(t *testing.T) {
 			t.Fatalf("an empty list must not fall back: %s", m.Qualified())
 		}
 	}
+
+	// The same answer from a NEW process whose provider is unreachable: the
+	// cached empty list is still the list that was read, so the fallback set
+	// must not come back — and a model that exists only in it stays refused.
+	srv.Close()
+	cfg.Model = "opencode-go/kimi-k3"
+	reg3, err := NewRegistry(cfg, srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg3.DiscoverModels(context.Background())
+	for _, m := range reg3.Models() {
+		if m.Provider == "opencode-go" {
+			t.Fatalf("a cached empty list must not fall back after a restart: %s", m.Qualified())
+		}
+	}
+	if _, ok := reg3.Lookup("opencode-go/kimi-k3"); ok {
+		t.Fatal("the fallback catalogue must not outlive the provider's empty answer")
+	}
+	if err := reg3.Verify(); err == nil || !strings.Contains(err.Error(), "not in the catalog") {
+		t.Fatalf("an offline empty list refuses a fallback-only model: %v", err)
+	}
 }
 
 // TestFetchOpenAICompatibleModelsReadsThePayload: the gateway's full shape
@@ -856,7 +878,10 @@ func TestFetchOpenAICompatibleModelsReadsThePayload(t *testing.T) {
 			{"id":"free","cost":{"text":{"input":{"price":0},"output":{"price":0}}}},
 			{"id":"partial","cost":{"text":{"input":{"price":1,"cache":{"read":0.1}}}}},
 			{"id":"broken","limit":{"context":"1M"},"capabilities":{"tools":{"supported":true}}},
-			{"id":"broken-embed","limit":{"context":"1M"},"capabilities":{"tools":{"supported":false}}}]}`
+			{"id":"broken-embed","limit":{"context":"1M"},"capabilities":{"tools":{"supported":false}}},
+			{"id":"salvaged","limit":{"context":"1M"},
+			 "capabilities":{"reasoning":{"supported":true,"effort":["low","medium","high"]}},
+			 "api":{"messages":{"base_url":"https://example.invalid"}}}]}`
 	})
 	got, err := fetchOpenAICompatibleModels(context.Background(), srv.Client(), srv.URL, http.Header{})
 	if err != nil {
@@ -896,9 +921,41 @@ func TestFetchOpenAICompatibleModelsReadsThePayload(t *testing.T) {
 		t.Fatalf("half a price is not a known price: %+v", partial)
 	}
 	// A row whose metadata does not decode still names a model: the id
-	// survives with the same unknown shape a thin payload gets.
+	// survives with the same unknown shape a thin payload gets. This row
+	// publishes nothing else readable, so the id is all there is to keep.
 	if broken, ok := byID["broken"]; !ok || broken.Ctx != 0 || broken.CostKnown || broken.Reasons {
 		t.Fatalf("an undecodable row keeps its id and nothing else: %+v", broken)
+	}
+	// One unreadable field must not erase the others: the limit does not
+	// decode, the advertised messages route and effort list still do — and
+	// they are what decides the request body.
+	salvaged, ok := byID["salvaged"]
+	if !ok {
+		t.Fatal("a row with a bad limit is still a model")
+	}
+	if salvaged.Ctx != 0 || salvaged.CostKnown {
+		t.Fatalf("the unreadable limit stays unknown: %+v", salvaged)
+	}
+	if salvaged.Protocol != "anthropic-messages" {
+		t.Fatalf("the payload's wire survives a bad limit: %+v", salvaged)
+	}
+	if !salvaged.Reasons || strings.Join(salvaged.Efforts, ",") != "low,medium,high" {
+		t.Fatalf("the payload's effort list survives a bad limit: %+v", salvaged)
+	}
+	// Through the real registry: a messages row with published levels takes
+	// the adaptive knob (SPECS §5). The pre-PR salvage dropped both facts and
+	// resolved this model onto openai-completions with thinking off.
+	reg, err := NewRegistry(mustCfg(t, `{"providers":{"opencode-go":{"baseUrl":"https://example.invalid"}}}`), srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := reg.rowFor("opencode-go", salvaged)
+	if m.Protocol != "anthropic-messages" || m.ThinkingMode != "adaptive" {
+		t.Fatalf("salvaged row must resolve messages+adaptive: protocol=%q mode=%q levels=%v",
+			m.Protocol, m.ThinkingMode, m.ThinkingLevelMap)
+	}
+	if m.ThinkingLevelMap[llm.EffortMedium] != "medium" || len(m.ThinkingLevelMap) != 3 {
+		t.Fatalf("the payload's levels are the map: %v", m.ThinkingLevelMap)
 	}
 }
 

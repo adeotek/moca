@@ -274,7 +274,12 @@ func (r *Registry) discoverOne(ctx context.Context, name string, force bool) Pro
 	if !r.listedByDiscovery(name) {
 		return out
 	}
-	if cached, fresh := r.cache.Load(name, base); len(cached) > 0 {
+	if cached, found, fresh := r.cache.Load(name, base); found {
+		// A cached answer is the provider's list even when it holds no rows:
+		// an empty list is a fact, not a cache miss, so it marks the list
+		// read before the rebuild — otherwise rebuildProviderLocked would
+		// treat it as "never asked" and put the fallback rows back.
+		r.markListRead(name)
 		r.mergeDiscovered(name, cached)
 		out.FromCache = fresh
 		out.Models, out.Assumed = discoveredIDs(cached), r.assumedModels(name)
@@ -674,11 +679,6 @@ func fetchOpenAIModels(ctx context.Context, hc *http.Client, base string, hdr ht
 // optional, so an id-only gateway keeps working exactly as before: unknown
 // window, unknown price, no effort levels.
 func fetchOpenAICompatibleModels(ctx context.Context, hc *http.Client, base string, hdr http.Header) ([]CachedModel, error) {
-	type limit struct {
-		Context int `json:"context"`
-		Input   int `json:"input"`
-		Output  int `json:"output"`
-	}
 	type price struct {
 		Price json.RawMessage `json:"price"`
 		Cache struct {
@@ -692,20 +692,17 @@ func fetchOpenAICompatibleModels(ctx context.Context, hc *http.Client, base stri
 			Output *price `json:"output"`
 		} `json:"text"`
 	}
-	type model struct {
-		ID           string `json:"id"`
-		Limit        limit  `json:"limit"`
-		Cost         *cost  `json:"cost"`
-		Capabilities *struct {
-			Tools *struct {
-				Supported *bool `json:"supported"`
-			} `json:"tools"`
-			Reasoning *struct {
-				Supported *bool    `json:"supported"`
-				Effort    []string `json:"effort"`
-			} `json:"reasoning"`
-		} `json:"capabilities"`
-		API map[string]json.RawMessage `json:"api"`
+	// The row keeps every metadata subtree raw and decodes them one at a time:
+	// a gateway that publishes one field in a shape moca does not model (a
+	// "1M" string where a token count belongs) loses that field, never the
+	// row's other facts. The advertised wire and effort list decide the
+	// request body, so an unreadable window must not change the protocol.
+	type row struct {
+		ID           string          `json:"id"`
+		Limit        json.RawMessage `json:"limit"`
+		Cost         json.RawMessage `json:"cost"`
+		Capabilities json.RawMessage `json:"capabilities"`
+		API          json.RawMessage `json:"api"`
 	}
 	var list struct {
 		Data []json.RawMessage `json:"data"`
@@ -715,55 +712,45 @@ func fetchOpenAICompatibleModels(ctx context.Context, hc *http.Client, base stri
 	}
 	var out []CachedModel
 	for _, raw := range list.Data {
-		var m model
-		if err := json.Unmarshal(raw, &m); err != nil {
-			// A row whose metadata does not decode still names a model, and an
-			// unknown limit is not an absent model: keep the id with the same
-			// unknown-window/no-price shape a thin payload gets. Only a row
-			// with no readable id — or an advertised `tools: false`, which
-			// survives in the same snippet — is dropped.
-			var idOnly struct {
-				ID           string `json:"id"`
-				Capabilities *struct {
-					Tools *struct {
-						Supported *bool `json:"supported"`
-					} `json:"tools"`
-				} `json:"capabilities"`
-			}
-			if json.Unmarshal(raw, &idOnly) != nil || idOnly.ID == "" {
-				slog.Debug("model row skipped", "provider", base, "err", causeClass(err))
-				continue
-			}
-			if c := idOnly.Capabilities; c != nil && c.Tools != nil &&
-				c.Tools.Supported != nil && !*c.Tools.Supported {
-				slog.Debug("model row skipped", "provider", base, "err", causeClass(err))
-				continue
-			}
-			slog.Debug("model row kept id-only", "provider", base, "id", idOnly.ID, "err", causeClass(err))
-			out = append(out, CachedModel{ID: idOnly.ID})
+		var r row
+		if err := json.Unmarshal(raw, &r); err != nil || r.ID == "" {
+			// Every other field is raw, so this fails only for a non-string
+			// id or a row that is not an object — nothing worth naming.
+			slog.Debug("model row skipped", "provider", base, "err", causeClass(err))
 			continue
 		}
-		if m.ID == "" {
-			continue
+		// Decode one subtree at a time: an unreadable field is logged and
+		// skipped, and the row keeps everything else it published.
+		field := func(name string, raw json.RawMessage, v any) bool {
+			if len(raw) == 0 {
+				return false
+			}
+			if err := json.Unmarshal(raw, v); err != nil {
+				slog.Debug("model row field unreadable", "provider", base, "id", r.ID, "field", name, "err", causeClass(err))
+				return false
+			}
+			return true
 		}
-		// An explicit `tools: {supported: false}` is an advertised no: moca is
-		// a tool-calling agent, so an embedding or image model is not a model
-		// here. An absent capability is unknown, not a no.
-		if c := m.Capabilities; c != nil && c.Tools != nil && c.Tools.Supported != nil && !*c.Tools.Supported {
-			continue
+		cm := CachedModel{ID: r.ID}
+		var lim struct {
+			Context int `json:"context"`
+			Input   int `json:"input"`
+			Output  int `json:"output"`
 		}
-		cm := CachedModel{ID: m.ID, Protocol: protocolFromAPI(m.API),
-			Ctx: m.Limit.Context, MaxOut: m.Limit.Output}
-		if cm.Ctx <= 0 {
-			// Some payloads publish only the input ceiling; it is the
-			// conservative window when there is no separate context field.
-			cm.Ctx = m.Limit.Input
+		if field("limit", r.Limit, &lim) {
+			cm.Ctx, cm.MaxOut = lim.Context, lim.Output
+			if cm.Ctx <= 0 {
+				// Some payloads publish only the input ceiling; it is the
+				// conservative window when there is no separate context field.
+				cm.Ctx = lim.Input
+			}
 		}
-		if m.Cost != nil && m.Cost.Text != nil && m.Cost.Text.Input != nil {
-			in := priceValue(m.Cost.Text.Input.Price)
+		var c cost
+		if field("cost", r.Cost, &c) && c.Text != nil && c.Text.Input != nil {
+			in := priceValue(c.Text.Input.Price)
 			var outp *float64
-			if m.Cost.Text.Output != nil {
-				outp = priceValue(m.Cost.Text.Output.Price)
+			if c.Text.Output != nil {
+				outp = priceValue(c.Text.Output.Price)
 			}
 			// Both rates are required for the price to count as known:
 			// moca's unit carries one rate per kind, so a lone input rate
@@ -771,14 +758,38 @@ func fetchOpenAICompatibleModels(ctx context.Context, hc *http.Client, base stri
 			// never published. A published zero is a price (a free model).
 			if in != nil && outp != nil {
 				cm.Cost = config.CostConfig{Input: *in, Output: *outp,
-					CacheRead:  deref(priceValue(m.Cost.Text.Input.Cache.Read)),
-					CacheWrite: deref(priceValue(m.Cost.Text.Input.Cache.Write))}
+					CacheRead:  deref(priceValue(c.Text.Input.Cache.Read)),
+					CacheWrite: deref(priceValue(c.Text.Input.Cache.Write))}
 				cm.CostKnown = true
 			}
 		}
-		if c := m.Capabilities; c != nil && c.Reasoning != nil {
-			cm.Reasons = c.Reasoning.Supported == nil || *c.Reasoning.Supported
-			cm.Efforts = c.Reasoning.Effort
+		var caps struct {
+			Tools     json.RawMessage `json:"tools"`
+			Reasoning json.RawMessage `json:"reasoning"`
+		}
+		if field("capabilities", r.Capabilities, &caps) {
+			var t struct {
+				Supported *bool `json:"supported"`
+			}
+			// An explicit `tools: {supported: false}` is an advertised no:
+			// moca is a tool-calling agent, so an embedding or image model is
+			// not a model here. An absent capability is unknown, not a no.
+			if field("capabilities.tools", caps.Tools, &t) && t.Supported != nil && !*t.Supported {
+				slog.Debug("model row skipped", "provider", base, "id", r.ID, "reason", "tools unsupported")
+				continue
+			}
+			var rs struct {
+				Supported *bool    `json:"supported"`
+				Effort    []string `json:"effort"`
+			}
+			if field("capabilities.reasoning", caps.Reasoning, &rs) {
+				cm.Reasons = rs.Supported == nil || *rs.Supported
+				cm.Efforts = rs.Effort
+			}
+		}
+		var api map[string]json.RawMessage
+		if field("api", r.API, &api) {
+			cm.Protocol = protocolFromAPI(api)
 		}
 		out = append(out, cm)
 	}

@@ -147,11 +147,9 @@ var (
 	// kimi-k3 still disables thinking through "none" (live-verified
 	// 2026-10-16) and accepts every level above it; "off" is an invalid wire
 	// value there ("off" is moca's label, "none" the wire one).
-	kimiThinking        = map[llm.Effort]string{llm.EffortOff: "none", llm.EffortMinimal: "minimal", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortMax: "max"}
-	deepseekThinking    = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortHigh: "high", llm.EffortMax: "max"}
-	deepseekProThinking = map[llm.Effort]string{llm.EffortHigh: "high", llm.EffortMax: "max"}
-	qwenThinking        = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortXHigh: "xhigh"}
-	basicThinking       = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
+	kimiThinking     = map[llm.Effort]string{llm.EffortOff: "none", llm.EffortMinimal: "minimal", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortMax: "max"}
+	deepseekThinking = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortHigh: "high", llm.EffortMax: "max"}
+	basicThinking    = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
 )
 
 // quirk corrects what a provider's own model payload says: a fact the wire

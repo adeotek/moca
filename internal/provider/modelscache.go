@@ -86,19 +86,22 @@ func (c *ModelsCache) Dir() string {
 	return c.dir
 }
 
-// Load returns the provider's cached models and whether they are still fresh.
-// A stale entry is returned with fresh=false (the caller serves it while it
-// refetches). A missing, corrupt, other-version, other-provider or
-// other-baseURL file is a miss: no models, not fresh.
-func (c *ModelsCache) Load(providerName, baseURL string) ([]CachedModel, bool) {
+// Load returns the provider's cached models, whether a usable entry exists at
+// all, and whether it is still fresh. A stale entry is returned with
+// fresh=false (the caller serves it while it refetches). An entry that stores
+// no models is still an entry — found is true — because "the provider lists
+// nothing" is an answer, and it must stay distinguishable from "we never
+// asked". A missing, corrupt, other-version, other-provider or other-baseURL
+// file is a miss: no models, found false, fresh false.
+func (c *ModelsCache) Load(providerName, baseURL string) (models []CachedModel, found, fresh bool) {
 	if c == nil || c.dir == "" {
-		return nil, false
+		return nil, false, false
 	}
 	f, err := readModelsCacheFile(c.file(providerName))
 	if err != nil || f.Provider != providerName || f.BaseURL != baseURL {
-		return nil, false
+		return nil, false, false
 	}
-	return f.Models, c.now().Sub(f.FetchedAt) < c.ttl
+	return f.Models, true, c.now().Sub(f.FetchedAt) < c.ttl
 }
 
 // Put replaces the provider's file. A failure to write is not fatal to a
