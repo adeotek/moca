@@ -14,21 +14,11 @@ import (
 )
 
 func deepseekModel() Model {
-	for _, m := range builtinCatalog {
-		if m.Qualified() == "opencode-go/deepseek-v4.1-flash" {
-			return m
-		}
-	}
-	return Model{}
+	return wireModel("opencode-go", "deepseek-v4.1-flash")
 }
 
 func glmModel() Model {
-	for _, m := range builtinCatalog {
-		if m.Qualified() == "opencode-go/glm-5.3-flash" {
-			return m
-		}
-	}
-	return Model{}
+	return wireModel("opencode-go", "glm-5.3-flash")
 }
 
 // assistantMsg is one assistant turn carrying a thinking block plus text.

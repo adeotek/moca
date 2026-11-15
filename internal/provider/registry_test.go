@@ -221,12 +221,12 @@ func TestNoSessionHeaderOutsideOpenCodeGo(t *testing.T) {
 	srv := sseServer(t, 200, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", nil, &hdr)
 	defer srv.Close()
 	r, err := NewRegistry(mustCfg(t, fmt.Sprintf(
-		`{"model":"anthropic/claude-haiku-4-5","providers":{"anthropic":{"baseUrls":{"anthropic-messages":%q}}}}`, srv.URL)),
+		`{"model":"anthropic/claude-sonnet-5-5","providers":{"anthropic":{"baseUrls":{"anthropic-messages":%q}}}}`, srv.URL)),
 		srv.Client(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, a, err := r.Resolve("anthropic/claude-haiku-4-5")
+	m, a, err := r.Resolve("anthropic/claude-sonnet-5-5")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,12 +253,12 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 `, nil, &hdr)
 	defer srv.Close()
 	cfg := mustCfg(t, fmt.Sprintf(
-		`{"model":"openai/gpt-6-astra","providers":{"openai":{"auth":"oauth","baseUrls":{"openai-responses":%q}}}}`, srv.URL))
+		`{"model":"openai/gpt-6-luna","providers":{"openai":{"auth":"oauth","baseUrls":{"openai-responses":%q}}}}`, srv.URL))
 	r, err := NewRegistry(cfg, srv.Client(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, a, err := r.Resolve("openai/gpt-6-astra")
+	m, a, err := r.Resolve("openai/gpt-6-luna")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,12 +272,12 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 
 func TestOAuthNotLoggedIn(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	cfg := mustCfg(t, `{"model":"openai/gpt-6-astra","providers":{"openai":{"auth":"oauth"}}}`)
+	cfg := mustCfg(t, `{"model":"openai/gpt-6-luna","providers":{"openai":{"auth":"oauth"}}}`)
 	r, err := NewRegistry(cfg, http.DefaultClient, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, a, err := r.Resolve("openai/gpt-6-astra")
+	_, a, err := r.Resolve("openai/gpt-6-luna")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,12 +289,12 @@ func TestOAuthNotLoggedIn(t *testing.T) {
 
 func TestOAuthRequiresResponsesProtocol(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	cfg := mustCfg(t, `{"model":"openai/gpt-6-astra","providers":{"openai":{"auth":"oauth","models":{"gpt-6-astra":{"protocol":"openai-completions"}}}}}`)
+	cfg := mustCfg(t, `{"model":"openai/gpt-6-luna","providers":{"openai":{"auth":"oauth","models":{"gpt-6-luna":{"protocol":"openai-completions"}}}}}`)
 	r, err := NewRegistry(cfg, http.DefaultClient, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.Resolve("openai/gpt-6-astra"); err == nil || !strings.Contains(err.Error(), "openai-responses") {
+	if _, _, err := r.Resolve("openai/gpt-6-luna"); err == nil || !strings.Contains(err.Error(), "openai-responses") {
 		t.Fatalf("oauth + completions protocol must be refused: %v", err)
 	}
 }
@@ -320,19 +320,19 @@ func TestCheckCredentialOAuthDoesNotTouchNetwork(t *testing.T) {
 	defer func() { oauthProviders["openai"] = orig }()
 	var hits atomic.Int32
 	hc := &http.Client{Transport: countingTransport{http.DefaultTransport, &hits}}
-	cfg := mustCfg(t, `{"model":"openai/gpt-6-astra","providers":{"openai":{"auth":"oauth"}}}`)
+	cfg := mustCfg(t, `{"model":"openai/gpt-6-luna","providers":{"openai":{"auth":"oauth"}}}`)
 	r, err := NewRegistry(cfg, hc, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CheckCredential("openai/gpt-6-astra"); err == nil || !strings.Contains(err.Error(), "moca login openai") {
+	if err := r.CheckCredential("openai/gpt-6-luna"); err == nil || !strings.Contains(err.Error(), "moca login openai") {
 		t.Fatalf("no stored login must point at `moca login openai`: %v", err)
 	}
 	store := NewDefaultStore()
 	if err := store.Put("openai", Token{Access: "OLD", Refresh: "RT", ClientID: "oaiapp_x", Expiry: time.Now().Add(-time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CheckCredential("openai/gpt-6-astra"); err != nil {
+	if err := r.CheckCredential("openai/gpt-6-luna"); err != nil {
 		t.Fatal(err)
 	}
 	if hits.Load() != 0 {
@@ -356,12 +356,12 @@ func TestAPIKeyStoreWinsOverEnv(t *testing.T) {
 	srv := sseServer(t, 200, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", nil, &hdr)
 	defer srv.Close()
 	cfg := mustCfg(t, fmt.Sprintf(
-		`{"model":"anthropic/claude-haiku-4-5","providers":{"anthropic":{"apiKey":"env:MOCA_T_ANTHROPIC","baseUrls":{"anthropic-messages":%q}}}}`, srv.URL))
+		`{"model":"anthropic/claude-sonnet-5-5","providers":{"anthropic":{"apiKey":"env:MOCA_T_ANTHROPIC","baseUrls":{"anthropic-messages":%q}}}}`, srv.URL))
 	r, err := NewRegistry(cfg, srv.Client(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, a, err := r.Resolve("anthropic/claude-haiku-4-5")
+	m, a, err := r.Resolve("anthropic/claude-sonnet-5-5")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,12 +387,12 @@ func TestAPIKeyStoreWinsOverEnv(t *testing.T) {
 func TestAPIKeyMissingMentionsLogin(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("MOCA_T_MISSING", "")
-	cfg := mustCfg(t, `{"model":"anthropic/claude-haiku-4-5","providers":{"anthropic":{"apiKey":"env:MOCA_T_MISSING"}}}`)
+	cfg := mustCfg(t, `{"model":"anthropic/claude-sonnet-5-5","providers":{"anthropic":{"apiKey":"env:MOCA_T_MISSING"}}}`)
 	r, err := NewRegistry(cfg, http.DefaultClient, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, a, err := r.Resolve("anthropic/claude-haiku-4-5")
+	m, a, err := r.Resolve("anthropic/claude-sonnet-5-5")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestAPIKeyMissingMentionsLogin(t *testing.T) {
 		t.Fatalf("missing-key error must name both entry points: %v", err)
 	}
 	// CheckCredential must surface the same gap without any network call.
-	if err := r.CheckCredential("anthropic/claude-haiku-4-5"); err == nil || !strings.Contains(err.Error(), "/login") {
+	if err := r.CheckCredential("anthropic/claude-sonnet-5-5"); err == nil || !strings.Contains(err.Error(), "/login") {
 		t.Fatalf("CheckCredential: %v", err)
 	}
 }
@@ -412,7 +412,7 @@ func TestAPIKeyMissingMentionsLogin(t *testing.T) {
 // to a line that may already be there.
 func TestAPIKeyMissingPointsAtTheDotEnv(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	cfg := mustCfg(t, `{"model":"anthropic/claude-haiku-4-5","providers":{"anthropic":{"apiKey":"env:MOCA_T_DOTENV_HINT"}}}`)
+	cfg := mustCfg(t, `{"model":"anthropic/claude-sonnet-5-5","providers":{"anthropic":{"apiKey":"env:MOCA_T_DOTENV_HINT"}}}`)
 	r, err := NewRegistry(cfg, http.DefaultClient, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -421,12 +421,12 @@ func TestAPIKeyMissingPointsAtTheDotEnv(t *testing.T) {
 
 	os.Unsetenv("MOCA_T_DOTENV_HINT")
 	t.Cleanup(func() { os.Unsetenv("MOCA_T_DOTENV_HINT") })
-	if err := r.CheckCredential("anthropic/claude-haiku-4-5"); err == nil || !strings.Contains(err.Error(), add) {
+	if err := r.CheckCredential("anthropic/claude-sonnet-5-5"); err == nil || !strings.Contains(err.Error(), add) {
 		t.Fatalf("unset: %v, want %q", err, add)
 	}
 
 	t.Setenv("MOCA_T_DOTENV_HINT", "")
-	err = r.CheckCredential("anthropic/claude-haiku-4-5")
+	err = r.CheckCredential("anthropic/claude-sonnet-5-5")
 	if err == nil || !strings.Contains(err.Error(), "set but empty") || !strings.Contains(err.Error(), "unset it") ||
 		strings.Contains(err.Error(), add) {
 		t.Fatalf("set but empty: %v, want the unset advice instead of %q", err, add)

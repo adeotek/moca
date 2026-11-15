@@ -153,7 +153,7 @@ func TestOllamaStartErrors(t *testing.T) {
 	}
 	// Configured but unused, with the server down: Start still works.
 	t.Setenv("ANTHROPIC_API_KEY", "k")
-	a, err := ollamaStart(t, `{"model":"anthropic/claude-haiku-4-5","providers":{"ollama":{"baseUrl":"`+down+`"}}}`, "", &evs)
+	a, err := ollamaStart(t, `{"model":"anthropic/claude-sonnet-5-5","providers":{"ollama":{"baseUrl":"`+down+`"}}}`, "", &evs)
 	if err != nil {
 		t.Fatalf("an unused, unreachable ollama must not block startup: %v", err)
 	}

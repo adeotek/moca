@@ -1,11 +1,13 @@
 package provider
 
 import (
+	"strings"
+
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 )
 
-// Model is one catalog entry. Cost is USD per million tokens.
+// Model is one registry entry. Cost is USD per million tokens.
 // ThinkingMode: "none" | "budget" (anthropic budget_tokens) | "adaptive"
 // (anthropic thinking:adaptive + output_config.effort) | "openai" (the
 // completions reasoning_effort field) | "effort-object" (the completions
@@ -123,6 +125,13 @@ func costM(in, out, cr, cw float64) config.CostConfig {
 	return config.CostConfig{Input: in, Output: out, CacheRead: cr, CacheWrite: cw}
 }
 
+// costQ is costM for the tables below, whose Cost is optional (a nil means
+// "the provider publishes its own price, leave it alone").
+func costQ(in, out, cr, cw float64) *config.CostConfig {
+	c := costM(in, out, cr, cw)
+	return &c
+}
+
 var (
 	anthropicAdaptive = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortXHigh: "xhigh", llm.EffortMax: "max"}
 	anthropicBudget   = map[llm.Effort]string{llm.EffortOff: "", llm.EffortLow: "", llm.EffortMedium: "", llm.EffortHigh: "", llm.EffortMax: ""}
@@ -138,97 +147,175 @@ var (
 	// kimi-k3 still disables thinking through "none" (live-verified
 	// 2026-10-16) and accepts every level above it; "off" is an invalid wire
 	// value there ("off" is moca's label, "none" the wire one).
-	kimiThinking        = map[llm.Effort]string{llm.EffortOff: "none", llm.EffortMinimal: "minimal", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortMax: "max"}
-	deepseekThinking    = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortHigh: "high", llm.EffortMax: "max"}
-	deepseekProThinking = map[llm.Effort]string{llm.EffortHigh: "high", llm.EffortMax: "max"}
-	qwenThinking        = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortXHigh: "xhigh"}
-	basicThinking       = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
+	kimiThinking     = map[llm.Effort]string{llm.EffortOff: "none", llm.EffortMinimal: "minimal", llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high", llm.EffortMax: "max"}
+	deepseekThinking = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortHigh: "high", llm.EffortMax: "max"}
+	basicThinking    = map[llm.Effort]string{llm.EffortLow: "low", llm.EffortMedium: "medium", llm.EffortHigh: "high"}
 )
 
-// builtinCatalog — prices/limits verified 2026-10-04 (phase 1), 2026-10-07
-// (opencode-go expansion rows) and 2026-10-16 (glm-5.3 / glm-5.3-flash /
-// kimi-k3 effort acceptance re-verified live — the glm serving variants
-// became thinking-only). Sources:
-//   - opencode-go: Pi 1.0.1 shipped catalog (pi-ai providers/data/opencode-go.json)
-//   - opencode.ai/docs/zen and /docs/go (protocol per model, go-tier endpoint
-//     table). Cost is standard (non-tiered) rates; the deepseek rows use the
-//     off-peak rate (peak hours are 2x — not modelled), qwen3.7-plus the <=256K tier.
-//   - anthropic: docs.anthropic.com models overview + pricing (opus/sonnet 5.5 = adaptive,
-//     haiku 4.5 = budget; cacheWrite = 5-minute write rate; cacheRead = hit rate).
-//   - openai: platform.openai.com models + developers.openai.com pricing (standard,
-//     short-context rates; long-context tiers exist and are not modelled in v1).
-var builtinCatalog = []Model{
-	// opencode-go — mixed protocol: the SPECS §6 original models, plus the 2026-10-07
-	// expansion (deepseek family, kimi-k2.7-code, mimo-v2.6-pro/flash,
-	// qwen3.8-max/flash, qwen3.7-plus). Routes and effort values live-verified
-	// 2026-10-07 — incl. qwen3.8-max on openai-completions (the /docs/go endpoint
-	// table lists /messages) and kimi-k2.7-code/mimo-v2.6-* rejecting off/minimal.
-	{Provider: "opencode-go", ID: "glm-5.3", Protocol: "openai-completions",
-		ContextWindow: 1_000_000, MaxOutput: 131072, Cost: costM(1.4, 4.4, 0.26, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: glmThinking},
+// quirk corrects what a provider's own model payload says: a fact the wire
+// states wrongly, understates, or cannot state at all. A zero field leaves the
+// discovered value alone, so a quirk never repeats metadata the provider
+// publishes.
+type quirk struct {
+	// Provider restricts the quirk to one provider (a metadata gap on one
+	// gateway); empty applies to any provider that lists the id.
+	Provider  string
+	Protocol  string
+	Window    int
+	MaxOutput int
+	Cost      *config.CostConfig
+	Mode      string
+	Levels    map[llm.Effort]string
+	Replay    bool
+}
+
+func (q quirk) applies(providerName string) bool {
+	return q.Provider == "" || q.Provider == providerName
+}
+
+// empty reports whether the quirk says nothing (it holds a map, so == does
+// not compile).
+func (q quirk) empty() bool {
+	return q.Protocol == "" && q.Window == 0 && q.MaxOutput == 0 && q.Cost == nil &&
+		q.Mode == "" && len(q.Levels) == 0 && !q.Replay
+}
+
+// catalogQuirks is what discovery cannot get right on its own. The model list
+// itself — which ids exist, their windows, output caps, prices and effort
+// levels — comes from each provider's /models payload (SPECS §6); this table
+// carries only the exceptions, so a model a provider ships tomorrow works
+// without a moca release.
+//
+// Sources: glm/kimi effort sets and the DeepSeek replay rule were live-verified
+// against https://opencode.ai/zen/go/v1 (2026-10-07, 2026-10-16); the anthropic
+// prices come from docs.anthropic.com/pricing (its API publishes windows and
+// effort levels, not prices); the openai rows are the whole metadata because
+// api.openai.com/models carries nothing but ids and shutdown dates.
+var catalogQuirks = map[string]quirk{
+	// The payload under-reports these effort sets: glm-5.3 lists no "medium",
+	// kimi-k3 only "max", and mimo/kimi-k2.7 list none at all.
+	"glm-5.3":         {Mode: "openai", Levels: glmThinking},
+	"glm-5.3-flash":   {Mode: "openai", Levels: glmFlashThinking},
+	"kimi-k3":         {Mode: "openai", Levels: kimiThinking, MaxOutput: 131072},
+	"kimi-k2.7-code":  {Mode: "openai", Levels: basicThinking},
+	"mimo-v2.6-pro":   {Mode: "openai", Levels: basicThinking},
+	"mimo-v2.6-flash": {Mode: "openai", Levels: basicThinking},
+	// Served on both wires; chat completions is the verified route
+	// (2026-10-07) and the one its effort list belongs to.
+	"qwen3.8-max": {Protocol: "openai-completions"},
+
+	// anthropic: prices only — adaptive-vs-budget arrives in its thinking
+	// capabilities, windows and effort levels in the model payload.
+	"claude-opus-5-5":   {Provider: "anthropic", Cost: costQ(4, 20, 0.2, 5)},
+	"claude-sonnet-5-5": {Provider: "anthropic", Cost: costQ(2, 10, 0.2, 2.5)},
+	"claude-haiku-4-5":  {Provider: "anthropic", Cost: costQ(1, 5, 0.1, 1.25)},
+
+	// openai: /models publishes an id and a shutdown date, nothing else.
+	"gpt-6-astra": {Provider: "openai", Window: 1_050_000, MaxOutput: 128_000,
+		Cost: costQ(10, 50, 1, 12.5), Mode: "openai", Levels: openaiReasoning},
+	"gpt-6-luna": {Provider: "openai", Window: 1_050_000, MaxOutput: 128_000,
+		Cost: costQ(0.1, 0.5, 0.01, 0.125), Mode: "openai", Levels: openaiReasoning},
+}
+
+// familyQuirk covers a vendor whose wire needs something no payload states:
+// DeepSeek's thinking mode requires the assistant's reasoning_content to be
+// passed back on every later turn (moca replays it), on either gateway.
+func familyQuirk(id string) quirk {
+	if strings.HasPrefix(id, "deepseek-") {
+		return quirk{Replay: true}
+	}
+	return quirk{}
+}
+
+// quirkFor merges the family rule with the id's own entry.
+func quirkFor(providerName, id string) (quirk, bool) {
+	q := familyQuirk(id)
+	own, ok := catalogQuirks[id]
+	if !ok || !own.applies(providerName) {
+		return q, !q.empty()
+	}
+	if own.Protocol != "" {
+		q.Protocol = own.Protocol
+	}
+	if own.Window != 0 {
+		q.Window = own.Window
+	}
+	if own.MaxOutput != 0 {
+		q.MaxOutput = own.MaxOutput
+	}
+	if own.Cost != nil {
+		q.Cost = own.Cost
+	}
+	if own.Mode != "" {
+		q.Mode = own.Mode
+	}
+	if len(own.Levels) > 0 {
+		q.Levels = own.Levels
+	}
+	q.Replay = q.Replay || own.Replay
+	return q, true
+}
+
+// applyQuirk overlays a quirk on a discovered row. It never invents a row: a
+// quirk for an id the provider does not list is dead weight, not a model.
+func applyQuirk(m Model, q quirk) Model {
+	if q.Protocol != "" {
+		m.Protocol = q.Protocol
+	}
+	if q.Window != 0 {
+		m.ContextWindow, m.WindowAssumed = q.Window, false
+	}
+	if q.MaxOutput != 0 {
+		m.MaxOutput = q.MaxOutput
+	}
+	if q.Cost != nil {
+		m.Cost, m.CostKnown = *q.Cost, true
+	}
+	if q.Mode != "" {
+		m.ThinkingMode = q.Mode
+	}
+	if len(q.Levels) > 0 {
+		m.ThinkingLevelMap = q.Levels
+	}
+	if q.Replay {
+		m.ReplayReasoning = true
+	}
+	return m
+}
+
+// fallbackCatalog is the last-resort model list, used ONLY for a provider
+// whose model list was never read (first run with no credential, a failed
+// fetch with no cache). It is deliberately tiny and never grows with a
+// vendor's catalogue: with discovery working, a model is a payload row, not a
+// table entry. Every row is complete, because it stands in for the missing
+// payload. Prices are the same ones the gateways publish (the zen twin bills
+// deepseek-v4.1-flash at twice the go tier's rate).
+var fallbackCatalog = []Model{
 	{Provider: "opencode-go", ID: "glm-5.3-flash", Protocol: "openai-completions",
 		ContextWindow: 1_000_000, MaxOutput: 131072, Cost: costM(0.15, 0.5, 0.03, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: glmFlashThinking},
-	{Provider: "opencode-go", ID: "minimax-m3", Protocol: "anthropic-messages",
-		ContextWindow: 1_000_000, MaxOutput: 131072, Cost: costM(0.3, 1.2, 0.06, 0),
-		ThinkingMode: "budget", ThinkingLevelMap: anthropicBudget},
-	{Provider: "opencode-go", ID: "kimi-k3", Protocol: "openai-completions",
-		ContextWindow: 1_048_576, MaxOutput: 131072, Cost: costM(3, 15, 0.3, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: kimiThinking},
-	{Provider: "opencode-go", ID: "gpt-6-luna", Protocol: "openai-responses",
-		ContextWindow: 1_050_000, MaxOutput: 128000, Cost: costM(0.1, 0.5, 0.01, 0.125),
-		ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning},
-	{Provider: "opencode-go", ID: "grok-4.7", Protocol: "openai-responses",
-		ContextWindow: 500_000, MaxOutput: 500_000, Cost: costM(2, 6, 0.5, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning},
-
+		ThinkingMode: "openai", ThinkingLevelMap: glmFlashThinking, CostKnown: true},
+	{Provider: "opencode-go", ID: "glm-5.3", Protocol: "openai-completions",
+		ContextWindow: 1_000_000, MaxOutput: 131072, Cost: costM(1.4, 4.4, 0.26, 0),
+		ThinkingMode: "openai", ThinkingLevelMap: glmThinking, CostKnown: true},
 	{Provider: "opencode-go", ID: "deepseek-v4.1-flash", Protocol: "openai-completions",
 		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.15, 0.6, 0.003, 0),
-		ThinkingMode: "openai", ReplayReasoning: true, ThinkingLevelMap: deepseekThinking},
-	{Provider: "opencode-go", ID: "deepseek-v4-flash", Protocol: "openai-completions",
-		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.15, 0.6, 0.003, 0),
-		ThinkingMode: "openai", ReplayReasoning: true, ThinkingLevelMap: deepseekThinking},
-	{Provider: "opencode-go", ID: "deepseek-v4-pro", Protocol: "openai-completions",
-		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.66, 1.98, 0.022, 0),
-		ThinkingMode: "openai", ReplayReasoning: true, ThinkingLevelMap: deepseekProThinking},
-	{Provider: "opencode-go", ID: "deepseek-v4-flash-vision-exp", Protocol: "openai-completions",
-		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.15, 0.6, 0.003, 0),
-		ThinkingMode: "openai", ReplayReasoning: true, ThinkingLevelMap: deepseekThinking},
-	{Provider: "opencode-go", ID: "kimi-k2.7-code", Protocol: "openai-completions",
-		ContextWindow: 262144, MaxOutput: 262144, Cost: costM(0.95, 4, 0.19, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: basicThinking},
-	{Provider: "opencode-go", ID: "mimo-v2.6-pro", Protocol: "openai-completions",
-		ContextWindow: 1_048_576, MaxOutput: 131072, Cost: costM(0.435, 0.87, 0.003625, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: basicThinking},
-	{Provider: "opencode-go", ID: "mimo-v2.6-flash", Protocol: "openai-completions",
-		ContextWindow: 1_048_576, MaxOutput: 131072, Cost: costM(0.14, 0.28, 0.0028, 0),
-		ThinkingMode: "openai", ThinkingLevelMap: basicThinking},
-	{Provider: "opencode-go", ID: "qwen3.8-max", Protocol: "openai-completions",
-		ContextWindow: 1_000_000, MaxOutput: 131072, Cost: costM(2, 6, 0.25, 2.5),
-		ThinkingMode: "openai", ThinkingLevelMap: qwenThinking},
-	{Provider: "opencode-go", ID: "qwen3.8-flash", Protocol: "anthropic-messages",
-		ContextWindow: 1_000_000, MaxOutput: 131072, Cost: costM(0.15, 0.47, 0.016, 0.2),
-		ThinkingMode: "budget", ThinkingLevelMap: anthropicBudget},
-	{Provider: "opencode-go", ID: "qwen3.7-plus", Protocol: "anthropic-messages",
-		ContextWindow: 1_000_000, MaxOutput: 65536, Cost: costM(0.4, 1.6, 0.04, 0.5),
-		ThinkingMode: "budget", ThinkingLevelMap: anthropicBudget},
+		ThinkingMode: "openai", ReplayReasoning: true, ThinkingLevelMap: deepseekThinking, CostKnown: true},
+	{Provider: "opencode-go", ID: "kimi-k3", Protocol: "openai-completions",
+		ContextWindow: 1_048_576, MaxOutput: 131072, Cost: costM(3, 15, 0.3, 0),
+		ThinkingMode: "openai", ThinkingLevelMap: kimiThinking, CostKnown: true},
 
-	// anthropic — current generation (Opus/Sonnet adaptive, Haiku 4.5 budget).
-	{Provider: "anthropic", ID: "claude-opus-5-5", Protocol: "anthropic-messages",
-		ContextWindow: 1_000_000, MaxOutput: 128000, Cost: costM(4, 20, 0.2, 5),
-		ThinkingMode: "adaptive", ThinkingLevelMap: anthropicAdaptive},
+	{Provider: "opencode", ID: "glm-5.3-flash", Protocol: "openai-completions",
+		ContextWindow: 1_000_000, MaxOutput: 131072, Cost: costM(0.15, 0.5, 0.03, 0),
+		ThinkingMode: "openai", ThinkingLevelMap: glmFlashThinking, CostKnown: true},
+	{Provider: "opencode", ID: "deepseek-v4.1-flash", Protocol: "openai-completions",
+		ContextWindow: 1_000_000, MaxOutput: 384000, Cost: costM(0.3, 1.2, 0.006, 0),
+		ThinkingMode: "openai", ReplayReasoning: true, ThinkingLevelMap: deepseekThinking, CostKnown: true},
+
 	{Provider: "anthropic", ID: "claude-sonnet-5-5", Protocol: "anthropic-messages",
 		ContextWindow: 1_000_000, MaxOutput: 128000, Cost: costM(2, 10, 0.2, 2.5),
-		ThinkingMode: "adaptive", ThinkingLevelMap: anthropicAdaptive},
-	{Provider: "anthropic", ID: "claude-haiku-4-5", Protocol: "anthropic-messages",
-		ContextWindow: 200_000, MaxOutput: 64000, Cost: costM(1, 5, 0.1, 1.25),
-		ThinkingMode: "budget", ThinkingLevelMap: anthropicBudget},
+		ThinkingMode: "adaptive", ThinkingLevelMap: anthropicAdaptive, CostKnown: true},
 
-	// openai — flagship + efficient tier.
-	{Provider: "openai", ID: "gpt-6-astra", Protocol: "openai-responses",
-		ContextWindow: 1_050_000, MaxOutput: 128000, Cost: costM(10, 50, 1, 12.5),
-		ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning},
 	{Provider: "openai", ID: "gpt-6-luna", Protocol: "openai-responses",
 		ContextWindow: 1_050_000, MaxOutput: 128000, Cost: costM(0.1, 0.5, 0.01, 0.125),
-		ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning},
+		ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning, CostKnown: true},
 }

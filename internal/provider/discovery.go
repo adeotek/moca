@@ -4,16 +4,16 @@ package provider
 // model list on its own endpoint; this file fetches those lists, normalizes
 // them into CachedModel and leaves the merging to the registry. Discovery is
 // best effort and bounded: a provider that fails leaves the previous state
-// (cache or catalog) in place and never fails a run.
+// (cache or fallback) in place and never fails a run.
 //
-// Endpoints, all verified live on 2026-10-24:
+// Endpoints, all verified live on 2026-11-15:
 //
 //	anthropic      GET {base}/v1/models?limit=1000   paginated (after_id/has_more)
 //	openai         GET {base}/models                 id + shutdown_date only
-//	opencode-go    GET {base}/models                 public, id only
-//	opencode       GET {base}/models                 public, id only
-//	openrouter     GET {base}/models                 public, window/pricing/efforts
-//	custom         GET {base}/models                 id only
+//	opencode-go    GET {base}/models                 window, output, price, efforts, api
+//	opencode       GET {base}/models                 window, output, price, efforts, api
+//	openrouter     GET {base}/models                 window/pricing/efforts
+//	custom         GET {base}/models                 provider-shaped, ids at least
 //
 // Ollama keeps its native discovery (tags + show) in ollama.go.
 
@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"slices"
 	"sort"
@@ -40,13 +41,6 @@ const (
 	maxModelsBody     = 8 << 20
 	modelsMaxPages    = 5
 )
-
-// catalogSeeds borrows another provider's catalog rows when the two serve the
-// same models under the same vendor prices. opencode is the pay-as-you-go
-// twin of the go tier: same account, same published per-token prices, so a
-// discovered zen id that the go catalog already describes keeps its window,
-// cost and thinking map instead of degrading to an unpriced guess.
-var catalogSeeds = map[string]string{"opencode": "opencode-go"}
 
 // modelsFetcher lists one provider's models.
 type modelsFetcher func(ctx context.Context, hc *http.Client, base string, hdr http.Header) ([]CachedModel, error)
@@ -84,15 +78,32 @@ func defaultProtocolFor(providerName string) string {
 	return "openai-completions"
 }
 
+// protocolFromAPI reads a gateway's advertised API surfaces and picks the wire
+// moca speaks for them, most-preferred first. The block describes what the
+// vendor's own SDKs use; the gateway usually serves several, so the order
+// matters more than the set. A payload without one (api.openai.com, most
+// compatible gateways) answers "" and the provider default applies.
+func protocolFromAPI(api map[string]json.RawMessage) string {
+	switch {
+	case api["chat-completions"] != nil:
+		return "openai-completions"
+	case api["responses"] != nil:
+		return "openai-responses"
+	case api["messages"] != nil:
+		return "anthropic-messages"
+	}
+	return ""
+}
+
 // assumedWindow is the context window given to a discovered model whose
 // provider does not publish one (config.MinContextWindow).
 const assumedWindow = config.MinContextWindow
 
-// modelFromCached builds a registry row from a discovered model, filling the
-// gaps: unknown protocol → the provider's default, unknown window → the
-// assumed one (flagged, so the UI can say so), unknown output cap → 8192,
-// unknown thinking → none. It never guesses a price: CostKnown stays false
-// unless the payload carried one.
+// modelFromCached builds a registry row from a discovered model's own facts,
+// filling the gaps: unknown protocol → the provider's default, unknown window
+// → the assumed one (flagged, so the UI can say so), unknown output cap →
+// 8192, unknown thinking → none. It never guesses a price: CostKnown stays
+// false unless the payload carried one.
 func modelFromCached(pname string, cm CachedModel) Model {
 	m := Model{Provider: pname, ID: cm.ID, Protocol: cm.Protocol, ContextWindow: cm.Ctx,
 		MaxOutput: cm.MaxOut, Cost: cm.Cost, CostKnown: cm.CostKnown, ThinkingMode: cm.Mode}
@@ -105,18 +116,28 @@ func modelFromCached(pname string, cm CachedModel) Model {
 	if m.MaxOutput <= 0 {
 		m.MaxOutput = 8192
 	}
-	if m.ThinkingMode == "" {
-		m.ThinkingMode = "none"
-	}
-	switch levels := effortMap(cm.Efforts, cm.Mandatory); {
+	switch {
 	case m.ThinkingMode == "budget":
 		// budget_tokens comes from MaxTokens and the effort, never from an
 		// advertised effort list (the budget-only models publish none), and
 		// a budget model can always think less or not at all: the curated
 		// budget rows' level set, off included.
 		m.ThinkingLevelMap = anthropicBudget
-	case len(levels) > 0 && m.ThinkingMode != "none":
-		m.ThinkingLevelMap = levels
+	case m.ThinkingMode == "adaptive":
+		// The effort levels an adaptive model accepts are its own; the
+		// curated set is the fallback for a payload that names none.
+		if levels := effortMap(cm.Efforts, false); len(levels) > 0 {
+			m.ThinkingLevelMap = levels
+		} else {
+			m.ThinkingLevelMap = anthropicAdaptive
+		}
+	case len(cm.Efforts) > 0:
+		if m.ThinkingMode == "" {
+			m.ThinkingMode = "openai"
+		}
+		m.ThinkingLevelMap = effortMap(cm.Efforts, cm.Mandatory)
+	case m.ThinkingMode == "":
+		m.ThinkingMode = "none"
 	}
 	if m.ThinkingMode != "none" && len(m.ThinkingLevelMap) == 0 {
 		m.ThinkingMode = "none"
@@ -253,7 +274,12 @@ func (r *Registry) discoverOne(ctx context.Context, name string, force bool) Pro
 	if !r.listedByDiscovery(name) {
 		return out
 	}
-	if cached, fresh := r.cache.Load(name, base); len(cached) > 0 {
+	if cached, found, fresh := r.cache.Load(name, base); found {
+		// A cached answer is the provider's list even when it holds no rows:
+		// an empty list is a fact, not a cache miss, so it marks the list
+		// read before the rebuild — otherwise rebuildProviderLocked would
+		// treat it as "never asked" and put the fallback rows back.
+		r.markListRead(name)
 		r.mergeDiscovered(name, cached)
 		out.FromCache = fresh
 		out.Models, out.Assumed = discoveredIDs(cached), r.assumedModels(name)
@@ -279,6 +305,7 @@ func (r *Registry) discoverOne(ctx context.Context, name string, force bool) Pro
 	}
 	slog.Debug("model discovery", "provider", name, "models", len(got), "cached", false)
 	r.setDiscoveryErr(name, nil)
+	r.markListRead(name)
 	r.mergeDiscovered(name, got)
 	if err := r.cache.Put(name, base, got); err != nil {
 		// The rows are in memory; a read-only data dir must not cost a run.
@@ -319,6 +346,14 @@ func (r *Registry) discoveryHeaders(ctx context.Context, name string) http.Heade
 		hdr.Set(k, v)
 	}
 	return hdr
+}
+
+// markListRead records that a provider's list was read successfully — an
+// empty answer from a reachable provider must not fall back to the table.
+func (r *Registry) markListRead(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.listRead[name] = true
 }
 
 // setDiscoveryErr records why a provider's last list fetch failed (nil on
@@ -367,78 +402,90 @@ func (r *Registry) mergeDiscovered(name string, models []CachedModel) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.discovered[name] = models
-	r.rebuildProviderLocked(name)
-}
-
-// addSeedsLocked clones the catalog rows of a sibling provider that serves the
-// same models at the same prices (catalogSeeds). The provider name is
-// rewritten, so the row is that provider's own. A row whose protocol the
-// provider has no base URL for is skipped: zen is chat-completions only, so a
-// go row on anthropic-messages or openai-responses could be listed and picked
-// but never resolved. Once the provider's own list is known, only the ids it
-// lists are seeded: the sibling's catalog describes models, it does not prove
-// this provider serves them (before any list, every row seeds — Verify and the
-// picker have nothing better to go on).
-func (r *Registry) addSeedsLocked(name string) {
-	src, ok := catalogSeeds[name]
-	if !ok {
-		return
-	}
-	var listed map[string]bool
-	if d := r.discovered[name]; len(d) > 0 {
-		listed = make(map[string]bool, len(d))
-		for _, cm := range d {
-			listed[cm.ID] = true
-		}
-	}
-	for _, m := range builtinCatalog {
-		if m.Provider != src || m.ID == "" || r.baseURL(name, m.Protocol) == "" {
-			continue
-		}
-		if listed != nil && !listed[m.ID] {
-			continue
-		}
-		m.Provider, m.CostKnown = name, true
-		r.models[m.Qualified()] = m
+	if err := r.rebuildProviderLocked(name); err != nil {
+		slog.Warn("provider rows rebuilt with a rejected override", "provider", name, "err", err)
 	}
 }
 
-// rebuildProviderLocked recomposes one provider's rows in precedence order:
-// defaults (from the discovered row) ← catalog ← seeds ← declared config
-// overrides. Walking from lowest to highest priority means a curated row's
-// metadata is never replaced by a thinner provider payload.
-func (r *Registry) rebuildProviderLocked(name string) {
+// rowFor composes one registry row from a discovered model: the provider's own
+// facts, then the vendor quirk, then the wire this provider can actually
+// serve. The order matters — a quirk may name a protocol the provider has no
+// base URL for (a messages-only id on zen), and that falls back to the
+// provider's default rather than resolving to a dead route.
+func (r *Registry) rowFor(name string, cm CachedModel) Model {
+	m := modelFromCached(name, cm)
+	if q, ok := quirkFor(name, cm.ID); ok {
+		m = applyQuirk(m, q)
+	}
+	// A provider-level protocol is the user's decision for every model the
+	// provider serves (a custom gateway on openai-responses or
+	// anthropic-messages): it wins over the fetcher's wire choice.
+	if p := r.cfg.Providers[name].Protocol; p != "" {
+		m.Protocol = p
+	}
+	if r.baseURL(name, m.Protocol) == "" {
+		m.Protocol = defaultProtocolFor(name)
+	}
+	// A messages route has no reasoning_effort: the anthropic thinking knob is
+	// its own, and which one the route takes is what the payload's effort list
+	// says. A model that publishes effort levels takes the adaptive knob
+	// (thinking.adaptive + output_config.effort) — verified live on both
+	// gateways 2026-11-15: claude-haiku-5-5 and claude-sonnet-5-5 answer
+	// `400 "thinking.type.enabled" is not supported for this model ... use
+	// "thinking.type.adaptive"`, while qwen3.8-flash accepts either. A model
+	// that publishes none keeps the budget knob (thinking.enabled +
+	// budget_tokens), which minimax-m3 accepts and which is the only one an
+	// empty effort list speaks to.
+	if m.Protocol == "anthropic-messages" && m.ThinkingMode != "budget" && m.ThinkingMode != "adaptive" {
+		// Adaptive cannot be switched off, so the off key a chat-completions
+		// effort list may carry is dropped with it (effortMap's mandatory
+		// flag does exactly that).
+		if levels := effortMap(cm.Efforts, true); len(levels) > 0 {
+			m.ThinkingMode, m.ThinkingLevelMap = "adaptive", levels
+		} else if m.ThinkingMode == "openai" || (m.ThinkingMode == "none" && cm.Reasons) {
+			m.ThinkingMode, m.ThinkingLevelMap = "budget", anthropicBudget
+		}
+	}
+	if m.ThinkingMode != "none" && len(m.ThinkingLevelMap) == 0 {
+		m.ThinkingMode = "none"
+	}
+	return m
+}
+
+// rebuildProviderLocked recomposes one provider's rows: the discovered list
+// (each row through rowFor), the fallback rows only when no list was ever
+// read, then the config's declared models and overrides. The provider's own
+// payload is the model list; nothing else may add a model to it.
+func (r *Registry) rebuildProviderLocked(name string) error {
 	for q, m := range r.models {
 		if m.Provider == name {
 			delete(r.models, q)
 		}
 	}
-	// A provider-level protocol is the user's decision for every model the
-	// provider serves (a custom gateway on openai-responses or
-	// anthropic-messages): it wins over the fetcher's wire default.
-	proto := r.cfg.Providers[name].Protocol
 	for _, cm := range r.discovered[name] {
-		m := modelFromCached(name, cm)
-		if proto != "" {
-			m.Protocol = proto
-		}
+		m := r.rowFor(name, cm)
 		r.models[m.Qualified()] = m
 	}
-	r.addSeedsLocked(name)
-	for _, m := range builtinCatalog {
-		if m.Provider == name {
-			m.CostKnown = true
-			r.models[m.Qualified()] = m
+	if len(r.discovered[name]) == 0 && !r.listRead[name] {
+		// No payload and no cache: a fresh install with no credential, or a
+		// first fetch that failed. Keep the provider usable with the small
+		// fallback set — never a stand-in for a list that was read.
+		for _, m := range fallbackCatalog {
+			if m.Provider == name {
+				r.models[m.Qualified()] = m
+			}
 		}
 	}
 	// Declared models and overrides win over everything discovered. The
 	// override is re-applied on every rebuild, and it cannot be rejected
 	// here: the config is immutable and NewRegistry validated this same map
 	// before it returned, so a failure is a bug in that ordering rather than
-	// a user error. Logged, never dropped.
+	// a user error.
 	if err := r.applyModelOverrides(name, r.cfg.Providers[name]); err != nil {
 		slog.Warn("declared model override not applied", "provider", name, "err", err)
+		return err
 	}
+	return nil
 }
 
 // ClearReport is what ClearModelsCache did.
@@ -626,24 +673,158 @@ func fetchOpenAIModels(ctx context.Context, hc *http.Client, base string, hdr ht
 }
 
 // fetchOpenAICompatibleModels reads the OpenAI-shaped /models every compatible
-// gateway exposes: ids only (opencode-go, opencode, custom providers).
+// gateway exposes. The shape is the superset OpenCode's gateways publish —
+// window, output cap, per-million prices (cache reads and writes included),
+// the advertised effort levels and the API surfaces — and every field is
+// optional, so an id-only gateway keeps working exactly as before: unknown
+// window, unknown price, no effort levels.
 func fetchOpenAICompatibleModels(ctx context.Context, hc *http.Client, base string, hdr http.Header) ([]CachedModel, error) {
+	type price struct {
+		Price json.RawMessage `json:"price"`
+		Cache struct {
+			Read  json.RawMessage `json:"read"`
+			Write json.RawMessage `json:"write"`
+		} `json:"cache"`
+	}
+	type cost struct {
+		Text *struct {
+			Input  *price `json:"input"`
+			Output *price `json:"output"`
+		} `json:"text"`
+	}
+	// The row keeps every metadata subtree raw and decodes them one at a time:
+	// a gateway that publishes one field in a shape moca does not model (a
+	// "1M" string where a token count belongs) loses that field, never the
+	// row's other facts. The advertised wire and effort list decide the
+	// request body, so an unreadable window must not change the protocol.
+	type row struct {
+		ID           string          `json:"id"`
+		Limit        json.RawMessage `json:"limit"`
+		Cost         json.RawMessage `json:"cost"`
+		Capabilities json.RawMessage `json:"capabilities"`
+		API          json.RawMessage `json:"api"`
+	}
 	var list struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+		Data []json.RawMessage `json:"data"`
 	}
 	if err := getJSON(ctx, hc, strings.TrimRight(base, "/")+"/models", hdr, &list); err != nil {
 		return nil, err
 	}
 	var out []CachedModel
-	for _, m := range list.Data {
-		if m.ID == "" {
+	for _, raw := range list.Data {
+		var r row
+		if err := json.Unmarshal(raw, &r); err != nil || r.ID == "" {
+			// Every other field is raw, so this fails only for a non-string
+			// id or a row that is not an object — nothing worth naming.
+			slog.Debug("model row skipped", "provider", base, "err", causeClass(err))
 			continue
 		}
-		out = append(out, CachedModel{ID: m.ID, Protocol: "openai-completions"})
+		// Decode one subtree at a time: an unreadable field is logged and
+		// skipped, and the row keeps everything else it published.
+		field := func(name string, raw json.RawMessage, v any) bool {
+			if len(raw) == 0 {
+				return false
+			}
+			if err := json.Unmarshal(raw, v); err != nil {
+				slog.Debug("model row field unreadable", "provider", base, "id", r.ID, "field", name, "err", causeClass(err))
+				return false
+			}
+			return true
+		}
+		cm := CachedModel{ID: r.ID}
+		var lim struct {
+			Context int `json:"context"`
+			Input   int `json:"input"`
+			Output  int `json:"output"`
+		}
+		if field("limit", r.Limit, &lim) {
+			cm.Ctx, cm.MaxOut = lim.Context, lim.Output
+			if cm.Ctx <= 0 {
+				// Some payloads publish only the input ceiling; it is the
+				// conservative window when there is no separate context field.
+				cm.Ctx = lim.Input
+			}
+		}
+		var c cost
+		if field("cost", r.Cost, &c) && c.Text != nil && c.Text.Input != nil {
+			in := priceValue(c.Text.Input.Price)
+			var outp *float64
+			if c.Text.Output != nil {
+				outp = priceValue(c.Text.Output.Price)
+			}
+			// Both rates are required for the price to count as known:
+			// moca's unit carries one rate per kind, so a lone input rate
+			// would claim the output side costs $0.00 — a price the provider
+			// never published. A published zero is a price (a free model).
+			if in != nil && outp != nil {
+				cm.Cost = config.CostConfig{Input: *in, Output: *outp,
+					CacheRead:  deref(priceValue(c.Text.Input.Cache.Read)),
+					CacheWrite: deref(priceValue(c.Text.Input.Cache.Write))}
+				cm.CostKnown = true
+			}
+		}
+		var caps struct {
+			Tools     json.RawMessage `json:"tools"`
+			Reasoning json.RawMessage `json:"reasoning"`
+		}
+		if field("capabilities", r.Capabilities, &caps) {
+			var t struct {
+				Supported *bool `json:"supported"`
+			}
+			// An explicit `tools: {supported: false}` is an advertised no:
+			// moca is a tool-calling agent, so an embedding or image model is
+			// not a model here. An absent capability is unknown, not a no.
+			if field("capabilities.tools", caps.Tools, &t) && t.Supported != nil && !*t.Supported {
+				slog.Debug("model row skipped", "provider", base, "id", r.ID, "reason", "tools unsupported")
+				continue
+			}
+			var rs struct {
+				Supported *bool    `json:"supported"`
+				Effort    []string `json:"effort"`
+			}
+			if field("capabilities.reasoning", caps.Reasoning, &rs) {
+				cm.Reasons = rs.Supported == nil || *rs.Supported
+				cm.Efforts = rs.Effort
+			}
+		}
+		var api map[string]json.RawMessage
+		if field("api", r.API, &api) {
+			cm.Protocol = protocolFromAPI(api)
+		}
+		out = append(out, cm)
 	}
 	return out, nil
+}
+
+// priceValue reads a price that is either a number or an object keyed by a
+// cache TTL (OpenCode publishes cache-write prices as {"30m":0.25,"12h":0.5}).
+// moca's CostConfig holds one rate per kind and a run never asks for a long
+// TTL, so the cheapest tier — the short-TTL rate — is the one a run pays.
+func priceValue(raw json.RawMessage) *float64 {
+	if len(raw) == 0 {
+		return nil
+	}
+	var f float64
+	if json.Unmarshal(raw, &f) == nil {
+		return &f
+	}
+	var tiers map[string]float64
+	if json.Unmarshal(raw, &tiers) == nil && len(tiers) > 0 {
+		best := math.Inf(1)
+		for _, v := range tiers {
+			best = min(best, v)
+		}
+		return &best
+	}
+	return nil
+}
+
+// deref reads an optional JSON number, 0 when absent.
+func deref(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // fetchOpenRouterModels reads the public catalog: window, output cap, per-token

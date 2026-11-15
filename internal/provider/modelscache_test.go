@@ -43,25 +43,25 @@ func TestModelsCacheTTLAndBaseURL(t *testing.T) {
 	if err := c.Put("gw", base, []CachedModel{{ID: "m", Ctx: 1000}}); err != nil {
 		t.Fatal(err)
 	}
-	if models, fresh := c.Load("gw", base); !fresh || len(models) != 1 || models[0].ID != "m" {
-		t.Fatalf("fresh entry: %v %v", models, fresh)
+	if models, found, fresh := c.Load("gw", base); !found || !fresh || len(models) != 1 || models[0].ID != "m" {
+		t.Fatalf("fresh entry: %v %v %v", models, found, fresh)
 	}
 	*now = now.Add(23*time.Hour + 59*time.Minute)
-	if _, fresh := c.Load("gw", base); !fresh {
+	if _, _, fresh := c.Load("gw", base); !fresh {
 		t.Fatal("23h59m must still be fresh")
 	}
 	*now = now.Add(2 * time.Minute) // 24h01m
-	models, fresh := c.Load("gw", base)
+	models, found, fresh := c.Load("gw", base)
 	if fresh {
 		t.Fatal("past 24h must be stale")
 	}
-	if len(models) != 1 {
-		t.Fatal("a stale entry still returns its rows (served while refetching)")
+	if !found || len(models) != 1 {
+		t.Fatal("a stale entry is still an entry, and it returns its rows (served while refetching)")
 	}
-	if _, fresh := c.Load("gw", "https://other.example/v1"); fresh || len(models) == 0 {
+	if _, found, _ := c.Load("gw", "https://other.example/v1"); found {
 		t.Fatal("a changed base URL invalidates the entry")
 	}
-	if _, fresh := c.Load("other-provider", base); fresh {
+	if _, found, _ := c.Load("other-provider", base); found {
 		t.Fatal("entries are per provider")
 	}
 }
@@ -89,7 +89,7 @@ func TestModelsCacheOneFilePerProvider(t *testing.T) {
 	if err := os.Remove(filepath.Join(c.Dir(), "openrouter.json")); err != nil {
 		t.Fatal(err)
 	}
-	if models, fresh := c.Load("anthropic", "https://a"); !fresh || len(models) != 1 {
+	if models, found, fresh := c.Load("anthropic", "https://a"); !found || !fresh || len(models) != 1 {
 		t.Fatal("removing one provider's file must leave the others")
 	}
 }
@@ -119,8 +119,8 @@ func TestModelsCacheFileNamesAreSafe(t *testing.T) {
 		t.Fatalf("a name escaped the cache dir: %q", sib)
 	}
 	for _, n := range names {
-		if models, fresh := c.Load(n, "https://x"); !fresh || len(models) != 1 || models[0].ID != "m-"+n {
-			t.Fatalf("%q does not round-trip: %v %v", n, models, fresh)
+		if models, found, fresh := c.Load(n, "https://x"); !found || !fresh || len(models) != 1 || models[0].ID != "m-"+n {
+			t.Fatalf("%q does not round-trip: %v %v %v", n, models, found, fresh)
 		}
 	}
 }
@@ -139,7 +139,7 @@ func TestModelsCacheFileOfAnotherProviderIsAMiss(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(c.Dir(), "other.json"), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if models, _ := c.Load("other", "https://x"); len(models) != 0 {
+	if models, found, _ := c.Load("other", "https://x"); found || len(models) != 0 {
 		t.Fatalf("gw's list was read as other's: %v", models)
 	}
 }
@@ -170,14 +170,14 @@ func TestModelsCacheFileShape(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, fresh := c.Load("gw", "https://gw"); fresh {
-		t.Fatal("corrupt cache must load as empty")
+	if _, found, fresh := c.Load("gw", "https://gw"); found || fresh {
+		t.Fatal("corrupt cache must load as a miss")
 	}
 	if err := os.WriteFile(path, []byte(`{"version":99,"provider":"gw","baseUrl":"https://gw","models":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, fresh := c.Load("gw", "https://gw"); fresh {
-		t.Fatal("another schema version must load as empty")
+	if _, found, fresh := c.Load("gw", "https://gw"); found || fresh {
+		t.Fatal("another schema version must load as a miss")
 	}
 }
 
@@ -194,7 +194,7 @@ func TestModelsCacheParallelProvidersAndClear(t *testing.T) {
 	}
 	wg.Wait()
 	for i := range 8 {
-		if _, fresh := c.Load(fmt.Sprintf("p%d", i), "https://gw"); !fresh {
+		if _, _, fresh := c.Load(fmt.Sprintf("p%d", i), "https://gw"); !fresh {
 			t.Fatalf("p%d lost its entry to a parallel write", i)
 		}
 	}
@@ -207,5 +207,36 @@ func TestModelsCacheParallelProvidersAndClear(t *testing.T) {
 	}
 	if providers, models, err := c.Clear(); err != nil || providers != 0 || models != 0 {
 		t.Fatalf("clear is idempotent: %d %d %v", providers, models, err)
+	}
+}
+
+// An entry that lists no models is still an entry: "the provider lists
+// nothing" and "we never asked" are different facts, and a restart must not
+// turn the first into the second.
+func TestModelsCacheEmptyListIsAnAnswer(t *testing.T) {
+	c, now := newTestCache(t)
+	for _, tc := range []struct {
+		name   string
+		models []CachedModel
+	}{
+		{"nil-then-null", nil},
+		{"empty", []CachedModel{}},
+	} {
+		if err := c.Put("gw", "https://gw", tc.models); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		models, found, fresh := c.Load("gw", "https://gw")
+		if !found || !fresh || len(models) != 0 {
+			t.Fatalf("%s: an empty answer is a cached entry, found=%v fresh=%v models=%v", tc.name, found, fresh, models)
+		}
+		// Stale is still found: the entry says the list was read.
+		*now = now.Add(25 * time.Hour)
+		if _, found, fresh := c.Load("gw", "https://gw"); !found || fresh {
+			t.Fatalf("%s: a stale empty answer is still an entry, found=%v fresh=%v", tc.name, found, fresh)
+		}
+	}
+	// A provider with no file at all is the miss.
+	if _, found, fresh := c.Load("other", "https://gw"); found || fresh {
+		t.Fatal("a provider that was never asked is a miss")
 	}
 }

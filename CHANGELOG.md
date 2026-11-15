@@ -2,6 +2,31 @@
 
 ## v0.8.2 (2026-11-14)
 
+### The model list belongs to the provider
+
+`/models` on the OpenCode gateways grew a full catalogue — context window, output cap, per-million
+prices (cache reads and writes included), the effort levels it accepts and the API surfaces it serves —
+and moca still decoded the id and threw the rest away. Every model outside moca's own table therefore
+started with a 16 384-token window, no price and no effort knob: 16 of the go tier's 30 ids and 75 of
+zen's 86, `kimi-k3.1-pro` and `gemini-4-argon` among them. The fetcher reads the whole shape now, so a
+model either gateway lists works the day it ships — a new id needs no moca release, and a retired one
+leaves the picker with the next fetch.
+
+The curated table is gone as a *model list* and survives as `catalogQuirks`: corrections a payload cannot
+state, or states wrongly — the effort sets glm/kimi/mimo under-report, kimi-k3's output clamp,
+qwen3.8-max's verified chat route, DeepSeek's `reasoning_content` replay (no field says it), Anthropic's
+prices (its API publishes none) and the whole OpenAI row (its API publishes ids and shutdown dates).
+Eight fallback rows remain for a provider whose list was never read, the model-list cache moved to
+version 2 so a day-old cache cannot keep serving metadata-less rows, and a model row moca cannot parse
+keeps its id instead of disappearing — an unknown limit is not an absent model.
+
+Two corrections the review pass forced, both live-verified against both gateways: a model whose payload
+advertises effort levels gets the **adaptive** thinking knob on a `/messages` route, not the budget one
+(`claude-haiku-5-5` answers `400 "thinking.type.enabled" is not supported for this model … use
+"thinking.type.adaptive"`, and that 400 is the first request of every run with thinking on), and a price
+that publishes only half the rates (an input price, no output) is *not* a known price — the output side
+would have been rendered `$0.00` for a rate the provider never published.
+
 ### The six built-ins become first-class: provenance, a fork, and `/name` everywhere
 
 A patch on top of v0.8.1, aimed at what the release measurement and a review pass found wrong rather than at

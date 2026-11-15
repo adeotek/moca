@@ -55,6 +55,10 @@ type Registry struct {
 	// deterministic and never stacks duplicates.
 	cache      *ModelsCache
 	discovered map[string][]CachedModel
+	// listRead records that a provider's model list was actually read (a
+	// successful fetch), so an empty answer stays distinguishable from "never
+	// asked": only the latter falls back to fallbackCatalog.
+	listRead map[string]bool
 	// discoveryErr is why a provider's last list fetch failed (absent when it
 	// succeeded, was served fresh from the cache, or never ran).
 	discoveryErr map[string]error
@@ -73,14 +77,10 @@ func NewRegistry(cfg config.Config, hc *http.Client, notify func(RetryNotice)) (
 	r := &Registry{cfg: cfg, hc: hc, notify: notify, getenv: os.Getenv, models: map[string]Model{},
 		oauth: map[string]CredentialFunc{}, sessionID: rand.Text(),
 		cache: NewModelsCache(config.ModelsCacheDir(), ModelsCacheTTL), discovered: map[string][]CachedModel{},
+		listRead:     map[string]bool{},
 		discoveryErr: map[string]error{}, resolved: map[string]Model{}}
-	for _, m := range builtinCatalog {
-		m.CostKnown = true // every curated row carries authored prices
-		r.models[m.Qualified()] = m
-	}
-	for pname, p := range cfg.Providers {
-		r.addSeedsLocked(pname)
-		if err := r.applyModelOverrides(pname, p); err != nil {
+	for pname := range cfg.Providers {
+		if err := r.rebuildProviderLocked(pname); err != nil {
 			return nil, err
 		}
 	}

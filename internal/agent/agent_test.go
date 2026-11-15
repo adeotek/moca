@@ -55,8 +55,22 @@ func newScript(t *testing.T, turns ...string) *scriptServer {
 	s := &scriptServer{turns: turns}
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet { // model discovery (SPECS §6)
+			// A gateway that publishes the full shape: the ids the agent tests
+			// drive, with the windows, prices and effort lists a real one
+			// carries (a thin payload would exercise a different path).
 			w.Header().Set("Content-Type", "application/json")
-			io.WriteString(w, `{"data":[{"id":"m"},{"id":"m2"}]}`)
+			io.WriteString(w, `{"data":[
+				{"id":"m","limit":{"context":200000,"output":8192}},
+				{"id":"m2","limit":{"context":200000,"output":8192}},
+				{"id":"glm-5.3","limit":{"context":1000000,"output":131072},
+				 "cost":{"text":{"input":{"price":1.4,"cache":{"read":0.26}},"output":{"price":4.4}}},
+				 "capabilities":{"reasoning":{"supported":true,"effort":["low","high","max"]}}},
+				{"id":"glm-5.3-flash","limit":{"context":1000000,"output":131072},
+				 "cost":{"text":{"input":{"price":0.15,"cache":{"read":0.03}},"output":{"price":0.5}}},
+				 "capabilities":{"reasoning":{"supported":true,"effort":["low","high","max"]}}},
+				{"id":"deepseek-v4.1-flash","limit":{"context":1000000,"output":384000},
+				 "cost":{"text":{"input":{"price":0.15,"cache":{"read":0.003}},"output":{"price":0.6}}},
+				 "capabilities":{"reasoning":{"supported":true,"effort":["low","high","max"]}}}]}`)
 			return
 		}
 		s.mu.Lock()
