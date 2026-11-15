@@ -421,11 +421,25 @@ func (r *Registry) rowFor(name string, cm CachedModel) Model {
 	if r.baseURL(name, m.Protocol) == "" {
 		m.Protocol = defaultProtocolFor(name)
 	}
-	// A messages route has no reasoning_effort: the anthropic thinking budget
-	// is its knob, whatever effort list the model advertises elsewhere.
-	if m.Protocol == "anthropic-messages" &&
-		(m.ThinkingMode == "openai" || (m.ThinkingMode == "none" && cm.Reasons)) {
-		m.ThinkingMode, m.ThinkingLevelMap = "budget", anthropicBudget
+	// A messages route has no reasoning_effort: the anthropic thinking knob is
+	// its own, and which one the route takes is what the payload's effort list
+	// says. A model that publishes effort levels takes the adaptive knob
+	// (thinking.adaptive + output_config.effort) — verified live on both
+	// gateways 2026-11-15: claude-haiku-5-5 and claude-sonnet-5-5 answer
+	// `400 "thinking.type.enabled" is not supported for this model ... use
+	// "thinking.type.adaptive"`, while qwen3.8-flash accepts either. A model
+	// that publishes none keeps the budget knob (thinking.enabled +
+	// budget_tokens), which minimax-m3 accepts and which is the only one an
+	// empty effort list speaks to.
+	if m.Protocol == "anthropic-messages" && m.ThinkingMode != "budget" && m.ThinkingMode != "adaptive" {
+		// Adaptive cannot be switched off, so the off key a chat-completions
+		// effort list may carry is dropped with it (effortMap's mandatory
+		// flag does exactly that).
+		if levels := effortMap(cm.Efforts, true); len(levels) > 0 {
+			m.ThinkingMode, m.ThinkingLevelMap = "adaptive", levels
+		} else if m.ThinkingMode == "openai" || (m.ThinkingMode == "none" && cm.Reasons) {
+			m.ThinkingMode, m.ThinkingLevelMap = "budget", anthropicBudget
+		}
 	}
 	if m.ThinkingMode != "none" && len(m.ThinkingLevelMap) == 0 {
 		m.ThinkingMode = "none"
@@ -701,11 +715,32 @@ func fetchOpenAICompatibleModels(ctx context.Context, hc *http.Client, base stri
 	}
 	var out []CachedModel
 	for _, raw := range list.Data {
-		// One model moca cannot parse must not cost the whole list: a vendor
-		// that reshapes one field is a missing row, not a provider outage.
 		var m model
 		if err := json.Unmarshal(raw, &m); err != nil {
-			slog.Debug("model row skipped", "provider", base, "err", causeClass(err))
+			// A row whose metadata does not decode still names a model, and an
+			// unknown limit is not an absent model: keep the id with the same
+			// unknown-window/no-price shape a thin payload gets. Only a row
+			// with no readable id — or an advertised `tools: false`, which
+			// survives in the same snippet — is dropped.
+			var idOnly struct {
+				ID           string `json:"id"`
+				Capabilities *struct {
+					Tools *struct {
+						Supported *bool `json:"supported"`
+					} `json:"tools"`
+				} `json:"capabilities"`
+			}
+			if json.Unmarshal(raw, &idOnly) != nil || idOnly.ID == "" {
+				slog.Debug("model row skipped", "provider", base, "err", causeClass(err))
+				continue
+			}
+			if c := idOnly.Capabilities; c != nil && c.Tools != nil &&
+				c.Tools.Supported != nil && !*c.Tools.Supported {
+				slog.Debug("model row skipped", "provider", base, "err", causeClass(err))
+				continue
+			}
+			slog.Debug("model row kept id-only", "provider", base, "id", idOnly.ID, "err", causeClass(err))
+			out = append(out, CachedModel{ID: idOnly.ID})
 			continue
 		}
 		if m.ID == "" {
@@ -725,16 +760,20 @@ func fetchOpenAICompatibleModels(ctx context.Context, hc *http.Client, base stri
 			cm.Ctx = m.Limit.Input
 		}
 		if m.Cost != nil && m.Cost.Text != nil && m.Cost.Text.Input != nil {
-			if in, outp := priceValue(m.Cost.Text.Input.Price), m.Cost.Text.Output; in != nil || outp != nil {
-				// Prices are dollars per million tokens, moca's unit — a
-				// published zero is a free model, a fact, not a gap.
-				c := config.CostConfig{Input: deref(in),
+			in := priceValue(m.Cost.Text.Input.Price)
+			var outp *float64
+			if m.Cost.Text.Output != nil {
+				outp = priceValue(m.Cost.Text.Output.Price)
+			}
+			// Both rates are required for the price to count as known:
+			// moca's unit carries one rate per kind, so a lone input rate
+			// would claim the output side costs $0.00 — a price the provider
+			// never published. A published zero is a price (a free model).
+			if in != nil && outp != nil {
+				cm.Cost = config.CostConfig{Input: *in, Output: *outp,
 					CacheRead:  deref(priceValue(m.Cost.Text.Input.Cache.Read)),
 					CacheWrite: deref(priceValue(m.Cost.Text.Input.Cache.Write))}
-				if outp != nil {
-					c.Output = deref(priceValue(outp.Price))
-				}
-				cm.Cost, cm.CostKnown = c, true
+				cm.CostKnown = true
 			}
 		}
 		if c := m.Capabilities; c != nil && c.Reasoning != nil {
@@ -747,9 +786,9 @@ func fetchOpenAICompatibleModels(ctx context.Context, hc *http.Client, base stri
 }
 
 // priceValue reads a price that is either a number or an object keyed by a
-// tier (OpenCode publishes cache-write prices as {"30m":0.25,"12h":0.5}).
-// moca's CostConfig holds one rate per kind, so the cheapest tier is the
-// conservative one: a run is never under-reported.
+// cache TTL (OpenCode publishes cache-write prices as {"30m":0.25,"12h":0.5}).
+// moca's CostConfig holds one rate per kind and a run never asks for a long
+// TTL, so the cheapest tier — the short-TTL rate — is the one a run pays.
 func priceValue(raw json.RawMessage) *float64 {
 	if len(raw) == 0 {
 		return nil

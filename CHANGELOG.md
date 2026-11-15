@@ -18,7 +18,14 @@ qwen3.8-max's verified chat route, DeepSeek's `reasoning_content` replay (no fie
 prices (its API publishes none) and the whole OpenAI row (its API publishes ids and shutdown dates).
 Eight fallback rows remain for a provider whose list was never read, the model-list cache moved to
 version 2 so a day-old cache cannot keep serving metadata-less rows, and a model row moca cannot parse
-now costs that row, not the whole list.
+keeps its id instead of disappearing — an unknown limit is not an absent model.
+
+Two corrections the review pass forced, both live-verified against both gateways: a model whose payload
+advertises effort levels gets the **adaptive** thinking knob on a `/messages` route, not the budget one
+(`claude-haiku-5-5` answers `400 "thinking.type.enabled" is not supported for this model … use
+"thinking.type.adaptive"`, and that 400 is the first request of every run with thinking on), and a price
+that publishes only half the rates (an input price, no output) is *not* a known price — the output side
+would have been rendered `$0.00` for a rate the provider never published.
 
 ### The six built-ins become first-class: provenance, a fork, and `/name` everywhere
 

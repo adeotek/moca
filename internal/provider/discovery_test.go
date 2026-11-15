@@ -588,7 +588,7 @@ func TestProtocolWithoutABaseURLFallsBack(t *testing.T) {
 
 // TestMessagesOnlyModelUsesTheMessagesRoute: on the go tier the advertised
 // messages surface is served, so the row takes the anthropic wire — and the
-// thinking knob that wire has (a budget), not reasoning_effort.
+// thinking knob that wire has, not reasoning_effort.
 func TestMessagesOnlyModelUsesTheMessagesRoute(t *testing.T) {
 	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
 		return 200, `{"data":[{"id":"minimax-m3","limit":{"context":1000000,"output":131072},
@@ -606,10 +606,57 @@ func TestMessagesOnlyModelUsesTheMessagesRoute(t *testing.T) {
 	reg.DiscoverModels(context.Background())
 	m := reg.models["opencode-go/minimax-m3"]
 	if m.Protocol != "anthropic-messages" || m.ThinkingMode != "budget" {
-		t.Fatalf("a messages-only model takes the budget route: %+v", m)
+		t.Fatalf("a messages-only model takes the budget route when it publishes no effort list: %+v", m)
 	}
 	if _, ok := m.ThinkingLevelMap[llm.EffortOff]; !ok {
 		t.Fatal("the budget route can always think less or not at all")
+	}
+}
+
+// TestMessagesRouteTakesItsThinkingKnobFromThePayload: a messages-route model
+// that publishes effort levels takes the ADAPTIVE knob, not the budget one —
+// claude 5.5 refuses `thinking.type.enabled` outright ("use
+// thinking.type.adaptive and output_config.effort", live-verified on both
+// gateways 2026-11-15), while qwen3.8-flash accepts either. The level map is
+// the payload's own, off excluded: adaptive thinking cannot be switched off.
+func TestMessagesRouteTakesItsThinkingKnobFromThePayload(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) {
+		return 200, `{"data":[
+			{"id":"claude-sonnet-5-5","limit":{"context":1000000,"output":128000},
+			 "api":{"messages":{"base_url":"https://inference.invalid/v1"}},
+			 "capabilities":{"reasoning":{"supported":true,"toggle":true,
+				"effort":["low","medium","high","xhigh","max"]}}},
+			{"id":"qwen-plain","limit":{"context":1000000,"output":131072},
+			 "api":{"messages":{"base_url":"https://inference.invalid/v1"}},
+			 "capabilities":{"reasoning":{"supported":true}}}]}`
+	})
+	blankBuiltinKeys(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("MOCA_GO_TEST_KEY", "k")
+	cfg := mustCfg(t, `{"providers":{"opencode-go":{"baseUrl":"`+srv.URL+`","apiKey":"env:MOCA_GO_TEST_KEY"}}}`)
+	reg, err := NewRegistry(cfg, srv.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.DiscoverModels(context.Background())
+	m := reg.models["opencode-go/claude-sonnet-5-5"]
+	if m.Protocol != "anthropic-messages" || m.ThinkingMode != "adaptive" {
+		t.Fatalf("an effort list on the messages route means the adaptive knob: %+v", m)
+	}
+	if _, ok := m.ThinkingLevelMap[llm.EffortOff]; ok {
+		t.Fatalf("adaptive thinking cannot be disabled, so off has no key: %v", m.ThinkingLevelMap)
+	}
+	if got := m.ClampEffort(llm.EffortMedium); got != llm.EffortMedium {
+		t.Fatalf("the payload's own levels stay reachable: medium clamps to %q", got)
+	}
+	if m.ClampEffort(llm.EffortOff) != llm.EffortLow {
+		t.Fatalf("off must clamp up to the lowest level it can think at, got %q", m.ClampEffort(llm.EffortOff))
+	}
+	if !m.HistoryBound() {
+		t.Fatal("an adaptive route binds the submitted history to its thinking prefix")
+	}
+	if q := reg.models["opencode-go/qwen-plain"]; q.ThinkingMode != "budget" {
+		t.Fatalf("no effort list keeps the budget knob: %+v", q)
 	}
 }
 
@@ -806,7 +853,10 @@ func TestFetchOpenAICompatibleModelsReadsThePayload(t *testing.T) {
 			 "api":{"chat-completions":{"base_url":"https://inference.invalid/v1"}}},
 			{"id":"thin"},
 			{"id":"embed","capabilities":{"tools":{"supported":false}}},
-			{"id":"free","cost":{"text":{"input":{"price":0},"output":{"price":0}}}}]}`
+			{"id":"free","cost":{"text":{"input":{"price":0},"output":{"price":0}}}},
+			{"id":"partial","cost":{"text":{"input":{"price":1,"cache":{"read":0.1}}}}},
+			{"id":"broken","limit":{"context":"1M"},"capabilities":{"tools":{"supported":true}}},
+			{"id":"broken-embed","limit":{"context":"1M"},"capabilities":{"tools":{"supported":false}}}]}`
 	})
 	got, err := fetchOpenAICompatibleModels(context.Background(), srv.Client(), srv.URL, http.Header{})
 	if err != nil {
@@ -818,6 +868,9 @@ func TestFetchOpenAICompatibleModelsReadsThePayload(t *testing.T) {
 	}
 	if _, ok := byID["embed"]; ok {
 		t.Fatal("a tools:false model is not a model here")
+	}
+	if _, ok := byID["broken-embed"]; ok {
+		t.Fatal("a tools:false row is dropped even when its metadata does not decode")
 	}
 	rich := byID["rich"]
 	if rich.Ctx != 1000000 || rich.MaxOut != 65536 || rich.Protocol != "openai-completions" {
@@ -836,6 +889,16 @@ func TestFetchOpenAICompatibleModelsReadsThePayload(t *testing.T) {
 	// A published zero is a price, not a gap.
 	if free := byID["free"]; !free.CostKnown || free.Cost.Input != 0 {
 		t.Fatalf("a free model is priced at zero: %+v", free)
+	}
+	// A lone input rate is not a price: moca's unit would claim the output
+	// side is free, which the provider never published.
+	if partial, ok := byID["partial"]; !ok || partial.CostKnown || partial.Cost != (config.CostConfig{}) {
+		t.Fatalf("half a price is not a known price: %+v", partial)
+	}
+	// A row whose metadata does not decode still names a model: the id
+	// survives with the same unknown shape a thin payload gets.
+	if broken, ok := byID["broken"]; !ok || broken.Ctx != 0 || broken.CostKnown || broken.Reasons {
+		t.Fatalf("an undecodable row keeps its id and nothing else: %+v", broken)
 	}
 }
 
