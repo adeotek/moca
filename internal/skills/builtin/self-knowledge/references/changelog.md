@@ -31,7 +31,7 @@ The six built-ins are not seeded files: they are extracted from the binary per c
 an edit to them is overwritten by the next update. That flexibility existed and was invisible, so:
 
 - `moca skills` lists every skill that resolves, in resolution order, with its source (project, global,
-  built-in, seeded) and a fork hint; `moca skills fork <name>` copies a built-in into your own skills dir,
+  built-in) and a fork hint; `moca skills fork <name>` copies a built-in into your own skills dir,
   where first-name-wins makes your copy shadow it. Never overwrites, refuses symlinks, names the skill if it
   does not exist.
 - `/help` marks built-in commands and skills once per block instead of leaving you to guess.
@@ -46,12 +46,15 @@ an edit to them is overwritten by the next update. That flexibility existed and 
   this mistake, made by hand.
 - **The runtime skill index has its own ceiling.** The prompt's byte ceiling holds the template, and the skill
   index is appended at runtime — which is how the three new built-ins added **+299 system-prompt tokens**
-  (2 381 → 2 680) without tripping it. `TestTheSkillIndexFitsItsBudget` pins the index at 2 150 bytes (six
-  built-ins measure 1 980) and was watched failing at 2 175 with a seventh added.
+  (2 381 → 2 680) without tripping it. `TestTheSkillIndexFitsItsBudget` pins the index's content at 1 400
+  bytes — each skill's absolute path normalized to a fixed sentinel, so the pin no longer measures the
+  machine's `TMPDIR` — with the six built-ins at 1 280; the cheapest seventh line costs 139 bytes of line,
+  so one does not fit.
 - **Marker adoption is measured with a tool now.** `test/evals/_lib/markers.sh` counts only what an assistant
   wrote — tool payloads plus assistant text, never the user's words and never the embedded system prompt. On
   the release A/B: **0 of 42** transcripts before the instruction, **1 of 42** with it, that one naming no
-  trigger. The earlier 3-of-45 reading came from a smaller sample and is superseded. No new prompt pressure
+  trigger. The earlier 3-of-45 reading came from a different sample, whose composition is not recorded here,
+  and is superseded. No new prompt pressure
   was added for a 1-in-42 rate; `/debt` instead harvests the `TODO`/`FIXME`/`HACK` deferrals a repository
   already carries, beside the marker, so a clean-looking ledger is not a lie of omission.
 
@@ -62,6 +65,24 @@ diagnosed in `BASELINE.md`: tool calls per run are unchanged (8.83 → 9.00) and
 delta is **per-step cost** — the +299-token index charged on every request, plus two of six runs emitting a
 narration line that pays a full context resend for nothing. Nothing in the working style reshapes refactors;
 the lever is the index, and the ceiling above is what holds it.
+
+### Review-pass fixes
+
+An independent pass over the range found no blockers and twenty-two items; the ones that change behaviour:
+
+- `-p "/remember <rule>"` is reserved like the TUI and ACP commands: it starts an `Agent.Remember` run instead
+  of expanding a user template named `remember`, and the name/args split is one whitespace rule on every
+  headless surface (`skills.SplitCommand`).
+- The skill write guard reads the command a rule *cites*: fenced examples, HTML comments and escaped backticks
+  no longer hijack the description check, a body citing two commands needs the description to name one of
+  them, and `pytests` is no longer read as `pytest`.
+- `moca skills fork` copies into a temp directory and renames, so a destination that appears mid-copy is never
+  deleted; `moca update skills` prints `<skill>: failed (<err>)` instead of `up to date` when its refresh
+  errors.
+- Eval gates close four leaks: the reuse checker ignores `_test.go` and any shift expression, the review
+  checker no longer credits a bare "panics" as the off-by-one and ignores `.moca/` in its untouched-tree arm,
+  the write-up checker sees receiver-form functions and accepts "therefore"/"since"/"hence", and `size_of`
+  keeps a filename with a space as one file. `--selftest` grows a leak row for each.
 
 ## v0.8.1 (2026-11-14)
 

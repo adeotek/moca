@@ -23,6 +23,11 @@ func runUpdateSkills(check bool, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "skills dir: %s\n", dir)
 	for _, u := range ups {
 		switch {
+		case u.Err != nil:
+			// The status line must not read "up to date" for a refresh that
+			// errored: the aggregate error goes to stderr and the exit is
+			// exitRuntime either way, but stdout is what a script greps (F9).
+			fmt.Fprintf(stdout, "%s: failed (%v)", u.Name, u.Err)
 		case u.Skipped != "":
 			fmt.Fprintf(stdout, "%s: skipped (%s — left as is)", u.Name, u.Skipped)
 		case u.Created:
@@ -40,7 +45,7 @@ func runUpdateSkills(check bool, stdout, stderr io.Writer) int {
 			}
 			fmt.Fprintf(stdout, "%s: %s %d %s (%s)", u.Name, verb, len(u.Changed), plural(len(u.Changed), "file", "files"), strings.Join(u.Changed, ", "))
 		}
-		if u.Skipped == "" && !u.Created && len(u.Kept) > 0 {
+		if u.Skipped == "" && u.Err == nil && !u.Created && len(u.Kept) > 0 {
 			fmt.Fprintf(stdout, " — kept %d extra %s (%s)", len(u.Kept), plural(len(u.Kept), "file", "files"), strings.Join(u.Kept, ", "))
 		}
 		fmt.Fprintln(stdout)

@@ -1,8 +1,10 @@
 package skills
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -99,6 +101,73 @@ func TestForkRefusesUnknownAndUnsafeNames(t *testing.T) {
 	_, err := Fork(builtin, user, "nope")
 	if !strings.Contains(err.Error(), "debt, review") {
 		t.Fatalf("the refusal must list the built-ins: %v", err)
+	}
+}
+
+// A symlink inside a built-in is refused rather than followed: a fork must not
+// become a way to copy something from outside the bundle into the user's
+// skills dir (the traversal-safety story behind forkNameRe).
+func TestForkRefusesASymlinkInTheSource(t *testing.T) {
+	builtin, user := forkFixture(t)
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("not for the fork\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(builtin, "review", "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Fork(builtin, user, "review"); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("a symlink in the source must refuse the fork: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(user, "review")); err == nil {
+		t.Fatal("a refused fork must leave no destination behind")
+	}
+}
+
+// The copy is built in a hidden temp dir and renamed: a destination that
+// appears while the copy runs belongs to someone else, and the fork must lose
+// without deleting or merging into it. Before the rename step, the error path
+// ran os.RemoveAll(dst) over whatever was there (F3).
+func TestForkNeverDestroysADestinationPlantedMidCopy(t *testing.T) {
+	builtin, user := forkFixture(t)
+	for i := 0; i < 2000; i++ {
+		p := filepath.Join(builtin, "review", fmt.Sprintf("f%04d.txt", i))
+		if err := os.WriteFile(p, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dst := filepath.Join(user, "review")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			ents, err := os.ReadDir(user)
+			if err == nil {
+				for _, e := range ents {
+					if strings.HasPrefix(e.Name(), ".fork-") {
+						_ = os.MkdirAll(dst, 0o755)
+						_ = os.WriteFile(filepath.Join(dst, "mine.txt"), []byte("the user's file\n"), 0o644)
+						return
+					}
+				}
+			}
+			runtime.Gosched()
+		}
+	}()
+	_, err := Fork(builtin, user, "review")
+	<-done
+	if err == nil {
+		t.Fatal("the fork must lose to a destination that appeared mid-copy")
+	}
+	got, rerr := os.ReadFile(filepath.Join(dst, "mine.txt"))
+	if rerr != nil || string(got) != "the user's file\n" {
+		t.Fatalf("the planted destination was damaged: %q %v", got, rerr)
+	}
+	ents, _ := os.ReadDir(user)
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), ".fork-") {
+			t.Fatalf("a temp tree was left behind: %s", e.Name())
+		}
 	}
 }
 

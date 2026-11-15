@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,7 +32,22 @@ func TestRunUpdateSkills(t *testing.T) {
 	if code := run(context.Background(), []string{"update", "skills"}, nil, &out, &errb); code != exitOK {
 		t.Fatalf("exit %d, stderr: %s", code, errb.String())
 	}
-	for _, want := range []string{"skills dir: " + dir, "rtk: created (1 file)", "graphify: created (9 files)"} {
+	// The file count is the bundle's, not a number pinned here: a legitimately
+	// added upstream file must not fail the command's test.
+	graphifyFiles := 0
+	if err := filepath.WalkDir(filepath.Join(dir, "graphify"), func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			graphifyFiles++
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"skills dir: " + dir, "rtk: created (1 file)",
+		fmt.Sprintf("graphify: created (%d %s)", graphifyFiles, plural(graphifyFiles, "file", "files"))} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, out.String())
 		}
@@ -83,6 +100,38 @@ func TestRunUpdateSkills(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "rtk: updated 1 file (SKILL.md) — kept 1 extra file (notes.md)") {
 		t.Fatalf("stdout:\n%s", out.String())
+	}
+}
+
+// A refresh that errors must not print "up to date" for the skill it failed to
+// write: stdout is what a script or the user greps, and the aggregate error on
+// stderr used to arrive beside a status line that claimed success (F9).
+func TestRunUpdateSkillsReportsAFailedRefresh(t *testing.T) {
+	dir := skillsConfigDir(t)
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"update", "skills"}, nil, &out, &errb); code != exitOK {
+		t.Fatalf("plant: exit %d, stderr: %s", code, errb.String())
+	}
+	// A directory where the bundle's SKILL.md goes: the read fails, and nothing
+	// this command can do turns it into an update.
+	skill := filepath.Join(dir, "rtk", "SKILL.md")
+	if err := os.Remove(skill); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := run(context.Background(), []string{"update", "skills"}, nil, &out, &errb); code != exitRuntime {
+		t.Fatalf("a failed refresh must exit %d, got %d (stderr: %s)", exitRuntime, code, errb.String())
+	}
+	if strings.Contains(out.String(), "rtk: up to date") {
+		t.Fatalf("stdout claims an errored refresh is up to date:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "rtk: failed (") {
+		t.Fatalf("stdout must report the failure against the skill:\n%s", out.String())
 	}
 }
 

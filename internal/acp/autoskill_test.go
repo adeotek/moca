@@ -99,7 +99,7 @@ func TestACPRememberSplitsOnAnyWhitespace(t *testing.T) {
 	if txt := lastUserText(t, s); !strings.Contains(txt, "Remember this project rule: use make test") {
 		t.Fatalf("the whole typed rule must reach the run, got %s", txt)
 	}
-	if name, args := splitCommand("/remember\tuse  it"); name != "remember" || args != "use  it" {
+	if name, args := skills.SplitCommand("/remember\tuse  it"); name != "remember" || args != "use  it" {
 		t.Fatalf("splitCommand = %q, %q", name, args)
 	}
 }

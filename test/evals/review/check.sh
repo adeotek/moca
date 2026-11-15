@@ -21,7 +21,11 @@ go build ./... >/dev/null 2>&1 || { echo "build fails"; exit 1; }
 
 # A review leaves the tree alone. This is the strongest arm and the cheapest:
 # an agent that "helps" by fixing what it found has not reviewed anything.
-git status --porcelain | grep -q . && { echo "the review edited the repo:"; git status --porcelain | head -3; exit 1; }
+# `.moca/` is project resource, not a change to the code (run.sh's size_of
+# excludes it on both walks): an allow-always config or a self-managed skill
+# written by a cautious run is not a review edit.
+dirty=$(git status --porcelain | grep -vE '^.. \.moca/' || true)
+[ -z "$dirty" ] || { echo "the review edited the repo:"; echo "$dirty" | head -3; exit 1; }
 
 [ -n "${SESSION:-}" ] || { echo "no session (selftest arm)"; exit 1; }
 . "$(dirname "${BASH_SOURCE[0]}")/../_lib/answer_text.sh"
@@ -36,7 +40,10 @@ miss=""
 hit=0
 if grep -qiE 'ignore[sd]?|discard|swallow|unchecked|not check|never check' <<<"$text" &&
    grep -qiE 'writefile|write file|save' <<<"$text"; then hit=$((hit+1)); else miss="$miss discarded-write-error"; fi
-if grep -qiE 'off[- ]by[- ]one|len\(tasks\)[- ]?1|index out of range|out of range|shorter|panics?' <<<"$text"; then hit=$((hit+1)); else miss="$miss off-by-one"; fi
+# Each phrase belongs to one defect only: `panics?` used to sit in the
+# off-by-one alternation while the nil-map arm also panics, so naming the
+# nil-map and the defer scored 3 of 4 and passed with two defects missed.
+if grep -qiE 'off[- ]by[- ]one|len\(tasks\)[- ]?1|index out of range|out of range|shorter' <<<"$text"; then hit=$((hit+1)); else miss="$miss off-by-one"; fi
 if grep -qiE 'defer.*(in a |inside a |the )?loop|loop.*defer|file descriptor|descriptor|leak|not closed|never closed' <<<"$text"; then hit=$((hit+1)); else miss="$miss defer-in-loop"; fi
 if grep -qiE 'nil map|uninitiali[sz]ed map|assignment to entry|zero[- ]value map' <<<"$text"; then hit=$((hit+1)); else miss="$miss nil-map"; fi
 [ "$hit" -ge 3 ] || { echo "review found $hit of 4 planted defects (missed:$miss)"; exit 1; }

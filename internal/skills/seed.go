@@ -62,6 +62,7 @@ type SeedUpdate struct {
 	Changed []string // bundle files written, slash-separated and relative to the skill dir
 	Kept    []string // files the user's copy carries that the bundle does not
 	Skipped string   // why the copy was left alone ("symlink", "not a directory")
+	Err     error    // this skill's refresh failed; the fields above are partial
 }
 
 // UpdateSeedSkills rewrites the embedded seed skills under dir from the
@@ -98,6 +99,7 @@ func updateSeedSkills(fsys fs.FS, dir string, dryRun bool) ([]SeedUpdate, error)
 		}
 		up, err := updateSeedOne(fsys, e.Name(), dir, dryRun)
 		if err != nil {
+			up.Err = err
 			errs = append(errs, err)
 		}
 		ups = append(ups, up)
