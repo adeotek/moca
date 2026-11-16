@@ -240,8 +240,9 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 }
 
 // webPrivateHost reports whether a fetch target is a private or local
-// address: localhost names, private/loopback/link-local IP literals, or a
-// name resolving to any such address.
+// address: localhost names, loopback/private/link-local/CGNAT literals (see
+// webPrivateIP for the non-public ranges), or a name resolving to any such
+// address.
 func webPrivateHost(host string) bool {
 	h := strings.ToLower(strings.TrimSuffix(host, "."))
 	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
@@ -262,9 +263,36 @@ func webPrivateHost(host string) bool {
 	return false
 }
 
+// webPrivateIP reports whether ip is a target the fetch gate must ask about.
+// Go's IsPrivate covers RFC 1918 and RFC 4193 only, so the non-public ranges
+// that matter in practice are checked explicitly:
+//
+//   - 100.64.0.0/10 — RFC 6598 shared address space: CGNAT, Tailscale peers,
+//     and Alibaba Cloud's metadata service (100.100.100.200). A host running
+//     moca on a Tailscale network or in that cloud can otherwise be steered
+//     at its peers or its credentials with no prompt at all.
+//   - 192.0.0.0/24 — IETF protocol assignments (PCP/TURN anycast).
+//   - 198.18.0.0/15 — benchmarking (RFC 2544), never a routable peer.
 func webPrivateIP(ip net.IP) bool {
-	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsInterfaceLocalMulticast())
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsInterfaceLocalMulticast() {
+		return true
+	}
+	// To4 folds ::ffff:a.b.c.d (the dialer's own check sees that form).
+	if ip4 := ip.To4(); ip4 != nil {
+		switch {
+		case ip4[0] == 100 && ip4[1]&0xc0 == 0x40: // 100.64.0.0/10
+			return true
+		case ip4[0] == 192 && ip4[1] == 0 && ip4[2] == 0: // 192.0.0.0/24
+			return true
+		case ip4[0] == 198 && (ip4[1] == 18 || ip4[1] == 19): // 198.18.0.0/15
+			return true
+		}
+	}
+	return false
 }
 
 type webResult struct{ Title, URL, Snippet string }

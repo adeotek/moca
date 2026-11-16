@@ -6,9 +6,11 @@ import (
 )
 
 // Plan mode (rev 20): the agent analyzes a request and writes an
-// implementation plan to <workdir>/docs/plans/*.md — nothing else changes.
-// Env.Plan drives the write confinement; shell, mcp, web and the read tools
-// stay available (the normal permission ladder applies to shell/mcp).
+// implementation plan to <workdir>/docs/plans/*.md — nothing else changes
+// through write/edit. Env.Plan drives the write confinement; shell, mcp, web
+// and the read tools stay available (the normal permission ladder applies to
+// shell/mcp, so a redirect is only as guarded as the rest of the ladder — the
+// confinement is not a sandbox).
 // Env.PlanWrote records the deliverable landing (the agent nudges a plan run
 // that would otherwise end without it).
 
