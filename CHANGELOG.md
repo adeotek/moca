@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.8.3 (2026-11-16)
+
+### The review pass: a fetch gate that missed shared address space, and CI that compiled one platform
+
+A full-repository review — two passes, structure and trust boundaries first, then implementation against
+the spec — found no live bug in the code it read in full, one real security gap, and a set of claims that
+had drifted from the tree. This release is the fixes.
+
+**The `web` fetch gate asked about RFC 1918 and nothing else.** Go's `IsPrivate` covers RFC 1918 and
+RFC 4193, so `100.64.0.0/10` — RFC 6598 shared address space, where Alibaba Cloud's metadata service sits
+at `100.100.100.200` and every Tailscale peer lives — read as public: a fetch there fired no approval and
+went straight to a connection attempt. `192.0.0.0/24` (IETF protocol assignments) and `198.18.0.0/15`
+(benchmarking) were open the same way. All three now ask like any private target, pinned at both `/10`
+boundaries and end to end: a denied asker refuses before the dial, where the pre-fix code spent the whole
+30-second timeout connecting.
+
+**CI compiled one platform.** gofmt, vet, build and the race suite all ran on linux, so `//go:build
+windows` files (and the `!(linux||darwin||…)` ones) were excluded from every step: a PR could break
+`replace_windows.go` and stay green until a release dispatch weeks later. Two cross-build steps compile
+windows and darwin on every push now, and `install.sh` — the one script every new user pipes into `bash` —
+gets `bash -n` + `shellcheck -S warning`.
+
+**Plan mode's promise was wider than its enforcement.** The README and the `-p` banner said every write
+outside `docs/plans/*.md` is refused; the confinement lives in `write`/`edit` only, and the shell tool runs
+on its ordinary ladder — verified, not assumed: `echo pwned > pwned.txt` under plan mode lands while
+`write` in the same environment refuses. The prose (README, `--help`, the `-p` banner, the ACP mode
+description, SPECS §10) now states what is enforced. Treat plan mode as "the model was told not to", not
+"the run cannot", until an analyser-side plan zone lands.
+
+### Drift the review caught
+
+- SPECS §2 said skillgate runs 16 legs and the corpus is rev 21; the gate runs 17 and the corpus is rev 33.
+  The same block's `--version` example still showed `v0.4.1-beta`, and "Not implemented yet" claimed the
+  current version was `v0.7.10`.
+- README's Development section counted twelve eval scenarios and two scripted harnesses; there are fifteen
+  scenarios and five harnesses — three of them hermetic (skillgate, goalgate, acpgate) and needing no key.
+- BENCHMARKS pinned `MOCA_VERSION` to "v0.7.12 now, the newest tag", three releases stale. It now says to
+  pin the release under test.
+- `internal/permissions/probe` — a 39-line manual symlink probe from the v0.4.0 overhaul that nothing
+  referenced (its cases are pinned in `jail_test.go`) — is gone, and the package count follows (18 → 17).
+
+### The doc-count pin was pinning history
+
+`TestSpecsPackageCount`'s pattern matched the *first* bolded "N tests across M Go packages" in SPECS, which
+is a dated review entry above §15's live claim. It only passed while both read 22; deleting the probe
+package moved one of them and exposed it. The pattern is anchored to §15's `Unit/integration` bullet now,
+so the pin measures the claim it names: **1496 tests across 21 Go packages**.
+
 ## v0.8.2 (2026-11-14)
 
 ### The model list belongs to the provider

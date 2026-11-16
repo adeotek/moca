@@ -34,7 +34,7 @@ usage:
     --config <path>            config file (dev/test)
     --continue                 latest session in this workdir
     --mode <m>                 permission mode for this run: default | auto | yolo | plan
-                               (plan = the plan scope: write an implementation plan to docs/plans/, no other writes)
+                               (plan = the plan scope: write an implementation plan to docs/plans/; write/edit reach nothing else)
     --model <provider/model>   override config `+"`"+`model`+"`"+` for this session
     --resume <id8|last>        resume a session of this directory (last = its newest)
   moca execute <plan.md> [-p "<notes>"] execute an implementation plan step by step, ticking its - [ ] boxes

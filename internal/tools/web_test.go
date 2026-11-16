@@ -422,6 +422,13 @@ func TestWebPrivateHost(t *testing.T) {
 	for host, want := range map[string]bool{
 		"localhost": true, "app.localhost": true, "127.0.0.1": true, "::1": true, "10.1.2.3": true,
 		"192.168.0.10": true, "172.16.0.1": true, "169.254.169.254": true, "0.0.0.0": true,
+		// RFC 6598 shared address space: Alibaba's metadata service and
+		// every Tailscale/CGNAT peer live here, and Go's IsPrivate misses it.
+		// Both /10 boundaries are pinned so a widened mask cannot pass.
+		"100.64.0.1": true, "100.100.100.200": true, "100.127.255.255": true,
+		"100.63.255.255": false, "100.128.0.0": false,
+		// IETF protocol assignments and benchmarking: never a public peer.
+		"192.0.0.9": true, "198.18.0.1": true, "198.19.255.255": true, "198.20.0.1": false,
 		// A zoned literal (RFC 6874 %25 in a URL) is still that address; the
 		// zone picks an interface and must not hide it from the check.
 		// net.ParseIP fails on the zone form, so this leans on LookupIP's
@@ -432,6 +439,26 @@ func TestWebPrivateHost(t *testing.T) {
 		if got := webPrivateHost(host); got != want {
 			t.Errorf("webPrivateHost(%q) = %v, want %v", host, got, want)
 		}
+	}
+}
+
+// TestWebFetchCGNATAddressNeedsApproval: 100.64.0.0/10 is where Alibaba's
+// metadata service (100.100.100.200) and every Tailscale peer answer. The
+// gate must ask for it like any private address and refuse before any
+// connection when there is no yes — the address itself is never dialed here.
+func TestWebFetchCGNATAddressNeedsApproval(t *testing.T) {
+	input := json.RawMessage(`{"op":"fetch","url":"http://100.100.100.200/latest/meta-data/"}`)
+	var asked []Question
+	deny := func(_ context.Context, q Question) Answer { asked = append(asked, q); return Deny }
+	for name, env := range map[string]*Env{"no asker": {}, "denied": {Ask: deny}} {
+		r := webTool{}.Run(context.Background(), env, input)
+		if !r.IsError || !strings.Contains(r.Content, "private or local") {
+			t.Errorf("%s: want a private-address refusal, got %+v", name, r)
+		}
+	}
+	if len(asked) != 1 || asked[0].Kind != "web" || asked[0].CanAlways ||
+		!strings.Contains(asked[0].Subject, "100.100.100.200") {
+		t.Errorf("want one ask-every-time web question naming the host, got %+v", asked)
 	}
 }
 

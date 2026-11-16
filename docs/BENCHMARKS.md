@@ -71,7 +71,8 @@ make probe                            # one live request per agent, proves the c
 TASK_NAMES=$(tr '\n' ',' < docs/tb2-subset-12.txt | sed 's/,$//') make subset
 ```
 
-`MOCA_VERSION` pins the release under test — **v0.7.12 now**, the newest tag; the rendered Harbor
+`MOCA_VERSION` pins the release under test — set it to the release whose numbers you are reproducing
+(the tables below were measured on v0.7.11 and v0.7.12), not to whatever is newest; the rendered Harbor
 config is copied into every job directory,
 so a run records exactly what ran.
 

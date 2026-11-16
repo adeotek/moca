@@ -17,7 +17,7 @@ var sessionModes = []SessionMode{
 	{ID: "ask", Name: "Ask", Description: "Allowlisted actions run; everything else asks"},
 	{ID: "auto", Name: "Auto", Description: "Safe actions run, risky ones ask, unsure ones get a classifier's opinion"},
 	{ID: "yolo", Name: "Yolo", Description: "All permission checks are off"},
-	{ID: "plan", Name: "Plan", Description: "Write an implementation plan to docs/plans/; no other writes"},
+	{ID: "plan", Name: "Plan", Description: "Write an implementation plan to docs/plans/; write/edit reach nothing else"},
 }
 
 func (s *session) modeID() string {

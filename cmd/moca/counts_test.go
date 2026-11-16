@@ -42,8 +42,13 @@ func out(t *testing.T, skipOnMissing, name string, args ...string) string {
 // agentsClaims reads AGENTS.md's opening "N Go files" count.
 var agentsFiles = regexp.MustCompile(`(\d+) Go files across (\d+) ` + "`internal/`" + ` packages`)
 
-// specsClaims reads SPECS §15's headline "N tests across M Go packages".
-var specsCounts = regexp.MustCompile(`\*\*(\d+) tests across (\d+) Go packages\*\*`)
+// specsClaims reads SPECS §15's headline "N tests across M Go packages". The
+// prefix anchors it to the Unit/integration bullet: an unanchored pattern also
+// matches the dated review-pass entries above it ("the full race suite
+// (**N tests across M Go packages**)"), and once their numbers and the live
+// claim's diverge — a deleted package moves the live one only — the pin would
+// silently measure the history instead.
+var specsCounts = regexp.MustCompile("Unit/integration: `go test ./... -race` — \\*\\*(\\d+) tests across (\\d+) Go packages\\*\\*")
 
 // getInts applies one pattern to a repository file and returns the numbers it
 // captured.
@@ -67,8 +72,8 @@ func getInts(t *testing.T, re *regexp.Regexp, parts ...string) []int {
 // TestAgentsGoFileCount keeps AGENTS.md's file count honest: it is measured
 // with `git ls-files '*.go'`, so an untracked scratch file does not move it —
 // only a file the change actually adds does, which is what the doc counts.
-// The package half is pinned here too: "N `internal/` packages" drifted from
-// 17 to 18 (`internal/permissions/probe`) while the file number held, and a
+// The package half is pinned here too: it drifts independently of the file
+// count (a stray `main` package moved it while the file number held), and a
 // directory walk cannot reproduce `go list` (it skips a dir whose files are all
 // behind a build tag).
 func TestAgentsGoFileCount(t *testing.T) {
