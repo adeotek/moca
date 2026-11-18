@@ -1,6 +1,6 @@
 # Context management: analysis and enhancement plan
 
-Status: plan (no code changed) · 2026-11-17
+Status: superseded by `2026-11-17-context-management-v4.md` · 2026-11-17
 Scope: `internal/compact`, `internal/agent` (loop, compaction, elision), `internal/session`, `internal/config`, `internal/tui`, `test/evals`.
 
 ## 1. Goals and definitions
