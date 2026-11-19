@@ -30,6 +30,12 @@
 - The summary serializer applies the same trim window, so a compaction sees the bounded prompt the model saw.
 - The full prompt is written to the session spill directory before the trim record is committed.
 
+## Unreleased — context gate (P4)
+
+- Added the hermetic `test/contextgate` gate: the built `moca -p` runs against a scripted provider with a growing read history; every work request is independently checked against the 80% ceiling, at least one compaction summary must fire, the run must reach its final answer, and the provider key must not leak into the output.
+- The gate is `//go:build contextgate` and is driven by `bash test/contextgate/run.sh`; it is not part of the normal suite or CI, like the other service gates.
+- Live model/provider accuracy and cost measurements, and the pinned Pi/OpenCode comparison benchmark, remain manual P4 legs; they need the repo `.env` key and are not claimed by the hermetic gate.
+
 ## v0.8.3 (2026-11-16)
 
 ### The review pass: a fetch gate that missed shared address space, and CI that compiled one platform

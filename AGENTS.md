@@ -1,6 +1,6 @@
 # AGENTS.md — moca
 
-One Go binary: a TUI coding agent (`github.com/adeotek/moca`, binary `moca`). 479 Go files across 17 `internal/` packages.
+One Go binary: a TUI coding agent (`github.com/adeotek/moca`, binary `moca`). 480 Go files across 17 `internal/` packages.
 
 ## Ground truth (read before changing behavior)
 
@@ -33,6 +33,7 @@ mise run <task>                             # the make targets, as mise tasks
 - **Ship gate** (not in CI, needs repo `.env` with `OPENCODE_API_KEY`, and a build first): `make build && bash test/shipgate/run.sh`. The checker is `//go:build shipgate`, so plain `go test ./...` skips it. Several `internal/tools` tests are `//go:build !windows`.
 - **Goal gate** (not in CI, hermetic — no key, no network; needs tmux and a build first): `make build && bash test/goalgate/run.sh` — drives the built TUI in tmux against a scripted provider through the `/goal` contract end to end: work → CONTINUE → work → COMPLETE with exactly two work and two review requests, bare `/goal`/clear, a pause landing mid-review with no further round, a killed process whose goal the next process pauses with zero provider calls, an explicit `/goal resume`, and a key-leak scan over the pane and logs. The checker is `//go:build goalgate`, so plain `go test ./...` skips it.
 - **ACP gate** (not in CI, a build first; hermetic — no key, no network): `make build && bash test/acpgate/run.sh` — drives the built `moca acp` over stdio against a scripted provider: a text turn, an approval, cancel, stdin-EOF exit 0 with an empty stderr, a second-process replay, close, delete, and an API-key leak scan. The checker is `//go:build acpgate`, so plain `go test ./...` skips it.
+- **Context gate** (not in CI, a build first; hermetic — no key, no network): `make build && bash test/contextgate/run.sh` — drives the built `moca -p` against a scripted openai-completions provider through a growing read history: every work request is measured independently against the 80% ceiling, at least one compaction summary must fire, the model must run to completion, and the provider key must not appear in the output. The checker is `//go:build contextgate`, so plain `go test ./...` skips it.
 - **Doc counts** (the drift class that bit twice in one pass): `cmd/moca/counts_test.go` runs in the normal suite and fails when AGENTS.md's Go-file count or SPECS §15's package count disagrees with the tree (`git ls-files '*.go'`, `go list ./...`). The `=== RUN` count is the one claim that can only be measured by running the suite, so it sits behind the `counts` tag: after any pass that adds or removes a test, `go test -tags counts ./cmd/moca -run TestSpecsTestCount -v`.
 
 ## Layout & dependency rules

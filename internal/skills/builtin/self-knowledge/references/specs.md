@@ -36,6 +36,7 @@ make release                      # dist/ cross-compiled (linux amd64+arm64, dar
 bash test/shipgate/run.sh         # the §14 ship gate (needs the repo .env model key)
 make build && bash test/goalgate/run.sh         # the goal gate: /goal end to end in tmux (hermetic)
 make build && bash test/acpgate/run.sh          # the ACP gate: the built `moca acp` over stdio, hermetic (no key, no network)
+make build && bash test/contextgate/run.sh      # the context gate: ceiling, compaction, prompt trim, hermetic (no key, no network)
 bash test/skillgate/run.sh        # the self-managed project skills gate: 17 legs on the built binary, hermetic (no key, no network)
 bash test/evals/run.sh -n 3 -l <label>   # the eval corpus (rev 33; same .env key) → test/evals/results/<label>.jsonl + a summary table
 bash test/evals/run.sh --selftest        # each checker fails on its fixture and passes on testdata/reference (no model, no key)
