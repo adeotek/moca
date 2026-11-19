@@ -16,6 +16,13 @@
 - `tools.Spill` returns a real error, so callers can distinguish “spilling off” from a failed write.
 - Forced compaction now prunes older completed tool results beyond the newest 20K tool-output tokens and the last two user turns, protecting errors and the latest result per path; each pruned result is written to the session spill directory first and replaced by a pointer stub. `Elision.Stubs` makes the choice byte-identical on resume.
 
+## Unreleased — context summary fidelity (P2)
+
+- Tool results in the compaction payload now keep a head and a tail within the 2K-char cap, chosen by tool class; the middle is marked with an exact omitted-character count.
+- Historical thinking is omitted from the summary payload; current route-required reasoning remains in the work request.
+- Tool-call arguments keep 500 chars for commands and edit strings.
+- The previous summary is passed outside the capped span, so a tiny summarizer cap shortens only the new span.
+
 ## v0.8.3 (2026-11-16)
 
 ### The review pass: a fetch gate that missed shared address space, and CI that compiled one platform
