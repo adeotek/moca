@@ -170,7 +170,7 @@ func (p *ProxyTool) Run(ctx context.Context, env *tools.Env, input json.RawMessa
 		full := strings.Join(parts, "\n")
 		out := tools.Truncate(full, mcpMaxOutput)
 		if len(full) > mcpMaxOutput {
-			if note := tools.Spill(env, "mcp", full); note != "" {
+			if note, _ := tools.Spill(env, "mcp", full); note != "" {
 				out += "\n" + note
 			}
 		}

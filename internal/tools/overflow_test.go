@@ -22,7 +22,10 @@ func spilledPath(t *testing.T, content string) string {
 
 func TestSpillWritesFullOutput(t *testing.T) {
 	env := &Env{SpillDir: filepath.Join(t.TempDir(), "overflow"), SpillPrefix: "abcd1234-"}
-	note := Spill(env, "shell", "a\nb\nc")
+	note, err := Spill(env, "shell", "a\nb\nc")
+	if err != nil {
+		t.Fatal(err)
+	}
 	p := spilledPath(t, note)
 	if !strings.HasPrefix(filepath.Base(p), "abcd1234-shell-") || !strings.Contains(note, "3 lines") {
 		t.Fatalf("note: %q", note)
@@ -33,7 +36,7 @@ func TestSpillWritesFullOutput(t *testing.T) {
 	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v (tool output can hold secrets)", fi.Mode().Perm())
 	}
-	if Spill(&Env{}, "shell", "x") != "" {
-		t.Fatal("no SpillDir: no spill")
+	if note, err := Spill(&Env{}, "shell", "x"); note != "" || err != nil {
+		t.Fatal("no SpillDir: no spill and no error")
 	}
 }
