@@ -1,6 +1,6 @@
 # Context management: implementation plan v4
 
-Status: plan (no code changed) · 2026-11-18
+Status: superseded by `2026-11-17-context-management-v5.md` · 2026-11-18
 Supersedes `2026-11-17-context-management.md` (v1),
 `2026-11-17-context-management-v2.md` (v2) and
 `2026-11-17-context-management-v3.md` (v3). v4 keeps v3's safety framing and resolves
