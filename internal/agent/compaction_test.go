@@ -120,7 +120,7 @@ func TestLoopGuardNamesOversizedEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := a.Run(context.Background(), "x")
-	if err == nil || !strings.Contains(err.Error(), "still over budget") ||
+	if err == nil || !strings.Contains(err.Error(), "context cannot fit") ||
 		!strings.Contains(err.Error(), "read") || !strings.Contains(err.Error(), "12k tokens") {
 		t.Fatalf("%v", err)
 	}
@@ -192,15 +192,15 @@ func TestManualCompactNothing(t *testing.T) {
 	}
 }
 
-// A cheap model whose credential is missing must not kill a run the active
-// model handles fine: the automatic checkpoint warns and skips; a real
-// overflow would still surface it (turnWithRecovery path).
-func TestAutoCompactionSkipsWhenSummarizerUnavailable(t *testing.T) {
+// A configured summary model whose credential is missing must not kill a run
+// the active model handles fine: the summarizer falls back to the active model
+// with one warning and still compacts.
+func TestAutoCompactionFallsBackToActiveModel(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("MOCA_T_KEY", "k")   // working provider
-	t.Setenv("MOCA_T_BROKEN", "") // missing key for the configured cheap model
-	s := newScript(t, append(bigToolTurns(5), textTurn("done"))...)
+	t.Setenv("MOCA_T_BROKEN", "") // missing key for the configured summary model
+	s := newScript(t, append(bigToolTurns(5), textTurn("## Goal\ns"), textTurn("done"))...)
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`{"model":"broken/x","context":{"maxSteps":40},
 		"providers":{
 		  "fake":{"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768,"maxOutputTokens":4096}}},
@@ -220,35 +220,43 @@ func TestAutoCompactionSkipsWhenSummarizerUnavailable(t *testing.T) {
 	}
 	out, err := a.Run(context.Background(), "make output")
 	if err != nil || out.Text != "done" {
-		t.Fatalf("the run must continue when the summarizer is unusable: %v %q", err, out.Text)
+		t.Fatalf("the run must continue when the summary model is unusable: %v %q", err, out.Text)
 	}
 	var warned bool
 	for _, e := range evs {
-		if w, ok := e.(Warning); ok && strings.Contains(w.Text, "auto-compaction skipped") && strings.Contains(w.Text, "MOCA_T_BROKEN") {
+		if w, ok := e.(Warning); ok && strings.Contains(w.Text, "summary model") && strings.Contains(w.Text, "using the active model") {
 			warned = true
 		}
 	}
 	if !warned {
-		t.Fatal("a warning must report the skipped auto-compaction")
+		t.Fatal("a warning must report the summary-model fallback")
 	}
 	entries, _ := session.ReadFile(a.Session().Path())
-	if c, _ := session.LatestCompaction(entries); c != nil {
-		t.Fatal("no compaction entry may be written when the summarizer is unusable")
+	c, _ := session.LatestCompaction(entries)
+	if c == nil || !strings.Contains(c.Summary, "## Goal") {
+		t.Fatal("the active model must still produce the compaction summary")
 	}
 }
 
-// When the estimate is over the trigger but the transcript is tiny, the loop
-// guard must blame the fixed overhead, not near-empty entries.
+// When the fixed overhead alone exceeds the 80% ceiling, the run warns and
+// continues under the fixed-overhead exception instead of failing.
 func TestLoopGuardReportsFixedOverhead(t *testing.T) {
-	s := newScript(t, textTurnUsage("hi", 26000, 15))
-	a, _, _ := startTestWith(t, s, "", smallModel)
+	s := newScript(t, textTurnUsage("hi", 27000, 15))
+	a, _, evs := startTestWith(t, s, "", smallModel)
 	if out, err := a.Run(context.Background(), "one"); err != nil || out.Text != "hi" {
 		t.Fatal(out, err)
 	}
-	_, err := a.Run(context.Background(), "two")
-	if err == nil || !strings.Contains(err.Error(), "still over budget") ||
-		!strings.Contains(err.Error(), "fixed overhead") || !strings.Contains(err.Error(), "26k tokens") {
-		t.Fatalf("%v", err)
+	if err := a.prepareRequest(context.Background(), false); err != nil {
+		t.Fatalf("fixed-overhead exception must keep the request possible: %v", err)
+	}
+	var warned bool
+	for _, e := range *evs {
+		if w, ok := e.(Warning); ok && strings.Contains(w.Text, "fixed context overhead") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatal("fixed-overhead exception must warn once")
 	}
 }
 

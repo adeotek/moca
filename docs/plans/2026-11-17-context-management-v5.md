@@ -1,10 +1,8 @@
 # Context management: implementation plan v5
 
-Status: plan (no code changed) · 2026-11-18
-Supersedes `2026-11-17-context-management.md` (v1),
-`2026-11-17-context-management-v2.md` (v2),
-`2026-11-17-context-management-v3.md` (v3) and
-`2026-11-17-context-management-v4.md` (v4). v5 keeps v4's safety framing and resolves
+Status: implementation in progress (P0a) · 2026-11-18
+Consolidates and replaces the earlier v1–v4 drafts, now removed from the repository.
+v5 keeps v4's safety framing and resolves
 the v4 review findings listed in §13. v4's tree citations were re-checked; new or
 changed claims are cited where they matter.
 
@@ -1113,8 +1111,8 @@ goal overflow pause; judge over budget without provider call.
 
 ## 13. What changed from v4
 
-v4's own delta (v3 → v4) is recorded in `2026-11-17-context-management-v4.md`; this
-list is the v4 review.
+v4's own delta (v3 → v4) is summarized in this list; the v4 draft was removed. The
+numbers below are the v4 review.
 
 1. **`keepRecentTokens` default change removed.** v4's `min(Effective/10, 60K)` floor
    raised the default kept tail from 20K to 30K on a 300K effective window — a silent
@@ -1153,8 +1151,9 @@ list is the v4 review.
 9. **Docs checklist was overbroad.** v5 limits the per-phase counts/mirror checklist to
    phases that change Go files, SPECS, README, CHANGELOG or AGENTS.md; editing
    `docs/plans/` alone does not trigger it.
-10. **Supersession chain.** v5 supersedes v1–v4 and marks v4 superseded; v4's v3 review
-    history remains in v4 rather than being duplicated here.
+10. **Supersession chain.** v5 replaces v1–v4; the earlier drafts were removed. The
+    v4 review history is summarized in this list rather than retained as a separate
+    file.
 11. **Split-turn summary contract was implicit.** v5 makes it normative in §5.3 and
     P2: a cut inside a turn summarizes history and the turn prefix separately, merges
     the current-turn section, and never drops the prefix; the P0a deterministic

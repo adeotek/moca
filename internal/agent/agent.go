@@ -168,13 +168,26 @@ type Agent struct {
 	// happens, when the run ends (§14).
 	rescueEffort    llm.Effort
 	rescueMaxTokens int
-	usage           llm.Usage
-	cost            float64
-	plan            bool
-	steps           int // steps taken by the current run (run-end log line)
+	// preflightMaxTokens is the output ceiling the current request can afford
+	// after the context preflight; turnMaxTokens applies it but never raises
+	// the configured/rescue ceiling. 0 means no preflight cap.
+	preflightMaxTokens int
+	usage              llm.Usage
+	cost               float64
+	plan               bool
+	steps              int // steps taken by the current run (run-end log line)
 	// warnedDrop gates the once-per-run thinking-drop warning (B1.2); reset
 	// at the start of every run.
 	warnedDrop bool
+	// warnedFixedOverhead gates the once-per-run fixed-overhead exception
+	// warning; reset at the start of every run.
+	warnedFixedOverhead bool
+	// pressureWarned gates the once-per-run ContextPressure notice; reset at
+	// the start of every run.
+	pressureWarned bool
+	// summaryFallbackWarned gates the once-per-session summary-model fallback
+	// warning.
+	summaryFallbackWarned bool
 	// execPlan/execPlanRel: the plan file a RunPlan run executes (abs, display).
 	execPlan, execPlanRel string
 	hard                  *savedModel
@@ -189,6 +202,10 @@ type Agent struct {
 	anchorTokens  int
 	anchorEntries int
 	anchorValid   bool
+	// charsPerToken is the session-local estimator ratio learned from
+	// provider usage; 0 means the cold-start chars/4. It is not persisted:
+	// resume restarts cold. Guarded by mu.
+	charsPerToken float64
 	// lastOverflow is the error behind the most recent errOverflow turn
 	// (provider overflow, or a length stop with the context full); the
 	// compact-and-retry surfaces it when recovery is impossible.
@@ -416,10 +433,14 @@ func (a *Agent) request(choice llm.ToolChoice) llm.Request {
 // turnMaxTokens is the output ceiling for the next request: the configured one
 // (min(model limit, context.reserveTokens)), raised for a truncation rescue.
 func (a *Agent) turnMaxTokens() int {
+	n := a.model.MaxTokens(a.opts.Config.Context.ReserveTokens)
 	if a.rescueMaxTokens > 0 {
-		return a.rescueMaxTokens
+		n = a.rescueMaxTokens
 	}
-	return a.model.MaxTokens(a.opts.Config.Context.ReserveTokens)
+	if a.preflightMaxTokens > 0 && n > a.preflightMaxTokens {
+		n = a.preflightMaxTokens
+	}
+	return n
 }
 
 // rescueBudget is the ceiling for rescue attempt n: double, quadruple, then eight
@@ -472,7 +493,9 @@ func rescueLevel(e llm.Effort, m provider.Model) llm.Effort {
 // input within reserve of the window) becomes errOverflow and nothing is
 // persisted: Run compacts once and repeats the turn (§6).
 func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, []llm.ToolCall, error) {
-	resp, err := a.adapter.Stream(ctx, a.request(choice), func(e llm.Event) {
+	req := a.request(choice)
+	reqChars := compact.RequestChars(req.System+req.SystemTail, req.Tools, req.Messages)
+	resp, err := a.adapter.Stream(ctx, req, func(e llm.Event) {
 		switch e.Type {
 		case llm.EventText:
 			a.emit(TextDelta{e.Text})
@@ -549,6 +572,15 @@ func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, 
 	a.mu.Lock()
 	n := compact.UsageTokens(resp.Usage)
 	a.anchorTokens, a.anchorEntries, a.anchorValid = n, len(a.entries), n > 0
+	// Calibrate the fallback from this request's character count and the
+	// provider's input usage. 0.95 is a conservative margin; a ratio outside
+	// [1,20] is not trustworthy and keeps the previous value.
+	if input := resp.Usage.Input + resp.Usage.CacheRead + resp.Usage.CacheWrite; input > 0 && reqChars > 0 {
+		ratio := float64(reqChars) / float64(input) * 0.95
+		if ratio >= 1 && ratio <= 20 {
+			a.charsPerToken = ratio
+		}
+	}
 	a.mu.Unlock()
 	a.emit(TurnEnd{Message: resp.Message, Usage: resp.Usage, Cost: cost, Stop: resp.Stop})
 	return resp, calls, nil
@@ -586,6 +618,9 @@ func (a *Agent) abort(reason string) {
 // A failed compaction, or a second overflow, surfaces the original error;
 // a cancelled one surfaces the cancellation (esc must read as an interrupt).
 func (a *Agent) turnWithRecovery(ctx context.Context, choice llm.ToolChoice) (llm.Response, []llm.ToolCall, error) {
+	if err := a.prepareRequest(ctx, true); err != nil {
+		return llm.Response{}, nil, err
+	}
 	resp, calls, err := a.turn(ctx, choice)
 	if !errors.Is(err, errOverflow) {
 		return resp, calls, err
@@ -597,6 +632,9 @@ func (a *Agent) turnWithRecovery(ctx context.Context, choice llm.ToolChoice) (ll
 			return resp, nil, cerr
 		}
 		return resp, nil, orig
+	}
+	if perr := a.prepareRequest(ctx, false); perr != nil {
+		return resp, nil, perr
 	}
 	resp, calls, err = a.turn(ctx, choice)
 	if errors.Is(err, errOverflow) {
@@ -685,6 +723,8 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 		a.opts.Env.SkillHintArmed = true
 	}
 	a.warnedDrop = false
+	a.warnedFixedOverhead = false
+	a.pressureWarned = false
 	// A truncated-turn rescue never outlives its run, whichever way the run
 	// ends: the step-limit wrap-up can be the rescued turn, and a failed
 	// nudge or turn returns before the loop clears it.
@@ -698,9 +738,6 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 	// The goal driver reads this after a round: a CONTINUE that followed a
 	// round with no tool call is a stall.
 	defer func() { a.runBatches = batches }()
-	if err := a.maybeCompact(ctx); err != nil {
-		return Outcome{}, err
-	}
 	if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(prompt),
 		GoalID: o.goalID, Nudge: o.goalNudge}); err != nil {
 		return Outcome{}, err
@@ -870,9 +907,6 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 		// Steering lands after the complete tool batch (never between a call
 		// and its result — no provider accepts that, §11).
 		if _, err := a.applySteering(); err != nil {
-			return Outcome{}, err
-		}
-		if err := a.maybeCompact(ctx); err != nil {
 			return Outcome{}, err
 		}
 		// Progress nudge (§14): once the configured number of tool batches has
