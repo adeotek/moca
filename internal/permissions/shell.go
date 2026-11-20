@@ -37,11 +37,21 @@ type Shell struct {
 	// is refused (the skill guard in tools validates those writes, and the
 	// shell cannot). "" = no check — the feature is off.
 	skillDir string
+	// planDir is the plan zone while plan mode is on: every redirect, tee and
+	// `time -o` target must be a markdown file under it — the same zone
+	// write/edit are confined to. "" = plan mode off. Unlike skillDir it
+	// follows the mode: the agent sets and clears it on every plan toggle.
+	planDir string
 }
 
 // SetSkillDir installs the skill-dir refusal (C1). It belongs to the feature
 // being on: a resumed session whose switch went off does not call it.
 func (s *Shell) SetSkillDir(dir string) { s.skillDir = dir }
+
+// SetPlanDir installs the plan-mode refusal for the shell's write channels
+// (redirects, tee, `time -o`). Plan mode is a confinement, not a sandbox: a
+// program that opens files is still only as guarded as the permission ladder.
+func (s *Shell) SetPlanDir(dir string) { s.planDir = dir }
 
 // AutoView returns the auto-mode view of s: the same Rules (an allow-always
 // learned in either view applies in both), the jail j (normally
@@ -50,8 +60,9 @@ func (s *Shell) SetSkillDir(dir string) { s.skillDir = dir }
 func (s *Shell) AutoView(j *Jail) *Shell {
 	// skillDir travels with the copy: auto mode swaps in this view
 	// (agent.New), and losing the field would silently drop the refusal in
-	// the mode that runs the most shell commands.
-	return &Shell{rules: s.rules, auto: true, jail: j, goos: s.goos, skillDir: s.skillDir}
+	// the mode that runs the most shell commands. planDir does too, though
+	// plan mode rides only on ask: the copy must never be the weak view.
+	return &Shell{rules: s.rules, auto: true, jail: j, goos: s.goos, skillDir: s.skillDir, planDir: s.planDir}
 }
 
 func NewShell(rules *Rules, jail *Jail, goos string) *Shell {
@@ -572,10 +583,27 @@ func (s *Shell) checkTargetText(t string, cwdUnknown bool) error {
 	if cwdUnknown && !filepath.IsAbs(t) && t != "~" && !strings.HasPrefix(t, "~/") {
 		return fmt.Errorf("relative redirect target %q after a cd/pushd/popd cannot be resolved; use an absolute path or run the cd separately", t)
 	}
-	if _, err := s.jail.Resolve(t, true); err != nil {
+	res, err := s.jail.Resolve(t, true)
+	if err != nil {
 		return err
 	}
+	if s.planDir != "" && !planZoneAllows(s.planDir, res) {
+		// Internal(): moca's own plan-zone guard, not a project fact — the
+		// tools layer must not arm the skill hint on it.
+		return internalErr(fmt.Sprintf("plan mode writes only docs/plans/*.md — the shell target %q is outside the plan zone (redirects, tee and time -o are confined like write/edit)", t))
+	}
 	return nil
+}
+
+// planZoneAllows reports whether res is a markdown file strictly under dir —
+// the shell side of the tools layer's plan confinement (the packages stay
+// independent, so the predicate is stated twice).
+func planZoneAllows(dir, res string) bool {
+	rel, err := filepath.Rel(dir, res)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return strings.HasSuffix(strings.ToLower(rel), ".md")
 }
 
 // pathCheck classifies literal path operands for the auto table against

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"path/filepath"
 	"slices"
 
 	"github.com/adeotek/moca/internal/llm"
@@ -19,15 +20,28 @@ func (a *Agent) Plan() bool { return a.plan }
 func (a *Agent) applyPlan(on bool) {
 	a.plan = on
 	a.opts.Env.Plan = on
+	// The shell's write channels (redirect, tee, time -o) ride the same zone
+	// (§10): tools guards write/edit, the analyser guards what a command
+	// would redirect. Set and cleared with the mode — plan rides only on ask,
+	// so applying it after SetMode lands on the ask view, never the auto one.
+	dir := ""
+	if on {
+		dir = filepath.Join(a.opts.Env.Root, "docs", "plans")
+	}
+	if cs, ok := a.opts.Env.Commands.(interface{ SetPlanDir(string) }); ok {
+		cs.SetPlanDir(dir)
+	}
 }
 
 // SetPlan toggles plan mode between runs (never during Run). The tools layer
-// enforces the write confinement (write/edit only reach docs/plans/*.md);
-// shell, mcp, web and the read tools stay available under their normal
-// permission rules; the envelope rides every user message *sent while plan
-// mode is on* (§14). Plan rides only on default: turning plan on leaves a
-// wider mode (auto, yolo) for default first (its own ModeChanged) —
-// previously only yolo did.
+// enforces the write confinement (write/edit only reach docs/plans/*.md), and
+// the shell's redirect/tee/time -o targets are confined to the same zone
+// (Shell.SetPlanDir); shell, mcp, web and the read tools otherwise stay
+// available under their normal permission rules — the confinement is not a
+// sandbox. The envelope rides every user message *sent while plan mode is on*
+// (§14). Plan rides only on default: turning plan on leaves a wider mode
+// (auto, yolo) for default first (its own ModeChanged) — previously only yolo
+// did.
 func (a *Agent) SetPlan(on bool) {
 	was := a.plan
 	if on && a.mode != ModeAsk {
