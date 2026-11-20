@@ -38,6 +38,7 @@ Optional, as the change warrants (all need `make build` first, none in CI):
 |---|---|---|
 | Skillgate (hermetic) | `bash test/skillgate/run.sh` | skills/skill-write-guard changes |
 | ACP gate (hermetic) | `bash test/acpgate/run.sh` | `moca acp` or wire changes |
+| Context gate (hermetic) | `bash test/contextgate/run.sh` | context, compaction or spill changes |
 | Ship gate (needs repo `.env`) | `bash test/shipgate/run.sh` | agent-loop changes |
 | Eval corpus (needs `.env`) | `bash test/evals/run.sh -n 3 -l <label>` | prompt/harness changes — A/B against `test/evals/BASELINE.md` |
 | Release rehearsal | `bash test/evals/replay/run.sh` | harness/token-accounting changes |

@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased — context preflight (P0a)
+## v0.8.3 (2026-11-18)
+
+### Context management
+
+The five-phase context-management plan landed in this release. The normal suite is
+**1507 tests across 21 Go packages**; the hermetic `contextgate` is a separate
+build-tagged gate.
+
+#### Context preflight (P0a)
 
 - Added the model-aware context governance layer: an **effective window**
   (`min(advertised model window, context.maxWindowTokens)`, default 300K), a **75% operating trigger** and an **80% estimated-input ceiling**, with one preflight before every work request.
@@ -10,39 +18,35 @@
 - The fallback estimator calibrates chars/token from provider usage; `compact.Budget` now carries the effective window and the hard ceiling. TUI context pressure uses the effective window; ACP `usage_update.size` keeps the physical window.
 - Added the P0a session contracts (`spillDir`, `Trim`, `SummaryState`, compaction telemetry) for the following phases.
 
-## Unreleased — context prune and stable spill (P1)
+#### Context prune and stable spill (P1)
 
 - The session header now stores the 16-hex overflow directory; resume reuses it (and validates it as an exact child of the overflow root) instead of allocating a fresh random directory.
 - `tools.Spill` returns a real error, so callers can distinguish “spilling off” from a failed write.
 - Forced compaction now prunes older completed tool results beyond the newest 20K tool-output tokens and the last two user turns, protecting errors and the latest result per path; each pruned result is written to the session spill directory first and replaced by a pointer stub. `Elision.Stubs` makes the choice byte-identical on resume.
 
-## Unreleased — context summary fidelity (P2)
+#### Context summary fidelity (P2)
 
 - Tool results in the compaction payload now keep a head and a tail within the 2K-char cap, chosen by tool class; the middle is marked with an exact omitted-character count.
 - Historical thinking is omitted from the summary payload; current route-required reasoning remains in the work request.
 - Tool-call arguments keep 500 chars for commands and edit strings.
 - The previous summary is passed outside the capped span, so a tiny summarizer cap shortens only the new span.
 
-## Unreleased — context oversized prompt trim (P3)
+#### Context oversized prompt trim and request/audit split (P3)
 
 - Persisted `trim` entries bound an oversized prompt for the request only: the model sees a 60/40 head+tail window and a path notice, while the transcript and the audit replay keep the full text.
 - `session.MessagesRequest` is now the single model-facing renderer; `Messages`/`MessagesWith` remain the audit renderer, so TUI/ACP replay is not shortened by policy trims.
 - The summary serializer applies the same trim window, so a compaction sees the bounded prompt the model saw.
 - The full prompt is written to the session spill directory before the trim record is committed.
 
-## Unreleased — context gate (P4)
+#### Context gate (P4)
 
 - Added the hermetic `test/contextgate` gate: the built `moca -p` runs against a scripted provider with a growing read history; every work request is independently checked against the 80% ceiling, at least one compaction summary must fire, the run must reach its final answer, and the provider key must not leak into the output.
 - The gate is `//go:build contextgate` and is driven by `bash test/contextgate/run.sh`; it is not part of the normal suite or CI, like the other service gates.
 - Live model/provider accuracy and cost measurements, and the pinned Pi/OpenCode comparison benchmark, remain manual P4 legs; they need the repo `.env` key and are not claimed by the hermetic gate.
 
-## v0.8.3 (2026-11-16)
-
 ### The review pass: a fetch gate that missed shared address space, and CI that compiled one platform
 
-A full-repository review — two passes, structure and trust boundaries first, then implementation against
-the spec — found no live bug in the code it read in full, one real security gap, and a set of claims that
-had drifted from the tree. This release is the fixes.
+This pass is the fixes.
 
 **The `web` fetch gate asked about RFC 1918 and nothing else.** Go's `IsPrivate` covers RFC 1918 and
 RFC 4193, so `100.64.0.0/10` — RFC 6598 shared address space, where Alibaba Cloud's metadata service sits
