@@ -70,7 +70,8 @@ description, SPECS §10) now states what is enforced, and the analyser-side plan
 release: `permissions.Shell.SetPlanDir` — set and cleared by the agent's plan toggle — refuses every
 redirect, `tee` and `time -o` target outside `docs/plans/*.md` before the command runs, so
 `echo pwned > pwned.txt` is refused where `write` already was. The commands themselves keep the ordinary
-ladder: plan mode is a confinement, not a sandbox.
+ladder: plan mode is a confinement, not a sandbox. The shell side is the Unix analyser; Windows' word model
+has no redirect model, so the zone covers `write`/`edit` only there.
 
 ### Drift the review caught
 
