@@ -45,20 +45,85 @@ func callLine(c *llm.ToolCall) string {
 		if json.Unmarshal(m[k], &s) == nil {
 			v = s
 		}
-		if len(v) > 200 {
-			v = safeTail(v[:200]) + "…"
+		limit := 200
+		switch {
+		case k == "command", k == "old_string", k == "new_string":
+			limit = 500
+		case c.Name == "write" && k == "content":
+			limit = 500
+		}
+		if len(v) > limit {
+			v = safeTail(v[:limit]) + "…"
 		}
 		parts[i] = k + "=" + strings.ReplaceAll(v, "\n", "⏎")
 	}
 	return fmt.Sprintf("%s(%s)", c.Name, strings.Join(parts, ", "))
 }
 
+// resultHeadRatio chooses how much of a capped tool result to keep from the
+// head: reads lead with declarations; command/web/mcp output leads with noise
+// and ends with the failure or summary.
+func resultHeadRatio(tool string, isError bool) float64 {
+	if isError {
+		return 0.35
+	}
+	switch tool {
+	case "read":
+		return 0.80
+	case "shell", "search", "web", "mcp":
+		return 0.35
+	default:
+		return 0.50
+	}
+}
+
+// capHeadTail bounds s to max bytes, keeping a head and a tail on rune
+// boundaries. The middle, not the failure at the end, is what gets dropped.
+func capHeadTail(s string, max int, headRatio float64) string {
+	if len(s) <= max {
+		return s
+	}
+	headLen := int(float64(max) * headRatio)
+	tailLen := max - headLen
+	head := runePrefix(s, headLen)
+	tail := runeSuffix(s, tailLen)
+	return head + fmt.Sprintf("\n[… %d chars omitted …]\n", len(s)-len(head)-len(tail)) + tail
+}
+
+func runePrefix(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+func runeSuffix(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	i := len(s) - n
+	for i < len(s) && !utf8.RuneStart(s[i]) {
+		i++
+	}
+	return s[i:]
+}
+
 // Serialize flattens the summarized window into text for the summary request.
-// It is lossy by design: tool results are truncated at 2K chars (the
-// summarizer needs facts, not outputs) and the header says so.
+// It is lossy by design: tool results keep a head and a tail within 2K chars,
+// tool arguments are bounded, and historical thinking is omitted — the
+// summarizer needs facts, not reasoning traces.
 func Serialize(es []Entry) string {
 	var sb strings.Builder
-	sb.WriteString("COMPACTION NOTE (lossy): tool results truncated at 2000 chars.\n")
+	sb.WriteString("COMPACTION NOTE (lossy): tool results keep head and tail within 2000 chars; historical thinking omitted.\n")
+	tool := map[string]string{}
+	for _, e := range es {
+		if e.Kind == KindToolUse && e.Call != nil {
+			tool[e.Call.ID] = e.Call.Name
+		}
+	}
 	for _, e := range es {
 		switch e.Kind {
 		case KindUser:
@@ -70,10 +135,6 @@ func Serialize(es []Entry) string {
 		case KindAssistant:
 			for _, c := range e.Msg.Content {
 				switch c.Type {
-				case llm.BlockThinking:
-					if c.Text != "" {
-						fmt.Fprintf(&sb, "[Assistant thinking]: %s\n", c.Text)
-					}
 				case llm.BlockText:
 					// Tool-only turns carry an empty text block; a bare
 					// "[Assistant]: " line is noise for the summarizer.
@@ -85,10 +146,7 @@ func Serialize(es []Entry) string {
 		case KindToolUse:
 			fmt.Fprintf(&sb, "[Assistant tool calls]: %s\n", callLine(e.Call))
 		case KindToolResult:
-			body := e.Result.Content
-			if len(body) > resultCap {
-				body = safeTail(body[:resultCap]) + "[… truncated]"
-			}
+			body := capHeadTail(e.Result.Content, resultCap, resultHeadRatio(tool[e.Result.CallID], e.Result.IsError))
 			label := "Tool result"
 			if e.Result.IsError {
 				label = "Tool error"

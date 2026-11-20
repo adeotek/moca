@@ -20,14 +20,26 @@ func TestSerialize(t *testing.T) {
 		{ID: "r2", Kind: KindToolResult, Result: &llm.ToolResult{Content: "boom", IsError: true}},
 	}
 	s := Serialize(es)
-	for _, want := range []string{"COMPACTION NOTE (lossy)", "[User]: fix the bug", "[Assistant thinking]: hmm",
-		"[Assistant]: looking", "[Assistant tool calls]: read(offset=10, path=a.go)", "[… truncated]", "[Tool error]: boom"} {
+	for _, want := range []string{"COMPACTION NOTE (lossy)", "[User]: fix the bug",
+		"[Assistant]: looking", "[Assistant tool calls]: read(offset=10, path=a.go)", "[…", "[Tool error]: boom"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q", want)
 		}
 	}
+	if strings.Contains(s, "[Assistant thinking]") {
+		t.Fatal("historical thinking must be omitted from the summary")
+	}
 	if strings.Count(s, "z") != 2000 {
 		t.Fatal("2K truncation")
+	}
+	// The head and the tail survive; the middle is what gets dropped.
+	body := "HEAD" + strings.Repeat("m", 3000) + "TAIL"
+	ht := Serialize([]Entry{
+		{ID: "c2", Kind: KindToolUse, Call: &llm.ToolCall{ID: "c2", Name: "read", Input: json.RawMessage(`{"path":"a"}`)}},
+		{ID: "r3", Kind: KindToolResult, Result: &llm.ToolResult{CallID: "c2", Content: body}},
+	})
+	if !strings.Contains(ht, "HEAD") || !strings.Contains(ht, "TAIL") || !strings.Contains(ht, "chars omitted") {
+		t.Fatalf("head+tail: %q", ht)
 	}
 }
 
