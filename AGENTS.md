@@ -1,6 +1,6 @@
 # AGENTS.md — moca
 
-One Go binary: a TUI coding agent (`github.com/adeotek/moca`, binary `moca`). 480 Go files across 17 `internal/` packages.
+One Go binary: a TUI coding agent (`github.com/adeotek/moca`, binary `moca`). 481 Go files across 17 `internal/` packages.
 
 ## Ground truth (read before changing behavior)
 
@@ -59,7 +59,7 @@ mise run <task>                             # the make targets, as mise tasks
 
 - `docs/specs/external-tools.md` — rtk/graphify allowlist rules and the cross-tool skills/prompts ecosystem.
 - `docs/specs/oauth-verification.md` — the binding OAuth policy gate (anthropic: API key only; openai: subscription login).
-- SPECS.md still cites `docs/reviews/` review docs from the v0.1–v0.5 era — those were deleted; don't chase them (the 2026-11-16 full review, `docs/reviews/2026-11-16-v0.8.2-full-review.md`, is tracked).
+- SPECS.md still cites `docs/reviews/` review docs from the v0.1–v0.5 era and the 2026-11-16 full review — all deleted; don't chase them (the review's findings live in SPECS §15 and CHANGELOG).
 
 ## graphify
 

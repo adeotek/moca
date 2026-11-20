@@ -5,7 +5,7 @@
 ### Context management
 
 The five-phase context-management plan landed in this release. The normal suite is
-**1507 tests across 21 Go packages**; the hermetic `contextgate` is a separate
+**1512 tests across 21 Go packages**; the hermetic `contextgate` is a separate
 build-tagged gate.
 
 #### Context preflight (P0a)
@@ -62,12 +62,15 @@ windows` files (and the `!(linux||darwin||…)` ones) were excluded from every s
 windows and darwin on every push now, and `install.sh` — the one script every new user pipes into `bash` —
 gets `bash -n` + `shellcheck -S warning`.
 
-**Plan mode's promise was wider than its enforcement.** The README and the `-p` banner said every write
-outside `docs/plans/*.md` is refused; the confinement lives in `write`/`edit` only, and the shell tool runs
-on its ordinary ladder — verified, not assumed: `echo pwned > pwned.txt` under plan mode lands while
-`write` in the same environment refuses. The prose (README, `--help`, the `-p` banner, the ACP mode
-description, SPECS §10) now states what is enforced. Treat plan mode as "the model was told not to", not
-"the run cannot", until an analyser-side plan zone lands.
+**Plan mode's promise was wider than its enforcement, and then it wasn't.** The README and the `-p` banner
+said every write outside `docs/plans/*.md` is refused; the confinement lived in `write`/`edit` only, and the
+shell tool ran on its ordinary ladder — verified, not assumed: `echo pwned > pwned.txt` under plan mode landed
+while `write` in the same environment refused. The prose (README, `--help`, the `-p` banner, the ACP mode
+description, SPECS §10) now states what is enforced, and the analyser-side plan zone landed in the same
+release: `permissions.Shell.SetPlanDir` — set and cleared by the agent's plan toggle — refuses every
+redirect, `tee` and `time -o` target outside `docs/plans/*.md` before the command runs, so
+`echo pwned > pwned.txt` is refused where `write` already was. The commands themselves keep the ordinary
+ladder: plan mode is a confinement, not a sandbox.
 
 ### Drift the review caught
 
@@ -75,11 +78,15 @@ description, SPECS §10) now states what is enforced. Treat plan mode as "the mo
   The same block's `--version` example still showed `v0.4.1-beta`, and "Not implemented yet" claimed the
   current version was `v0.7.10`.
 - README's Development section counted twelve eval scenarios and two scripted harnesses; there are fifteen
-  scenarios and five harnesses — three of them hermetic (skillgate, goalgate, acpgate) and needing no key.
+  scenarios and six harnesses — four of them hermetic (skillgate, goalgate, acpgate, contextgate) and
+  needing no key.
 - BENCHMARKS pinned `MOCA_VERSION` to "v0.7.12 now, the newest tag", three releases stale. It now says to
   pin the release under test.
 - `internal/permissions/probe` — a 39-line manual symlink probe from the v0.4.0 overhaul that nothing
   referenced (its cases are pinned in `jail_test.go`) — is gone, and the package count follows (18 → 17).
+- `docs/release.md` and `docs/reviews/2026-11-16-v0.8.2-full-review.md` are gone: the release procedure
+  lives in SPECS §2 and AGENTS.md, and the review's findings live in this entry and §15 — a stale operator
+  page and a one-shot report do not belong in the tree they describe.
 
 ### The doc-count pin was pinning history
 

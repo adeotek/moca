@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/adeotek/moca/internal/llm"
+	"github.com/adeotek/moca/internal/permissions"
 	"github.com/adeotek/moca/internal/session"
 )
 
@@ -105,6 +106,53 @@ func TestPlanModeShellRunsThroughAgent(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("shell result missing or erroring in plan mode")
+	}
+}
+
+// TestPlanModeShellWriteChannelsConfined: the analyser-side plan zone, wired
+// through the agent. A redirect outside docs/plans is refused end to end and
+// lands nothing; a redirect inside it runs; and the plan toggle sets and
+// clears the zone on the live checker.
+func TestPlanModeShellWriteChannelsConfined(t *testing.T) {
+	s := newScript(t,
+		toolTurn([2]string{"shell", `{"command":"echo pwned > pwned.txt"}`}),
+		toolTurn([2]string{"shell", `{"command":"echo ok > docs/plans/p.md"}`}),
+		textTurn("done"),
+	)
+	a, work, _ := startTest(t, s, 40, planMode)
+	if err := os.MkdirAll(filepath.Join(work, "docs", "plans"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Run(context.Background(), "plan it"); err != nil {
+		t.Fatal(err)
+	}
+	refused := false
+	for _, e := range a.entries {
+		if e.ToolResult != nil && e.ToolResult.IsError && strings.Contains(e.ToolResult.Content, "docs/plans/*.md") {
+			refused = true
+		}
+	}
+	if !refused {
+		t.Fatal("the out-of-zone redirect was not refused")
+	}
+	if b, err := os.ReadFile(filepath.Join(work, "pwned.txt")); err == nil {
+		t.Fatalf("the refused redirect landed: %q", b)
+	}
+	if b, err := os.ReadFile(filepath.Join(work, "docs", "plans", "p.md")); err != nil || strings.TrimSpace(string(b)) != "ok" {
+		t.Fatalf("in-zone redirect: %q %v", b, err)
+	}
+	// The toggle owns the zone: off clears it, on restores it.
+	sh := a.opts.Env.Commands.(*permissions.Shell)
+	if _, _, _, err := sh.Check("echo x > late.txt"); err == nil {
+		t.Fatal("the plan run's checker lost the zone")
+	}
+	a.SetPlan(false)
+	if _, _, _, err := sh.Check("echo x > late.txt"); err != nil {
+		t.Fatalf("plan off must clear the zone: %v", err)
+	}
+	a.SetPlan(true)
+	if _, _, _, err := sh.Check("echo x > late.txt"); err == nil {
+		t.Fatal("plan on must restore the zone")
 	}
 }
 

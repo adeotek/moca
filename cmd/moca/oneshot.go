@@ -127,7 +127,7 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		fmt.Fprintln(stderr, "auto mode: safe actions run, risky ones are refused (no one to ask)")
 	}
 	if plan {
-		fmt.Fprintln(stderr, "plan mode: write/edit reach only docs/plans/ (shell keeps the permission rules)")
+		fmt.Fprintln(stderr, "plan mode: write/edit and shell redirects reach only docs/plans/")
 	}
 	var a *agent.Agent
 	so := agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model,
