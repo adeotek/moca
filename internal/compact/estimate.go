@@ -7,6 +7,18 @@ import "github.com/adeotek/moca/internal/llm"
 // Tokens estimates tokens as chars/4, rounded up.
 func Tokens(chars int) int { return (chars + 3) / 4 }
 
+// TokensAt estimates tokens at a session-calibrated chars-per-token ratio,
+// rounded up. A non-positive ratio falls back to 4.
+func TokensAt(chars int, charsPerToken float64) int {
+	if chars <= 0 {
+		return 0
+	}
+	if charsPerToken <= 0 {
+		charsPerToken = 4
+	}
+	return int(float64(chars)/charsPerToken + 0.999)
+}
+
 // MessageChars counts the characters of one message's text, thinking text,
 // tool-call name/input and tool-result content.
 func MessageChars(m llm.Message) int {

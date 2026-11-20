@@ -458,6 +458,42 @@ type ContextConfig struct {
 	// (DefaultProgressNudgeAt), 0 disables the nudge — a pointer so an
 	// explicit 0 is distinguishable from an absent key.
 	ProgressNudgeAt *int `json:"progressNudgeAt"`
+	// CompactAtPercent is the operating trigger as a percent of the effective
+	// window (§14.1). nil = DefaultCompactAtPercent; 0 selects the reserve
+	// trigger; nonzero values are 1..80.
+	CompactAtPercent *int `json:"compactAtPercent"`
+	// MaxWindowTokens caps the effective working window. nil = the default
+	// cap; 0 selects the advertised model window; nonzero values are >= 16000.
+	MaxWindowTokens *int `json:"maxWindowTokens"`
+	// SummaryModel is the dedicated compaction summarizer, provider/model.
+	// Empty resolves the configured `model`, then the active model.
+	SummaryModel string `json:"summaryModel"`
+}
+
+// DefaultCompactAtPercent is the operating trigger when
+// context.compactAtPercent is absent.
+const DefaultCompactAtPercent = 75
+
+// DefaultMaxWindowTokens is the effective-window cap when
+// context.maxWindowTokens is absent.
+const DefaultMaxWindowTokens = 300_000
+
+// CompactPercent resolves the operating trigger percentage: the configured
+// value, else the default. 0 means the reserve trigger.
+func (c ContextConfig) CompactPercent() int {
+	if c.CompactAtPercent == nil {
+		return DefaultCompactAtPercent
+	}
+	return *c.CompactAtPercent
+}
+
+// MaxWindow resolves the effective-window cap: the configured value, else the
+// default; 0 means the advertised model window.
+func (c ContextConfig) MaxWindow() int {
+	if c.MaxWindowTokens == nil {
+		return DefaultMaxWindowTokens
+	}
+	return *c.MaxWindowTokens
 }
 
 // DefaultProgressNudgeAt is the §14 progress nudge's threshold when
@@ -694,6 +730,21 @@ func (c Config) Validate() error {
 	}
 	if c.Context.MaxSteps < 1 || c.Context.ReserveTokens < 1 || c.Context.KeepRecentTokens < 1 {
 		return fmt.Errorf("context: reserveTokens, keepRecentTokens and maxSteps must be positive")
+	}
+	if p := c.Context.CompactAtPercent; p != nil && (*p < 0 || *p > 80) {
+		return fmt.Errorf("context.compactAtPercent must be 0 (reserve trigger) or 1..80, got %d", *p)
+	}
+	if p := c.Context.MaxWindowTokens; p != nil && *p != 0 && *p < 16000 {
+		return fmt.Errorf("context.maxWindowTokens must be 0 (advertised window) or at least 16000, got %d", *p)
+	}
+	if m := c.Context.SummaryModel; m != "" {
+		p, _, err := SplitModel(m)
+		if err != nil {
+			return fmt.Errorf("context.summaryModel: %w", err)
+		}
+		if _, ok := c.Providers[p]; !ok {
+			return fmt.Errorf("context.summaryModel %q names unknown provider %q", m, p)
+		}
 	}
 	if c.Context.ProgressNudgeAt != nil && *c.Context.ProgressNudgeAt < 0 {
 		return fmt.Errorf("context.progressNudgeAt must be >= 0 (0 disables the progress nudge, absent = %d)", DefaultProgressNudgeAt)

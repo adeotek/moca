@@ -26,16 +26,18 @@ func (SteeringApplied) isEvent() {}
 // Status is a consistent snapshot for the TUI status bar (§11). It is safe to
 // call while a run is in progress.
 type Status struct {
-	Model         provider.Model
-	Effort        llm.Effort
-	ContextTokens int
-	Window        int
-	Usage         llm.Usage
-	Cost          float64
-	Sub           bool
-	Hard          bool
-	Yolo          bool
-	Plan          bool
+	Model           provider.Model
+	Effort          llm.Effort
+	ContextTokens   int
+	Window          int
+	EffectiveWindow int
+	Trigger         int
+	Usage           llm.Usage
+	Cost            float64
+	Sub             bool
+	Hard            bool
+	Yolo            bool
+	Plan            bool
 }
 
 // Models lists the catalog for /model (sorted by qualified id).
@@ -103,6 +105,7 @@ func (a *Agent) recordModel() {
 		ModelChange: &session.ModelChange{Model: a.model.Qualified(), Effort: string(a.effort)}})
 	a.mu.Lock()
 	a.anchorValid = false
+	a.charsPerToken = 0
 	a.mu.Unlock()
 }
 
@@ -297,20 +300,26 @@ func (a *Agent) ContextTokens() int {
 }
 
 func (a *Agent) contextTokensLocked() int {
+	cpt := a.charsPerToken
+	if cpt <= 0 {
+		cpt = 4
+	}
 	if a.anchorValid {
 		n := 0
 		for _, m := range session.Messages(a.entries[a.anchorEntries:]) {
 			n += compact.MessageChars(m)
 		}
-		return a.anchorTokens + compact.Tokens(n)
+		return a.anchorTokens + compact.TokensAt(n, cpt)
 	}
-	return compact.Tokens(compact.RequestChars(a.opts.System, a.opts.Tools.Specs(),
-		TransformHistory(a.messagesLocked(), a.model.Qualified())))
+	return compact.TokensAt(compact.RequestChars(a.opts.System, a.opts.Tools.Specs(),
+		TransformHistory(a.messagesLocked(), a.model.Qualified())), cpt)
 }
 
 func (a *Agent) Status() Status {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	b := a.Budget()
 	return Status{Model: a.model, Effort: a.effort, ContextTokens: a.contextTokensLocked(), Window: a.model.ContextWindow,
+		EffectiveWindow: b.Effective, Trigger: b.Trigger(),
 		Usage: a.usage, Cost: a.cost, Sub: a.opts.Config.Providers[a.model.Provider].Auth == "oauth", Hard: a.hard != nil, Yolo: a.mode == ModeYolo, Plan: a.plan}
 }
