@@ -26,17 +26,23 @@ type TurnEnd struct {
 type Retry struct{ Notice provider.RetryNotice }
 type Warning struct{ Text string }
 
+// ContextPressure reports a request accepted between the operating trigger and
+// the hard ceiling: compaction was attempted but the request fits only above
+// the quality-oriented band.
+type ContextPressure struct{ Input, Threshold, Ceiling int }
+
 // Note is a quiet, non-problem notice (the startup auto-skill count, the
 // switch table's note): the TUI prints it muted, -p as "note: …", ACP as an
 // info notice.
 type Note struct{ Text string }
 
-func (TextDelta) isEvent()     {}
-func (ThinkingDelta) isEvent() {}
-func (StreamReset) isEvent()   {}
-func (ToolStart) isEvent()     {}
-func (ToolEnd) isEvent()       {}
-func (TurnEnd) isEvent()       {}
-func (Retry) isEvent()         {}
-func (Warning) isEvent()       {}
-func (Note) isEvent()          {}
+func (TextDelta) isEvent()       {}
+func (ThinkingDelta) isEvent()   {}
+func (StreamReset) isEvent()     {}
+func (ToolStart) isEvent()       {}
+func (ToolEnd) isEvent()         {}
+func (TurnEnd) isEvent()         {}
+func (Retry) isEvent()           {}
+func (Warning) isEvent()         {}
+func (ContextPressure) isEvent() {}
+func (Note) isEvent()            {}

@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/colorprofile"
 
 	"github.com/adeotek/moca/internal/agent"
-	"github.com/adeotek/moca/internal/compact"
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/provider"
@@ -361,9 +360,14 @@ func (m *model) refreshStatus() {
 	}
 	st := m.agent.Status()
 	m.status.Model, m.status.Effort = st.Model.Qualified(), st.Effort
-	m.status.Window, m.status.Used = st.Window, st.ContextTokens
-	cc := m.start.Config.Context
-	m.status.Trigger = compact.NewBudget(st.Window, cc.ReserveTokens, cc.KeepRecentTokens).Trigger()
+	m.status.Window, m.status.Used = st.EffectiveWindow, st.ContextTokens
+	if m.status.Window == 0 {
+		m.status.Window = st.Window
+	}
+	m.status.Trigger = st.Trigger
+	if m.status.Trigger == 0 {
+		m.status.Trigger = m.status.Window
+	}
 	m.status.In = st.Usage.Input + st.Usage.CacheRead + st.Usage.CacheWrite
 	m.status.Out, m.status.Cost, m.status.Sub = st.Usage.Output, st.Cost, st.Sub
 	m.status.CostUnknown = !st.Model.CostKnown
@@ -1419,6 +1423,9 @@ func (m *model) handleAgent(e agent.Event) tea.Cmd {
 		return nil
 	case agent.Warning:
 		return m.printlnWarn("warning: " + e.Text)
+	case agent.ContextPressure:
+		m.refreshStatus()
+		return m.printlnMuted(fmt.Sprintf("⋯ context pressure: %d/%d tokens (trigger %d) — continuing below the ceiling", e.Input, e.Ceiling, e.Threshold))
 	case agent.Note:
 		return m.printlnMuted(e.Text)
 	case agent.Compacted:

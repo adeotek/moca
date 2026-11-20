@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — context preflight (P0a)
+
+- Added the model-aware context governance layer: an **effective window**
+  (`min(advertised model window, context.maxWindowTokens)`, default 300K), a **75% operating trigger** and an **80% estimated-input ceiling**, with one preflight before every work request.
+- Added `context.compactAtPercent`, `context.maxWindowTokens` and `context.summaryModel`, with presence-aware defaults and validation.
+- The output budget is fitted to the room the effective window leaves; requests that cannot fit return a bounded `context cannot fit` error, with a fixed-overhead exception and a 256-token output floor.
+- Added a model-free deterministic compaction fallback for an unavailable summarizer, a summary-model fallback to the active model, and a `ContextPressure` event for requests accepted between the trigger and the ceiling.
+- The fallback estimator calibrates chars/token from provider usage; `compact.Budget` now carries the effective window and the hard ceiling. TUI context pressure uses the effective window; ACP `usage_update.size` keeps the physical window.
+- Added the P0a session contracts (`spillDir`, `Trim`, `SummaryState`, compaction telemetry) for the following phases.
+
 ## v0.8.3 (2026-11-16)
 
 ### The review pass: a fetch gate that missed shared address space, and CI that compiled one platform
