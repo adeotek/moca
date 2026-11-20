@@ -18,6 +18,19 @@ func (f *fakeSum) fn(_ context.Context, system, user string) (string, llm.Usage,
 	return "## Goal\nsummary " + string(rune('A'+len(f.calls)-1)), llm.Usage{Input: 100, Output: 10}, nil
 }
 
+func TestPreviousSummarySurvivesTinySpanCap(t *testing.T) {
+	f := &fakeSum{}
+	prev := strings.Repeat("P", 2000)
+	es := []Entry{u("u1", strings.Repeat("x", 5000)), a("a1", "ok"), u("u2", "next")}
+	_, ok, err := Compact(context.Background(), es, Prev{Summary: prev}, 1, 500, f.fn)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	if len(f.calls) != 1 || !strings.Contains(f.calls[0], prev) {
+		t.Fatal("the previous summary must not be capped away")
+	}
+}
+
 func TestCompactSimple(t *testing.T) {
 	f := &fakeSum{}
 	es := []Entry{u("u1", k), a("a1", k), {ID: "c", Kind: KindToolUse, Call: &llm.ToolCall{Name: "edit", Input: json.RawMessage(`{"path":"x.go"}`)}},

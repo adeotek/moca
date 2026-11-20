@@ -57,23 +57,26 @@ func Compact(ctx context.Context, es []Entry, prev Prev, keepRecent, inputCapCha
 		prevBlock = "Previous summary (update it, don't drop facts):\n" + prev.Summary + "\n\n"
 	}
 	var usage llm.Usage
-	call := func(user string) (string, error) {
-		s, u, err := sum(ctx, SummarySystem, CapChars(user, inputCapChars))
+	call := func(prefix, span string) (string, error) {
+		// Keep the previous summary out of the capped span: the span may be
+		// shortened, but cumulative memory is not the thing to drop.
+		room := max(0, inputCapChars-len(prefix))
+		s, u, err := sum(ctx, SummarySystem, prefix+CapChars(span, room))
 		usage = usage.Add(u)
 		return strings.TrimSpace(s), err
 	}
 	var summary string
 	var err error
 	if turnStart < 0 {
-		summary, err = call(prevBlock + Serialize(es[:cut]))
+		summary, err = call(prevBlock, Serialize(es[:cut]))
 	} else {
 		var a, b string
 		if turnStart > 0 || prevBlock != "" {
-			if a, err = call(prevBlock + Serialize(es[:turnStart])); err != nil {
+			if a, err = call(prevBlock, Serialize(es[:turnStart])); err != nil {
 				return Result{Usage: usage}, false, err
 			}
 		}
-		if b, err = call(currentTurnNote + Serialize(es[turnStart:cut])); err != nil {
+		if b, err = call(currentTurnNote, Serialize(es[turnStart:cut])); err != nil {
 			return Result{Usage: usage}, false, err
 		}
 		summary = strings.TrimSpace(a + "\n\n## Current turn (in progress)\n" + b)
