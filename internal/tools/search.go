@@ -182,7 +182,7 @@ func (searchTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resu
 			more = fmt.Sprintf("%d+", searchSpillCap)
 		}
 		out += fmt.Sprintf("\n[… %d of %s hits shown; narrow the pattern or path]", searchCap, more)
-		if note := Spill(env, "search", strings.Join(hits, "\n")+"\n"); note != "" {
+		if note, _ := Spill(env, "search", strings.Join(hits, "\n")+"\n"); note != "" {
 			out += "\n" + note
 		}
 	}

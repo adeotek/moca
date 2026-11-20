@@ -227,7 +227,7 @@ func webFetch(ctx context.Context, env *Env, rawURL, format string, timeout *int
 		return errorf("unsupported content type %q (%d bytes) — fetch serves text, html, json and xml; use shell curl for other types", ctype, len(body))
 	}
 	if n := len(out); n > webOutputMax {
-		note := Spill(env, "web", out)
+		note, _ := Spill(env, "web", out)
 		if note == "" {
 			note = "fetch a more specific URL if needed"
 		}

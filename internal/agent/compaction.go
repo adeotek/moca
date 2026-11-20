@@ -75,6 +75,7 @@ func (a *Agent) liveEntries() ([]compact.Entry, compact.Prev) {
 	}
 	var out []compact.Entry
 	elided := session.ElidedIDs(entries)
+	stubs := session.ElidedStubs(entries)
 	for _, e := range entries[start:] {
 		switch e.Type {
 		case session.TypeMessage:
@@ -91,6 +92,9 @@ func (a *Agent) liveEntries() ([]compact.Entry, compact.Prev) {
 			if elided[e.ID] {
 				stub := *r
 				stub.Content = session.ElidedStub
+				if s, ok := stubs[e.ID]; ok {
+					stub.Content = s
+				}
 				r = &stub
 			}
 			out = append(out, compact.Entry{ID: e.ID, Kind: compact.KindToolResult, Result: r})
@@ -155,6 +159,13 @@ func (a *Agent) summarizer() (compact.Summarizer, int, provider.Model, error) {
 // it summarizes the live window's older history into a compaction entry and
 // returns ErrNothingToCompact when there is nothing older than keepRecent.
 func (a *Agent) Compact(ctx context.Context) error {
+	// The cache is reset by this compaction anyway: prune superseded and
+	// older completed results (with verified spill pointers) before building
+	// the summary payload, so stale output is not paid for in the summary
+	// request too.
+	if err := a.elide(true); err != nil {
+		return err
+	}
 	live, prev := a.liveEntries()
 	sum, capChars, cheap, err := a.summarizer()
 	if err != nil {
@@ -183,11 +194,6 @@ func (a *Agent) Compact(ctx context.Context) error {
 	a.usage, a.cost = a.usage.Add(u), a.cost+cost
 	a.anchorValid = false
 	a.mu.Unlock()
-	// The cache is reset anyway: stub every stale result the kept window
-	// still carries.
-	if err := a.elide(true); err != nil {
-		return err
-	}
 	a.emit(Compacted{TokensBefore: before, TokensAfter: a.ContextTokens()})
 	return nil
 }
@@ -248,6 +254,14 @@ func (a *Agent) prepareRequest(ctx context.Context, allowCompact bool) error {
 				est = a.ContextTokens()
 			}
 		}
+	}
+	if est > b.Ceiling() {
+		// Last resort before the fixed-overhead exception: prune even the
+		// protected working set with verified spill pointers.
+		if err := a.pruneProtected(); err != nil {
+			return err
+		}
+		est = a.ContextTokens()
 	}
 	if est > b.Ceiling() {
 		// The fixed-overhead exception: only when the fixed system + tool

@@ -30,6 +30,20 @@ func ElidedIDs(entries []Entry) map[string]bool {
 	return ids
 }
 
+// ElidedStubs collects the per-ID replacement text recorded by elision
+// entries; IDs without an entry use ElidedStub.
+func ElidedStubs(entries []Entry) map[string]string {
+	stubs := map[string]string{}
+	for _, e := range entries {
+		if e.Type == TypeElision && e.Elision != nil {
+			for id, stub := range e.Elision.Stubs {
+				stubs[id] = stub
+			}
+		}
+	}
+	return stubs
+}
+
 // SummaryPrefix opens the user message that carries a compaction summary;
 // front ends recognize it when replaying history.
 const SummaryPrefix = "[Summary of earlier conversation]"
@@ -87,6 +101,7 @@ func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, keepTai
 	}
 	assistantIdx := map[string]int{}
 	elided := ElidedIDs(entries)
+	stubs := ElidedStubs(entries)
 	for i := start; i < len(entries); i++ {
 		e := entries[i]
 		switch e.Type {
@@ -123,7 +138,9 @@ func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, keepTai
 				continue
 			}
 			r := *e.ToolResult
-			if elided[e.ID] {
+			if stub, ok := stubs[e.ID]; ok {
+				r.Content = stub
+			} else if elided[e.ID] {
 				r.Content = ElidedStub
 			}
 			appendUser(&out, llm.ContentBlock{Type: llm.BlockToolResult, ToolResult: &r})

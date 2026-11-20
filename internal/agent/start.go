@@ -129,7 +129,7 @@ func OpenRegistry(o StartOptions) (*provider.Registry, error) {
 	return reg, nil
 }
 
-func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error) {
+func prepare(o StartOptions, jailRoot string, applyHygiene bool, spillDir string) (*setup, error) {
 	cfg, emit, reg := effectiveConfig(o), o.Emit, o.Registry
 	if reg == nil {
 		var err error
@@ -162,8 +162,14 @@ func prepare(o StartOptions, jailRoot string, applyHygiene bool) (*setup, error)
 	// This process's overflow dir is readable too: over-cap tool outputs are
 	// saved there in full and the cut result names the file (tools.Spill).
 	// Only its own dir — other sessions' outputs (other projects, possibly
-	// secrets) share the overflow area and must stay out of reach.
-	spillDir, err := newSpillDir()
+	// secrets) share the overflow area and must stay out of reach. A resumed
+	// session reuses the dir recorded in its header; a new one gets a random
+	// 16-hex dir stored in the header it is about to create.
+	if spillDir == "" {
+		spillDir, err = newSpillDir()
+	} else {
+		err = validateSpillDir(spillDir)
+	}
 	if err != nil {
 		return nil, &StartError{err}
 	}
@@ -567,6 +573,24 @@ func newSpillDir() (string, error) {
 	return filepath.Join(overflowDir(), hex.EncodeToString(b)), nil
 }
 
+// validateSpillDir admits only the exact shape newSpillDir creates: an
+// absolute 16-hex child of the overflow root. A resumed header cannot point
+// the jail at an arbitrary path.
+func validateSpillDir(dir string) error {
+	if strings.Contains(dir, "..") {
+		return fmt.Errorf("spillDir %q contains a traversal component", dir)
+	}
+	clean := filepath.Clean(dir)
+	if !filepath.IsAbs(clean) || filepath.Dir(clean) != filepath.Clean(overflowDir()) {
+		return fmt.Errorf("spillDir %q is not a child of %s", dir, overflowDir())
+	}
+	base := filepath.Base(clean)
+	if len(base) != 16 || strings.Trim(base, "0123456789abcdef") != "" {
+		return fmt.Errorf("spillDir %q is not a 16-hex session directory", dir)
+	}
+	return nil
+}
+
 // pruneOverflow removes overflow entries (per-process dirs, and flat files of
 // the first rev-21 layout) older than days; 0 keeps everything.
 func pruneOverflow(days int) {
@@ -619,7 +643,7 @@ func webSearchKey(cfg config.Config) (string, error) {
 }
 
 func Start(o StartOptions) (*Agent, error) {
-	st, err := prepare(o, o.Workdir, true)
+	st, err := prepare(o, o.Workdir, true, "")
 	if err != nil {
 		return nil, err
 	}
@@ -660,7 +684,7 @@ func Start(o StartOptions) (*Agent, error) {
 	h := session.Header{
 		Workdir: jail.Root(), Provider: m.Provider, Model: cfg.Model, Effort: string(effort),
 		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.mode() == ModeYolo, Mode: string(o.mode()),
-		SelfManagedSkills: selfManaged != nil}
+		SelfManagedSkills: selfManaged != nil, SpillDir: st.spillDir}
 	var w *session.Writer
 	if o.DeferSession {
 		w, err = session.CreateLazy(filepath.Join(config.DataDir(), "sessions"), h, slug)

@@ -10,6 +10,12 @@
 - The fallback estimator calibrates chars/token from provider usage; `compact.Budget` now carries the effective window and the hard ceiling. TUI context pressure uses the effective window; ACP `usage_update.size` keeps the physical window.
 - Added the P0a session contracts (`spillDir`, `Trim`, `SummaryState`, compaction telemetry) for the following phases.
 
+## Unreleased — context prune and stable spill (P1)
+
+- The session header now stores the 16-hex overflow directory; resume reuses it (and validates it as an exact child of the overflow root) instead of allocating a fresh random directory.
+- `tools.Spill` returns a real error, so callers can distinguish “spilling off” from a failed write.
+- Forced compaction now prunes older completed tool results beyond the newest 20K tool-output tokens and the last two user turns, protecting errors and the latest result per path; each pruned result is written to the session spill directory first and replaced by a pointer stub. `Elision.Stubs` makes the choice byte-identical on resume.
+
 ## v0.8.3 (2026-11-16)
 
 ### The review pass: a fetch gate that missed shared address space, and CI that compiled one platform

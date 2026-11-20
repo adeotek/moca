@@ -144,10 +144,12 @@ type Trim struct {
 }
 
 // Elision marks superseded tool results (§6): request rebuilds replace
-// their content with ElidedStub; the transcript keeps the originals.
+// their content with ElidedStub; the transcript keeps the originals. Stubs
+// carries per-ID replacement text for results pruned with a spill pointer.
 type Elision struct {
-	IDs    []string `json:"ids"`    // tool_result entry ids
-	Tokens int      `json:"tokens"` // estimated tokens saved
+	IDs    []string          `json:"ids"`    // tool_result entry ids
+	Tokens int               `json:"tokens"` // estimated tokens saved
+	Stubs  map[string]string `json:"stubs,omitempty"`
 }
 
 type ModelChange struct {
