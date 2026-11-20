@@ -283,7 +283,7 @@ func (a *Agent) messagesLocked() []llm.Message {
 		blocks := planExtra(e)
 		return append(blocks, goalExtra(objectives, e)...)
 	}
-	msgs := session.MessagesWith(a.entries, extra, a.model.KeepsTailThinking())
+	msgs := session.MessagesRequest(a.entries, extra, a.model.KeepsTailThinking())
 	// After a compaction that dropped every entry of the active goal, put the
 	// objective back — on a clone, never in stored history.
 	if a.goalSet && a.goal.Status == session.GoalActive && !a.goalLiveLocked(a.goal.ID) {

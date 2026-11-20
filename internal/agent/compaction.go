@@ -12,6 +12,7 @@ import (
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/provider"
 	"github.com/adeotek/moca/internal/session"
+	"github.com/adeotek/moca/internal/tools"
 )
 
 // Compacted reports a completed compaction (§6): the context estimate before
@@ -76,6 +77,7 @@ func (a *Agent) liveEntries() ([]compact.Entry, compact.Prev) {
 	var out []compact.Entry
 	elided := session.ElidedIDs(entries)
 	stubs := session.ElidedStubs(entries)
+	trims := session.Trims(entries)
 	for _, e := range entries[start:] {
 		switch e.Type {
 		case session.TypeMessage:
@@ -83,7 +85,21 @@ func (a *Agent) liveEntries() ([]compact.Entry, compact.Prev) {
 			if e.Message.Role == llm.RoleAssistant {
 				k = compact.KindAssistant
 			}
-			out = append(out, compact.Entry{ID: e.ID, Kind: k, Msg: e.Message})
+			msg := e.Message
+			if k == compact.KindUser {
+				if t, ok := trims[e.ID]; ok {
+					m := *e.Message
+					m.Content = make([]llm.ContentBlock, 0, len(e.Message.Content))
+					for _, c := range e.Message.Content {
+						if c.Type == llm.BlockText {
+							c.Text = session.ApplyTrim(c.Text, t)
+						}
+						m.Content = append(m.Content, c)
+					}
+					msg = &m
+				}
+			}
+			out = append(out, compact.Entry{ID: e.ID, Kind: k, Msg: msg})
 		case session.TypeToolUse:
 			c := e.ToolUse.Call
 			out = append(out, compact.Entry{ID: e.ID, Kind: compact.KindToolUse, Call: &c})
@@ -96,6 +112,10 @@ func (a *Agent) liveEntries() ([]compact.Entry, compact.Prev) {
 					stub.Content = s
 				}
 				r = &stub
+			} else if t, ok := trims[e.ID]; ok {
+				trimmed := *r
+				trimmed.Content = session.ApplyTrim(r.Content, t)
+				r = &trimmed
 			}
 			out = append(out, compact.Entry{ID: e.ID, Kind: compact.KindToolResult, Result: r})
 		}
@@ -226,6 +246,9 @@ func (a *Agent) prepareRequest(ctx context.Context, allowCompact bool) error {
 	if b.Effective < 4096 {
 		return fmt.Errorf("%w: effective window %d is below the 4096-token minimum", errContextCannotFit, b.Effective)
 	}
+	if err := a.trimOversizedPrompt(b); err != nil {
+		return err
+	}
 	if err := a.elide(false); err != nil {
 		return err
 	}
@@ -288,6 +311,79 @@ func (a *Agent) prepareRequest(ctx context.Context, allowCompact bool) error {
 		a.emit(ContextPressure{Input: est, Threshold: b.Trigger(), Ceiling: b.Ceiling()})
 	}
 	return nil
+}
+
+// trimOversizedPrompt bounds the newest genuine user prompt: when it exceeds
+// min(Effective/4, 32K) estimated tokens, the full text is spilled and a Trim
+// record makes the request carry a head/tail window. The transcript and audit
+// view keep the original.
+func (a *Agent) trimOversizedPrompt(b compact.Budget) error {
+	if a.opts.Env == nil {
+		return nil
+	}
+	a.mu.Lock()
+	var id, text string
+	for i := len(a.entries) - 1; i >= 0; i-- {
+		e := a.entries[i]
+		if e.Type != session.TypeMessage || e.Message == nil || e.Message.Role != llm.RoleUser {
+			continue
+		}
+		id = e.ID
+		for _, c := range e.Message.Content {
+			if c.Type == llm.BlockText {
+				text += c.Text
+			}
+		}
+		break
+	}
+	trims := session.Trims(a.entries)
+	a.mu.Unlock()
+	if id == "" || text == "" {
+		return nil
+	}
+	if _, ok := trims[id]; ok {
+		return nil
+	}
+	budgetTokens := min(b.Effective/4, 32_000)
+	if budgetTokens < 1 || compact.Tokens(len(text)) <= budgetTokens {
+		return nil
+	}
+	note, err := tools.Spill(a.opts.Env, "trim", text)
+	if err != nil || note == "" {
+		return nil
+	}
+	path := spillPath(note)
+	if path == "" {
+		return nil
+	}
+	// 3 chars per token is the conservative direction for the trim window.
+	budgetBytes := budgetTokens * 3
+	head := budgetBytes * 6 / 10
+	tail := budgetBytes - head
+	if _, err := a.append(session.Entry{Type: session.TypeTrim, Trim: &session.Trim{
+		IDs: []string{id}, Path: path, HeadBytes: head, TailBytes: tail,
+		Notice: "[prompt trimmed to fit the context; full text saved to " + path + " — read it with offset/limit]",
+	}}); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	a.anchorValid = false
+	a.mu.Unlock()
+	return nil
+}
+
+// spillPath extracts the path from tools.Spill's note.
+func spillPath(note string) string {
+	const marker = "saved to "
+	i := strings.Index(note, marker)
+	if i < 0 {
+		return ""
+	}
+	p := note[i+len(marker):]
+	if j := strings.Index(p, " — "); j >= 0 {
+		p = p[:j]
+	}
+	return strings.TrimSpace(p)
 }
 
 // compactDeterministic is the P0a reduction floor: it replaces the older span
