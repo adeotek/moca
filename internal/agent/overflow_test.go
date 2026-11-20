@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/adeotek/moca/internal/session"
 )
 
 // TestSpillDirsAreRandom: the process dir is an unguessable 16-hex name under
@@ -35,6 +37,42 @@ func TestSpillDirsAreRandom(t *testing.T) {
 		if _, err := hex.DecodeString(name); err != nil {
 			t.Fatalf("dir name %q is not hex: %v", name, err)
 		}
+	}
+}
+
+func TestValidateSpillDir(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	valid, err := newSpillDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSpillDir(valid); err != nil {
+		t.Fatalf("the dir newSpillDir creates must validate: %v", err)
+	}
+	for _, bad := range []string{
+		"",
+		"/tmp/not-the-overflow-root/aaaaaaaaaaaaaaaa",
+		filepath.Join(overflowDir(), "short"),
+		filepath.Join(overflowDir(), "AAAAAAAAAAAAAAAA"),
+		overflowDir() + "/aaaaaaaaaaaaaaaa/../bbbbbbbbbbbbbbbb",
+	} {
+		if err := validateSpillDir(bad); err == nil {
+			t.Errorf("%q must be rejected", bad)
+		}
+	}
+}
+
+func TestStartPersistsSpillDir(t *testing.T) {
+	a, _, _ := startTestWith(t, newScript(t), "", "")
+	entries, err := session.ReadFile(a.Session().Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 0 || entries[0].Session == nil {
+		t.Fatal("session header missing")
+	}
+	if err := validateSpillDir(entries[0].Session.SpillDir); err != nil {
+		t.Fatalf("the header must carry the validated spill dir: %v", err)
 	}
 }
 

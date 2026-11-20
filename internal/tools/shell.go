@@ -191,7 +191,7 @@ func (shellTool) Run(ctx context.Context, env *Env, input json.RawMessage) Resul
 		body += "\n"
 	}
 	if len(out.Output) > shellMaxOutput {
-		if note := Spill(env, "shell", out.Output); note != "" {
+		if note, _ := Spill(env, "shell", out.Output); note != "" {
 			body += note + "\n"
 		}
 	}

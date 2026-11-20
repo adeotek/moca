@@ -103,12 +103,12 @@ func TestAutoCompactionShrinksContext(t *testing.T) {
 	}
 }
 
-func TestLoopGuardNamesOversizedEntry(t *testing.T) {
+func TestProtectedPruneFitsAnOversizedEntry(t *testing.T) {
 	s := newScript(t, toolTurn([2]string{"read", `{"path":"dist/app.min.js","limit":2000}`}), textTurn("## Goal\ns"), textTurn("never"))
 	a, work, _ := startTestWith(t, s, "", minWindowModel)
 	// One read of a big file is capped at 50K chars ≈ 12k tokens: larger
-	// than keepRecent (4096) and, kept verbatim, still over the trigger
-	// (12288) — the loop guard must name it instead of compacting forever.
+	// than keepRecent (4096) and, kept verbatim, still over the ceiling
+	// (13107). The last-resort prune must spill it and keep the run alive.
 	var sb strings.Builder
 	for sb.Len() < 300_000 {
 		sb.WriteString("const v000000000000000000000000 = 1;\n")
@@ -119,10 +119,21 @@ func TestLoopGuardNamesOversizedEntry(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(work, "dist", "app.min.js"), []byte(sb.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := a.Run(context.Background(), "x")
-	if err == nil || !strings.Contains(err.Error(), "context cannot fit") ||
-		!strings.Contains(err.Error(), "read") || !strings.Contains(err.Error(), "12k tokens") {
-		t.Fatalf("%v", err)
+	if _, err := a.Run(context.Background(), "x"); err != nil {
+		t.Fatalf("last-resort prune must fit the request: %v", err)
+	}
+	var stubbed bool
+	for _, e := range a.entries {
+		if e.Type == session.TypeElision {
+			for _, stub := range e.Elision.Stubs {
+				if strings.Contains(stub, "pruned:") && strings.Contains(stub, "saved to") {
+					stubbed = true
+				}
+			}
+		}
+	}
+	if !stubbed {
+		t.Fatal("the oversized read must be stubbed with a spill pointer")
 	}
 }
 

@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 
 	"github.com/adeotek/moca/internal/compact"
 	"github.com/adeotek/moca/internal/session"
+	"github.com/adeotek/moca/internal/tools"
 )
 
 // Elision (§6): tool results superseded later in the live window — the same
@@ -20,6 +22,60 @@ import (
 // cache from the first one on, so small savings are not worth it.
 // Compaction resets the cache anyway and elides whatever is stale.
 const elideMinTokens = 8000
+
+// agedCand is one older completed tool result eligible for pruning with a
+// spill pointer.
+type agedCand struct {
+	id, content string
+	tokens      int
+}
+
+// agedResults returns older completed results beyond the protected suffix:
+// the newest min(20K, keepRecent, 40K) tool-output tokens, the last two user
+// turns, errors, and the latest result per path stay. The saving estimate
+// reserves the spill stub's own text.
+func agedResults(live []compact.Entry, keepRecent int) ([]agedCand, int) {
+	protect := max(20_000, min(keepRecent, 40_000))
+	paths := map[string]string{} // call id -> canonical path
+	for _, e := range live {
+		if e.Kind != compact.KindToolUse || e.Call == nil {
+			continue
+		}
+		var in struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(e.Call.Input, &in) == nil && in.Path != "" {
+			paths[e.Call.ID] = filepath.Clean(in.Path)
+		}
+	}
+	latest := map[string]bool{}
+	tokens, userTurns := 0, 0
+	var out []agedCand
+	saved := 0
+	for i := len(live) - 1; i >= 0; i-- {
+		e := live[i]
+		if e.Kind == compact.KindUser {
+			userTurns++
+		}
+		if e.Kind != compact.KindToolResult || e.Result == nil || e.Result.Content == session.ElidedStub {
+			continue
+		}
+		tokens += compact.EntryTokens(e)
+		if userTurns < 2 || tokens <= protect || e.Result.IsError {
+			continue
+		}
+		path := paths[e.Result.CallID]
+		if path != "" {
+			if !latest[path] {
+				latest[path] = true
+				continue // the newest result for this path is the working set
+			}
+		}
+		out = append(out, agedCand{id: e.ID, content: e.Result.Content, tokens: compact.EntryTokens(e)})
+		saved += max(0, compact.EntryTokens(e)-80) // spill stub headroom
+	}
+	return out, saved
+}
 
 // staleResults returns the ids of live tool results superseded by a later
 // call, and the tokens their stubs save.
@@ -102,19 +158,82 @@ func shouldElide(saved int, force, historyBound bool) bool {
 }
 
 // elide persists an elision of the live window's stale results when they
-// are worth it (force: whatever is stale — right after a compaction).
+// are worth it (force: whatever is stale — right before or after a
+// compaction, which resets the cache anyway). Older completed results are
+// pruned only when forced and only with a verified spill pointer.
 func (a *Agent) elide(force bool) error {
 	live, _ := a.liveEntries()
 	ids, saved := staleResults(live)
+	stubs := map[string]string{}
+	if a.opts.Env != nil {
+		cands, agedSaved := agedResults(live, a.Budget().KeepRecent)
+		// Mid-run pruning rewrites the prompt cache: only cross the 25K/25%
+		// gate when a summary will not reset it anyway. A forced pass (at a
+		// compaction boundary) takes everything eligible.
+		if force || agedSaved >= max(25_000, a.ContextTokens()/4) {
+			for _, c := range cands {
+				note, err := tools.Spill(a.opts.Env, "prune", c.content)
+				if err != nil || note == "" {
+					continue
+				}
+				stub := "[pruned: " + note + "]"
+				stubs[c.id] = stub
+				ids = append(ids, c.id)
+				saved += max(0, c.tokens-compact.Tokens(len(stub)))
+			}
+		}
+	}
 	if len(ids) == 0 || !shouldElide(saved, force, a.model.HistoryBound()) {
 		return nil
 	}
-	if _, err := a.append(session.Entry{Type: session.TypeElision, Elision: &session.Elision{IDs: ids, Tokens: saved}}); err != nil {
+	el := &session.Elision{IDs: ids, Tokens: saved}
+	if len(stubs) > 0 {
+		el.Stubs = stubs
+	}
+	if _, err := a.append(session.Entry{Type: session.TypeElision, Elision: el}); err != nil {
 		return err
 	}
-	a.logger().Info("elided", "results", len(ids), "saved", saved)
+	a.logger().Info("elided", "results", len(ids), "saved", saved, "spilled", len(stubs))
 	a.mu.Lock()
 	a.anchorValid = false // the next request differs from what the anchor measured
+	a.mu.Unlock()
+	return nil
+}
+
+// pruneProtected is the last-resort reduction (§5.2 rule 4): when the hard
+// ceiling is otherwise unreachable, even the working set and the latest
+// results are stubbed, but only with a verified spill pointer. Errors stay.
+func (a *Agent) pruneProtected() error {
+	if a.opts.Env == nil {
+		return nil
+	}
+	live, _ := a.liveEntries()
+	var ids []string
+	stubs := map[string]string{}
+	saved := 0
+	for _, e := range live {
+		if e.Kind != compact.KindToolResult || e.Result == nil || e.Result.IsError ||
+			e.Result.Content == session.ElidedStub || strings.HasPrefix(e.Result.Content, "[pruned:") {
+			continue
+		}
+		note, err := tools.Spill(a.opts.Env, "prune", e.Result.Content)
+		if err != nil || note == "" {
+			continue
+		}
+		stub := "[pruned: " + note + "]"
+		ids = append(ids, e.ID)
+		stubs[e.ID] = stub
+		saved += max(0, compact.EntryTokens(e)-compact.Tokens(len(stub)))
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err := a.append(session.Entry{Type: session.TypeElision, Elision: &session.Elision{IDs: ids, Tokens: saved, Stubs: stubs}}); err != nil {
+		return err
+	}
+	a.logger().Info("pruned protected results", "results", len(ids), "saved", saved)
+	a.mu.Lock()
+	a.anchorValid = false
 	a.mu.Unlock()
 	return nil
 }

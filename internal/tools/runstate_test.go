@@ -83,7 +83,8 @@ type spillFailTool struct{}
 
 func (spillFailTool) Spec() llm.ToolSpec { return llm.ToolSpec{Name: "spillfail"} }
 func (spillFailTool) Run(_ context.Context, env *Env, _ json.RawMessage) Result {
-	return errorf("build failed\n%s", Spill(env, "shell", strings.Repeat("error line\n", 50)))
+	note, _ := Spill(env, "shell", strings.Repeat("error line\n", 50))
+	return errorf("build failed\n%s", note)
 }
 
 // TestRepeatedFailureIgnoresSpillPath: the overflow file name is random per

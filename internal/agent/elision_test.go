@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,7 +102,10 @@ func TestOverflowIsPerSession(t *testing.T) {
 		}
 	}
 	// The path a real tools.Spill note names resolves in the same jail.
-	note := tools.Spill(a.opts.Env, "shell", "full text\n")
+	note, err := tools.Spill(a.opts.Env, "shell", "full text\n")
+	if err != nil {
+		t.Fatal(err)
+	}
 	i, j := strings.Index(note, "saved to "), strings.LastIndex(note, " — read it")
 	if i < 0 || j < i {
 		t.Fatalf("spill note shape: %q", note)
@@ -173,5 +177,50 @@ func TestHistoryBoundFollowsActiveModel(t *testing.T) {
 	}
 	if !stage(t, "openai") {
 		t.Fatal("a non-bound model elides past the threshold")
+	}
+}
+
+func TestAgedPruneSpillsAndStubs(t *testing.T) {
+	a, _, _ := startTestWith(t, newScript(t), "", minWindowModel)
+	appendMsg := func(text string) {
+		if _, err := a.append(session.Entry{Type: session.TypeMessage, Message: userText(text)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendMsg("first turn")
+	appendPairs := func() {
+		for i := 0; i < 3; i++ {
+			id := fmt.Sprintf("c%d", len(a.entries))
+			if _, err := a.append(session.Entry{Type: session.TypeToolUse, ToolUse: &session.ToolUse{
+				MessageID: "m", Call: llm.ToolCall{ID: id, Name: "shell", Input: json.RawMessage(`{"command":"build"}`)},
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.append(session.Entry{Type: session.TypeToolResult, ToolResult: &llm.ToolResult{
+				CallID: id, Content: strings.Repeat(string(rune('a'+i)), 50_000),
+			}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	appendPairs()
+	appendMsg("second turn")
+	appendPairs()
+	appendMsg("third turn")
+	before := a.ContextTokens()
+	if err := a.elide(true); err != nil {
+		t.Fatal(err)
+	}
+	if after := a.ContextTokens(); after >= before {
+		t.Fatalf("aged prune must reduce the estimate: %d -> %d", before, after)
+	}
+	stubs := session.ElidedStubs(a.entries)
+	if len(stubs) == 0 {
+		t.Fatal("aged prune must persist spill-pointer stubs")
+	}
+	for id, stub := range stubs {
+		if !strings.Contains(stub, "pruned:") || !strings.Contains(stub, "saved to") {
+			t.Fatalf("stub %s: %q", id, stub)
+		}
 	}
 }

@@ -1,6 +1,6 @@
 # Context management: implementation plan v5
 
-Status: implementation in progress (P0a) · 2026-11-18
+Status: implementation in progress (P1) · 2026-11-18
 Consolidates and replaces the earlier v1–v4 drafts, now removed from the repository.
 v5 keeps v4's safety framing and resolves
 the v4 review findings listed in §13. v4's tree citations were re-checked; new or
