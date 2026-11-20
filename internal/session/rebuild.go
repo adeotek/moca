@@ -1,6 +1,10 @@
 package session
 
-import "github.com/adeotek/moca/internal/llm"
+import (
+	"unicode/utf8"
+
+	"github.com/adeotek/moca/internal/llm"
+)
 
 // LatestCompaction returns the newest compaction entry and its index, or
 // (nil, -1). Request rebuilds and further compactions start from its
@@ -30,14 +34,79 @@ func ElidedIDs(entries []Entry) map[string]bool {
 	return ids
 }
 
+// ElidedStubs collects the per-ID replacement text recorded by elision
+// entries; IDs without an entry use ElidedStub.
+func ElidedStubs(entries []Entry) map[string]string {
+	stubs := map[string]string{}
+	for _, e := range entries {
+		if e.Type == TypeElision && e.Elision != nil {
+			for id, stub := range e.Elision.Stubs {
+				stubs[id] = stub
+			}
+		}
+	}
+	return stubs
+}
+
 // SummaryPrefix opens the user message that carries a compaction summary;
 // front ends recognize it when replaying history.
 const SummaryPrefix = "[Summary of earlier conversation]"
 
-// Messages rebuilds request messages: the latest compaction summary (if any),
-// then entries from its firstKeptEntryId onward (§8). Without a compaction
-// the whole transcript is used, unchanged.
-func Messages(entries []Entry) []llm.Message { return MessagesWith(entries, nil, false) }
+// Trims collects request-only trim windows by entry id; the latest record
+// wins. The audit renderer ignores them.
+func Trims(entries []Entry) map[string]Trim {
+	trims := map[string]Trim{}
+	for _, e := range entries {
+		if e.Type != TypeTrim || e.Trim == nil {
+			continue
+		}
+		for _, id := range e.Trim.IDs {
+			trims[id] = *e.Trim
+		}
+	}
+	return trims
+}
+
+// ApplyTrim replaces s with the head and tail named by t plus its notice.
+// Byte cuts are snapped to rune boundaries. The transcript keeps the original.
+func ApplyTrim(s string, t Trim) string {
+	if len(s) <= t.HeadBytes+t.TailBytes {
+		return s
+	}
+	head := trimPrefix(s, t.HeadBytes)
+	tail := trimSuffix(s, t.TailBytes)
+	notice := t.Notice
+	if notice == "" {
+		notice = "[trimmed to fit the context]"
+	}
+	return head + "\n" + notice + "\n" + tail
+}
+
+func trimPrefix(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+func trimSuffix(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	i := len(s) - n
+	for i < len(s) && !utf8.RuneStart(s[i]) {
+		i++
+	}
+	return s[i:]
+}
+
+// Messages rebuilds the audit view: the latest compaction summary (if any),
+// then entries from its firstKeptEntryId onward (§8). Trim records are shown
+// as annotations by front ends but do not shorten this view.
+func Messages(entries []Entry) []llm.Message { return messages(entries, nil, false, false) }
 
 // MessagesWith rebuilds request messages with the two render-time hooks the
 // agent needs:
@@ -61,8 +130,22 @@ func Messages(entries []Entry) []llm.Message { return MessagesWith(entries, nil,
 //     turns keep theirs either way (the strip is scoped to entries before the
 //     compaction boundary).
 func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, keepTailThinking bool) []llm.Message {
+	return messages(entries, extra, keepTailThinking, false)
+}
+
+// MessagesRequest rebuilds the model-facing request view: the audit view with
+// persisted trim windows applied. Only the agent request builder uses it.
+func MessagesRequest(entries []Entry, extra func(Entry) []llm.ContentBlock, keepTailThinking bool) []llm.Message {
+	return messages(entries, extra, keepTailThinking, true)
+}
+
+func messages(entries []Entry, extra func(Entry) []llm.ContentBlock, keepTailThinking, request bool) []llm.Message {
 	var out []llm.Message
 	start, compactionIdx := 0, -1
+	var trims map[string]Trim
+	if request {
+		trims = Trims(entries)
+	}
 	if c, idx := LatestCompaction(entries); c != nil {
 		compactionIdx = idx
 		found := false
@@ -87,6 +170,7 @@ func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, keepTai
 	}
 	assistantIdx := map[string]int{}
 	elided := ElidedIDs(entries)
+	stubs := ElidedStubs(entries)
 	for i := start; i < len(entries); i++ {
 		e := entries[i]
 		switch e.Type {
@@ -104,6 +188,11 @@ func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, keepTai
 				continue
 			}
 			content := e.Message.Content
+			if request {
+				if t, ok := trims[e.ID]; ok {
+					content = trimBlocks(content, t)
+				}
+			}
 			if extra != nil {
 				if ex := extra(e); len(ex) > 0 {
 					content = append(append([]llm.ContentBlock{}, content...), ex...)
@@ -123,8 +212,12 @@ func MessagesWith(entries []Entry, extra func(Entry) []llm.ContentBlock, keepTai
 				continue
 			}
 			r := *e.ToolResult
-			if elided[e.ID] {
+			if stub, ok := stubs[e.ID]; ok {
+				r.Content = stub
+			} else if elided[e.ID] {
 				r.Content = ElidedStub
+			} else if t, ok := trims[e.ID]; ok {
+				r.Content = ApplyTrim(r.Content, t)
 			}
 			appendUser(&out, llm.ContentBlock{Type: llm.BlockToolResult, ToolResult: &r})
 		}
@@ -174,6 +267,17 @@ func appendUser(out *[]llm.Message, blocks ...llm.ContentBlock) {
 		return
 	}
 	*out = append(*out, llm.Message{Role: llm.RoleUser, Content: append([]llm.ContentBlock{}, blocks...)})
+}
+
+func trimBlocks(blocks []llm.ContentBlock, t Trim) []llm.ContentBlock {
+	out := make([]llm.ContentBlock, 0, len(blocks))
+	for _, c := range blocks {
+		if c.Type == llm.BlockText {
+			c.Text = ApplyTrim(c.Text, t)
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // Repair returns synthetic error results for every tool_use without a

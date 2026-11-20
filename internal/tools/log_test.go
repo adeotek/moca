@@ -70,10 +70,10 @@ func TestToolCallLoggedWithoutContent(t *testing.T) {
 
 func TestSpillLogged(t *testing.T) {
 	log := captureLog(t, slog.LevelDebug)
-	Spill(&Env{SpillDir: t.TempDir(), SpillPrefix: "s-"}, "shell", "abc")
+	_, _ = Spill(&Env{SpillDir: t.TempDir(), SpillPrefix: "s-"}, "shell", "abc")
 	f := filepath.Join(t.TempDir(), "file")
 	os.WriteFile(f, nil, 0o600)
-	Spill(&Env{SpillDir: filepath.Join(f, "sub")}, "web", "abc")
+	_, _ = Spill(&Env{SpillDir: filepath.Join(f, "sub")}, "web", "abc")
 	out := log.String()
 	if !strings.Contains(out, "msg=spill kind=shell bytes=3") || !strings.Contains(out, `level=WARN msg="spill failed" kind=web`) {
 		t.Fatalf("spill lines:\n%s", out)

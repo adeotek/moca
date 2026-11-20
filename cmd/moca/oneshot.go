@@ -97,6 +97,8 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 			fmt.Fprintf(stderr, "retry %d/%d · %s\n", e.Notice.Attempt, e.Notice.Max, e.Notice.Wait.Round(1e8))
 		case agent.Warning:
 			fmt.Fprintf(stderr, "warning: %s\n", e.Text)
+		case agent.ContextPressure:
+			fmt.Fprintf(stderr, "context pressure: %d/%d tokens (trigger %d)\n", e.Input, e.Ceiling, e.Threshold)
 		case agent.Note:
 			fmt.Fprintf(stderr, "note: %s\n", e.Text)
 		}
@@ -125,7 +127,7 @@ func runOneShot(ctx context.Context, o Options, cfg config.Config, stdout, stder
 		fmt.Fprintln(stderr, "auto mode: safe actions run, risky ones are refused (no one to ask)")
 	}
 	if plan {
-		fmt.Fprintln(stderr, "plan mode: write/edit reach only docs/plans/ (shell keeps the permission rules)")
+		fmt.Fprintln(stderr, "plan mode: write/edit and shell redirects reach only docs/plans/")
 	}
 	var a *agent.Agent
 	so := agent.StartOptions{Config: cfg, Workdir: wd, Effort: o.Effort, Model: o.Model,

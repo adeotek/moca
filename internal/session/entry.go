@@ -19,6 +19,10 @@ const (
 	TypeError          = "error"
 	TypePermissionMode = "permission_mode"
 	TypeElision        = "elision"
+	// TypeTrim marks a request-only head+tail window over persisted entries.
+	// The transcript keeps the original; audit shows the notice, request uses
+	// the window.
+	TypeTrim = "trim"
 	// TypeGoal is a full goal-state snapshot (§8/§14, v0.8.0): every
 	// transition appends one, so the latest goal entry is the live state and
 	// the history stays append-only. It is pre-conversation metadata: a goal
@@ -51,6 +55,10 @@ type Header struct {
 	// stored prompt, whose text embeds an absolute path (a moved repo or a
 	// changed symlink layout would make the probe lie) — M7.
 	SelfManagedSkills bool `json:"selfManagedSkills,omitempty"`
+	// SpillDir is the session-scoped overflow directory admitted to the jail.
+	// It is chosen before the header and reused on resume; old headers have
+	// none and use a degraded stub for their pointers.
+	SpillDir string `json:"spillDir,omitempty"`
 }
 
 type PermissionMode struct {
@@ -71,13 +79,77 @@ type Compaction struct {
 	Usage            llm.Usage `json:"usage"`
 	ReadFiles        []string  `json:"readFiles,omitempty"`
 	ModifiedFiles    []string  `json:"modifiedFiles,omitempty"`
+	// Telemetry for /cost, status and the evals. Additive; old readers ignore.
+	TokensAfter   int    `json:"tokensAfter,omitempty"`
+	PrunedTokens  int    `json:"prunedTokens,omitempty"`
+	SummaryTokens int    `json:"summaryTokens,omitempty"`
+	Fallback      bool   `json:"fallback,omitempty"`
+	SkipReason    string `json:"skipReason,omitempty"`
+	// SummaryState is the deterministic, model-independent state carried
+	// across compactions (P2). The prose Summary stays separate.
+	SummaryState *SummaryState `json:"summaryState,omitempty"`
+}
+
+// ConstraintRef points at a raw user entry that carries a standing constraint.
+type ConstraintRef struct {
+	EntryID string `json:"entryId"`
+	Tokens  int    `json:"tokens,omitempty"`
+}
+
+// ReadWindow identifies one read of a file; latest-result identity is the
+// tuple, not just the path.
+type ReadWindow struct {
+	Path   string `json:"path"`
+	Offset int    `json:"offset"`
+	Limit  int    `json:"limit"`
+}
+
+// CommandState is one shell command with its latest result evidence.
+type CommandState struct {
+	Command  string `json:"command"`
+	Exit     int    `json:"exit,omitempty"`
+	Verified bool   `json:"verified,omitempty"`
+}
+
+// ErrorState is one exact critical error and its artifact pointer.
+type ErrorState struct {
+	Tool     string `json:"tool,omitempty"`
+	Text     string `json:"text"`
+	Artifact string `json:"artifact,omitempty"`
+}
+
+// SummaryState is the deterministic state block carried on a compaction.
+type SummaryState struct {
+	GoalID        string          `json:"goalId,omitempty"`
+	GoalStatus    string          `json:"goalStatus,omitempty"`
+	Constraints   []ConstraintRef `json:"constraints,omitempty"`
+	ReadFiles     []string        `json:"readFiles,omitempty"`
+	ModifiedFiles []string        `json:"modifiedFiles,omitempty"`
+	Reads         []ReadWindow    `json:"reads,omitempty"`
+	Commands      []CommandState  `json:"commands,omitempty"`
+	Errors        []ErrorState    `json:"errors,omitempty"`
+	Artifacts     []string        `json:"artifacts,omitempty"`
+	Decisions     []string        `json:"decisions,omitempty"`
+	Omitted       int             `json:"omitted,omitempty"`
+}
+
+// Trim is a request-only window over persisted entries: the transcript keeps
+// the original; the request view uses HeadBytes/TailBytes and Notice.
+type Trim struct {
+	IDs       []string `json:"ids"`
+	Path      string   `json:"path,omitempty"`
+	HeadBytes int      `json:"headBytes,omitempty"`
+	TailBytes int      `json:"tailBytes,omitempty"`
+	Notice    string   `json:"notice,omitempty"`
 }
 
 // Elision marks superseded tool results (§6): request rebuilds replace
-// their content with ElidedStub; the transcript keeps the originals.
+// their content with ElidedStub; the transcript keeps the originals. Stubs
+// carries per-ID replacement text for results pruned with a spill pointer.
 type Elision struct {
-	IDs    []string `json:"ids"`    // tool_result entry ids
-	Tokens int      `json:"tokens"` // estimated tokens saved
+	IDs    []string          `json:"ids"`    // tool_result entry ids
+	Tokens int               `json:"tokens"` // estimated tokens saved
+	Stubs  map[string]string `json:"stubs,omitempty"`
 }
 
 type ModelChange struct {
@@ -140,6 +212,7 @@ type Entry struct {
 	Error          *ErrorInfo      `json:"error,omitempty"`
 	PermissionMode *PermissionMode `json:"permissionMode,omitempty"`
 	Elision        *Elision        `json:"elision,omitempty"`
+	Trim           *Trim           `json:"trim,omitempty"`
 	Goal           *Goal           `json:"goal,omitempty"`
 	// GoalID ties a user message to a goal (v0.8.0): metadata only, never
 	// wire content. The goal envelopes a request renders for the entry are

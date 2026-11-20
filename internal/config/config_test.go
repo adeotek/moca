@@ -46,7 +46,8 @@ func TestSpecExampleDecodesIntact(t *testing.T) {
 		t.Fatal("scalars lost")
 	}
 	if c.Context.ReserveTokens != 16384 || c.Context.KeepRecentTokens != 20000 || c.Context.MaxSteps != 40 ||
-		c.Context.ProgressNudge() != 12 {
+		c.Context.ProgressNudge() != 12 || c.Context.CompactPercent() != 75 ||
+		c.Context.MaxWindow() != 300000 || c.Context.SummaryModel != "" {
 		t.Fatalf("context: %+v", c.Context)
 	}
 	if c.ModelEffort != "" || c.ModelHardEffort != "" {
@@ -568,6 +569,26 @@ func TestResolveMode(t *testing.T) {
 		m, p := ResolveMode(c.flag, c.cfg)
 		if m != c.mode || p != c.plan {
 			t.Errorf("ResolveMode(%q) = %q,%v; want %q,%v", c.flag, m, p, c.mode, c.plan)
+		}
+	}
+}
+
+func TestContextTriggerConfig(t *testing.T) {
+	c, err := Parse([]byte(`{"context":{"compactAtPercent":0,"maxWindowTokens":0,"summaryModel":"opencode-go/glm-5.3"}}`))
+	if err != nil {
+		t.Fatalf("explicit zero must survive defaults: %v", err)
+	}
+	if c.Context.CompactPercent() != 0 || c.Context.MaxWindow() != 0 || c.Context.SummaryModel != "opencode-go/glm-5.3" {
+		t.Fatalf("context overrides lost: %+v", c.Context)
+	}
+	for _, src := range []string{
+		`{"context":{"compactAtPercent":81}}`,
+		`{"context":{"compactAtPercent":-1}}`,
+		`{"context":{"maxWindowTokens":15999}}`,
+		`{"context":{"summaryModel":"not-a-model"}}`,
+	} {
+		if _, err := Parse([]byte(src)); err == nil {
+			t.Errorf("%s: expected validation error", src)
 		}
 	}
 }

@@ -15,15 +15,16 @@ import (
 // of the jail (agent/start.go); files are named <SpillPrefix><kind>-*.txt and
 // pruned with the snapshot retention.
 
-// Spill saves full and returns the note naming the file, or "" when spilling
-// is off (no SpillDir) or fails — the cut output then stands alone.
-func Spill(env *Env, kind, full string) string {
+// Spill saves full and returns the note naming the file. A nil error with an
+// empty note means spilling is off (no SpillDir); a non-nil error means the
+// note is empty and the cut output stands alone.
+func Spill(env *Env, kind, full string) (string, error) {
 	if env.SpillDir == "" {
-		return ""
+		return "", nil
 	}
-	fail := func(err error) string {
+	fail := func(err error) (string, error) {
 		slog.Warn("spill failed", "kind", kind, "error", err)
-		return ""
+		return "", err
 	}
 	if err := os.MkdirAll(env.SpillDir, 0o700); err != nil {
 		return fail(err)
@@ -46,5 +47,5 @@ func Spill(env *Env, kind, full string) string {
 	// and marks what it dropped, so the file can be missing a middle. The
 	// description and this note now say what the file actually holds.
 	return fmt.Sprintf("[output saved to %s — read it with offset/limit or search it; do not re-run the command to see it (%d lines, %s; the capture keeps head and tail)]",
-		f.Name(), lines, webSize(len(full)))
+		f.Name(), lines, webSize(len(full))), nil
 }

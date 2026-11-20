@@ -1,12 +1,52 @@
 # Changelog
 
-## v0.8.3 (2026-11-16)
+## v0.8.3 (2026-11-18)
+
+### Context management
+
+The five-phase context-management plan landed in this release. The normal suite is
+**1512 tests across 21 Go packages**; the hermetic `contextgate` is a separate
+build-tagged gate.
+
+#### Context preflight (P0a)
+
+- Added the model-aware context governance layer: an **effective window**
+  (`min(advertised model window, context.maxWindowTokens)`, default 300K), a **75% operating trigger** and an **80% estimated-input ceiling**, with one preflight before every work request.
+- Added `context.compactAtPercent`, `context.maxWindowTokens` and `context.summaryModel`, with presence-aware defaults and validation.
+- The output budget is fitted to the room the effective window leaves; requests that cannot fit return a bounded `context cannot fit` error, with a fixed-overhead exception and a 256-token output floor.
+- Added a model-free deterministic compaction fallback for an unavailable summarizer, a summary-model fallback to the active model, and a `ContextPressure` event for requests accepted between the trigger and the ceiling.
+- The fallback estimator calibrates chars/token from provider usage; `compact.Budget` now carries the effective window and the hard ceiling. TUI context pressure uses the effective window; ACP `usage_update.size` keeps the physical window.
+- Added the P0a session contracts (`spillDir`, `Trim`, `SummaryState`, compaction telemetry) for the following phases.
+
+#### Context prune and stable spill (P1)
+
+- The session header now stores the 16-hex overflow directory; resume reuses it (and validates it as an exact child of the overflow root) instead of allocating a fresh random directory.
+- `tools.Spill` returns a real error, so callers can distinguish “spilling off” from a failed write.
+- Forced compaction now prunes older completed tool results beyond the newest 20K tool-output tokens and the last two user turns, protecting errors and the latest result per path; each pruned result is written to the session spill directory first and replaced by a pointer stub. `Elision.Stubs` makes the choice byte-identical on resume.
+
+#### Context summary fidelity (P2)
+
+- Tool results in the compaction payload now keep a head and a tail within the 2K-char cap, chosen by tool class; the middle is marked with an exact omitted-character count.
+- Historical thinking is omitted from the summary payload; current route-required reasoning remains in the work request.
+- Tool-call arguments keep 500 chars for commands and edit strings.
+- The previous summary is passed outside the capped span, so a tiny summarizer cap shortens only the new span.
+
+#### Context oversized prompt trim and request/audit split (P3)
+
+- Persisted `trim` entries bound an oversized prompt for the request only: the model sees a 60/40 head+tail window and a path notice, while the transcript and the audit replay keep the full text.
+- `session.MessagesRequest` is now the single model-facing renderer; `Messages`/`MessagesWith` remain the audit renderer, so TUI/ACP replay is not shortened by policy trims.
+- The summary serializer applies the same trim window, so a compaction sees the bounded prompt the model saw.
+- The full prompt is written to the session spill directory before the trim record is committed.
+
+#### Context gate (P4)
+
+- Added the hermetic `test/contextgate` gate: the built `moca -p` runs against a scripted provider with a growing read history; every work request is independently checked against the 80% ceiling, at least one compaction summary must fire, the run must reach its final answer, and the provider key must not leak into the output.
+- The gate is `//go:build contextgate` and is driven by `bash test/contextgate/run.sh`; it is not part of the normal suite or CI, like the other service gates.
+- Live model/provider accuracy and cost measurements, and the pinned Pi/OpenCode comparison benchmark, remain manual P4 legs; they need the repo `.env` key and are not claimed by the hermetic gate.
 
 ### The review pass: a fetch gate that missed shared address space, and CI that compiled one platform
 
-A full-repository review — two passes, structure and trust boundaries first, then implementation against
-the spec — found no live bug in the code it read in full, one real security gap, and a set of claims that
-had drifted from the tree. This release is the fixes.
+This pass is the fixes.
 
 **The `web` fetch gate asked about RFC 1918 and nothing else.** Go's `IsPrivate` covers RFC 1918 and
 RFC 4193, so `100.64.0.0/10` — RFC 6598 shared address space, where Alibaba Cloud's metadata service sits
@@ -22,12 +62,16 @@ windows` files (and the `!(linux||darwin||…)` ones) were excluded from every s
 windows and darwin on every push now, and `install.sh` — the one script every new user pipes into `bash` —
 gets `bash -n` + `shellcheck -S warning`.
 
-**Plan mode's promise was wider than its enforcement.** The README and the `-p` banner said every write
-outside `docs/plans/*.md` is refused; the confinement lives in `write`/`edit` only, and the shell tool runs
-on its ordinary ladder — verified, not assumed: `echo pwned > pwned.txt` under plan mode lands while
-`write` in the same environment refuses. The prose (README, `--help`, the `-p` banner, the ACP mode
-description, SPECS §10) now states what is enforced. Treat plan mode as "the model was told not to", not
-"the run cannot", until an analyser-side plan zone lands.
+**Plan mode's promise was wider than its enforcement, and then it wasn't.** The README and the `-p` banner
+said every write outside `docs/plans/*.md` is refused; the confinement lived in `write`/`edit` only, and the
+shell tool ran on its ordinary ladder — verified, not assumed: `echo pwned > pwned.txt` under plan mode landed
+while `write` in the same environment refused. The prose (README, `--help`, the `-p` banner, the ACP mode
+description, SPECS §10) now states what is enforced, and the analyser-side plan zone landed in the same
+release: `permissions.Shell.SetPlanDir` — set and cleared by the agent's plan toggle — refuses every
+redirect, `tee` and `time -o` target outside `docs/plans/*.md` before the command runs, so
+`echo pwned > pwned.txt` is refused where `write` already was. The commands themselves keep the ordinary
+ladder: plan mode is a confinement, not a sandbox. The shell side is the Unix analyser; Windows' word model
+has no redirect model, so the zone covers `write`/`edit` only there.
 
 ### Drift the review caught
 
@@ -35,11 +79,15 @@ description, SPECS §10) now states what is enforced. Treat plan mode as "the mo
   The same block's `--version` example still showed `v0.4.1-beta`, and "Not implemented yet" claimed the
   current version was `v0.7.10`.
 - README's Development section counted twelve eval scenarios and two scripted harnesses; there are fifteen
-  scenarios and five harnesses — three of them hermetic (skillgate, goalgate, acpgate) and needing no key.
+  scenarios and six harnesses — four of them hermetic (skillgate, goalgate, acpgate, contextgate) and
+  needing no key.
 - BENCHMARKS pinned `MOCA_VERSION` to "v0.7.12 now, the newest tag", three releases stale. It now says to
   pin the release under test.
 - `internal/permissions/probe` — a 39-line manual symlink probe from the v0.4.0 overhaul that nothing
   referenced (its cases are pinned in `jail_test.go`) — is gone, and the package count follows (18 → 17).
+- `docs/release.md` and `docs/reviews/2026-11-16-v0.8.2-full-review.md` are gone: the release procedure
+  lives in SPECS §2 and AGENTS.md, and the review's findings live in this entry and §15 — a stale operator
+  page and a one-shot report do not belong in the tree they describe.
 
 ### The doc-count pin was pinning history
 

@@ -23,6 +23,10 @@ const smallModel = `"m":{"contextWindow":32768,"maxOutputTokens":4096}`
 // 12288 — small enough that one big read busts it.
 const minWindowModel = `"m":{"contextWindow":16384,"maxOutputTokens":4096}`
 
+// A 200K window keeps 80K-char prompts inside the P3 trim budget, so the
+// provider-overflow recovery tests still exercise the overflow path.
+const bigWindowModel = `"m":{"contextWindow":200000,"maxOutputTokens":4096}`
+
 // bigToolTurns scripts n shell turns each returning 2×10000 chars (~5000
 // tokens); with smallModel the trigger (24576) fires exactly after the 5th
 // batch. (The script server answers every agent request in order, including
@@ -103,12 +107,12 @@ func TestAutoCompactionShrinksContext(t *testing.T) {
 	}
 }
 
-func TestLoopGuardNamesOversizedEntry(t *testing.T) {
+func TestProtectedPruneFitsAnOversizedEntry(t *testing.T) {
 	s := newScript(t, toolTurn([2]string{"read", `{"path":"dist/app.min.js","limit":2000}`}), textTurn("## Goal\ns"), textTurn("never"))
 	a, work, _ := startTestWith(t, s, "", minWindowModel)
 	// One read of a big file is capped at 50K chars ≈ 12k tokens: larger
-	// than keepRecent (4096) and, kept verbatim, still over the trigger
-	// (12288) — the loop guard must name it instead of compacting forever.
+	// than keepRecent (4096) and, kept verbatim, still over the ceiling
+	// (13107). The last-resort prune must spill it and keep the run alive.
 	var sb strings.Builder
 	for sb.Len() < 300_000 {
 		sb.WriteString("const v000000000000000000000000 = 1;\n")
@@ -119,10 +123,21 @@ func TestLoopGuardNamesOversizedEntry(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(work, "dist", "app.min.js"), []byte(sb.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := a.Run(context.Background(), "x")
-	if err == nil || !strings.Contains(err.Error(), "still over budget") ||
-		!strings.Contains(err.Error(), "read") || !strings.Contains(err.Error(), "12k tokens") {
-		t.Fatalf("%v", err)
+	if _, err := a.Run(context.Background(), "x"); err != nil {
+		t.Fatalf("last-resort prune must fit the request: %v", err)
+	}
+	var stubbed bool
+	for _, e := range a.entries {
+		if e.Type == session.TypeElision {
+			for _, stub := range e.Elision.Stubs {
+				if strings.Contains(stub, "pruned:") && strings.Contains(stub, "saved to") {
+					stubbed = true
+				}
+			}
+		}
+	}
+	if !stubbed {
+		t.Fatal("the oversized read must be stubbed with a spill pointer")
 	}
 }
 
@@ -132,7 +147,7 @@ func TestOverflowCompactsAndRetriesOnce(t *testing.T) {
 	// (split turn part), retry. 80K-char prompts put ~20k tokens per turn, so
 	// the cut splits the turn (keepRecent 16384) and two summaries merge.
 	s := newScript(t, textTurn("a1"), textTurn("a2"), overflow, textTurn("## Goal\ns"), textTurn("## Turn\ns"), textTurn("recovered"))
-	a, _, _ := startTestWith(t, s, "", "")
+	a, _, _ := startTestWith(t, s, "", bigWindowModel)
 	if _, err := a.Run(context.Background(), strings.Repeat("q", 80000)); err != nil {
 		t.Fatal(err)
 	}
@@ -192,15 +207,15 @@ func TestManualCompactNothing(t *testing.T) {
 	}
 }
 
-// A cheap model whose credential is missing must not kill a run the active
-// model handles fine: the automatic checkpoint warns and skips; a real
-// overflow would still surface it (turnWithRecovery path).
-func TestAutoCompactionSkipsWhenSummarizerUnavailable(t *testing.T) {
+// A configured summary model whose credential is missing must not kill a run
+// the active model handles fine: the summarizer falls back to the active model
+// with one warning and still compacts.
+func TestAutoCompactionFallsBackToActiveModel(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("MOCA_T_KEY", "k")   // working provider
-	t.Setenv("MOCA_T_BROKEN", "") // missing key for the configured cheap model
-	s := newScript(t, append(bigToolTurns(5), textTurn("done"))...)
+	t.Setenv("MOCA_T_BROKEN", "") // missing key for the configured summary model
+	s := newScript(t, append(bigToolTurns(5), textTurn("## Goal\ns"), textTurn("done"))...)
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`{"model":"broken/x","context":{"maxSteps":40},
 		"providers":{
 		  "fake":{"baseUrl":%q,"protocol":"openai-completions","auth":"api_key","apiKey":"env:MOCA_T_KEY","models":{"m":{"contextWindow":32768,"maxOutputTokens":4096}}},
@@ -220,35 +235,43 @@ func TestAutoCompactionSkipsWhenSummarizerUnavailable(t *testing.T) {
 	}
 	out, err := a.Run(context.Background(), "make output")
 	if err != nil || out.Text != "done" {
-		t.Fatalf("the run must continue when the summarizer is unusable: %v %q", err, out.Text)
+		t.Fatalf("the run must continue when the summary model is unusable: %v %q", err, out.Text)
 	}
 	var warned bool
 	for _, e := range evs {
-		if w, ok := e.(Warning); ok && strings.Contains(w.Text, "auto-compaction skipped") && strings.Contains(w.Text, "MOCA_T_BROKEN") {
+		if w, ok := e.(Warning); ok && strings.Contains(w.Text, "summary model") && strings.Contains(w.Text, "using the active model") {
 			warned = true
 		}
 	}
 	if !warned {
-		t.Fatal("a warning must report the skipped auto-compaction")
+		t.Fatal("a warning must report the summary-model fallback")
 	}
 	entries, _ := session.ReadFile(a.Session().Path())
-	if c, _ := session.LatestCompaction(entries); c != nil {
-		t.Fatal("no compaction entry may be written when the summarizer is unusable")
+	c, _ := session.LatestCompaction(entries)
+	if c == nil || !strings.Contains(c.Summary, "## Goal") {
+		t.Fatal("the active model must still produce the compaction summary")
 	}
 }
 
-// When the estimate is over the trigger but the transcript is tiny, the loop
-// guard must blame the fixed overhead, not near-empty entries.
+// When the fixed overhead alone exceeds the 80% ceiling, the run warns and
+// continues under the fixed-overhead exception instead of failing.
 func TestLoopGuardReportsFixedOverhead(t *testing.T) {
-	s := newScript(t, textTurnUsage("hi", 26000, 15))
-	a, _, _ := startTestWith(t, s, "", smallModel)
+	s := newScript(t, textTurnUsage("hi", 27000, 15))
+	a, _, evs := startTestWith(t, s, "", smallModel)
 	if out, err := a.Run(context.Background(), "one"); err != nil || out.Text != "hi" {
 		t.Fatal(out, err)
 	}
-	_, err := a.Run(context.Background(), "two")
-	if err == nil || !strings.Contains(err.Error(), "still over budget") ||
-		!strings.Contains(err.Error(), "fixed overhead") || !strings.Contains(err.Error(), "26k tokens") {
-		t.Fatalf("%v", err)
+	if err := a.prepareRequest(context.Background(), false); err != nil {
+		t.Fatalf("fixed-overhead exception must keep the request possible: %v", err)
+	}
+	var warned bool
+	for _, e := range *evs {
+		if w, ok := e.(Warning); ok && strings.Contains(w.Text, "fixed context overhead") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatal("fixed-overhead exception must warn once")
 	}
 }
 
@@ -309,7 +332,7 @@ func TestOverflowRecoveryCancelSurfacesCancellation(t *testing.T) {
 	s := newScript(t, textTurn("a1"), textTurn("a2"), overflowBody, textTurn("## Goal\ns"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	a, _, _ := startWith(t, s, 40, "", "", func(o *StartOptions) {
+	a, _, _ := startWith(t, s, 40, "", bigWindowModel, func(o *StartOptions) {
 		// StreamReset is emitted right as the overflow is detected, before
 		// the recovery compaction starts.
 		o.Emit = func(e Event) {
@@ -334,7 +357,7 @@ func TestOverflowRecoveryCancelSurfacesCancellation(t *testing.T) {
 func TestFailedCompactionStillCountsSpentUsage(t *testing.T) {
 	s := newScript(t, textTurn("a1"), textTurn("a2"), overflowBody,
 		textTurnUsage("## Goal\nA", 1234, 56), "HTTP400:"+`{"error":{"message":"nope"}}`)
-	a, _, _ := startTestWith(t, s, "", "")
+	a, _, _ := startTestWith(t, s, "", bigWindowModel)
 	for _, p := range []string{strings.Repeat("q", 80000), strings.Repeat("r", 80000)} {
 		if _, err := a.Run(context.Background(), p); err != nil {
 			t.Fatal(err)
@@ -366,7 +389,7 @@ func TestFailedCompactionStillCountsSpentUsage(t *testing.T) {
 func TestSummarizerOverflowRetriesWithHalfThePayload(t *testing.T) {
 	s := newScript(t, textTurn("a1"), textTurn("a2"), overflowBody,
 		overflowBody, textTurn("## Goal\nA"), textTurn("## Turn\nB"), textTurn("recovered"))
-	a, _, _ := startTestWith(t, s, "", "")
+	a, _, _ := startTestWith(t, s, "", bigWindowModel)
 	for _, p := range []string{strings.Repeat("q", 80000), strings.Repeat("r", 80000)} {
 		if _, err := a.Run(context.Background(), p); err != nil {
 			t.Fatal(err)

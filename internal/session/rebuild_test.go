@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/adeotek/moca/internal/llm"
@@ -33,6 +34,26 @@ func TestMessagesRebuild(t *testing.T) {
 	}
 	if len(m[2].Content) != 3 || m[2].Content[0].ToolResult.CallID != "c1" || m[2].Content[2].Text != "steer" {
 		t.Fatalf("results then steering text: %+v", m[2].Content)
+	}
+}
+
+func TestMessagesRequestAppliesTrimAuditKeepsOriginal(t *testing.T) {
+	full := strings.Repeat("x", 1000)
+	es := []Entry{
+		{ID: "u1", Type: TypeMessage, Message: txt(llm.RoleUser, full)},
+		{ID: "tr", Type: TypeTrim, Trim: &Trim{IDs: []string{"u1"}, HeadBytes: 10, TailBytes: 10, Notice: "[trimmed]"}},
+	}
+	audit := Messages(es)
+	if len(audit) != 1 || len(audit[0].Content) != 1 || audit[0].Content[0].Text != full {
+		t.Fatalf("audit must keep the original: %+v", audit)
+	}
+	req := MessagesRequest(es, nil, false)
+	if len(req) != 1 || len(req[0].Content) != 1 {
+		t.Fatalf("request shape: %+v", req)
+	}
+	got := req[0].Content[0].Text
+	if len(got) >= len(full) || !strings.Contains(got, "[trimmed]") || !strings.HasPrefix(got, strings.Repeat("x", 10)) {
+		t.Fatalf("request trim: %q", got)
 	}
 }
 
