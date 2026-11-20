@@ -23,6 +23,13 @@
 - Tool-call arguments keep 500 chars for commands and edit strings.
 - The previous summary is passed outside the capped span, so a tiny summarizer cap shortens only the new span.
 
+## Unreleased — context oversized prompt trim (P3)
+
+- Persisted `trim` entries bound an oversized prompt for the request only: the model sees a 60/40 head+tail window and a path notice, while the transcript and the audit replay keep the full text.
+- `session.MessagesRequest` is now the single model-facing renderer; `Messages`/`MessagesWith` remain the audit renderer, so TUI/ACP replay is not shortened by policy trims.
+- The summary serializer applies the same trim window, so a compaction sees the bounded prompt the model saw.
+- The full prompt is written to the session spill directory before the trim record is committed.
+
 ## v0.8.3 (2026-11-16)
 
 ### The review pass: a fetch gate that missed shared address space, and CI that compiled one platform

@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/session"
 )
 
@@ -70,15 +72,31 @@ func TestContextTokensCalibratesFromUsage(t *testing.T) {
 	}
 }
 
-func TestPromptPasteCannotFit(t *testing.T) {
-	s := newScript(t)
+func TestPromptPasteTrimsRequestButAuditKeepsOriginal(t *testing.T) {
+	s := newScript(t, textTurn("ok"))
 	a, _, _ := startTestWith(t, s, "", minWindowModel)
-	_, err := a.Run(context.Background(), strings.Repeat("x", 100_000))
-	if err == nil || !strings.Contains(err.Error(), "context cannot fit") {
-		t.Fatalf("an oversized prompt must fail before a provider request: %v", err)
+	full := strings.Repeat("x", 100_000)
+	out, err := a.Run(context.Background(), full)
+	if err != nil || out.Text != "ok" {
+		t.Fatalf("the oversized prompt must be trimmed, not fail: %v %q", err, out.Text)
 	}
-	if len(s.bodies) != 0 {
-		t.Fatalf("no request may reach the provider, got %d", len(s.bodies))
+	if len(s.bodies) != 1 {
+		t.Fatalf("one request expected, got %d", len(s.bodies))
+	}
+	body, _ := json.Marshal(s.bodies[0]["messages"])
+	if strings.Count(string(body), "x") >= 100_000 || !strings.Contains(string(body), "prompt trimmed") {
+		t.Fatal("the request must carry the head/tail trim and its notice")
+	}
+	var audit string
+	for _, m := range a.History() {
+		if m.Role == llm.RoleUser {
+			for _, c := range m.Content {
+				audit += c.Text
+			}
+		}
+	}
+	if !strings.Contains(audit, full) {
+		t.Fatal("the audit view must keep the original prompt")
 	}
 }
 
