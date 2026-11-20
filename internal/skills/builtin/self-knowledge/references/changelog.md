@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### A 1M model reported as 300K — the working-window cap is opt-in
+
+v0.8.3's context budget capped the working window at 300K by default and then fed
+that cap into the status bar's `ctx` field, so every model above 300K
+(`deepseek-v4.1-flash`, `glm-5.3-flash`, `glm-5.3`, …) read as `ctx 300k`, and a
+1M model compacted at 225K — the model's own context size was neither shown nor
+used. `context.maxWindowTokens` now defaults to 0 (the advertised window): a
+working-window cap is a cost/quality decision the user opts into, not a silent
+default. The bar reports the advertised window; when a configured cap lowers it,
+a separate `cap` segment names the effective working window and the percent keeps
+measuring against it. Pinned by `TestStatusBarKeepsTheAdvertisedWindow`,
+`TestRenderStatusCappedWindow` and the defaults in `TestDefaultsApplied`; ACP
+`usage_update.size` already kept the advertised window and is untouched.
+
 ## v0.8.3 (2026-11-18)
 
 ### Context management

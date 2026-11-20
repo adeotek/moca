@@ -462,8 +462,10 @@ type ContextConfig struct {
 	// window (§14.1). nil = DefaultCompactAtPercent; 0 selects the reserve
 	// trigger; nonzero values are 1..80.
 	CompactAtPercent *int `json:"compactAtPercent"`
-	// MaxWindowTokens caps the effective working window. nil = the default
-	// cap; 0 selects the advertised model window; nonzero values are >= 16000.
+	// MaxWindowTokens caps the effective working window (§14.1). nil or 0 =
+	// the advertised model window (no cap — the default); nonzero values are
+	// >= 16000. A cap is opt-in: silently running a 1M model at 300K was the
+	// v0.8.3 default this key lost.
 	MaxWindowTokens *int `json:"maxWindowTokens"`
 	// SummaryModel is the dedicated compaction summarizer, provider/model.
 	// Empty resolves the configured `model`, then the active model.
@@ -474,10 +476,6 @@ type ContextConfig struct {
 // context.compactAtPercent is absent.
 const DefaultCompactAtPercent = 75
 
-// DefaultMaxWindowTokens is the effective-window cap when
-// context.maxWindowTokens is absent.
-const DefaultMaxWindowTokens = 300_000
-
 // CompactPercent resolves the operating trigger percentage: the configured
 // value, else the default. 0 means the reserve trigger.
 func (c ContextConfig) CompactPercent() int {
@@ -487,11 +485,12 @@ func (c ContextConfig) CompactPercent() int {
 	return *c.CompactAtPercent
 }
 
-// MaxWindow resolves the effective-window cap: the configured value, else the
-// default; 0 means the advertised model window.
+// MaxWindow resolves the effective-window cap: the configured value, else 0 —
+// the advertised model window. No cap is the default; a working-window limit
+// is a cost/quality decision the user opts into.
 func (c ContextConfig) MaxWindow() int {
 	if c.MaxWindowTokens == nil {
-		return DefaultMaxWindowTokens
+		return 0
 	}
 	return *c.MaxWindowTokens
 }

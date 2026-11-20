@@ -104,7 +104,7 @@
     "maxSteps": 40, // tool-call steps before the run is wrapped up
     "progressNudgeAt": 12, // tool batches with no file change before one "start acting" nudge; 0 disables
     "compactAtPercent": 75, // operating trigger as % of the effective window; 0 = reserve trigger
-    "maxWindowTokens": 300000, // effective working-window cap; 0 = the advertised model window
+    "maxWindowTokens": 0, // working-window cap; 0 = the model's advertised window (no cap)
     "summaryModel": "" // optional provider/model for compaction summaries; empty = model
   },
 
