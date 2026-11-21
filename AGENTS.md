@@ -21,6 +21,7 @@ scripts/release/render-acp-registry.py --tag <tag> --out <dir>   # the ACP regis
 scripts/release/render-homebrew-formula.py --tag <tag> --out <dir>   # Formula/moca.rb for adeotek/homebrew-tap
 scripts/release/render-winget-manifests.py --tag <tag> --out <dir>   # the three winget-pkgs manifests
 scripts/release/publish-channels.sh --tag <tag> [--verify] [--registry-repo D] [--tap-repo D]  # all three, then the commands
+scripts/release/release-channels.sh --version <tag> [--channel acp|homebrew|winget|all] [--dry-run]  # checks, renders, pushes, opens the PRs
 mise run <task>                             # the make targets, as mise tasks
 ```
 

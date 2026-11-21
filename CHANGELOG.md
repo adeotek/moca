@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### One-command channel release
+
+`scripts/release/release-channels.sh --version <tag>` publishes a released version
+to one, several or all distribution channels (`--channel acp|homebrew|winget`,
+repeated or comma-separated; default all). It verifies the GitHub Release (all
+seven assets present, every checksum recomputed against the downloaded
+archives), renders each selected channel with the existing renderers, refuses a
+tap downgrade unless `--allow-downgrade`, runs the ACP registry's own schema,
+launch and auth validators, then commits the formula to the tap and opens the
+registry and winget PRs. Re-runs are safe: a channel already carrying the version is
+verified and skipped, an open PR is reported instead of duplicated. `--dry-run`
+runs every check and render without writing to any repository;
+`publish-channels.sh` remains the render-and-inspect path.
+
 ## v0.8.4 (2026-11-21)
 
 The context-window fix and the seeded-skill refresh.
