@@ -16,7 +16,7 @@ func TestWindowsParseLive(t *testing.T) {
 	if os.Getenv("MOCA_WINPARSE") != "1" {
 		t.Skip("set MOCA_WINPARSE=1 to run against the real PowerShell")
 	}
-	defer closeWinParser()
+	defer CloseWinParser()
 
 	ps, err := winParseDefault("Get-ChildItem -Path . -Filter *.go | Select-Object Name\nRemove-Item -Recurse -Force .\\out > log.txt")
 	if err != nil {

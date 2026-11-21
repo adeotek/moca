@@ -96,20 +96,91 @@ type parsedScript struct {
 	Dynamic bool // some scriptblock/subexpression/array/variable exists: ask once
 }
 
-// winParseDefault is the real helper: the long-lived child, or a child per call when
-// that is impossible.
-var winParseDefault = func(script string) (parsedScript, error) {
+// psParseError is the wrapper answering "I read this and it is broken". It is
+// deterministic — the same script parses to the same errors — so the cache may keep
+// it. A transport failure (no interpreter, a dead child, a timeout) is not, and is
+// never cached: a wedged child must not poison a run.
+type psParseError struct{ Msgs []string }
+
+func (e psParseError) Error() string { return "powershell parse: " + strings.Join(e.Msgs, "; ") }
+
+// psTransport is the sidecar call, a variable so tests can count it.
+var psTransport = func(script string) (parsedScript, error) {
 	return psDefault.parse(script)
 }
+
+// winParseDefault is the real helper: one cache lookup, then the long-lived child (or
+// a child per call when that is impossible).
+var winParseDefault = func(script string) (parsedScript, error) {
+	if e, ok := psParseCache.get(script); ok {
+		return e.ps, e.err
+	}
+	ps, err := psTransport(script)
+	if _, isParse := err.(psParseError); err == nil || isParse {
+		psParseCache.put(script, psCacheEntry{ps: ps, err: err})
+	}
+	return ps, err
+}
+
+// psCacheMax bounds the parse cache. A run touches a few dozen distinct scripts; 256
+// is far past that and small enough to be irrelevant in memory.
+const psCacheMax = 256
+
+type psCacheEntry struct {
+	ps  parsedScript
+	err error
+}
+
+// psCache is an insertion-ordered map: when it is full the oldest entry goes. A real
+// LRU would be a second data structure for no benefit at this size.
+type psCache struct {
+	mu    sync.Mutex
+	m     map[string]psCacheEntry
+	order []string
+}
+
+func (c *psCache) get(k string) (psCacheEntry, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.m[k]
+	return e, ok
+}
+
+func (c *psCache) put(k string, e psCacheEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = make(map[string]psCacheEntry, psCacheMax)
+	}
+	if _, ok := c.m[k]; ok {
+		c.m[k] = e
+		return
+	}
+	if len(c.order) >= psCacheMax {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.m, oldest)
+	}
+	c.m[k] = e
+	c.order = append(c.order, k)
+}
+
+func (c *psCache) len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.m)
+}
+
+var psParseCache = &psCache{m: make(map[string]psCacheEntry, psCacheMax)}
 
 // winParse parses a PowerShell command string. It is a variable because the test
 // binary replaces it (no test may spawn a PowerShell child) and because a Shell can
 // carry its own parser.
 var winParse = winParseDefault
 
-// closeWinParser ends the parser child. Call it when a run ends; the child also dies
+// CloseWinParser ends the parser child. Call it when a run ends; the child also dies
 // on its own when stdin closes with the process, so this is tidiness, not a leak fix.
-func closeWinParser() { psDefault.Close() }
+func CloseWinParser() { psDefault.Close() }
 
 var psDefault = &psSidecar{}
 
@@ -321,7 +392,7 @@ func decodePS(raw []byte) (parsedScript, error) {
 		return parsedScript{}, fmt.Errorf("powershell parse: %w", err)
 	}
 	if len(pl.Errors) > 0 {
-		return parsedScript{}, fmt.Errorf("powershell parse: %s", strings.Join(pl.Errors, "; "))
+		return parsedScript{}, psParseError{Msgs: pl.Errors}
 	}
 	return parsedScript{Cmds: pl.Cmds, Writes: pl.Writes, Dynamic: pl.Dynamic}, nil
 }

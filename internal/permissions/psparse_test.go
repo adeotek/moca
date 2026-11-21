@@ -254,3 +254,75 @@ func TestWindowsParseWrapperIsTheFixture(t *testing.T) {
 		}
 	}
 }
+
+// TestWindowsParseCache: a repeated script is parsed once, a deterministic parse
+// failure is cached too, a transport failure is not, and the map stays bounded.
+func TestWindowsParseCache(t *testing.T) {
+	psParseCache = &psCache{m: make(map[string]psCacheEntry, psCacheMax)}
+	old := psTransport
+	defer func() { psTransport = old; psParseCache = &psCache{m: make(map[string]psCacheEntry, psCacheMax)} }()
+
+	calls := 0
+	psTransport = func(string) (parsedScript, error) {
+		calls++
+		return parsedScript{Cmds: []psCmd{{Name: "Get-ChildItem", Static: true}}}, nil
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := winParseDefault("Get-ChildItem"); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("calls = %d, want 1 for one repeated script", calls)
+	}
+	if _, err := winParseDefault("Get-Item x"); err != nil {
+		t.Fatalf("second script: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("calls = %d, want 2 for a new script", calls)
+	}
+
+	// A broken script is a deterministic failure: the same text fails the same way,
+	// so the second attempt must not pay for the parse again.
+	broken := 0
+	psTransport = func(string) (parsedScript, error) {
+		broken++
+		return parsedScript{}, psParseError{Msgs: []string{"An empty pipe element is not allowed."}}
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := winParseDefault("Get- |"); err == nil {
+			t.Fatal("broken script: want an error")
+		}
+	}
+	if broken != 1 {
+		t.Errorf("broken calls = %d, want 1 (a parse failure is cached)", broken)
+	}
+
+	// A transport failure is transient — a dead child must be retried, not remembered.
+	transient := 0
+	psTransport = func(string) (parsedScript, error) {
+		transient++
+		return parsedScript{}, errPSTimeout
+	}
+	for i := 0; i < 2; i++ {
+		// A script this test has not cached yet: the success above must not mask it.
+		if _, err := winParseDefault("Get-Item y"); err == nil {
+			t.Fatal("timeout: want an error")
+		}
+	}
+	if transient != 2 {
+		t.Errorf("transient calls = %d, want 2 (a transport failure is not cached)", transient)
+	}
+
+	// Bounded: the 257th distinct script evicts the oldest.
+	psParseCache = &psCache{m: make(map[string]psCacheEntry, psCacheMax)}
+	psTransport = func(string) (parsedScript, error) { return parsedScript{}, nil }
+	for i := 0; i < psCacheMax+8; i++ {
+		if _, err := winParseDefault(strings.Repeat("x", i+1)); err != nil {
+			t.Fatalf("bulk parse %d: %v", i, err)
+		}
+	}
+	if n := psParseCache.len(); n > psCacheMax {
+		t.Errorf("cache len = %d, want <= %d", n, psCacheMax)
+	}
+}
