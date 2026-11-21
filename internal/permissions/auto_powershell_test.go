@@ -159,6 +159,30 @@ func TestAutoWindowsAlwaysAsk(t *testing.T) {
 	}
 }
 
+// TestAutoWindowsFilters: a pipeline filter is allowed only when it carries no
+// scriptblock. `Where-Object { … }` and `ForEach-Object { … }` run whatever the
+// block holds, so they ask; the property-name forms do not.
+func TestAutoWindowsFilters(t *testing.T) {
+	s := winAuto(t)
+	cases := map[string]verdict{
+		"Get-ChildItem | Where-Object Name":                 {},
+		"Get-ChildItem | Where-Object -Property Name -EQ x": {},
+
+		"Get-ChildItem | ? Name":                           {},
+		"Get-ChildItem | ForEach-Object Name":              {},
+		"Get-ChildItem | % Name":                           {},
+		"Get-ChildItem | Where-Object { $_.Length -gt 0 }": {every: []string{"where-object"}},
+		"Get-ChildItem | ForEach-Object { Remove-Item x }": {every: []string{"foreach-object"}},
+		// a filter's own output written outside is still a write
+		"Get-ChildItem | Out-File C:\\x":                   {every: []string{"out-file"}},
+		"Get-ChildItem | ConvertTo-Json | Out-File .git/x": {every: []string{"out-file"}},
+	}
+	for cmd, want := range cases {
+		need, every, unsure, err := s.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
+	}
+}
+
 // TestAutoWindowsScriptblockAsks: a scriptblock, a subexpression or an
 // array-subexpression runs code the table cannot see, and the classifier cannot
 // see it either (it receives the command as text), so these ask every time

@@ -225,6 +225,20 @@ var winCmdlets = map[string]winSpec{
 	})},
 	"convertfrom-xml": {kind: winKindRead, pos: posNone, params: wp(nil)},
 
+	// Pipeline filters. A filter with no scriptblock only selects, sorts or
+	// renames properties; one with a block runs arbitrary code, which
+	// winVerdict has already turned into an ask before this row is reached.
+	"where-object": {kind: winKindFilter, pos: posNone, params: wp(map[string]winParam{
+		"filterscript": pValue, "property": pValue, "value": pValue, "inputobject": pValue,
+		"eq": pValue, "ne": pValue, "gt": pValue, "lt": pValue, "ge": pValue, "le": pValue,
+		"like": pValue, "notlike": pValue, "match": pValue, "notmatch": pValue,
+		"contains": pValue, "notcontains": pValue, "in": pValue, "notin": pValue, "replace": pValue,
+	})},
+	"foreach-object": {kind: winKindFilter, pos: posNone, params: wp(map[string]winParam{
+		"process": pValue, "begin": pValue, "end": pValue, "membersetname": pValue,
+		"inputobject": pValue, "throttlelimit": pValue, "parallel": pSwitch, "asjob": pSwitch,
+	})},
+
 	// Writers. Every destination must be literal and confined; a destination
 	// that is the workdir root itself is ordinary for the copy/create family
 	// (Unix guardNone) and asks for the ones that write into a file (the Unix
@@ -319,6 +333,10 @@ func winVerdict(ws []Word, conf pathFunc) (autoVerdict, bool) {
 		return winReadVerdict(ws[1:], spec, conf), true
 	case winKindConfined:
 		return winConfinedVerdict(ws[1:], spec, conf), true
+	case winKindFilter:
+		// Reached only when the args carry no scriptblock (winVerdict asked
+		// above), so there is no code to run.
+		return autoAllow, true
 	default:
 		return autoUnsure, false
 	}
