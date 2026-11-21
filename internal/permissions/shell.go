@@ -42,6 +42,10 @@ type Shell struct {
 	// write/edit are confined to. "" = plan mode off. Unlike skillDir it
 	// follows the mode: the agent sets and clears it on every plan toggle.
 	planDir string
+	// winParse is the PowerShell parse (psparse.go), nil meaning the default
+	// helper. Only Windows commands use it, and only auto mode: it replaces
+	// the word model's guesses with what PowerShell's own parser reports.
+	winParse func(string) (parsedScript, error)
 }
 
 // SetSkillDir installs the skill-dir refusal (C1). It belongs to the feature
@@ -62,7 +66,7 @@ func (s *Shell) AutoView(j *Jail) *Shell {
 	// (agent.New), and losing the field would silently drop the refusal in
 	// the mode that runs the most shell commands. planDir does too, though
 	// plan mode rides only on ask: the copy must never be the weak view.
-	return &Shell{rules: s.rules, auto: true, jail: j, goos: s.goos, skillDir: s.skillDir, planDir: s.planDir}
+	return &Shell{rules: s.rules, auto: true, jail: j, goos: s.goos, skillDir: s.skillDir, planDir: s.planDir, winParse: s.winParse}
 }
 
 func NewShell(rules *Rules, jail *Jail, goos string) *Shell {

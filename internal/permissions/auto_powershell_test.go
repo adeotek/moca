@@ -2,6 +2,8 @@ package permissions
 
 import (
 	"slices"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/adeotek/moca/internal/config"
@@ -350,5 +352,186 @@ func TestAutoWindowsRelativeGlobReads(t *testing.T) {
 		if _, every, _, err := s.Check(cmd); err != nil || len(every) == 0 {
 			t.Errorf("%q: every=%v err=%v, want an ask", cmd, every, err)
 		}
+	}
+}
+
+// --- Layer D: the parse path -------------------------------------------------
+
+// psVal / psQ / psP / psPV / psDyn build parsed elements the way the wrapper emits
+// them, so these tests pin the analyser's mapping rather than the JSON decoder.
+func psVal(v string) psArg           { return psArg{Value: &v} }
+func psQ(v string) psArg             { return psArg{Value: &v, Quoted: true} }
+func psP(name string) psArg          { return psArg{Param: name} }
+func psPV(n, v string) psArg         { return psArg{Param: n, Value: &v} }
+func psDyn(kind string) psArg        { return psArg{Dynamic: kind} }
+func psC(n string, a ...psArg) psCmd { return psCmd{Name: n, Args: a, Static: true} }
+
+// fakeParse returns a parser that answers with ps for every script and records the
+// text it was given.
+func fakeParse(ps parsedScript) (*[]string, func(string) (parsedScript, error)) {
+	var seen []string
+	return &seen, func(script string) (parsedScript, error) {
+		seen = append(seen, script)
+		return ps, nil
+	}
+}
+
+// TestAutoWindowsParsedScript: every command in a parsed script is judged on its own,
+// with its parameters and values already separated — and a destructive cmdlet asks
+// wherever it appears, including nested in a scriptblock (the parse reports nested
+// CommandAsts as commands).
+func TestAutoWindowsParsedScript(t *testing.T) {
+	s := winAuto(t)
+	// Order matters: an ask taints what follows (a command that was not cleared may
+	// have changed how the next one resolves), so the destructive one is last.
+	ps := parsedScript{Cmds: []psCmd{
+		psC("Get-Content", psVal("go.mod")),
+		psC("Get-Item", psVal("b.txt")),
+		psC("Remove-Item", psVal(".git"), psP("Recurse"), psP("Force")),
+	}}
+	seen, fake := fakeParse(ps)
+	s.winParse = fake
+
+	need, every, unsure, err := s.Check("Get-Content go.mod\nGet-Item b.txt\nRemove-Item -Recurse -Force .git")
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if len(every) != 1 || every[0] != "remove-item" {
+		t.Errorf("every = %v, want exactly [remove-item]", every)
+	}
+	if len(need) != 0 || len(unsure) != 0 {
+		t.Errorf("need=%v unsure=%v, want the reads cleared", need, unsure)
+	}
+	if len(*seen) != 1 || !strings.Contains((*seen)[0], "Remove-Item") {
+		t.Errorf("parser saw %v, want the whole script once", *seen)
+	}
+}
+
+// TestAutoWindowsParsedQuiet: the shapes this layer exists for are cleared, not guessed.
+func TestAutoWindowsParsedQuiet(t *testing.T) {
+	for _, ps := range []parsedScript{
+		{Cmds: []psCmd{psC("Get-ChildItem", psP("Path"), psVal("*"), psPV("Filter", "*.go"))}},
+		{Cmds: []psCmd{psC("Copy-Item", psPV("Path", "a.txt"), psPV("Destination", `C:\Windows\System32`))}}, // destination outside: still an ask, see below
+		{Cmds: []psCmd{psC("Select-String", psPV("Path", "go.mod"), psPV("Pattern", "x"))}},
+	} {
+		s := winAuto(t)
+		_, fake := fakeParse(ps)
+		s.winParse = fake
+		if need, every, unsure, err := s.Check("x"); err != nil || len(need)+len(every)+len(unsure) != 0 {
+			// Copy-Item's outside destination is the exception: it must ask.
+			if ps.Cmds[0].Name == "Copy-Item" && len(every) == 1 {
+				continue
+			}
+			t.Errorf("%s: need=%v every=%v unsure=%v err=%v, want cleared", ps.Cmds[0].Name, need, every, unsure, err)
+		}
+	}
+}
+
+// TestAutoWindowsParseFallback: any parser failure is the word model's business. This
+// is the arm that must never become an allow.
+func TestAutoWindowsParseFallback(t *testing.T) {
+	s := winAuto(t)
+	s.winParse = func(string) (parsedScript, error) { return parsedScript{}, errors.New("no pwsh") }
+
+	need, every, unsure, err := s.Check("Get-ChildItem\nRemove-Item -Recurse -Force C:\\Windows\\System32")
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if len(every) == 0 || every[0] != "remove-item" {
+		t.Errorf("every = %v (need=%v unsure=%v), want the word model's am on remove-item", every, need, unsure)
+	}
+
+}
+
+// TestAutoWindowsParseWrites: a redirection is a write the analyser can finally see.
+// Inside the workdir it is silent; outside it is refused like the Unix redirect; the
+// skills dir is refused outright.
+func TestAutoWindowsParseWrites(t *testing.T) {
+	inside := winAuto(t)
+	_, fake := fakeParse(parsedScript{
+		Cmds:   []psCmd{psC("Get-ChildItem")},
+		Writes: []psWrite{{Target: "out.txt"}},
+	})
+	inside.winParse = fake
+	if need, every, unsure, err := inside.Check("Get-ChildItem > out.txt"); err != nil || len(need)+len(every)+len(unsure) != 0 {
+		t.Errorf("confined redirect: need=%v every=%v unsure=%v err=%v, want cleared", need, every, unsure, err)
+	}
+
+	outside := winAuto(t)
+	_, fake = fakeParse(parsedScript{
+		Cmds:   []psCmd{psC("Get-ChildItem")},
+		Writes: []psWrite{{Target: `../outside.txt`}},
+	})
+	outside.winParse = fake
+	if _, _, _, err := outside.Check("Get-ChildItem > ../outside.txt"); err == nil {
+		t.Error("outside redirect: want a refusal, got none")
+	}
+
+	skills := winAuto(t)
+	_, fake = fakeParse(parsedScript{
+		Cmds:   []psCmd{psC("Get-ChildItem")},
+		Writes: []psWrite{{Target: ".moca/skills/x/SKILL.md"}},
+	})
+	skills.winParse = fake
+	if _, _, _, err := skills.Check("Get-ChildItem > .moca/skills/x/SKILL.md"); !errors.Is(err, errSkillWrite) {
+		t.Errorf("skills redirect: err = %v, want errSkillWrite", err)
+	}
+}
+
+// TestAutoWindowsParseUnknowable: an operand nobody can place is judged by its role.
+// A filter's scriptblock is harmless; a read's path is exactly what was unknowable.
+func TestAutoWindowsParseUnknowable(t *testing.T) {
+	filter := winAuto(t)
+	_, fake := fakeParse(parsedScript{
+		Cmds: []psCmd{
+			{Name: "Get-ChildItem", Static: true},
+			{Name: "Where-Object", Static: false, Args: []psArg{psDyn("ScriptBlockExpressionAst")}},
+		},
+	})
+	filter.winParse = fake
+	if need, every, unsure, err := filter.Check("Get-ChildItem | Where-Object { $_.Length -gt 1 }"); err != nil || len(need)+len(every)+len(unsure) != 0 {
+		t.Errorf("filter: need=%v every=%v unsure=%v err=%v, want cleared", need, every, unsure, err)
+	}
+
+	read := winAuto(t)
+	_, fake = fakeParse(parsedScript{
+		Cmds: []psCmd{{Name: "Get-Content", Static: false, Args: []psArg{psDyn("VariableExpressionAst")}}},
+	})
+	read.winParse = fake
+	if _, _, unsure, err := read.Check("Get-Content $env:APPDATA\\x.ini"); err != nil || len(unsure) == 0 {
+		t.Errorf("unknown path: unsure=%v err=%v, want unsure (never an allow)", unsure, err)
+	}
+
+	name := winAuto(t)
+	_, fake = fakeParse(parsedScript{
+		Cmds: []psCmd{{Name: "$cmd", Static: false, Args: []psArg{psVal("1")}}},
+	})
+	name.winParse = fake
+	if _, every, _, err := name.Check("& $cmd 1"); err != nil || len(every) == 0 {
+		t.Errorf("dynamic name: every=%v err=%v, want an ask", every, err)
+	}
+}
+
+// TestAutoWindowsParseStateCarries: a cd inside a parsed script still invalidates the
+// relative paths after it, and a name definition still taints what follows.
+func TestAutoWindowsParseStateCarries(t *testing.T) {
+	s := winAuto(t)
+	_, fake := fakeParse(parsedScript{Cmds: []psCmd{
+		psC("Set-Location", psVal("..")),
+		psC("Get-Content", psVal("go.mod")),
+	}})
+	s.winParse = fake
+	if _, _, unsure, err := s.Check("Set-Location ..\nGet-Content go.mod"); err != nil || len(unsure) == 0 {
+		t.Errorf("after cd: unsure=%v err=%v, want the relative read unsure", unsure, err)
+	}
+
+	s2 := winAuto(t)
+	_, fake = fakeParse(parsedScript{Cmds: []psCmd{
+		psC("Set-Alias", psPV("Name", "ll"), psPV("Value", "Remove-Item")),
+		psC("ll", psVal("x")),
+	}})
+	s2.winParse = fake
+	if _, _, unsure, err := s2.Check("Set-Alias ll Remove-Item\nll x"); err != nil || len(unsure) == 0 {
+		t.Errorf("after Set-Alias: unsure=%v err=%v, want the call unsure", unsure, err)
 	}
 }

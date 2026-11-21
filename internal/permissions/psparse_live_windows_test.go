@@ -18,7 +18,7 @@ func TestWindowsParseLive(t *testing.T) {
 	}
 	defer closeWinParser()
 
-	ps, err := winParse("Get-ChildItem -Path . -Filter *.go | Select-Object Name\nRemove-Item -Recurse -Force .\\out > log.txt")
+	ps, err := winParseDefault("Get-ChildItem -Path . -Filter *.go | Select-Object Name\nRemove-Item -Recurse -Force .\\out > log.txt")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestWindowsParseLive(t *testing.T) {
 		first = psDefault.cmd.Process.Pid
 	}
 	psDefault.mu.Unlock()
-	if _, err := winParse("Get-ChildItem"); err != nil {
+	if _, err := winParseDefault("Get-ChildItem"); err != nil {
 		t.Fatalf("second parse: %v", err)
 	}
 	psDefault.mu.Lock()
@@ -62,7 +62,7 @@ func TestWindowsParseLive(t *testing.T) {
 	if err := os.WriteFile(canary, []byte("alive"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := winParse(`Remove-Item -Recurse -Force "` + dir + `"`); err != nil {
+	if _, err := winParseDefault(`Remove-Item -Recurse -Force "` + dir + `"`); err != nil {
 		t.Fatalf("destructive parse: %v", err)
 	}
 	if _, err := os.Stat(canary); err != nil {

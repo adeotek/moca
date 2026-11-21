@@ -96,11 +96,16 @@ type parsedScript struct {
 	Dynamic bool // some scriptblock/subexpression/array/variable exists: ask once
 }
 
-// winParse parses a PowerShell command string. It is a variable so tests (and the
-// non-Windows suite) can replace it.
-var winParse = func(script string) (parsedScript, error) {
+// winParseDefault is the real helper: the long-lived child, or a child per call when
+// that is impossible.
+var winParseDefault = func(script string) (parsedScript, error) {
 	return psDefault.parse(script)
 }
+
+// winParse parses a PowerShell command string. It is a variable because the test
+// binary replaces it (no test may spawn a PowerShell child) and because a Shell can
+// carry its own parser.
+var winParse = winParseDefault
 
 // closeWinParser ends the parser child. Call it when a run ends; the child also dies
 // on its own when stdin closes with the process, so this is tidiness, not a leak fix.
