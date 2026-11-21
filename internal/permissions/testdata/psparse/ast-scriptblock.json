@@ -1,0 +1,1 @@
+{"e":[],"dyn":true,"w":[],"c":[{"n":"Get-ChildItem","k":true,"a":[]},{"n":"Where-Object","k":false,"a":[{"d":"ScriptBlockExpressionAst"}]}]}

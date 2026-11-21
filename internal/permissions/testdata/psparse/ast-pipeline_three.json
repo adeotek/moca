@@ -1,0 +1,1 @@
+{"e":[],"dyn":false,"w":[],"c":[{"n":"Get-ChildItem","k":true,"a":[]},{"n":"Sort-Object","k":true,"a":[{"v":"Length","q":false},{"p":"Descending","v":null}]},{"n":"Select-Object","k":true,"a":[{"p":"First","v":null},{"v":"3","n":true}]}]}

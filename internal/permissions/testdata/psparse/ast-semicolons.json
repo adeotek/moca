@@ -1,0 +1,1 @@
+{"e":[],"dyn":false,"w":[],"c":[{"n":"Get-ChildItem","k":true,"a":[]},{"n":"Remove-Item","k":true,"a":[{"v":"x","q":false}]},{"n":"Write-Output","k":true,"a":[{"v":"hi","q":false}]}]}

@@ -1,0 +1,1 @@
+{"e":[],"dyn":true,"w":[],"c":[{"n":"Get-Content","k":false,"a":[{"d":"SubExpressionAst"}]},{"n":"Resolve-Path","k":true,"a":[{"v":".\\go.mod","q":false}]}]}
