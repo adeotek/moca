@@ -1,7 +1,7 @@
 # Graph Report - moca-dev  (2026-11-21)
 
 ## Corpus Check
-- 655 files · ~763,747 words
+- 655 files · ~764,439 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 37 file(s) not represented in the graph (top: .jsonc 17, (none) 14, .jsonl 4)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f1695f37`
+- Built from commit: `ba8da043`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1452,7 +1452,7 @@ Nodes (3): answer_text(), answer_text.sh script, answer_text_test.sh script
   AGENTS.md · relation: cites_deleted_docs
 
 ## Knowledge Gaps
-- **879 isolated node(s):** `login --api-key flag`, `login --no-browser flag`, `docs/specs/SPECS.md`, `conventional commits`, `one version bump per PR` (+874 more)
+- **879 isolated node(s):** `login --api-key flag`, `login --no-browser flag`, `conventional commits`, `one version bump per PR`, `docs/specs/SPECS.md` (+874 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1769 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **426 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -1460,15 +1460,15 @@ Nodes (3): answer_text(), answer_text.sh script, answer_text_test.sh script
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `graphify codebase knowledge graph CLI, in default allowlist, seeded into ~/.config/moca/skills/graphify/ (SKILL.md + references)` connect `net/http/httptest.Server` to `github-and-merge.md`, `transcribe.md`, `Serialize`, `Items`?**
-  _High betweenness centrality (0.307) - this node is a cross-community bridge._
+  _High betweenness centrality (0.282) - this node is a cross-community bridge._
 - **Are the 182 inferred relationships involving `newScript()` (e.g. with `TestACPBareRememberIsAnsweredNotForwarded()` and `TestACPRememberIntercepted()`) actually correct?**
   _`newScript()` has 182 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `login --api-key flag`, `login --no-browser flag`, `docs/specs/SPECS.md` to the rest of the system?**
+- **What connects `login --api-key flag`, `login --no-browser flag`, `conventional commits` to the rest of the system?**
   _879 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `discovery_test.go` be split into smaller, more focused modules?**
   _Cohesion score 0.06896551724137931 - nodes in this community are weakly interconnected._
 - **Why does `Step 0 - Clone GitHub repo(s) (only if a GitHub URL was given)` connect `github-and-merge.md` to `.Install`?**
-  _High betweenness centrality (0.300) - this node is a cross-community bridge._
+  _High betweenness centrality (0.278) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._
