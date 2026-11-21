@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.8.5 (2026-11-21)
 
 ### One-command channel release
 
