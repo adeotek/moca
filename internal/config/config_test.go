@@ -47,7 +47,7 @@ func TestSpecExampleDecodesIntact(t *testing.T) {
 	}
 	if c.Context.ReserveTokens != 16384 || c.Context.KeepRecentTokens != 20000 || c.Context.MaxSteps != 40 ||
 		c.Context.ProgressNudge() != 12 || c.Context.CompactPercent() != 75 ||
-		c.Context.MaxWindow() != 300000 || c.Context.SummaryModel != "" {
+		c.Context.MaxWindow() != 0 || c.Context.SummaryModel != "" {
 		t.Fatalf("context: %+v", c.Context)
 	}
 	if c.ModelEffort != "" || c.ModelHardEffort != "" {
@@ -219,6 +219,11 @@ func TestDefaultsApplied(t *testing.T) {
 	}
 	if c.Context.ReserveTokens != 16384 || c.Context.KeepRecentTokens != 20000 || c.Context.MaxSteps != 40 {
 		t.Fatalf("context defaults: %+v", c.Context)
+	}
+	// The working-window cap is opt-in: no cap means the model's advertised
+	// window (v0.8.3's 300K default silently shrank every 1M model).
+	if c.Context.CompactPercent() != DefaultCompactAtPercent || c.Context.MaxWindow() != 0 {
+		t.Fatalf("context trigger/cap defaults: %d %d", c.Context.CompactPercent(), c.Context.MaxWindow())
 	}
 	if c.Context.ProgressNudge() != DefaultProgressNudgeAt {
 		t.Fatalf("progress nudge default: %d", c.Context.ProgressNudge())

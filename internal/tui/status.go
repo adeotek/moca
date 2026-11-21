@@ -12,9 +12,11 @@ import (
 )
 
 // StatusInfo is the plain-text status bar content (§11); each field carries a
-// role (styled per theme by styleLine in status_style.go). Line 1: version ·
-// cwd · branch. Line 2: model · effort · ctx W · P% · in/out · cost — the
-// caller opens line 2 with the permission-mode badge, before the model.
+// role (styled per theme by status_style.go). Line 1: version · cwd · branch.
+// Line 2: model · effort · ctx W [· cap C] · P% · in/out · cost — the caller
+// opens line 2 with the permission-mode badge, before the model. W is the
+// model's advertised window; cap C appears only when context.maxWindowTokens
+// lowers the working window, and P% is always of that effective window.
 type StatusInfo struct {
 	Version      string
 	Cwd, Branch  string
@@ -22,9 +24,13 @@ type StatusInfo struct {
 	Model        string
 	Effort       llm.Effort
 	Window, Used int
-	In, Out      int
-	Cost         float64
-	Sub          bool
+	// Effective is the working window the percent and the pressure colors are
+	// measured against (min(Window, context.maxWindowTokens)); 0 means the
+	// advertised window itself.
+	Effective int
+	In, Out   int
+	Cost      float64
+	Sub       bool
 	// CostUnknown marks a model whose provider publishes no price (a
 	// discovered row outside the catalog): the bar says `—`, never $0.0000.
 	CostUnknown bool
@@ -41,14 +47,24 @@ const (
 	pressureHot  // at or past the auto-compaction trigger
 )
 
+// effectiveWindow is the window the percent and pressure are measured against:
+// the effective one when a cap lowered it, else the advertised window.
+func (s StatusInfo) effectiveWindow() int {
+	if s.Effective > 0 {
+		return s.Effective
+	}
+	return s.Window
+}
+
 // pressure rates how full the context is.
 func (s StatusInfo) pressure() int {
+	w := s.effectiveWindow()
 	switch {
-	case s.Window <= 0 || s.Used <= 0:
+	case w <= 0 || s.Used <= 0:
 		return pressureOK
 	case s.Trigger > 0 && s.Used >= s.Trigger:
 		return pressureHot
-	case s.Used*100 >= s.Window*70:
+	case s.Used*100 >= w*70:
 		return pressureWarn
 	}
 	return pressureOK
@@ -135,12 +151,27 @@ func RenderStatus(s StatusInfo, width int) (l1, l2 []segment) {
 	if s.pressure() == pressureHot {
 		hint = "/compact" // the bar says what to do about a full context
 	}
+	window := s.Window
+	if window <= 0 {
+		window = s.effectiveWindow()
+	}
 	l2 = renderLine([]segment{
 		{text: s.Model, role: roleModel}, {text: string(AbbrevEffort(s.Effort)), role: roleEffort},
-		{text: "ctx " + FmtWindow(s.Window), role: roleMuted}, {text: FmtPercent(s.Used, s.Window), role: rolePct}, {text: hint, role: roleHint, drop: 2},
+		{text: "ctx " + FmtWindow(window), role: roleMuted}, {text: capSegment(s), role: roleMuted, drop: 2},
+		{text: FmtPercent(s.Used, s.effectiveWindow()), role: rolePct}, {text: hint, role: roleHint, drop: 2},
 		{text: FmtTokens(s.In) + "/" + FmtTokens(s.Out), role: roleMuted, drop: 3}, {text: cost, role: roleCost},
 	}, width, 0)
 	return l1, l2
+}
+
+// capSegment labels the working-window cap: "cap C" when context.maxWindowTokens
+// lowered the model's window, empty (never rendered) otherwise. Without it the
+// percent would sit next to the advertised window with no visible divisor.
+func capSegment(s StatusInfo) string {
+	if s.Effective > 0 && s.Window > 0 && s.Effective < s.Window {
+		return "cap " + FmtWindow(s.Effective)
+	}
+	return ""
 }
 
 // FmtPercent renders context usage as a percentage of the window: whole

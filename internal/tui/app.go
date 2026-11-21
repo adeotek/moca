@@ -360,11 +360,18 @@ func (m *model) refreshStatus() {
 	}
 	st := m.agent.Status()
 	m.status.Model, m.status.Effort = st.Model.Qualified(), st.Effort
-	m.status.Window, m.status.Used = st.EffectiveWindow, st.ContextTokens
+	// Window is the model's advertised window (what `ctx` reports); the
+	// percent and pressure use the effective working window, whose cap gets
+	// its own segment (v0.8.3 briefly showed the cap as the model's window).
+	m.status.Window, m.status.Used = st.Window, st.ContextTokens
+	m.status.Effective = st.EffectiveWindow
 	if m.status.Window == 0 {
-		m.status.Window = st.Window
+		m.status.Window = st.EffectiveWindow
 	}
 	m.status.Trigger = st.Trigger
+	if m.status.Trigger == 0 {
+		m.status.Trigger = st.EffectiveWindow
+	}
 	if m.status.Trigger == 0 {
 		m.status.Trigger = m.status.Window
 	}
