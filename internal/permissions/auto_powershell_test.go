@@ -89,3 +89,27 @@ func TestAutoWindowsCmdletsAreAskModeNeutral(t *testing.T) {
 		}
 	}
 }
+
+// TestAutoWindowsScriptblockAsks: a scriptblock, a subexpression or an
+// array-subexpression runs code the table cannot see, and the classifier cannot
+// see it either (it receives the command as text), so these ask every time
+// rather than land in the unsure tier.
+func TestAutoWindowsScriptblockAsks(t *testing.T) {
+	s := winAuto(t)
+	cases := map[string]verdict{
+		"Get-Content $(Join-Path . x)":      {every: []string{"get-content"}},
+		"Get-ChildItem -Path @('a', 'b')":   {every: []string{"get-childitem"}},
+		"Get-ChildItem -Filter { $_.Name }": {every: []string{"get-childitem"}},
+		// the call and dot-source operators run whatever the word holds
+		"& $cmd":           {every: []string{"&"}},
+		". .\\profile.ps1": {every: []string{"."}},
+		// a subexpression in a *later* segment is judged on its own head
+		"$x = 'Remove-Item'; & $x .git": {unsure: []string{"$x"}, every: []string{"&"}},
+		// and an ordinary read with no block still passes
+		"Get-ChildItem -Filter *.go": {},
+	}
+	for cmd, want := range cases {
+		need, every, unsure, err := s.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
+	}
+}

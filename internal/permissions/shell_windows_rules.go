@@ -63,8 +63,10 @@ var (
 	// names), and the typographic quotes and dashes PowerShell accepts.
 	winAutoNonLit = "*?[],:<>&~!‘’‚‛“”„–—―"
 	// winAlwaysAsk: code runners and system control with no Unix spelling
-	// in the table — every invocation asks.
+	// in the table — every invocation asks. `&` and `.` are PowerShell's call
+	// and dot-source operators: `& $cmd` runs whatever the variable holds.
 	winAlwaysAsk = map[string]bool{
+		"&": true, ".": true,
 		"iex": true, "invoke-expression": true, "invoke-command": true, "icm": true,
 		"start-process": true, "saps": true, "start": true, "invoke-item": true, "ii": true,
 		"cmd": true, "powershell": true, "pwsh": true, "wscript": true, "cscript": true, "mshta": true,
