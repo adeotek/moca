@@ -519,6 +519,10 @@ committed as `internal/permissions/testdata/psparse/` (28 payloads, one wrapper)
 
 ### Task 14: The parse helper
 
+**Shipped** in `[feat:core] a PowerShell parse sidecar for the analyser` — `psparse.go`, `psparse.ps1` (the loop wrapper, also the fixture source so the two cannot drift), five payload/error/cap tests, and the opt-in `//go:build windows` live arm.
+
+
+
 **Objective:** `winParse(script string) (parsedScript, error)` in the permissions
 package — a long-lived parser child, injectable for tests, never able to execute.
 
@@ -586,6 +590,10 @@ package — a long-lived parser child, injectable for tests, never able to execu
 
 ### Task 15: Parse first, word model second
 
+**Shipped** in `[feat:core] classify Windows shell commands from PowerShell's own parse` — `checkWindows` tries the parse first and falls through on any error; `checkParsed` reuses `classify` (same table, rules and state machine), judges `w` targets through `checkTargetText` plus the skills refusal, and the `TestAutoWindowsParse*` pins are mutation-proven (fallback→allow fails, deleting the write loop fails). `TestMain` stubs the parser so no unit test can spawn a child; the live arm calls `winParseDefault`.
+
+
+
 **Objective:** `checkWindows` classifies the parsed commands with the P1 tables, and
 falls back to today's word model whenever the parse is unavailable, failed or `k:false`.
 
@@ -623,6 +631,10 @@ falls back to today's word model whenever the parse is unavailable, failed or `k
 
 ### Task 16: Lifecycle and cache
 
+**Shipped** in `[feat:core] one parser child per run, and a parse cache` — `psParseError` (deterministic, cacheable) vs transport errors (never cached), a 256-entry insertion-ordered cache, `CloseWinParser` called from `cmd/moca/main.go`, respawn-once then child-per-call, and a watchdog kill on a timed-out read. Deviation worth noting: the cache lives on the package, not on `Shell`, because `AutoView` copies would otherwise each hold half a cache and a `Shell` has no lifetime of its own.
+
+
+
 **Objective:** the parser child is started once per run, never leaks, and a repeated
 command does not pay the round trip again.
 
@@ -646,7 +658,11 @@ command does not pay the round trip again.
 - [ ] **Step 4: Run** — green, `-count=8 -race` for the shared map and the sidecar.
 - [ ] **Step 5: Commit** — `[feat:core] one parser child per run, and a parse cache`.
 
-### Task 17: Close v0.8.5 — SPECS, counts, CHANGELOG and the release tail
+### Task 17: Close v0.8.5
+
+**Docs shipped** in the cache commit (SPECS §11.2 parse bullet, CHANGELOG subsection, AGENTS.md count, §15 count, mirrors). The release closing (dated heading, v0.8.5 header line) stays a release action after D merges.
+
+ — SPECS, counts, CHANGELOG and the release tail
 
 **Objective:** the spec states the parser contract including its fallbacks and its
 lifecycle, the counts move, and the release heading the train has been accumulating
