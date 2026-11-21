@@ -50,7 +50,17 @@ alias. Ask mode is unchanged. Pinned by `TestAutoWindowsCmdlets`,
 `TestAutoWindowsAlwaysAsk`, `TestAutoWindowsFilters` and
 `TestAutoWindowsCmdletsAreAskModeNeutral`.
 
-Two gaps the review pass found in that table, both fixed before the merge:
+A third: every quoted argument was "unknowable" (quotes are in the non-literal
+set), so `Get-Content 'go.mod'` and `Set-Content out.json '{"a":1}'` spent a
+classifier call and then asked — and a quoted path dodged the checks that only
+run on literal words: `Set-Content '.moca/skills/x/SKILL.md'` came back as an
+ordinary prompt instead of the skills refusal, and `'..\x'` skipped the
+traversal rule. A word that is one quoted string is now literal (single quotes
+never evaluate; double quotes evaluate only `$` and a backtick), its value is
+what the path checks and rule matching see, and a quoted word is still not a
+parameter. Pinned by `TestAutoWindowsQuotedLiterals`.
+
+Two other gaps the review pass found in that table, both fixed before the merge:
 a parameter already decided which word is the destination, but the positional
 sequence relabelled it — `Copy-Item -Destination C:\Windows\System32 -Path a.txt`
 judged the outside destination as a *read* (unsure, the classifier's call) while

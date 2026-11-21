@@ -249,3 +249,51 @@ func TestAutoWindowsParameterRolesAreNotReassigned(t *testing.T) {
 		assertVerdict(t, cmd, want, need, every, unsure, err)
 	}
 }
+
+// TestAutoWindowsQuotedLiterals: a word that is one quoted string is data, not
+// an unknown. Single quotes never evaluate in PowerShell at all; double quotes
+// evaluate only `$` and backtick. Reading them as "unknowable" made every quoted
+// argument a classifier call, and — worse — let a quoted path dodge the checks
+// that run on literal words: `Set-Content '.moca/skills/x/SKILL.md'` came back
+// as an ordinary prompt instead of the skills refusal, and `'..\x'` skipped the
+// traversal rule.
+func TestAutoWindowsQuotedLiterals(t *testing.T) {
+	s := winAuto(t)
+	cleared := []string{
+		`Get-Content 'go.mod'`,
+		`Get-ChildItem '*.go'`,
+		`Set-Content 'out.json' '{"a":1}'`,
+		`Set-Content "out.json" "hi"`,
+		`Copy-Item 'a.txt' 'b.txt'`,
+		`Get-Item './go.mod'`,
+	}
+	for _, c := range cleared {
+		if need, every, unsure, err := s.Check(c); err != nil || len(need)+len(every)+len(unsure) != 0 {
+			t.Errorf("%q: need=%v every=%v unsure=%v err=%v, want cleared", c, need, every, unsure, err)
+		}
+	}
+	asked := []string{
+		`Set-Content "$env:TEMP\out.json" hi`, // double quotes interpolate
+		"Set-Content \"`out.json`\" hi",       // backtick escape
+		`Get-ChildItem "$(Get-X)"`,            // subexpression runs code
+		`Set-Content '..\evil.txt' hi`,        // quoted traversal is still a traversal
+		`Set-Content 'a;b.txt' hi`,            // the split ignores quotes: fails closed
+	}
+	for _, c := range asked {
+		if _, every, _, err := s.Check(c); err != nil || len(every) == 0 {
+			t.Errorf("%q: every=%v err=%v, want an ask", c, every, err)
+		}
+	}
+	// The skills guard is the point of the literal flag: quoting the path must not
+	// downgrade the refusal to a prompt.
+	for _, c := range []string{
+		`Set-Content '.moca/skills/x/SKILL.md' hi`,
+		`Out-File '.moca/skills/x/SKILL.md'`,
+		`Add-Content ".moca/skills/x/SKILL.md" hi`,
+		`Set-Content .moca/skills/x/SKILL.md hi`,
+	} {
+		if _, _, _, err := s.Check(c); err == nil {
+			t.Errorf("%q: want the skills-write refusal, got none", c)
+		}
+	}
+}

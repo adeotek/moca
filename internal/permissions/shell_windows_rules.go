@@ -115,6 +115,9 @@ var (
 // .git; a read of Go's `...` pattern excepted) are outside; separators are normalized for the shared guards.
 func winPathCheck(inner pathFunc) pathFunc {
 	return func(p string, write bool) pathClass {
+		// Judge the value, not its quoted spelling: `'..\x'` is a traversal and
+		// `'.moca/skills/x/SKILL.md'` is a skills write.
+		p = strings.Trim(p, `"'`)
 		if p == "" || strings.HasPrefix(p, `\`) || strings.HasPrefix(p, "/") || strings.ContainsAny(p, ":~") {
 			return pathOut
 		}
@@ -168,7 +171,10 @@ func (s *Shell) checkWindows(command string) ([]string, []string, []string, erro
 	classify := func(fields []string) error {
 		ws := make([]Word, len(fields))
 		for i, f := range fields {
-			ws[i] = Word{Text: f, Literal: i == 0 || !strings.ContainsAny(f, nonLit)}
+			// A word that is one quoted string is literal (winQuoted): its quotes
+			// stay in Text so a quoted `-Path` is not read as a parameter, while
+			// winPathCheck and textForms see the value between them.
+			ws[i] = Word{Text: f, Literal: i == 0 || !strings.ContainsAny(f, nonLit) || winQuoted(f)}
 		}
 		ws[0].Text = winName(fields[0])
 		// Skill writes: the cmdlets that write a path never touch the
@@ -262,4 +268,34 @@ func (s *Shell) checkWindows(command string) ([]string, []string, []string, erro
 // trimmed, `.exe` stripped.
 func winName(tok string) string {
 	return strings.TrimSuffix(strings.Trim(strings.ToLower(tok), `'"`), ".exe")
+}
+
+// winQuoted reports a word PowerShell passes through unchanged: the whole word
+// is one quoted string, so the quotes are its delimiters and its value is the
+// text between them. SINGLE quotes never evaluate anything in PowerShell (the
+// only escape is a doubled ”, which is rejected here as an interior quote), so
+// `'$(rm x)'` and `'{"a":1}'` are data. DOUBLE quotes interpolate, so the word
+// stays non-literal when it holds `$` or a backtick — the two things a
+// double-quoted string resolves.
+//
+// Treating these as literal is what stops a quoted write target from dodging the
+// path checks (`'..\x'`) and a quoted path from dodging the skills guard
+// (`Set-Content '.moca/skills/x/SKILL.md'`), which the word model previously
+// read as "unknowable" and handed to the classifier.
+func winQuoted(f string) bool {
+	if len(f) < 2 {
+		return false
+	}
+	q := f[0]
+	if q != '\'' && q != '"' || f[len(f)-1] != q {
+		return false
+	}
+	inner := f[1 : len(f)-1]
+	if strings.ContainsRune(inner, rune(q)) {
+		return false
+	}
+	if q == '\'' {
+		return true
+	}
+	return !strings.ContainsAny(inner, "$`")
 }

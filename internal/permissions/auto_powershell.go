@@ -531,9 +531,14 @@ func winRedirect(args []Word) bool {
 
 // winDynamic reports an argument that runs or builds a command: a scriptblock,
 // a subexpression, or a subexpression-array. The judge cannot see what such an
-// argument does either — the command is text to it too — so these ask.
+// argument does either — the command is text to it too — so these ask. A word
+// that is one quoted string is data (winQuoted): `'{"a":1}'` is a brace inside a
+// literal, and `Set-Content out.json '{"a":1}'` must not ask for it.
 func winDynamic(args []Word) bool {
 	for _, a := range args {
+		if a.Literal {
+			continue
+		}
 		if strings.Contains(a.Text, "{") || strings.Contains(a.Text, "$(") || strings.Contains(a.Text, "@(") {
 			return true
 		}
