@@ -133,7 +133,14 @@ func readCheck(ws []Word, from int, conf pathFunc) autoVerdict {
 		}
 	}
 	for _, a := range args {
-		if !a.Literal || !readOK(conf(a.Text, false)) {
+		// A relative wildcard read is placeable: the shell expands it in the
+		// cwd, and relGlob refuses every spelling that could leave it (`..`,
+		// a root, a drive, `~`, a variable). `grep x *.go` is as readable as
+		// `grep x go.mod`; `grep x ../*.go` is not.
+		if !a.Literal && !relGlob(a.Text) {
+			return autoUnsure
+		}
+		if a.Literal && !readOK(conf(a.Text, false)) {
 			return autoUnsure
 		}
 		if p, ok := optPath(a.Text); ok && !readOK(conf(p, false)) {

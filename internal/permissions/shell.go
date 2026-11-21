@@ -292,6 +292,13 @@ func toWords(args []*syntax.Word) []Word {
 	ws := make([]Word, len(args))
 	for i, a := range args {
 		t, ok := wordLit(a)
+		if !ok {
+			// Keep a relative glob's pattern so the read side can place it; every
+			// other unknowable word stays "" (fail closed).
+			if g, isGlob := wordGlob(a); isGlob {
+				t = g
+			}
+		}
 		ws[i] = Word{Text: t, Literal: ok}
 	}
 	return ws
@@ -363,6 +370,48 @@ func wordLit(w *syntax.Word) (string, bool) {
 		return "", false
 	}
 	return sb.String(), true
+}
+
+// wordGlob returns a word's pattern text when its only non-literal feature is an
+// unquoted `*` or `?` and the pattern is relative (relGlob). The word model
+// otherwise reports such a word as "" and `false`, which made every glob
+// unplaceable; a relative pattern names only what is inside the workdir, so the
+// read side can judge it the way it judges a literal relative path. Bracket and
+// brace patterns, escapes, ~ and expansions stay unknown ("").
+func wordGlob(w *syntax.Word) (string, bool) {
+	var sb strings.Builder
+	for _, p := range w.Parts {
+		switch x := p.(type) {
+		case *syntax.Lit:
+			if !literalSafe(x.Value, false) {
+				return "", false
+			}
+			sb.WriteString(x.Value)
+		case *syntax.SglQuoted:
+			if x.Dollar {
+				return "", false
+			}
+			sb.WriteString(x.Value)
+		case *syntax.DblQuoted:
+			if x.Dollar {
+				return "", false
+			}
+			for _, q := range x.Parts {
+				l, ok := q.(*syntax.Lit)
+				if !ok || !literalSafe(l.Value, false) {
+					return "", false
+				}
+				sb.WriteString(l.Value)
+			}
+		default:
+			return "", false
+		}
+	}
+	s := sb.String()
+	if !relGlob(s) {
+		return "", false
+	}
+	return s, true
 }
 
 // patternSafe reports whether the unquoted text of a word contains no brace

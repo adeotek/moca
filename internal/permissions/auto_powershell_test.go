@@ -239,8 +239,11 @@ func TestAutoWindowsParameterRolesAreNotReassigned(t *testing.T) {
 		`Copy-Item -Destination C:\Windows\System32 -Path a.txt`: {every: []string{"copy-item"}},
 		`Copy-Item -Path a.txt -Destination C:\Windows\System32`: {every: []string{"copy-item"}},
 		`Move-Item -Destination C:\x -Path a.txt`:                {every: []string{"move-item"}},
-		// The glob is a read the table cannot place: unsure, never allow.
-		`Select-String -Path *.go -Pattern x`: {unsure: []string{"select-string"}},
+		// A relative glob is placed now (TestAutoWindowsRelativeGlobReads), so the
+		// row that proves the parameter's path is JUDGED uses a value it cannot
+		// place; the glob row proves the same operand is no longer dropped as data.
+		`Select-String -Path $env:HOME\x -Pattern x`: {unsure: []string{"select-string"}},
+		`Select-String -Path *.go -Pattern x`:        {every: nil},
 		// The confined shapes still clear with the parameter form.
 		`Copy-Item -Path a -Destination b`: {every: nil},
 		`Set-Content -Path out.txt hi`:     {every: nil},
@@ -317,6 +320,35 @@ func TestWindowsDefaultAllowlistIsAllLearnable(t *testing.T) {
 	for _, cmd := range []string{"Get-ChildItem", "Get-Content go.mod", "dir", "type go.mod", "Copy-Item a b", "Set-Content out.txt hi"} {
 		if need, every, unsure, err := s.Check(cmd); err != nil || len(need)+len(every)+len(unsure) != 0 {
 			t.Errorf("%q with the Windows default allowlist: need=%v every=%v unsure=%v err=%v, want cleared", cmd, need, every, unsure, err)
+		}
+	}
+}
+
+// TestAutoWindowsRelativeGlobReads: the Windows half of TestAutoRelativeGlobReads
+// — a relative wildcard read is cleared, the escapes stay unsure, and a glob is
+// never a write destination.
+func TestAutoWindowsRelativeGlobReads(t *testing.T) {
+	s := winAuto(t)
+	for _, cmd := range []string{
+		`dir *.go`, `Get-ChildItem *.go`, `Get-ChildItem *`,
+		`Select-String -Path *.go -Pattern x`, `Get-Content [a-z]*.md`,
+		`sls -Path */*.go -Pattern x`, `Test-Path *.go`,
+	} {
+		if need, every, unsure, err := s.Check(cmd); err != nil || len(need)+len(every)+len(unsure) != 0 {
+			t.Errorf("%q: need=%v every=%v unsure=%v err=%v, want cleared", cmd, need, every, unsure, err)
+		}
+	}
+	for _, cmd := range []string{
+		`Get-ChildItem ..\*.go`, `Get-ChildItem C:\*.go`, `Get-Content $env:TEMP\*.txt`,
+	} {
+		if _, _, unsure, err := s.Check(cmd); err != nil || len(unsure) == 0 {
+			t.Errorf("%q: unsure=%v err=%v, want unsure", cmd, unsure, err)
+		}
+	}
+	// A glob is not a write target: still asks.
+	for _, cmd := range []string{`Set-Content *.txt hi`, `Out-File *.log`} {
+		if _, every, _, err := s.Check(cmd); err != nil || len(every) == 0 {
+			t.Errorf("%q: every=%v err=%v, want an ask", cmd, every, err)
 		}
 	}
 }
