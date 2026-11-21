@@ -8,8 +8,8 @@ import (
 )
 
 // rtk subcommand classes, captured from `rtk --help` and `rtk <sub> --help`
-// (rtk 1.2.0, 2026-11-13, linuxbrew install; first captured on 0.51.0,
-// 2026-10-06), plus execution probes:
+// (rtk 1.2.1, 2026-11-21, linuxbrew install; 1.2.0 captured 2026-11-13;
+// first captured on 0.51.0, 2026-10-06), plus execution probes:
 // `rtk test echo x` and `rtk test -- echo x` both run the command directly;
 // `rtk err`, `rtk summary` and `rtk run` take the command as the first
 // positional word; `rtk run -c` and `--shell` take a shell command string;
@@ -43,6 +43,13 @@ import (
 // tsc, jest, ruff, …) stays on the generic rule — the wrapped tool must be
 // allowlisted — and the configuration/authoring subcommands stay out of
 // rtkSelf.
+//
+// The 1.2.1 re-check (2026-11-21) changed no class: 1.2.1 is a bugfix release
+// (cargo prefix routing, proxy request bounds and relaunch, hook integrity),
+// every name in the two maps still exists and still runs nothing user-named or
+// the same first word, `bypass`/`proxy` still execute their positional
+// command, and no new subcommand joined a self class — `llm-proxy` launches a
+// daemon and stays on the generic rule, so its word must be allowlisted.
 //
 // The analyser's contract (§7/§10): `rtk <cmd>` is unwrapped like env/time —
 // the wrapped command passes the same analysis — and rtk itself must be

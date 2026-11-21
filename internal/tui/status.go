@@ -122,7 +122,9 @@ func plainLine(segs []segment) string {
 // prepends the permission-mode badge (before the model) and reserves its
 // width; nothing here is badge-aware.
 // Line 1 shrink order: drop cwd, then branch, then truncate the version.
-// Line 2 shrink order: drop in/out, then truncate the model, then truncate.
+// Line 2 shrink order: drop in/out and the /compact hint, then the cap (the
+// percent's divisor must outlive the telemetry it explains), then truncate
+// the model.
 func RenderStatus(s StatusInfo, width int) (l1, l2 []segment) {
 	branch := "-"
 	if s.Git {
@@ -157,9 +159,9 @@ func RenderStatus(s StatusInfo, width int) (l1, l2 []segment) {
 	}
 	l2 = renderLine([]segment{
 		{text: s.Model, role: roleModel}, {text: string(AbbrevEffort(s.Effort)), role: roleEffort},
-		{text: "ctx " + FmtWindow(window), role: roleMuted}, {text: capSegment(s), role: roleMuted, drop: 2},
+		{text: "ctx " + FmtWindow(window), role: roleMuted}, {text: capSegment(s), role: roleMuted, drop: 3},
 		{text: FmtPercent(s.Used, s.effectiveWindow()), role: rolePct}, {text: hint, role: roleHint, drop: 2},
-		{text: FmtTokens(s.In) + "/" + FmtTokens(s.Out), role: roleMuted, drop: 3}, {text: cost, role: roleCost},
+		{text: FmtTokens(s.In) + "/" + FmtTokens(s.Out), role: roleMuted, drop: 2}, {text: cost, role: roleCost},
 	}, width, 0)
 	return l1, l2
 }
