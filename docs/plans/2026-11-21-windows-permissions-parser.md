@@ -553,9 +553,11 @@ package — a long-lived parser child, injectable for tests, never able to execu
 - `c[].n` — the command name as written; a dynamic name arrives as `$cmd` with `k:false`.
 
 **Interfaces:**
-- Produces: `type psCmd struct{ Name string; Static bool; Args []Word; Writes []psWrite }`,
-  `type parsedScript struct{ Cmds []psCmd; Dynamic bool; Err error }`,
+- Produces: `type psCmd struct{ Name string; Static bool; Args []psArg }`,
+  `type parsedScript struct{ Cmds []psCmd; Writes []psWrite; Dynamic bool }`,
   `var winParse = func(script string) (parsedScript, error)`, `func closeWinParser()`.
+  (`psArg` is `{Param, Value, Quoted, Numeric, Dynamic}` — the wrapper's JSON shape, so the
+  analyser reads the payload without a second translation table.)
 - The sidecar: one `exec.CommandContext` child (`pwsh` from `PATH`, else
   `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`), started on the first
   parse, fed one base64 UTF-8 line per request on stdin, answering one JSON line on
