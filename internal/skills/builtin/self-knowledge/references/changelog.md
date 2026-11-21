@@ -14,9 +14,12 @@ used. `context.maxWindowTokens` now defaults to 0 (the advertised window): a
 working-window cap is a cost/quality decision the user opts into, not a silent
 default. The bar reports the advertised window; when a configured cap lowers it,
 a separate `cap` segment names the effective working window and the percent keeps
-measuring against it. Pinned by `TestStatusBarKeepsTheAdvertisedWindow`,
-`TestRenderStatusCappedWindow` and the defaults in `TestDefaultsApplied`; ACP
-`usage_update.size` already kept the advertised window and is untouched.
+measuring against it, and the cap is shed last when the bar narrows — dropping it
+first left `ctx 1M · 77%` beside a percent of the 300K cap (`in/out` goes before
+it). Pinned by `TestStatusBarKeepsTheAdvertisedWindow`,
+`TestRenderStatusCappedWindow`, `TestRenderStatusCapOutlivesInOut` and the
+defaults in `TestDefaultsApplied`; ACP `usage_update.size` already kept the
+advertised window and is untouched.
 
 ### Seeded skills re-checked: rtk 1.2.1, graphify 0.9.114
 

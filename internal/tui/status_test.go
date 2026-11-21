@@ -80,6 +80,24 @@ func TestStatusBarKeepsTheAdvertisedWindow(t *testing.T) {
 	}
 }
 
+// TestRenderStatusCapOutlivesInOut pins the cap's shrink rank: the cap is the
+// percent's divisor, so a narrowing bar sheds in/out (and the /compact hint)
+// first — `ctx 1M · 77%` with no cap reads as 77% of the 1M the model does not
+// work in.
+func TestRenderStatusCapOutlivesInOut(t *testing.T) {
+	s := full
+	s.Effective, s.Trigger = 300_000, 225_000
+	// 87 cells with the cap and the hint; 67 with in/out and the hint gone.
+	_, l2 := RenderStatus(s, 70)
+	got := plainLine(l2)
+	if !strings.Contains(got, "cap 300k") || !strings.Contains(got, "77%") {
+		t.Fatalf("the cap must outlive in/out so the percent keeps its divisor: %q", got)
+	}
+	if strings.Contains(got, "24k/6k") {
+		t.Fatalf("in/out should have dropped at 70 cells: %q", got)
+	}
+}
+
 func TestRenderStatusVariants(t *testing.T) {
 	s := full
 	s.Git, s.Branch, s.Sub = false, "", true
