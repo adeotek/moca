@@ -29,6 +29,23 @@ a line that is nothing but block delimiters adds no name — the body of the blo
 is judged statement by statement. Pinned by `TestShellWindowsNewlineSegments` and
 `TestShellWindowsCommentsAndBlocks`, both mutation-checked against the old split.
 
+### Fixed — Windows allow rules now match, and have a default list
+
+Allow matching compared the head text exactly, and the Windows analyser
+lowercases it, so a rule written the way the user types the command
+(`permissions.allow: ["Get-ChildItem"]`) was silently inert — only
+`get-childitem` worked. The allow arm now folds case on Windows (`Rules.SetFoldAllow`,
+set from the shell's GOOS): every literal word folds, argument patterns included,
+while deny/ask already did and every other GOOS keeps the exact comparison.
+Separately, an absent `shell.allow` resolved to the Unix `DefaultShellAllow` on
+every platform, so a Windows session started with an allowlist naming tools it
+does not have and prompted for every cmdlet it does: `DefaultShellAllowFor(goos)`
+publishes a PowerShell list (Get-ChildItem/dir, Get-Content/type, Select-String,
+Test-Path, New-Item, Copy-Item, Set-Content, …), filtered to names
+`LegacyAllowNames` keeps so no entry is inert. Pinned by
+`TestWindowsAllowRuleCaseFold`, `TestDefaultShellAllowWindows` and
+`TestWindowsDefaultAllowlistIsAllLearnable`.
+
 ### Added — a PowerShell risk table for auto mode
 
 Auto mode judged Windows commands with the Unix table, which has no spelling
