@@ -16,6 +16,19 @@ verified and skipped, an open PR is reported instead of duplicated. `--dry-run`
 runs every check and render without writing to any repository;
 `publish-channels.sh` remains the render-and-inspect path.
 
+### Fixed — a multi-line PowerShell block was analysed as one command
+
+`winSplit` had no CR/LF in its statement-separator class, so `strings.Fields`
+read every line after the first as an *argument* of the first: `echo hi` followed
+by `Remove-Item -Recurse -Force C:\Windows` produced no verdict at all in either
+permission mode and ran cleared, and an allow-always learned for the first line's
+name auto-ran the rest of the block. Every newline now ends a statement, exactly
+as `;` does. Comment-only lines and `<# … #>` spans are dropped first (a comment
+is not a statement, and it must not become a prompt for a command named `#`), and
+a line that is nothing but block delimiters adds no name — the body of the block
+is judged statement by statement. Pinned by `TestShellWindowsNewlineSegments` and
+`TestShellWindowsCommentsAndBlocks`, both mutation-checked against the old split.
+
 ## v0.8.4 (2026-11-21)
 
 The context-window fix and the seeded-skill refresh.
