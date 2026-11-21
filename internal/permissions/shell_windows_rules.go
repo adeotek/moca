@@ -12,6 +12,47 @@ import (
 // block whose head was a builtin or an allowlisted name was cleared whole.
 var winSplit = regexp.MustCompile("&&|\\|\\||[;|\r\n]")
 
+// winBlockComment strips a <# … #> span, PowerShell's block comment.
+var winBlockComment = regexp.MustCompile(`(?s)<#.*?#>`)
+
+// winCommentFree drops block comments and comment-only lines before the
+// command is split, keeping the line boundary (a comment ends where the
+// statement would have). A comment is not a statement and must not become an
+// approval prompt for a command name like "#". Only WHOLE-line comments are
+// stripped: an inline `#` is left alone, because the word model cannot tell it
+// from a `#` inside a quoted string, and truncating a string can only hide an
+// operand — an unterminated quote reads as non-literal, which fails closed.
+func winCommentFree(command string) string {
+	if !strings.ContainsRune(command, '#') {
+		return command
+	}
+	command = winBlockComment.ReplaceAllString(command, "")
+	var b strings.Builder
+	for _, line := range strings.Split(command, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			b.WriteByte('\n')
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// winBlockOnly reports a segment that is nothing but block delimiters. Under
+// the newline split every statement inside a block is its own segment, so a
+// lone `{` or `}` runs nothing and must not prompt under a name like "}".
+func winBlockOnly(fields []string) bool {
+	for _, f := range fields {
+		switch strings.Trim(f, `"'`) {
+		case "{", "}", "(", ")":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 var winAsk = map[string]bool{"remove-item": true, "rm": true, "ri": true, "del": true, "erase": true, "rd": true, "rmdir": true}
 
 // Auto mode on Windows (the Unix risk table on best-effort words).
@@ -134,9 +175,9 @@ func (s *Shell) checkWindows(command string) ([]string, []string, []string, erro
 		}
 		return nil
 	}
-	for _, seg := range winSplit.Split(command, -1) {
+	for _, seg := range winSplit.Split(winCommentFree(command), -1) {
 		fields := strings.Fields(seg)
-		if len(fields) == 0 {
+		if len(fields) == 0 || winBlockOnly(fields) {
 			continue
 		}
 		name := strings.TrimSuffix(strings.ToLower(fields[0]), ".exe")

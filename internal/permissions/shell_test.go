@@ -367,3 +367,41 @@ func TestShellWindowsNewlineSegments(t *testing.T) {
 		}
 	}
 }
+
+// TestShellWindowsCommentsAndBlocks: the newline split must not turn a comment
+// into an approval prompt, and a line that is nothing but a block delimiter
+// runs nothing. Both would otherwise appear in the question's subject list
+// (`#`, `}`), and neither is a command.
+func TestShellWindowsCommentsAndBlocks(t *testing.T) {
+	root, _, _ := setup(t)
+	j, _ := NewJail(root, nil, nil)
+	auto := NewShell(NewRules(), j, "windows").AutoView(j)
+	ask := NewShell(NewRules(), j, "windows")
+
+	autoRows := map[string]verdict{
+		// The comment contributes no name; `ls` is tainted by the unsure
+		// line before it, exactly as in the newline table.
+		"Get-ChildItem\n# list the tree\nls":         {unsure: []string{"get-childitem", "ls"}},
+		"# only a comment":                           {},
+		"<# block\ncomment #>":                       {},
+		"<# block\nremove-this #>\nRemove-Item .git": {every: []string{"remove-item"}},
+		// A block's body is judged statement by statement; the delimiters are
+		// not commands, so they add no name of their own.
+		"ForEach-Object {\nRemove-Item .git\n}": {every: []string{"remove-item"}, unsure: []string{"foreach-object"}},
+		"}\nRemove-Item .git":                   {every: []string{"remove-item"}},
+	}
+	for cmd, want := range autoRows {
+		need, every, unsure, err := auto.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
+	}
+
+	askRows := map[string]verdict{
+		"# only a comment":     {},
+		"<# block\ncomment #>": {},
+		"}\nRemove-Item .git":  {every: []string{"remove-item"}},
+	}
+	for cmd, want := range askRows {
+		need, every, unsure, err := ask.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
+	}
+}
