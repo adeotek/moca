@@ -6,7 +6,11 @@ import (
 	"strings"
 )
 
-var winSplit = regexp.MustCompile(`&&|\|\||[;|]`)
+// winSplit ends one statement and starts the next. A newline belongs in the
+// class: PowerShell treats CR, LF and CRLF as statement separators, so leaving
+// them out made every line after the first an *argument* of the first — a
+// block whose head was a builtin or an allowlisted name was cleared whole.
+var winSplit = regexp.MustCompile("&&|\\|\\||[;|\r\n]")
 
 var winAsk = map[string]bool{"remove-item": true, "rm": true, "ri": true, "del": true, "erase": true, "rd": true, "rmdir": true}
 

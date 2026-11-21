@@ -317,3 +317,53 @@ func TestShellWindowsRuleWords(t *testing.T) {
 		t.Errorf("git status: %v %v %v", need, every, err)
 	}
 }
+
+// TestShellWindowsNewlineSegments: a newline ends a statement exactly as a
+// semicolon does. It did not before v0.8.5 — `winSplit` had no CR/LF in its
+// class, so `strings.Fields` made every line after the first an argument of
+// the first, and a block whose head was a builtin or an allowlisted name was
+// cleared whole (a security defect: `echo hi` on line 1 hid a
+// `Remove-Item -Recurse -Force C:\Windows` on line 2).
+func TestShellWindowsNewlineSegments(t *testing.T) {
+	root, _, _ := setup(t)
+	j, _ := NewJail(root, nil, nil)
+	auto := NewShell(NewRules(), j, "windows").AutoView(j)
+	ask := NewShell(NewRules(), j, "windows")
+
+	// The second statement is always the same one, so a row that clears it is
+	// the defect this test exists for.
+	autoRows := map[string]verdict{
+		"Get-ChildItem\nRemove-Item -Recurse -Force .git":   {every: []string{"remove-item"}, unsure: []string{"get-childitem"}},
+		"Get-ChildItem\r\nRemove-Item -Recurse -Force .git": {every: []string{"remove-item"}, unsure: []string{"get-childitem"}},
+		"echo hi\nRemove-Item -Recurse -Force C:\\Windows":  {every: []string{"remove-item"}},
+		"ls\nrm -rf .git":       {every: []string{"rm"}},
+		"Get-ChildItem\n\n\nls": {unsure: []string{"get-childitem", "ls"}},
+		// An unclear segment taints the rest (the cmdState rule): `ls` would
+		// be allowed on its own and is unsure after an unjudged line.
+		"git status\nGet-ChildItem\nls": {unsure: []string{"get-childitem", "ls"}},
+	}
+	for cmd, want := range autoRows {
+		need, every, unsure, err := auto.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
+	}
+
+	askRows := map[string]verdict{
+		"Get-ChildItem\nRemove-Item -Recurse -Force .git":   {need: []string{"get-childitem"}, every: []string{"remove-item"}},
+		"Get-ChildItem\r\nRemove-Item -Recurse -Force .git": {need: []string{"get-childitem"}, every: []string{"remove-item"}},
+		"echo hi\nRemove-Item -Recurse -Force C:\\Windows":  {every: []string{"remove-item"}},
+		"ls\nrm -rf .git": {need: []string{"ls"}, every: []string{"rm"}},
+	}
+	for cmd, want := range askRows {
+		need, every, unsure, err := ask.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
+	}
+
+	// Regression, the shape the review measured: without the CR/LF split this
+	// returned no verdicts at all in either mode.
+	for _, s := range []*Shell{auto, ask} {
+		need, every, unsure, err := s.Check("echo hi\nRemove-Item -Recurse -Force C:\\Windows")
+		if err != nil || len(need)+len(unsure) != 0 || !slices.Equal(every, []string{"remove-item"}) {
+			t.Fatalf("a block whose head is a builtin must not clear line 2: need=%v every=%v unsure=%v err=%v", need, every, unsure, err)
+		}
+	}
+}
