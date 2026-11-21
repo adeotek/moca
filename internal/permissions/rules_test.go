@@ -43,7 +43,7 @@ func TestRuleMatch(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := r.match(c.cmd, false); got != c.want {
+		if got := r.match(c.cmd, false, false); got != c.want {
 			t.Errorf("%q vs %v = %v, want %v", c.rule, c.cmd, got, c.want)
 		}
 	}
@@ -72,7 +72,7 @@ func TestRuleConservativeHeads(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := r.match(c.cmd, c.conservative); got != c.want {
+		if got := r.match(c.cmd, c.conservative, false); got != c.want {
 			t.Errorf("%q vs %v (conservative=%v) = %v, want %v", c.rule, c.cmd, c.conservative, got, c.want)
 		}
 	}
@@ -99,7 +99,7 @@ func TestRuleNonLiteralMultiWord(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := r.match(c.cmd, c.conservative); got != c.want {
+		if got := r.match(c.cmd, c.conservative, false); got != c.want {
 			t.Errorf("%q vs %v (conservative=%v) = %v, want %v", c.rule, c.cmd, c.conservative, got, c.want)
 		}
 	}
@@ -127,7 +127,7 @@ func TestParseRuleCollapsesStars(t *testing.T) {
 		cmd[i] = Word{Text: "w", Literal: true}
 	}
 	start := time.Now()
-	if r.match(cmd, false) {
+	if r.match(cmd, false, false) {
 		t.Error("pattern * * ... a must not match 60 words without a")
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
@@ -138,24 +138,24 @@ func TestParseRuleCollapsesStars(t *testing.T) {
 func TestRuleNonLiteralIsConservative(t *testing.T) {
 	r, _ := ParseRule("git push *")
 	cmd := []Word{{"git", true}, {"$SUB", false}, {"origin", true}}
-	if !r.match(cmd, true) {
+	if !r.match(cmd, true, false) {
 		t.Error("deny/ask must treat $SUB as possibly `push`")
 	}
-	if r.match(cmd, false) {
+	if r.match(cmd, false, false) {
 		t.Error("allow must not treat $SUB as `push`")
 	}
 	any, _ := ParseRule("rm *")
-	if !any.match([]Word{{"rm", true}, {"*.o", false}}, false) {
+	if !any.match([]Word{{"rm", true}, {"*.o", false}}, false, false) {
 		t.Error("a standalone * matches non-literal words even for allow")
 	}
 }
 
 func TestRuleCase(t *testing.T) {
 	r, _ := ParseRule("git push *")
-	if !r.match(lit("GIT", "push"), true) {
+	if !r.match(lit("GIT", "push"), true, false) {
 		t.Error("deny/ask matches the command name case-insensitively")
 	}
-	if r.match(lit("GIT", "push"), false) {
+	if r.match(lit("GIT", "push"), false, false) {
 		t.Error("allow is case-sensitive")
 	}
 }
@@ -200,7 +200,7 @@ func TestRulesPrecedence(t *testing.T) {
 func matchWithin(t *testing.T, r Rule, cmd []Word, conservative bool, budget time.Duration) bool {
 	t.Helper()
 	done := make(chan bool, 1)
-	go func() { done <- r.match(cmd, conservative) }()
+	go func() { done <- r.match(cmd, conservative, false) }()
 	select {
 	case got := <-done:
 		return got
@@ -286,7 +286,7 @@ func TestRuleWideningReview(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := r.match(c.cmd, c.conservative); got != c.want {
+		if got := r.match(c.cmd, c.conservative, false); got != c.want {
 			t.Errorf("%q vs %v (conservative=%v) = %v, want %v", c.rule, c.cmd, c.conservative, got, c.want)
 		}
 	}
@@ -305,5 +305,46 @@ func TestLearnPathRecordsExactHead(t *testing.T) {
 		if d, layer, _ := r.Decide(lit(name, "status")); d != Allow || layer != "user" {
 			t.Errorf("Learn(%q) then Decide(%s status) = %v/%q, want Allow/user", name, name, d, layer)
 		}
+	}
+}
+
+// TestWindowsAllowRuleCaseFold: Windows resolves a cmdlet name
+// case-insensitively, and allow matching is exact everywhere else on purpose.
+// A rule written the way the user types the command must therefore match on
+// Windows — before this, `permissions.allow: ["Get-ChildItem"]` was silently
+// inert (the Windows classifier lowercases the head, and the rule was compared
+// against that spelling).
+func TestWindowsAllowRuleCaseFold(t *testing.T) {
+	root, _, _ := setup(t)
+	j, _ := NewJail(root, nil, nil)
+	for _, rule := range []string{"Get-ChildItem", "get-childitem", "GET-CHILDITEM"} {
+		rs, err := ParseRuleSet("user", []string{rule}, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := NewShell(NewRules(rs), j, "windows")
+		for _, cmd := range []string{"Get-ChildItem", "get-childitem", "GET-CHILDITEM"} {
+			if need, every, unsure, err := w.Check(cmd); err != nil || len(need)+len(every)+len(unsure) != 0 {
+				t.Errorf("windows rule %q vs %q: need=%v every=%v unsure=%v err=%v, want cleared", rule, cmd, need, every, unsure, err)
+			}
+		}
+	}
+	// Linux keeps the exact comparison: a case variant is not the name the rule
+	// gives a tool.
+	rs, _ := ParseRuleSet("user", []string{"Get-ChildItem"}, nil, nil)
+	if need, _, _, _ := NewShell(NewRules(rs), j, "linux").Check("GET-CHILDITEM"); len(need) == 0 {
+		t.Error("linux must not fold an allow rule")
+	}
+
+	// A path-qualified head is still its own identity on Windows.
+	rsG, _ := ParseRuleSet("user", []string{"git"}, nil, nil)
+	if need, _, _, _ := NewShell(NewRules(rsG), j, "windows").Check(`C:\\tools\\Git\\git status`); len(need) == 0 {
+		t.Error("a path-qualified Windows head must not satisfy the bare `git` rule")
+	}
+
+	// An argument pattern folds too, or `get-content *.md` would not cover a.md.
+	rs2, _ := ParseRuleSet("user", []string{"get-content *.md"}, nil, nil)
+	if need, _, _, _ := NewShell(NewRules(rs2), j, "windows").Check("get-content README.MD"); len(need) != 0 {
+		t.Errorf("an argument pattern must fold on windows: need=%v", need)
 	}
 }
