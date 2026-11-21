@@ -20,6 +20,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -650,24 +651,71 @@ var openaiDenyList = []string{"embedding", "tts", "whisper", "dall-e", "moderati
 // fetchOpenAIModels reads /models: ids, minus non-chat models and models the
 // vendor has announced a shutdown for. The payload carries no window or price.
 func fetchOpenAIModels(ctx context.Context, hc *http.Client, base string, hdr http.Header) ([]CachedModel, error) {
+	// api.openai.com/v1/models answers two shapes, and which one you get is a
+	// property of the credential, not the URL:
+	//
+	//   - an API key gets the standard `{"data":[{"id":...}]}` list;
+	//   - a Sign-in-with-ChatGPT token gets `{"models":[{"slug":...}]}` with the
+	//     account's own windows and reasoning levels, and an EMPTY `data`
+	//     array. That is the shape docs/specs/oauth-verification.md §2.4
+	//     describes ("show display_name, pass slug").
+	//
+	// Reading only the first shape made a subscription look like an account
+	// with no models: the fetch succeeded with zero rows, and a zero-row answer
+	// is cached as authoritative (see discoverOne), so the curated openai rows
+	// were dropped and the picker offered no GPT model at all. A payload with
+	// neither key is therefore an error, never an empty list.
 	var list struct {
 		Data []struct {
 			ID           string  `json:"id"`
 			ShutdownDate *string `json:"shutdown_date"`
 		} `json:"data"`
+		Models []struct {
+			Slug             string `json:"slug"`
+			Visibility       string `json:"visibility"`
+			ContextWindow    int    `json:"context_window"`
+			MaxContextWindow int    `json:"max_context_window"`
+			Levels           []struct {
+				Effort string `json:"effort"`
+			} `json:"supported_reasoning_levels"`
+		} `json:"models"`
 	}
 	if err := getJSON(ctx, hc, strings.TrimRight(base, "/")+"/models", hdr, &list); err != nil {
 		return nil, err
 	}
+	if list.Data == nil && list.Models == nil {
+		return nil, errors.New("openai: /models answered neither data nor models")
+	}
+	denied := func(id string) bool {
+		return slices.ContainsFunc(openaiDenyList, func(s string) bool { return strings.Contains(strings.ToLower(id), s) })
+	}
 	var out []CachedModel
 	for _, m := range list.Data {
-		if m.ID == "" || m.ShutdownDate != nil {
-			continue
-		}
-		if slices.ContainsFunc(openaiDenyList, func(s string) bool { return strings.Contains(strings.ToLower(m.ID), s) }) {
+		if m.ID == "" || m.ShutdownDate != nil || denied(m.ID) {
 			continue
 		}
 		out = append(out, CachedModel{ID: m.ID, Protocol: defaultProtocolFor("openai")})
+	}
+	for _, m := range list.Models {
+		// "hide" rows are served to the CLI but are not offered to users
+		// (gpt-reserve, codex-auto-review); §2.4 says list-visibility only.
+		if m.Slug == "" || (m.Visibility != "" && m.Visibility != "list") || denied(m.Slug) {
+			continue
+		}
+		ctxWindow := m.ContextWindow
+		if ctxWindow <= 0 {
+			ctxWindow = m.MaxContextWindow
+		}
+		var efforts []string
+		for _, l := range m.Levels {
+			if l.Effort != "" {
+				efforts = append(efforts, l.Effort)
+			}
+		}
+		// The subscription route publishes no output cap (it rejects
+		// max_output_tokens), so MaxOut stays 0 and the row gets the default.
+		out = append(out, CachedModel{ID: m.Slug, Protocol: defaultProtocolFor("openai"),
+			Ctx: ctxWindow, Efforts: efforts})
 	}
 	return out, nil
 }

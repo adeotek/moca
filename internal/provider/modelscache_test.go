@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -238,5 +239,31 @@ func TestModelsCacheEmptyListIsAnAnswer(t *testing.T) {
 	// A provider with no file at all is the miss.
 	if _, found, fresh := c.Load("other", "https://gw"); found || fresh {
 		t.Fatal("a provider that was never asked is a miss")
+	}
+}
+
+// TestModelsCacheVersionIsRead: a file written by another schema is a miss. The
+// version field was written but never read until v3, which is how a stale
+// authoritative-empty openai list outlived the parser that produced it.
+func TestModelsCacheVersionIsRead(t *testing.T) {
+	c, _ := newTestCache(t)
+	if err := c.Put("openai", "https://api.openai.com/v1", nil); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(c.Dir(), "openai.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rewrite the file with an older version, exactly as a previous moca left it.
+	old := strings.Replace(string(raw), `"version":`+strconv.Itoa(modelsCacheVersion), `"version":2`, 1)
+	if old == string(raw) {
+		t.Fatalf("payload did not name the version: %s", raw)
+	}
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if models, found, _ := c.Load("openai", "https://api.openai.com/v1"); found || len(models) != 0 {
+		t.Fatalf("a v2 file was served: found=%v models=%v", found, models)
 	}
 }

@@ -11,6 +11,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -1036,5 +1038,56 @@ func TestVerifySuggestsNearestModels(t *testing.T) {
 		if !strings.HasPrefix(c, "gw/") || strings.Contains(c, "unrelated") {
 			t.Fatalf("candidates stay in the provider: %q", cands)
 		}
+	}
+}
+
+// TestFetchOpenAIModelsSubscription is the v0.8.5 regression: a Sign-in-with-ChatGPT
+// token gets `{"models":[{"slug":...}]}` from the same endpoint an API key gets
+// `{"data":[{"id":...}]}` from. Reading only the second shape made a subscription
+// look like an account with zero models, and an authoritative empty answer wiped the
+// curated rows — so the picker offered no GPT model at all.
+func TestFetchOpenAIModelsSubscription(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "openai_models_subscription.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) { return 200, string(raw) })
+	models, err := fetchOpenAIModels(context.Background(), srv.Client(), srv.URL, http.Header{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// gpt-reserve carries visibility "hide" and must not be offered.
+	if len(models) != 2 {
+		t.Fatalf("models = %+v, want the two list-visible rows", models)
+	}
+	sol := models[0]
+	if sol.ID != "gpt-6.2-sol" || sol.Protocol != "openai-responses" || sol.Ctx != 500000 {
+		t.Fatalf("first row: %+v", sol)
+	}
+	if strings.Join(sol.Efforts, ",") != "low,medium,high,xhigh,max,ultra" {
+		t.Errorf("efforts = %v, want the published levels as-is", sol.Efforts)
+	}
+	if models[1].ID != "gpt-6-luna" || models[1].Ctx != 272000 {
+		t.Errorf("second row: %+v", models[1])
+	}
+	// The row must become a usable Model: thinking on, the levels it published.
+	m := modelFromCached("openai", sol)
+	if m.ThinkingMode != "openai" || len(m.ThinkingLevelMap) == 0 || m.ContextWindow != 500000 {
+		t.Errorf("model: %+v", m)
+	}
+}
+
+// TestFetchOpenAIModelsUnrecognisedPayload: a shape moca cannot read is an error, not
+// an empty list. An empty list would be cached as the provider's truth and take the
+// curated rows with it.
+func TestFetchOpenAIModelsUnrecognisedPayload(t *testing.T) {
+	srv := jsonServer(t, nil, func(*http.Request) (int, string) { return 200, `{"object":"list"}` })
+	if _, err := fetchOpenAIModels(context.Background(), srv.Client(), srv.URL, http.Header{}); err == nil {
+		t.Fatal("want an error for a payload with neither data nor models")
+	}
+	// A genuinely empty list is still a fact for the shape that was read.
+	srv2 := jsonServer(t, nil, func(*http.Request) (int, string) { return 200, `{"models":[]}` })
+	if got, err := fetchOpenAIModels(context.Background(), srv2.Client(), srv2.URL, http.Header{}); err != nil || len(got) != 0 {
+		t.Fatalf("empty models: %v, %+v", err, got)
 	}
 }
