@@ -102,6 +102,36 @@ the workdir. A write target that is a glob still asks, `rm *` still asks, and
 `TestAutoRelativeGlobReads` and `TestAutoWindowsRelativeGlobReads`.
 
 
+### Added — Windows shell commands are judged by PowerShell's own parser
+
+The word model guessed at quoting, parameter binding and redirection. In auto mode
+`checkWindows` now asks PowerShell itself: one long-lived child per run
+(`pwsh`, else `powershell.exe`), fed the command as base64 on stdin and answering one
+JSON line with every command, its parameters and their values, and every file
+redirect. Parsing never executes — the spike proved it with a canary directory
+(`Remove-Item -Recurse -Force` against it, parsed, untouched) — and the script text
+never reaches a command line.
+
+What it buys, on the shapes the table used to guess at: `-Destination C:\Windows\System32`
+is now *the destination parameter's value* rather than the third word (`Copy-Item`'s
+role split, fixed by hand in #126, is now a fact); `2>&1` is not confused with a write;
+`Get-Item a.txt,b.txt` is two known paths; a quoted `'{"a":1}'` is a value, not an
+unknown; and `Get-ChildItem > out.txt` inside the workdir no longer prompts while the
+same redirect outside it is refused like a Unix one.
+
+Three numbers from the gate, on Windows 11 with Defender live: a child per parse costs
+`293 ms` (5.1) / `330 ms` (7), the sidecar answers in `66.7 ms` / `40.9 ms`, and
+`powershell.exe` and `pwsh` produce byte-identical payloads. Params are cached per
+script (256 entries, successes and deterministic parse errors only), and every failure
+— no interpreter, a dead sidecar, unparsable output, parser errors, a timeout — falls
+back to the word model rather than to an allow.
+
+Pinned by 28 recorded AST payloads from a real parse (`internal/permissions/testdata/psparse/`),
+`TestWindowsParsePayloads`, `TestWindowsParseCache`, the four `TestAutoWindowsParse*`
+tests, and a `//go:build windows` arm that runs the real interpreter and re-proves
+non-execution.
+
+
 ## v0.8.4 (2026-11-21)
 
 The context-window fix and the seeded-skill refresh.

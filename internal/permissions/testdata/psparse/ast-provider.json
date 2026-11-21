@@ -1,0 +1,1 @@
+{"e":[],"dyn":false,"w":[],"c":[{"n":"Get-ChildItem","k":true,"a":[{"p":"Path","v":null},{"v":"HKCU:\\Software","q":false}]},{"n":"Select-Object","k":true,"a":[{"v":"Name","q":false}]}]}

@@ -14,13 +14,18 @@ import (
 
 	"github.com/adeotek/moca/internal/applog"
 	"github.com/adeotek/moca/internal/config"
+	"github.com/adeotek/moca/internal/permissions"
 	"github.com/adeotek/moca/internal/provider"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	os.Exit(run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	code := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
+	// End the Windows shell parser child before the process ends; a long-lived one
+	// per run is the whole point of Layer D, and it should not outlive the run.
+	permissions.CloseWinParser()
+	os.Exit(code)
 }
 
 // bootResult is what startup() found: the variables the user .env contributed

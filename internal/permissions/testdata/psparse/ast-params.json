@@ -1,0 +1,1 @@
+{"e":[],"dyn":false,"w":[],"c":[{"n":"Copy-Item","k":true,"a":[{"p":"Destination","v":null},{"v":"C:\\Windows\\System32","q":false},{"p":"Path","v":null},{"v":"a.txt","q":false},{"p":"Recurse","v":null},{"p":"Force","v":null}]}]}

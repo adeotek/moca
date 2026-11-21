@@ -162,6 +162,19 @@ func winSkillPath(p string) bool {
 }
 
 func (s *Shell) checkWindows(command string) ([]string, []string, []string, error) {
+	// Auto mode asks PowerShell's own parser first: it knows the quoting, the
+	// parameter binding and the redirections the word model below guesses at.
+	// Any failure — no interpreter, a broken sidecar, a script it could not parse
+	// — falls through to the word model, never to an allow.
+	if s.auto {
+		parse := s.winParse
+		if parse == nil {
+			parse = winParse
+		}
+		if parsed, err := parse(command); err == nil {
+			return s.checkParsed(parsed)
+		}
+	}
 	var v verdictAcc
 	var st cmdState
 	nonLit := "$`\"'(){}@%"
@@ -262,6 +275,102 @@ func (s *Shell) checkWindows(command string) ([]string, []string, []string, erro
 		}
 	}
 	return v.need, v.every, v.unsure, nil
+}
+
+// checkParsed judges a script that PowerShell parsed for us, with the same table,
+// rules and state machine as the word model: the difference is that every command
+// arrives with its parameters and values separated, and every file redirection is
+// listed rather than guessed at from a `<`/`>` in the text.
+//
+// A command the parser marked not static still goes through the table: an
+// unknowable operand is left non-literal, so `Where-Object { $_.Name }` stays a
+// filter while `Get-Content $env:X` cannot be cleared (the operand the read needs is
+// exactly the one nobody can place). A scriptblock's own commands are separate
+// CommandAsts, so `& $x` inside one is judged on its own and asks.
+func (s *Shell) checkParsed(ps parsedScript) ([]string, []string, []string, error) {
+	var v verdictAcc
+	var st cmdState
+	for _, c := range ps.Cmds {
+		ws := psWords(c)
+		if !ws[0].Literal {
+			// `& $cmd`: neither the command nor its arguments are knowable.
+			v.add(&v.every, ws[0].Text)
+			st.tainted = true
+			continue
+		}
+		if winSkillWriters[ws[0].Text] {
+			for _, w := range ws[1:] {
+				if !w.Literal || strings.HasPrefix(w.Text, "-") {
+					continue
+				}
+				if winSkillPath(w.Text) {
+					return nil, nil, nil, errSkillWrite
+				}
+			}
+		}
+		asked := len(v.need) + len(v.every) + len(v.unsure)
+		if err := s.classify(ws, &v, st); err != nil {
+			return nil, nil, nil, err
+		}
+		// Same state machine as the text path: a cd invalidates every relative
+		// path after it, and anything that was not cleared — or that defines a
+		// name — taints what follows.
+		if winCd[ws[0].Text] {
+			st.cwdUnknown, st.tainted = true, true
+		}
+		if len(v.need)+len(v.every)+len(v.unsure) > asked || winDefines[ws[0].Text] {
+			st.tainted = true
+		}
+	}
+	// Redirections are writes. They are confined exactly like the Unix ones
+	// (checkTargetText: the jail, `..`, a cd, and the plan zone) because the
+	// analyser can see them at all only since the parse.
+	for _, w := range ps.Writes {
+		target := strings.TrimSpace(strings.Trim(w.Target, `"'`))
+		if target == "" {
+			continue
+		}
+		if winSkillPath(target) {
+			return nil, nil, nil, errSkillWrite
+		}
+		if err := s.checkTargetText(target, st.cwdUnknown); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	return v.need, v.every, v.unsure, nil
+}
+
+// psWords turns a parsed command into the word slice the table takes: the name, then
+// each parameter and its value (or the value alone), with an unknowable element left
+// non-literal. A quoted value is literal — the parse knows it is a string.
+func psWords(c psCmd) []Word {
+	name := winName(c.Name)
+	ws := make([]Word, 0, len(c.Args)+1)
+	ws = append(ws, Word{Text: name, Literal: psPlainName(name)})
+	for _, a := range c.Args {
+		if a.Param != "" {
+			ws = append(ws, Word{Text: "-" + strings.ToLower(a.Param), Literal: true})
+			if a.Value != nil {
+				ws = append(ws, Word{Text: *a.Value, Literal: true})
+			}
+			continue
+		}
+		if a.Value != nil {
+			ws = append(ws, Word{Text: *a.Value, Literal: true})
+			continue
+		}
+		ws = append(ws, Word{Text: "", Literal: false})
+	}
+	return ws
+}
+
+// psPlainName reports a command name the parse resolved to a bare word: anything
+// carrying an expansion is a name nobody can look up in the table.
+func psPlainName(name string) bool {
+	if name == "" {
+		return false
+	}
+	return !strings.ContainsAny(name, "$`(){}@%")
 }
 
 // winName normalizes a best-effort token: lowercase, surrounding quotes
