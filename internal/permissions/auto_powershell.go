@@ -18,7 +18,6 @@ package permissions
 // winOperand, which never allows one.
 
 import (
-	"regexp"
 	"strings"
 )
 
@@ -277,21 +276,15 @@ var winCmdlets = map[string]winSpec{
 	})},
 }
 
-// winAbsPath reports a word whose raw text names an absolute or provider path
-// even when its runtime value cannot be known (`C:\x`, `\x`, `/x`,
-// `HKLM:\…`, `-Path:C:\x`). Such a word is asked about rather than handed to
-// the classifier: the one thing the word model can still tell is that it is
-// not relative to the workdir.
-var winAbsPath = regexp.MustCompile(`^([A-Za-z]:|[\\/]|[A-Za-z][A-Za-z0-9_.-]*:)`)
-
-func winAbsPathText(s string) bool {
-	return winAbsPath.MatchString(strings.Trim(s, `"'`))
-}
-
-// winOp is one positional operand and what it may do.
+// winOp is one operand and what it may do. set records that a parameter
+// already decided the role: the positional sequence must not overwrite it, or
+// `Copy-Item -Destination C:\Windows\x -Path a.txt` would judge the
+// destination as a read (a parameter's role is the only one that knows which
+// word is the target).
 type winOp struct {
 	w    Word
 	role int // opData, opRead, opWrite
+	set  bool
 }
 
 const (
@@ -396,7 +389,7 @@ func winOperands(args []Word, spec winSpec) ([]winOp, autoVerdict) {
 					if p == pDst {
 						role = opWrite
 					}
-					ops = append(ops, winOp{w: args[i], role: role})
+					ops = append(ops, winOp{w: args[i], role: role, set: true})
 				}
 			}
 			continue
@@ -407,9 +400,14 @@ func winOperands(args []Word, spec winSpec) ([]winOp, autoVerdict) {
 	return ops, v
 }
 
-// winRoles assigns each positional operand its role from the row's winPos.
+// winRoles assigns each positional operand its role from the row's winPos. An
+// operand a parameter already placed keeps that role: `Select-String -Path *.go
+// -Pattern x` must judge the glob, not relabel the pattern as the path.
 func winRoles(ops []winOp, pos winPos) {
 	for i := range ops {
+		if ops[i].set {
+			continue
+		}
 		switch pos {
 		case posReadAll:
 			ops[i].role = opRead

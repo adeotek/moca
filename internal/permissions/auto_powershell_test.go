@@ -151,6 +151,23 @@ func TestAutoWindowsAlwaysAsk(t *testing.T) {
 		"while ($true) { Get-ChildItem }",
 		"sc query",
 		"sc out.txt hi", // sc is sc.exe AND Set-Content's alias: never folded
+		// Destructive content writers and machine state with no operand model.
+		"Clear-Content x.txt",
+		"clc x.txt",
+		"Clear-Item x",
+		"Set-Item x y",
+		"si x y",
+		"format c:",
+		"diskpart",
+		"Clear-Disk -Number 0",
+		"Initialize-Disk -Number 0",
+		"bcdedit /set testsigning on",
+		"netsh advfirewall set allprofiles state off",
+		"wmic logicaldisk get size",
+		"icacls C:\\x /grant Everyone:F",
+		"takeown /f C:\\Windows",
+		"Unblock-File downloaded.zip",
+		"Set-AuthenticodeSignature x.ps1 -Certificate $c",
 	} {
 		_, every, unsure, err := s.Check(cmd)
 		if err != nil || len(every) == 0 || len(unsure) != 0 {
@@ -202,6 +219,32 @@ func TestAutoWindowsScriptblockAsks(t *testing.T) {
 		"Get-ChildItem -Filter *.go": {},
 	}
 	for cmd, want := range cases {
+		need, every, unsure, err := s.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
+	}
+}
+
+// TestAutoWindowsParameterRolesAreNotReassigned: a parameter already decided
+// which word is the destination, so the positional sequence must not relabel
+// it. Before the fix, `Copy-Item -Destination C:\Windows\System32 -Path a.txt`
+// swapped the roles — the outside destination was judged as a READ (unsure, the
+// classifier's call) while the in-workdir source became the write, and
+// `Select-String -Path *.go -Pattern x` dropped the glob as data entirely and
+// came back ALLOW without judging a single path.
+func TestAutoWindowsParameterRolesAreNotReassigned(t *testing.T) {
+	rows := map[string]verdict{
+		`Copy-Item -Destination C:\Windows\System32 -Path a.txt`: {every: []string{"copy-item"}},
+		`Copy-Item -Path a.txt -Destination C:\Windows\System32`: {every: []string{"copy-item"}},
+		`Move-Item -Destination C:\x -Path a.txt`:                {every: []string{"move-item"}},
+		// The glob is a read the table cannot place: unsure, never allow.
+		`Select-String -Path *.go -Pattern x`: {unsure: []string{"select-string"}},
+		// The confined shapes still clear with the parameter form.
+		`Copy-Item -Path a -Destination b`: {every: nil},
+		`Set-Content -Path out.txt hi`:     {every: nil},
+		`New-Item -ItemType Directory foo`: {every: nil},
+	}
+	s := winAuto(t)
+	for cmd, want := range rows {
 		need, every, unsure, err := s.Check(cmd)
 		assertVerdict(t, cmd, want, need, every, unsure, err)
 	}

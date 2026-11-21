@@ -50,6 +50,17 @@ alias. Ask mode is unchanged. Pinned by `TestAutoWindowsCmdlets`,
 `TestAutoWindowsAlwaysAsk`, `TestAutoWindowsFilters` and
 `TestAutoWindowsCmdletsAreAskModeNeutral`.
 
+Two gaps the review pass found in that table, both fixed before the merge:
+a parameter already decided which word is the destination, but the positional
+sequence relabelled it — `Copy-Item -Destination C:\Windows\System32 -Path a.txt`
+judged the outside destination as a *read* (unsure, the classifier's call) while
+the in-workdir source became the write, and `Select-String -Path *.go -Pattern x`
+dropped the glob as data and came back **allow** without judging a path
+(`TestAutoWindowsParameterRolesAreNotReassigned`). And the always-ask list was
+missing the destructive content writers and machine state with no operand model
+(`Clear-Content`, `Set-Item`, `format`, `diskpart`, `bcdedit`, `netsh`, `wmic`,
+`icacls`, `takeown`, `Unblock-File`), which reached the classifier instead.
+
 ## v0.8.4 (2026-11-21)
 
 The context-window fix and the seeded-skill refresh.

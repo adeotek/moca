@@ -82,6 +82,19 @@ var (
 		"install-module": true, "save-module": true, "import-module": true, "save-help": true,
 		"get-credential": true, "new-service": true, "set-service": true, "stop-service": true,
 		"new-itemproperty": true, "set-itemproperty": true, "remove-itemproperty": true,
+		"rename-itemproperty": true, "copy-itemproperty": true, "move-itemproperty": true,
+		// Destructive file content and machine state the table has no operand
+		// model for: Clear-Content truncates a file and Set-Item writes any
+		// provider (file, registry, env), so neither may reach the classifier.
+		"clear-content": true, "clc": true, "clear-item": true, "cli": true,
+		"set-item": true, "si": true,
+		// Disk, boot, firewall and ACL tools. `format` and `diskpart` destroy
+		// data irrecoverably and have no row; `format-volume` is hard-denied
+		// already, the rest ask every time rather than being judged by a model.
+		"format": true, "diskpart": true, "clear-disk": true, "initialize-disk": true,
+		"bcdedit": true, "netsh": true, "wmic": true,
+		"icacls": true, "cacls": true, "takeown": true,
+		"unblock-file": true, "set-authenticodesignature": true,
 		"invoke-webrequest": true, "iwr": true, "invoke-restmethod": true, "irm": true,
 	}
 	// winCd: commands after which the cwd is no longer the workdir.
