@@ -238,7 +238,16 @@ func (s *Shell) classify(ws []Word, v *verdictAcc, st cmdState) error {
 					tws = append([]Word{{Text: "rm", Literal: true}}, ws[1:]...)
 				}
 			}
-			verdict := autoClassify(tws, conf)
+			// The PowerShell table first (auto_windows.go): a cmdlet the Unix
+			// table has no spelling for. No row → the Unix table decides, so
+			// `ls`/`cat`/`mkdir` and the rm aliases behave exactly as before.
+			verdict, ruled := autoUnsure, false
+			if win && !pathHead {
+				verdict, ruled = winVerdict(ws, conf)
+			}
+			if !ruled {
+				verdict = autoClassify(tws, conf)
+			}
 			if verdict == autoAllow && st.tainted {
 				verdict = autoUnsure
 			}
