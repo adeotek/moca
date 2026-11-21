@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.8.4 (2026-11-21)
+
+The context-window fix and the seeded-skill refresh.
 
 ### A 1M model reported as 300K — the working-window cap is opt-in
 
@@ -15,6 +17,26 @@ a separate `cap` segment names the effective working window and the percent keep
 measuring against it. Pinned by `TestStatusBarKeepsTheAdvertisedWindow`,
 `TestRenderStatusCappedWindow` and the defaults in `TestDefaultsApplied`; ACP
 `usage_update.size` already kept the advertised window and is untouched.
+
+### Seeded skills re-checked: rtk 1.2.1, graphify 0.9.114
+
+- **rtk 1.2.0 → 1.2.1 (released 2026-11-19).** A bugfix release — cargo
+  toolchain and prefix routing, proxy request bounds and relaunch, hook
+  integrity and compound-entry handling — and no subcommand class moved: the
+  analyser's `rtkSelf`/`rtkRun` maps and the seeded skill's command set still
+  describe the CLI exactly (`llm-proxy` launches a daemon and stays on the
+  generic rule, so its word must be allowlisted like any other wrapped
+  command).
+- **graphify 0.9.108 → 0.9.114 (released 2026-11-20).** The seed moves three
+  files: `SKILL.md` and `references/extraction-spec.md` now treat a dispatched
+  file with no coverage entry — or 0 lines — as unread, drop whatever was
+  guessed from its name and retry it on the next `--update` (#2225), and
+  `references/exports.md` adds the MCP server's `get_section` tool. The other
+  five references are byte-identical. `graphify install --platform moca` is
+  still not in an upstream release (0.9.114 lists no `moca` platform), so the
+  documented manual copy route stands.
+- Both stay user-owned: an existing `~/.config/moca/skills/<name>/` is never
+  rewritten; `moca update skills` applies the refresh explicitly.
 
 ## v0.8.3 (2026-11-18)
 
