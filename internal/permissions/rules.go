@@ -125,7 +125,15 @@ func (m *matcher) step(pi, wi int) bool {
 		return false
 	}
 	if ws[0].Literal {
-		return globWord(pat[0], ws[0].Text) && m.match(pi+1, wi+1)
+		// A word the user quoted is also its value: `git "push" origin` must
+		// match a `git push *` rule, and the deny direction matters more than
+		// the allow one. Both spellings are tried against the same remainder.
+		for _, t := range textForms(ws[0].Text) {
+			if globWord(pat[0], t) && m.match(pi+1, wi+1) {
+				return true
+			}
+		}
+		return false
 	}
 	if !m.conservative {
 		return false
@@ -285,4 +293,15 @@ func (r *Rules) Learn(name string) {
 	defer r.mu.Unlock()
 	last := &r.layers[len(r.layers)-1]
 	last.Allow = append(last.Allow, rule)
+}
+
+// textForms is a word's spellings as written and with one layer of quotes
+// removed: the analyser keeps the quotes in Text (so a quoted `-Path` is not
+// read as a parameter) but a rule matches the value, which is what the shell
+// passes to the command.
+func textForms(t string) []string {
+	if u := strings.Trim(t, `"'`); u != t {
+		return []string{t, u}
+	}
+	return []string{t}
 }

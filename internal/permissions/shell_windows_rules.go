@@ -63,14 +63,39 @@ var (
 	// names), and the typographic quotes and dashes PowerShell accepts.
 	winAutoNonLit = "*?[],:<>&~!‘’‚‛“”„–—―"
 	// winAlwaysAsk: code runners and system control with no Unix spelling
-	// in the table — every invocation asks.
+	// in the table — every invocation asks. `&` and `.` are PowerShell's call
+	// and dot-source operators: `& $cmd` runs whatever the variable holds.
 	winAlwaysAsk = map[string]bool{
+		"&": true, ".": true,
 		"iex": true, "invoke-expression": true, "invoke-command": true, "icm": true,
 		"start-process": true, "saps": true, "start": true, "invoke-item": true, "ii": true,
 		"cmd": true, "powershell": true, "pwsh": true, "wscript": true, "cscript": true, "mshta": true,
 		"rundll32": true, "regsvr32": true, "reg": true, "sc": true, "net": true, "schtasks": true,
 		"taskkill": true, "stop-process": true, "spps": true, "stop-computer": true, "restart-computer": true,
 		"set-executionpolicy": true, "winget": true, "choco": true, "scoop": true,
+		// PowerShell statement keywords and code runners with no Unix spelling:
+		// the table cannot see what a block or a compiled type does, and the
+		// classifier receives only text, so these ask every time.
+		"for": true, "foreach": true, "while": true, "do": true, "switch": true,
+		"start-job": true, "start-threadjob": true, "add-type": true,
+		"register-objectevent": true, "register-engineevent": true, "register-scheduledjob": true,
+		"install-module": true, "save-module": true, "import-module": true, "save-help": true,
+		"get-credential": true, "new-service": true, "set-service": true, "stop-service": true,
+		"new-itemproperty": true, "set-itemproperty": true, "remove-itemproperty": true,
+		"rename-itemproperty": true, "copy-itemproperty": true, "move-itemproperty": true,
+		// Destructive file content and machine state the table has no operand
+		// model for: Clear-Content truncates a file and Set-Item writes any
+		// provider (file, registry, env), so neither may reach the classifier.
+		"clear-content": true, "clc": true, "clear-item": true, "cli": true,
+		"set-item": true, "si": true,
+		// Disk, boot, firewall and ACL tools. `format` and `diskpart` destroy
+		// data irrecoverably and have no row; `format-volume` is hard-denied
+		// already, the rest ask every time rather than being judged by a model.
+		"format": true, "diskpart": true, "clear-disk": true, "initialize-disk": true,
+		"bcdedit": true, "netsh": true, "wmic": true,
+		"icacls": true, "cacls": true, "takeown": true,
+		"unblock-file": true, "set-authenticodesignature": true,
+		"invoke-webrequest": true, "iwr": true, "invoke-restmethod": true, "irm": true,
 	}
 	// winCd: commands after which the cwd is no longer the workdir.
 	winCd = map[string]bool{"cd": true, "chdir": true, "sl": true, "set-location": true,
@@ -90,6 +115,9 @@ var (
 // .git; a read of Go's `...` pattern excepted) are outside; separators are normalized for the shared guards.
 func winPathCheck(inner pathFunc) pathFunc {
 	return func(p string, write bool) pathClass {
+		// Judge the value, not its quoted spelling: `'..\x'` is a traversal and
+		// `'.moca/skills/x/SKILL.md'` is a skills write.
+		p = strings.Trim(p, `"'`)
 		if p == "" || strings.HasPrefix(p, `\`) || strings.HasPrefix(p, "/") || strings.ContainsAny(p, ":~") {
 			return pathOut
 		}
@@ -143,7 +171,10 @@ func (s *Shell) checkWindows(command string) ([]string, []string, []string, erro
 	classify := func(fields []string) error {
 		ws := make([]Word, len(fields))
 		for i, f := range fields {
-			ws[i] = Word{Text: f, Literal: i == 0 || !strings.ContainsAny(f, nonLit)}
+			// A word that is one quoted string is literal (winQuoted): its quotes
+			// stay in Text so a quoted `-Path` is not read as a parameter, while
+			// winPathCheck and textForms see the value between them.
+			ws[i] = Word{Text: f, Literal: i == 0 || !strings.ContainsAny(f, nonLit) || winQuoted(f)}
 		}
 		ws[0].Text = winName(fields[0])
 		// Skill writes: the cmdlets that write a path never touch the
@@ -237,4 +268,34 @@ func (s *Shell) checkWindows(command string) ([]string, []string, []string, erro
 // trimmed, `.exe` stripped.
 func winName(tok string) string {
 	return strings.TrimSuffix(strings.Trim(strings.ToLower(tok), `'"`), ".exe")
+}
+
+// winQuoted reports a word PowerShell passes through unchanged: the whole word
+// is one quoted string, so the quotes are its delimiters and its value is the
+// text between them. SINGLE quotes never evaluate anything in PowerShell (the
+// only escape is a doubled ”, which is rejected here as an interior quote), so
+// `'$(rm x)'` and `'{"a":1}'` are data. DOUBLE quotes interpolate, so the word
+// stays non-literal when it holds `$` or a backtick — the two things a
+// double-quoted string resolves.
+//
+// Treating these as literal is what stops a quoted write target from dodging the
+// path checks (`'..\x'`) and a quoted path from dodging the skills guard
+// (`Set-Content '.moca/skills/x/SKILL.md'`), which the word model previously
+// read as "unknowable" and handed to the classifier.
+func winQuoted(f string) bool {
+	if len(f) < 2 {
+		return false
+	}
+	q := f[0]
+	if q != '\'' && q != '"' || f[len(f)-1] != q {
+		return false
+	}
+	inner := f[1 : len(f)-1]
+	if strings.ContainsRune(inner, rune(q)) {
+		return false
+	}
+	if q == '\'' {
+		return true
+	}
+	return !strings.ContainsAny(inner, "$`")
 }

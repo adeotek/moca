@@ -29,6 +29,48 @@ a line that is nothing but block delimiters adds no name — the body of the blo
 is judged statement by statement. Pinned by `TestShellWindowsNewlineSegments` and
 `TestShellWindowsCommentsAndBlocks`, both mutation-checked against the old split.
 
+### Added — a PowerShell risk table for auto mode
+
+Auto mode judged Windows commands with the Unix table, which has no spelling
+for a `Verb-Noun` cmdlet: `Get-ChildItem`, `Get-Content`, `Select-String`,
+`Test-Path`, `dir`, `type` and `copy` were all *unsure*, so each one spent a
+classifier call and each rejected verdict became a prompt. `auto_powershell.go`
+adds a curated table — reads (with the aliases users actually type), pipeline
+filters allowed only without a scriptblock, confined writers judged on the
+operand that is really the destination, and an always-ask list for the code
+runners and machine-state cmdlets (`Invoke-WebRequest`, `Add-Type`,
+`Install-Module`, the service and `*-ItemProperty` cmdlets, `for`/`foreach`/
+`while`/`do`/`switch`). A parameter the table does not model is *unsure* (fail
+closed, like an unmodelled getopt option), a scriptblock or subexpression asks
+every time, and a write destination the words cannot place asks rather than
+reaching the classifier, because on Windows this table is the only gate for a
+write target. `sc` stays ask-every-time: it is both `sc.exe` and `Set-Content`'s
+alias. Ask mode is unchanged. Pinned by `TestAutoWindowsCmdlets`,
+`TestAutoWindowsConfinedMutators`, `TestAutoWindowsScriptblockAsks`,
+`TestAutoWindowsAlwaysAsk`, `TestAutoWindowsFilters` and
+`TestAutoWindowsCmdletsAreAskModeNeutral`.
+
+A third: every quoted argument was "unknowable" (quotes are in the non-literal
+set), so `Get-Content 'go.mod'` and `Set-Content out.json '{"a":1}'` spent a
+classifier call and then asked — and a quoted path dodged the checks that only
+run on literal words: `Set-Content '.moca/skills/x/SKILL.md'` came back as an
+ordinary prompt instead of the skills refusal, and `'..\x'` skipped the
+traversal rule. A word that is one quoted string is now literal (single quotes
+never evaluate; double quotes evaluate only `$` and a backtick), its value is
+what the path checks and rule matching see, and a quoted word is still not a
+parameter. Pinned by `TestAutoWindowsQuotedLiterals`.
+
+Two other gaps the review pass found in that table, both fixed before the merge:
+a parameter already decided which word is the destination, but the positional
+sequence relabelled it — `Copy-Item -Destination C:\Windows\System32 -Path a.txt`
+judged the outside destination as a *read* (unsure, the classifier's call) while
+the in-workdir source became the write, and `Select-String -Path *.go -Pattern x`
+dropped the glob as data and came back **allow** without judging a path
+(`TestAutoWindowsParameterRolesAreNotReassigned`). And the always-ask list was
+missing the destructive content writers and machine state with no operand model
+(`Clear-Content`, `Set-Item`, `format`, `diskpart`, `bcdedit`, `netsh`, `wmic`,
+`icacls`, `takeown`, `Unblock-File`), which reached the classifier instead.
+
 ## v0.8.4 (2026-11-21)
 
 The context-window fix and the seeded-skill refresh.

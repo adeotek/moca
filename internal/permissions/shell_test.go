@@ -333,14 +333,14 @@ func TestShellWindowsNewlineSegments(t *testing.T) {
 	// The second statement is always the same one, so a row that clears it is
 	// the defect this test exists for.
 	autoRows := map[string]verdict{
-		"Get-ChildItem\nRemove-Item -Recurse -Force .git":   {every: []string{"remove-item"}, unsure: []string{"get-childitem"}},
-		"Get-ChildItem\r\nRemove-Item -Recurse -Force .git": {every: []string{"remove-item"}, unsure: []string{"get-childitem"}},
+		"Get-ChildItem\nRemove-Item -Recurse -Force .git":   {every: []string{"remove-item"}},
+		"Get-ChildItem\r\nRemove-Item -Recurse -Force .git": {every: []string{"remove-item"}},
 		"echo hi\nRemove-Item -Recurse -Force C:\\Windows":  {every: []string{"remove-item"}},
 		"ls\nrm -rf .git":       {every: []string{"rm"}},
-		"Get-ChildItem\n\n\nls": {unsure: []string{"get-childitem", "ls"}},
-		// An unclear segment taints the rest (the cmdState rule): `ls` would
-		// be allowed on its own and is unsure after an unjudged line.
-		"git status\nGet-ChildItem\nls": {unsure: []string{"get-childitem", "ls"}},
+		"Get-ChildItem\n\n\nls": {},
+		// The PowerShell table (auto_powershell.go) clears these, so the rows
+		// pin only what the newline split contributes.
+		"git status\nGet-ChildItem\nls": {},
 	}
 	for cmd, want := range autoRows {
 		need, every, unsure, err := auto.Check(cmd)
@@ -379,15 +379,15 @@ func TestShellWindowsCommentsAndBlocks(t *testing.T) {
 	ask := NewShell(NewRules(), j, "windows")
 
 	autoRows := map[string]verdict{
-		// The comment contributes no name; `ls` is tainted by the unsure
-		// line before it, exactly as in the newline table.
-		"Get-ChildItem\n# list the tree\nls":         {unsure: []string{"get-childitem", "ls"}},
+		// A comment contributes no name: the statement after it is what the
+		// split must still see.
+		"Get-ChildItem\n# list the tree\nls":         {},
 		"# only a comment":                           {},
 		"<# block\ncomment #>":                       {},
 		"<# block\nremove-this #>\nRemove-Item .git": {every: []string{"remove-item"}},
 		// A block's body is judged statement by statement; the delimiters are
 		// not commands, so they add no name of their own.
-		"ForEach-Object {\nRemove-Item .git\n}": {every: []string{"remove-item"}, unsure: []string{"foreach-object"}},
+		"ForEach-Object {\nRemove-Item .git\n}": {every: []string{"foreach-object", "remove-item"}},
 		"}\nRemove-Item .git":                   {every: []string{"remove-item"}},
 	}
 	for cmd, want := range autoRows {
