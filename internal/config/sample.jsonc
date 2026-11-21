@@ -66,8 +66,10 @@
   // ---------------------------------------------------------------------------
   // Shell (SPECS §10). `allow` is the first-word allowlist for the `shell` tool.
   // ---------------------------------------------------------------------------
-  // Absent = the built-in list (go, git, make, npm, docker, …). Setting it
-  // REPLACES that list, so copy the default first if you extend it.
+  // Absent = the built-in list for this OS: (go, git, make, npm, docker, …) on
+  // Linux/macOS, the PowerShell cmdlets (Get-ChildItem, Get-Content, …) on
+  // Windows. Setting it REPLACES that list, so copy the default first if you
+  // extend it.
   // "shell": { "allow": ["go", "git", "make", "npm", "docker"] },
 
   // ---------------------------------------------------------------------------

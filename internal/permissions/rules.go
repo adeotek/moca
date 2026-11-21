@@ -56,7 +56,11 @@ func baseName(s string) string {
 // the head word and the rule's first word, and treats non-literal words as
 // possibly matching. Allow compares the head text exactly (so /tmp/x/git does
 // not satisfy `git *`) and matches non-literal words only with a standalone *.
-func (r Rule) match(cmd []Word, conservative bool) bool {
+// fold relaxes the ALLOW arm to a case-insensitive comparison of every literal
+// word: Windows resolves a cmdlet name case-insensitively, so a rule written
+// `Get-ChildItem` must cover `get-childitem` there (and only there — the fold is
+// set from the shell's GOOS, never globally, because Linux paths are exact).
+func (r Rule) match(cmd []Word, conservative, fold bool) bool {
 	if len(cmd) == 0 {
 		return false
 	}
@@ -65,16 +69,19 @@ func (r Rule) match(cmd []Word, conservative bool) bool {
 	if conservative {
 		head.Text = strings.ToLower(baseName(head.Text))
 		first = strings.ToLower(baseName(first))
+	} else if fold {
+		head.Text = strings.ToLower(head.Text)
+		first = strings.ToLower(first)
 	}
-	return matchWords(append([]string{first}, r.words[1:]...), append([]Word{head}, cmd[1:]...), conservative)
+	return matchWords(append([]string{first}, r.words[1:]...), append([]Word{head}, cmd[1:]...), conservative, fold)
 }
 
 // matchWords matches pattern words against command words. A standalone *
 // matches zero or more command words. In conservative mode a non-literal
 // command word may expand to zero or more words, so it may be skipped or may
 // be matched against a pattern word while staying available for more.
-func matchWords(pat []string, ws []Word, conservative bool) bool {
-	m := &matcher{pat: pat, ws: ws, conservative: conservative}
+func matchWords(pat []string, ws []Word, conservative, fold bool) bool {
+	m := &matcher{pat: pat, ws: ws, conservative: conservative, fold: fold}
 	m.memo = make([]uint8, (len(pat)+1)*(len(ws)+1))
 	return m.match(0, 0)
 }
@@ -87,6 +94,7 @@ type matcher struct {
 	pat          []string
 	ws           []Word
 	conservative bool
+	fold         bool    // allow arm on Windows: literal words compare case-insensitively
 	memo         []uint8 // 0 unknown, 1 false, 2 true
 }
 
@@ -127,8 +135,12 @@ func (m *matcher) step(pi, wi int) bool {
 	if ws[0].Literal {
 		// A word the user quoted is also its value: `git "push" origin` must
 		// match a `git push *` rule, and the deny direction matters more than
-		// the allow one. Both spellings are tried against the same remainder.
+		// the allow one. Both spellings are tried against the same remainder,
+		// each folded when the shell is Windows.
 		for _, t := range textForms(ws[0].Text) {
+			if m.fold {
+				t = strings.ToLower(t)
+			}
 			if globWord(pat[0], t) && m.match(pi+1, wi+1) {
 				return true
 			}
@@ -195,19 +207,19 @@ func ParseRuleSet(name string, allow, ask, deny []string) (RuleSet, error) {
 	return rs, nil
 }
 
-func (rs RuleSet) decide(ws []Word) (Decision, string) {
+func (rs RuleSet) decide(ws []Word, fold bool) (Decision, string) {
 	for _, r := range rs.Deny {
-		if r.match(ws, true) {
+		if r.match(ws, true, false) {
 			return Deny, r.Src
 		}
 	}
 	for _, r := range rs.Ask {
-		if r.match(ws, true) {
+		if r.match(ws, true, false) {
 			return Ask, r.Src
 		}
 	}
 	for _, r := range rs.Allow {
-		if r.match(ws, false) {
+		if r.match(ws, false, fold) {
 			return Allow, r.Src
 		}
 	}
@@ -224,7 +236,7 @@ func (r *Rules) AllowsNamed(ws []Word) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, l := range r.layers {
-		d, _ := l.decide(ws)
+		d, _ := l.decide(ws, r.foldAllow)
 		if d == NoMatch {
 			continue
 		}
@@ -232,7 +244,7 @@ func (r *Rules) AllowsNamed(ws []Word) bool {
 			return false
 		}
 		for _, rule := range l.Allow {
-			if rule.namesArgs() && rule.match(ws, false) {
+			if rule.namesArgs() && rule.match(ws, false, r.foldAllow) {
 				return true
 			}
 		}
@@ -258,6 +270,9 @@ func (r Rule) namesArgs() bool {
 type Rules struct {
 	mu     sync.Mutex
 	layers []RuleSet
+	// foldAllow makes the ALLOW arm compare case-insensitively. It is set once
+	// by NewShell from the shell's GOOS (Windows only) — before any Decide.
+	foldAllow bool
 }
 
 func NewRules(layers ...RuleSet) *Rules {
@@ -271,7 +286,7 @@ func (r *Rules) Decide(ws []Word) (Decision, string, string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, l := range r.layers {
-		if d, src := l.decide(ws); d != NoMatch {
+		if d, src := l.decide(ws, r.foldAllow); d != NoMatch {
 			return d, l.Name, src
 		}
 	}
@@ -281,6 +296,15 @@ func (r *Rules) Decide(ws []Word) (Decision, string, string) {
 // Learn records an allow-always answer for name in the user layer. name is
 // one literal command word; anything else (empty, whitespace, a wildcard) is
 // ignored rather than widened into a broader rule.
+// SetFoldAllow makes allow rules compare case-insensitively. Called once by
+// NewShell when the shell's GOOS is windows; a no-op call afterwards would be a
+// bug, so it takes the mutex like every other writer.
+func (r *Rules) SetFoldAllow(on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.foldAllow = on
+}
+
 func (r *Rules) Learn(name string) {
 	if name == "" || strings.Contains(name, "*") || strings.IndexFunc(name, unicode.IsSpace) >= 0 {
 		return

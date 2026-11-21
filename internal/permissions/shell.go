@@ -69,6 +69,12 @@ func NewShell(rules *Rules, jail *Jail, goos string) *Shell {
 	if rules == nil {
 		rules = NewRules()
 	}
+	// Windows resolves a cmdlet name case-insensitively, so an allow rule
+	// written the way the user types the command (`Get-ChildItem`) must match.
+	// Every other GOOS keeps the exact comparison (Linux paths are case-sensitive).
+	if goos == "windows" {
+		rules.SetFoldAllow(true)
+	}
 	return &Shell{rules: rules, jail: jail, goos: goos}
 }
 
