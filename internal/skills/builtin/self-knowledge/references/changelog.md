@@ -29,6 +29,27 @@ a line that is nothing but block delimiters adds no name — the body of the blo
 is judged statement by statement. Pinned by `TestShellWindowsNewlineSegments` and
 `TestShellWindowsCommentsAndBlocks`, both mutation-checked against the old split.
 
+### Added — a PowerShell risk table for auto mode
+
+Auto mode judged Windows commands with the Unix table, which has no spelling
+for a `Verb-Noun` cmdlet: `Get-ChildItem`, `Get-Content`, `Select-String`,
+`Test-Path`, `dir`, `type` and `copy` were all *unsure*, so each one spent a
+classifier call and each rejected verdict became a prompt. `auto_powershell.go`
+adds a curated table — reads (with the aliases users actually type), pipeline
+filters allowed only without a scriptblock, confined writers judged on the
+operand that is really the destination, and an always-ask list for the code
+runners and machine-state cmdlets (`Invoke-WebRequest`, `Add-Type`,
+`Install-Module`, the service and `*-ItemProperty` cmdlets, `for`/`foreach`/
+`while`/`do`/`switch`). A parameter the table does not model is *unsure* (fail
+closed, like an unmodelled getopt option), a scriptblock or subexpression asks
+every time, and a write destination the words cannot place asks rather than
+reaching the classifier, because on Windows this table is the only gate for a
+write target. `sc` stays ask-every-time: it is both `sc.exe` and `Set-Content`'s
+alias. Ask mode is unchanged. Pinned by `TestAutoWindowsCmdlets`,
+`TestAutoWindowsConfinedMutators`, `TestAutoWindowsScriptblockAsks`,
+`TestAutoWindowsAlwaysAsk`, `TestAutoWindowsFilters` and
+`TestAutoWindowsCmdletsAreAskModeNeutral`.
+
 ## v0.8.4 (2026-11-21)
 
 The context-window fix and the seeded-skill refresh.
