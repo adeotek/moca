@@ -1,8 +1,8 @@
 package permissions
 
 import (
-	"slices"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
