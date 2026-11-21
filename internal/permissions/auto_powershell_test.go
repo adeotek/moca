@@ -1,7 +1,10 @@
 package permissions
 
 import (
+	"slices"
 	"testing"
+
+	"github.com/adeotek/moca/internal/config"
 )
 
 // winAuto builds the auto-mode view a Windows session gets, for the table
@@ -294,6 +297,26 @@ func TestAutoWindowsQuotedLiterals(t *testing.T) {
 	} {
 		if _, _, _, err := s.Check(c); err == nil {
 			t.Errorf("%q: want the skills-write refusal, got none", c)
+		}
+	}
+}
+
+// TestWindowsDefaultAllowlistIsAllLearnable: the Windows built-in allowlist is
+// consumed by LegacyAllowNames, which drops hard-deny, `rm` and the removal
+// aliases. A member the filter drops is a promise the config cannot keep, so
+// every entry must survive it — and every entry must actually clear its cmdlet.
+func TestWindowsDefaultAllowlistIsAllLearnable(t *testing.T) {
+	allow := config.DefaultShellAllowFor("windows")
+	kept := LegacyAllowNames(slices.Clone(allow))
+	if !slices.Equal(kept, allow) {
+		t.Fatalf("LegacyAllowNames dropped entries: kept %v of %v", kept, allow)
+	}
+	root, _, _ := setup(t)
+	j, _ := NewJail(root, nil, nil)
+	s := NewShell(RulesFromAllow(allow), j, "windows").AutoView(j)
+	for _, cmd := range []string{"Get-ChildItem", "Get-Content go.mod", "dir", "type go.mod", "Copy-Item a b", "Set-Content out.txt hi"} {
+		if need, every, unsure, err := s.Check(cmd); err != nil || len(need)+len(every)+len(unsure) != 0 {
+			t.Errorf("%q with the Windows default allowlist: need=%v every=%v unsure=%v err=%v, want cleared", cmd, need, every, unsure, err)
 		}
 	}
 }

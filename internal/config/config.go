@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,6 +22,38 @@ var DefaultShellAllow = []string{"go", "git", "gh", "grep", "rg", "find", "ls", 
 	"wc", "sort", "uniq", "diff", "which", "jq", "mkdir", "sed", "awk",
 	"curl", "make", "mise", "python", "pytest", "node", "npm",
 	"docker", "kubectl", "terraform", "ansible", "rtk", "graphify"}
+
+// defaultShellAllowWindows is the Windows built-in list. The Unix one names
+// tools a PowerShell session does not have by those spellings (`rg` needs its
+// own install, `grep` is `Select-String`, `sed` has no PowerShell equivalent),
+// so absent a `shell.allow` entry a Windows session prompted for everything —
+// measured: `Get-ChildItem`, `Get-Content`, `Select-String`, `Test-Path`,
+// `dir`, `type` all asked. Names are lowercase because the analyser lowercases
+// the head; a mixed-case entry would be inert before the case fold existed and
+// is merely redundant after it. Nothing from the ask-every-time classes
+// (hard-deny, `rm` and the removal aliases) is here: LegacyAllowNames drops
+// them anyway, and listing one would only pretend.
+var defaultShellAllowWindows = []string{
+	"get-childitem", "gci", "dir", "ls", "get-content", "gc", "cat", "type", "get-item", "gi",
+	"select-string", "sls", "test-path", "resolve-path", "split-path", "join-path",
+	"get-location", "gl", "get-date", "get-command", "get-help", "get-module",
+	"measure-object", "sort-object", "select-object", "format-table", "format-list",
+	"out-string", "convertto-json", "convertfrom-json", "write-output",
+	"new-item", "ni", "md", "mkdir", "copy-item", "copy", "cp", "cpi",
+	"move-item", "move", "mv", "mi", "rename-item", "ren", "rni",
+	"set-content", "add-content", "out-file", "tee-object", "tee",
+	"go", "git", "gh", "node", "npm",
+}
+
+// DefaultShellAllowFor is the built-in first-word allowlist for goos. It is what
+// an absent `shell.allow` resolves to, so a Windows session starts from the
+// cmdlets it actually runs instead of prompting for every one of them.
+func DefaultShellAllowFor(goos string) []string {
+	if goos == "windows" {
+		return slices.Clone(defaultShellAllowWindows)
+	}
+	return slices.Clone(DefaultShellAllow)
+}
 
 // BuiltinProviders are always known; config entries with these names
 // override fields, they don't need baseUrl/protocol.
@@ -547,7 +580,7 @@ func (c *Config) applyDefaults() {
 		}
 	}
 	if c.Shell.Allow == nil {
-		c.Shell.Allow = slices.Clone(DefaultShellAllow)
+		c.Shell.Allow = DefaultShellAllowFor(runtime.GOOS)
 	}
 	if c.MCP.IdleTimeout == 0 {
 		c.MCP.IdleTimeout = 600

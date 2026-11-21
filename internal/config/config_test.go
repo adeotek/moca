@@ -597,3 +597,39 @@ func TestContextTriggerConfig(t *testing.T) {
 		}
 	}
 }
+
+// TestDefaultShellAllowWindows: the built-in list follows the GOOS. The Unix
+// list stays byte-identical (a Windows-only addition must not move it), the
+// Windows list names the cmdlets a session actually runs, and it may not name
+// anything the legacy filter drops — a member that LegacyAllowNames would
+// discard is a promise the config cannot keep.
+func TestDefaultShellAllowWindows(t *testing.T) {
+	if got, want := DefaultShellAllowFor("linux"), DefaultShellAllow; !slices.Equal(got, want) {
+		t.Fatalf("linux list changed: %v", got)
+	}
+	if got, want := DefaultShellAllowFor("darwin"), DefaultShellAllow; !slices.Equal(got, want) {
+		t.Fatalf("darwin list changed: %v", got)
+	}
+	win := DefaultShellAllowFor("windows")
+	has := map[string]bool{}
+	for _, n := range win {
+		has[n] = true
+		if n != strings.ToLower(n) {
+			t.Errorf("%q must be lowercase: the analyser lowercases the head and a mixed-case entry is inert", n)
+		}
+	}
+	for _, want := range []string{"get-childitem", "ls", "get-content", "select-string", "test-path", "new-item", "copy-item", "go", "git"} {
+		if !has[want] {
+			t.Errorf("windows list is missing %q", want)
+		}
+	}
+	// The list must not *promise* what the analyser refuses: `rm` and the
+	// removal aliases are ask-every-time and hard-deny names never lift, so a
+	// member from those classes is inert. The permissions package pins that
+	// side (TestWindowsDefaultAllowlistIsAllLearnable).
+	for _, never := range []string{"rm", "del", "erase", "rd", "rmdir", "sudo", "dd", "shred"} {
+		if has[never] {
+			t.Errorf("windows list names %q, which no allow rule can lift", never)
+		}
+	}
+}
