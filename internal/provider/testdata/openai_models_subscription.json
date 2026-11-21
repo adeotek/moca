@@ -1,0 +1,107 @@
+{
+ "models": [
+  {
+   "slug": "gpt-6.2-sol",
+   "visibility": "list",
+   "context_window": 500000,
+   "max_context_window": 872000,
+   "display_name": "GPT-6.2-Sol",
+   "description": "Fast, go-to model for coding and everyday work.",
+   "default_reasoning_level": "low",
+   "supported_reasoning_levels": [
+    {
+     "effort": "low",
+     "description": "Fast responses with lighter reasoning"
+    },
+    {
+     "effort": "medium",
+     "description": "Balances speed and reasoning depth for everyday tasks"
+    },
+    {
+     "effort": "high",
+     "description": "Greater reasoning depth for complex problems"
+    },
+    {
+     "effort": "xhigh",
+     "description": "Extra high reasoning depth for complex problems"
+    },
+    {
+     "effort": "max",
+     "description": "Maximum reasoning depth for the hardest problems"
+    },
+    {
+     "effort": "ultra",
+     "description": "Maximum reasoning with automatic task delegation"
+    }
+   ],
+   "comp_hash": "3000",
+   "tool_mode": "code_mode_only"
+  },
+  {
+   "slug": "gpt-reserve",
+   "visibility": "hide",
+   "context_window": 272000,
+   "max_context_window": 872000,
+   "display_name": "GPT-Reserve",
+   "description": "Fast and affordable agentic coding model.",
+   "default_reasoning_level": "medium",
+   "supported_reasoning_levels": [
+    {
+     "effort": "low",
+     "description": "Fast responses with lighter reasoning"
+    },
+    {
+     "effort": "medium",
+     "description": "Balances speed and reasoning depth for everyday tasks"
+    },
+    {
+     "effort": "high",
+     "description": "Greater reasoning depth for complex problems"
+    },
+    {
+     "effort": "xhigh",
+     "description": "Extra high reasoning depth for complex problems"
+    },
+    {
+     "effort": "max",
+     "description": "Maximum reasoning depth for the hardest problems"
+    }
+   ],
+   "comp_hash": "3000",
+   "tool_mode": "code_mode_only"
+  },
+  {
+   "slug": "gpt-6-luna",
+   "visibility": "list",
+   "context_window": 272000,
+   "max_context_window": 872000,
+   "display_name": "GPT-6-Luna",
+   "description": "Fast and affordable model for easier tasks.",
+   "default_reasoning_level": "medium",
+   "supported_reasoning_levels": [
+    {
+     "effort": "low",
+     "description": "Fast responses with lighter reasoning"
+    },
+    {
+     "effort": "medium",
+     "description": "Balances speed and reasoning depth for everyday tasks"
+    },
+    {
+     "effort": "high",
+     "description": "Greater reasoning depth for complex problems"
+    },
+    {
+     "effort": "xhigh",
+     "description": "Extra high reasoning depth for complex problems"
+    },
+    {
+     "effort": "max",
+     "description": "Maximum reasoning depth for the hardest problems"
+    }
+   ],
+   "comp_hash": "3000",
+   "tool_mode": "code_mode_only"
+  }
+ ]
+}

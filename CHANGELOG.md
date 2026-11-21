@@ -132,6 +132,28 @@ tests, and a `//go:build windows` arm that runs the real interpreter and re-prov
 non-execution.
 
 
+### Fixed — an OpenAI ChatGPT subscription listed no GPT models
+
+`openai/v1/models` answers **two** payload shapes, and which one arrives depends on the
+credential: an API key gets `{"data":[{"id":…}]}`, a Sign-in-with-ChatGPT subscription
+token gets `{"models":[{"slug":…,"visibility":…,"context_window":…}]}` with an empty
+`data`. moca read only the first, so a subscription looked like an account with zero
+models — and because a successful-empty answer is cached as authoritative, the curated
+`openai` row was dropped too and the picker offered no GPT model at all. The cache made
+it sticky: the empty file was served until its 24 h TTL, and a refetch returned the
+same shape again.
+
+Both shapes are read now (visibility `list` only, window from `context_window`,
+published effort levels become the thinking levels), a payload with neither key is an
+error rather than an empty list, and the models-cache version is enforced on load (it
+had been written but never read, so a stale file could outlive the parser that wrote
+it). The curated fallback row's window was also wrong by 4× (1.05M; a subscription
+reports 272k for that slug), which would have overflowed the route instead of
+compacting. Verified against a real subscription: ten GPT models in the picker
+(`gpt-6.2-sol`, `gpt-6.1-terra`, the `gpt-6-*` family, …) and a live turn through the
+subscription route returning `end_turn`.
+
+
 ## v0.8.4 (2026-11-21)
 
 The context-window fix and the seeded-skill refresh.

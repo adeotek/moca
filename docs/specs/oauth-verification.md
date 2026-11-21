@@ -190,8 +190,15 @@ The phase-7 plan was drafted before this verification. Reality adjusts it:
 6. **Responses request shaping on the OAuth route**: omit `max_output_tokens` (unsupported there), keep
    `store:false`/`stream:true` (already moca's shape), and wrap the seven function tools in one namespace
    (`moca`). The adapter applies this only when the credential is OAuth; API-key traffic is unchanged.
-7. **Models on the subscription route** are the account-visible slugs; moca does not call `/v1/models` at
-   runtime — the user declares models in config (catalog approach unchanged). Noted in README/SPECS.
+7. **Models on the subscription route** are the account-visible slugs: `GET /v1/models` with the
+   subscription token answers `{"models":[{"slug":…,"visibility":"list"|"hide","context_window":…,
+   "supported_reasoning_levels":[…]}]}` — the same endpoint an API key gets `{"data":[{"id":…}]}` from.
+   moca **does** call it (it is the only way to learn the account's list without hard-coding slugs);
+   `visibility` must be `list`, and the window comes from `context_window`. Implemented in
+   `fetchOpenAIModels` (both shapes) and verified live 2026-11-21 against a real ChatGPT subscription:
+   twelve rows, two hidden, ten listed, and a `gpt-6.2-sol` turn through the subscription route returned
+   `end_turn`. An empty `data` array is what the token gets — reading only that shape made the provider
+   look empty and wiped the curated row (fixed in v0.8.5).
 8. **Single registration per provider (single-account simplification)**: moca keeps one openai registration in the store
    (no account picker). `moca login openai` while logged in = reauthorization with the saved client id;
    switching accounts = `moca logout openai` then `moca login openai` (fresh dynamic registration). Recorded in

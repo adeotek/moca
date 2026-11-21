@@ -315,7 +315,13 @@ var fallbackCatalog = []Model{
 		ContextWindow: 1_000_000, MaxOutput: 128000, Cost: costM(2, 10, 0.2, 2.5),
 		ThinkingMode: "adaptive", ThinkingLevelMap: anthropicAdaptive, CostKnown: true},
 
+	// The fallback for a fetch that never succeeded. The window is what a
+	// subscription account reports for this slug (`context_window`, measured
+	// 2026-11-21 — the curated 1.05M was 4x the real one, which would have
+	// overflowed the route instead of compacting). No row is offered for a
+	// model the account may not have: discovery replaces this list as soon as
+	// /models answers.
 	{Provider: "openai", ID: "gpt-6-luna", Protocol: "openai-responses",
-		ContextWindow: 1_050_000, MaxOutput: 128000, Cost: costM(0.1, 0.5, 0.01, 0.125),
+		ContextWindow: 272_000, MaxOutput: 128000, Cost: costM(0.1, 0.5, 0.01, 0.125),
 		ThinkingMode: "openai", ThinkingLevelMap: openaiReasoning, CostKnown: true},
 }

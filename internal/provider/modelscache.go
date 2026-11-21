@@ -32,7 +32,10 @@ const (
 	// v2: CachedModel gained Reasons and the OpenAI-compatible fetcher started
 	// reading the gateway's window/price/effort metadata — a v1 file would
 	// serve rows that predate it, so it reads as a miss and refetches once.
-	modelsCacheVersion = 2
+	// v3: Load rejects a foreign version (it did not before), and
+	// fetchOpenAIModels reads the subscription shape — a v2 openai file may
+	// hold an empty list produced by the parser that could not read it.
+	modelsCacheVersion = 3
 )
 
 // CachedModel is one provider model, normalized. An empty Protocol means "the
@@ -98,7 +101,12 @@ func (c *ModelsCache) Load(providerName, baseURL string) (models []CachedModel, 
 		return nil, false, false
 	}
 	f, err := readModelsCacheFile(c.file(providerName))
-	if err != nil || f.Provider != providerName || f.BaseURL != baseURL {
+	if err != nil || f.Version != modelsCacheVersion || f.Provider != providerName || f.BaseURL != baseURL {
+		// A file written by another schema is a miss, not a list: the rows in
+		// it were normalized by code that no longer exists. The version field
+		// was written but never read until v3 (the subscription-models fix),
+		// which is why the stale empty openai file could outlive the parser
+		// that produced it.
 		return nil, false, false
 	}
 	return f.Models, true, c.now().Sub(f.FetchedAt) < c.ttl
