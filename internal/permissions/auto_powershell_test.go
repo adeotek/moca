@@ -129,6 +129,36 @@ func TestAutoWindowsConfinedMutators(t *testing.T) {
 	}
 }
 
+// TestAutoWindowsAlwaysAsk: the code runners and machine-state cmdlets, and
+// the `sc` collision that keeps the removal aliases and Set-Content apart from
+// the service-control binary. Every row here is ask-every-time in auto mode;
+// ask mode is unchanged (its own ladder consults askEvery/winAsk only).
+func TestAutoWindowsAlwaysAsk(t *testing.T) {
+	s := winAuto(t)
+	for _, cmd := range []string{
+		"Invoke-WebRequest https://example.com",
+		"iwr https://example.com",
+		"Invoke-RestMethod https://example.com",
+		"Add-Type -TypeDefinition x",
+		"Install-Module Pester",
+		"Start-Job -ScriptBlock { x }",
+		"New-Service -Name x -BinaryPathName y",
+		"Set-Service x -Status Stopped",
+		"Set-ItemProperty HKCU:\\x -Name y -Value z",
+		"Get-Credential",
+		"Start-Process notepad",
+		"foreach ($f in $files) { Remove-Item $f }",
+		"while ($true) { Get-ChildItem }",
+		"sc query",
+		"sc out.txt hi", // sc is sc.exe AND Set-Content's alias: never folded
+	} {
+		_, every, unsure, err := s.Check(cmd)
+		if err != nil || len(every) == 0 || len(unsure) != 0 {
+			t.Errorf("%q: every=%v unsure=%v err=%v, want an ask-every-time name", cmd, every, unsure, err)
+		}
+	}
+}
+
 // TestAutoWindowsScriptblockAsks: a scriptblock, a subexpression or an
 // array-subexpression runs code the table cannot see, and the classifier cannot
 // see it either (it receives the command as text), so these ask every time

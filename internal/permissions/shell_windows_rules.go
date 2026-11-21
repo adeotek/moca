@@ -73,6 +73,16 @@ var (
 		"rundll32": true, "regsvr32": true, "reg": true, "sc": true, "net": true, "schtasks": true,
 		"taskkill": true, "stop-process": true, "spps": true, "stop-computer": true, "restart-computer": true,
 		"set-executionpolicy": true, "winget": true, "choco": true, "scoop": true,
+		// PowerShell statement keywords and code runners with no Unix spelling:
+		// the table cannot see what a block or a compiled type does, and the
+		// classifier receives only text, so these ask every time.
+		"for": true, "foreach": true, "while": true, "do": true, "switch": true,
+		"start-job": true, "start-threadjob": true, "add-type": true,
+		"register-objectevent": true, "register-engineevent": true, "register-scheduledjob": true,
+		"install-module": true, "save-module": true, "import-module": true, "save-help": true,
+		"get-credential": true, "new-service": true, "set-service": true, "stop-service": true,
+		"new-itemproperty": true, "set-itemproperty": true, "remove-itemproperty": true,
+		"invoke-webrequest": true, "iwr": true, "invoke-restmethod": true, "irm": true,
 	}
 	// winCd: commands after which the cwd is no longer the workdir.
 	winCd = map[string]bool{"cd": true, "chdir": true, "sl": true, "set-location": true,

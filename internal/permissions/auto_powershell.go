@@ -101,7 +101,10 @@ var winAlias = map[string]string{
 	"ren": "rename-item", "rni": "rename-item",
 	"ni": "new-item", "md": "new-item", "mkdir": "new-item",
 	"ac": "add-content", "where": "where-object", "?": "where-object",
-	"foreach": "foreach-object", "%": "foreach-object",
+	// No `foreach` here: it is both ForEach-Object's alias and PowerShell's
+	// loop keyword, and the keyword (a code block) is the dangerous reading —
+	// it stays in winAlwaysAsk.
+	"%": "foreach-object",
 }
 
 // winCmdlets is the table. A cmdlet missing from it falls through to the Unix
