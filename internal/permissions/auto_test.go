@@ -763,3 +763,34 @@ func TestShellLearnableMatchesAllow(t *testing.T) {
 		}
 	}
 }
+
+// TestAutoRelativeGlobReads: a relative wildcard read is placeable — the shell
+// expands it against the cwd, and escaping needs `..`, a drive or a root, all of
+// which relGlob refuses. Before this, every glob was a classifier call, so the
+// most common listing command in the agent (`grep x *.go`, `cat *.md`) paid for
+// one and could still land on a prompt.
+func TestAutoRelativeGlobReads(t *testing.T) {
+	root, _, _ := setup(t)
+	j, _ := NewJail(root, nil, nil)
+	cleared := []string{`grep x *.go`, `cat *.md`, `head -5 *.txt`, `grep -rn x */*.go`}
+	for _, cmd := range cleared {
+		w := NewShell(nil, j, "linux").AutoView(j)
+		if need, every, unsure, err := w.Check(cmd); err != nil || len(need)+len(every)+len(unsure) != 0 {
+			t.Errorf("%q: need=%v every=%v unsure=%v err=%v, want cleared", cmd, need, every, unsure, err)
+		}
+	}
+	// The escapes stay unplaced, and rm keeps its ask.
+	unplaced := map[string]bool{`cat ../*.go`: true, `cat /etc/*`: true, `cat ~/*.go`: true, `cat $X/*.go`: true}
+	for cmd := range unplaced {
+		w := NewShell(nil, j, "linux").AutoView(j)
+		if _, _, unsure, err := w.Check(cmd); err != nil || len(unsure) == 0 {
+			t.Errorf("%q: unsure=%v err=%v, want unsure", cmd, unsure, err)
+		}
+	}
+	for _, cmd := range []string{`rm *`, `rm -rf *.o`} {
+		w := NewShell(nil, j, "linux").AutoView(j)
+		if _, every, _, err := w.Check(cmd); err != nil || len(every) == 0 {
+			t.Errorf("%q: every=%v err=%v, want the rm ask", cmd, every, err)
+		}
+	}
+}

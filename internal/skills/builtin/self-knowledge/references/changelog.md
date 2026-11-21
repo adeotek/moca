@@ -88,6 +88,20 @@ missing the destructive content writers and machine state with no operand model
 (`Clear-Content`, `Set-Item`, `format`, `diskpart`, `bcdedit`, `netsh`, `wmic`,
 `icacls`, `takeown`, `Unblock-File`), which reached the classifier instead.
 
+### Added — a relative glob is a read inside the workdir
+
+A glob was "unknowable" everywhere, so the most common command shape in the
+agent — `grep x *.go` on Unix, `dir *.go` or `Select-String -Path *.go` on
+Windows — spent a classifier call on every invocation and could still land on a
+prompt. The Unix word model now keeps a relative pattern's text
+(`wordGlob`) instead of discarding it, and `relGlob` places a read whose only
+non-literal feature is an unquoted `*`/`?` with no `..`, root, drive or provider
+colon, `~`, `$`, `%`, backtick, brace or paren — every spelling that could leave
+the workdir. A write target that is a glob still asks, `rm *` still asks, and
+`cat ../*.go` / `Get-ChildItem C:\*.go` stay unsure. Pinned by
+`TestAutoRelativeGlobReads` and `TestAutoWindowsRelativeGlobReads`.
+
+
 ## v0.8.4 (2026-11-21)
 
 The context-window fix and the seeded-skill refresh.

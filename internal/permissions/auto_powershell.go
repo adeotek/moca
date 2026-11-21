@@ -459,6 +459,13 @@ func winOperand(w Word, conf pathFunc, write, guarded bool) autoVerdict {
 			// (which cannot place it either). This is the existing `tee` rule.
 			return autoAsk
 		}
+		if relGlob(w.Text) {
+			// A relative wildcard read: `dir *.go`, `Get-ChildItem *.go`,
+			// `Select-String -Path *.go`. It can name only what is inside the
+			// workdir (relGlob refuses `..`, a drive, a provider, a root), the
+			// same guarantee a literal relative path gets.
+			return autoAllow
+		}
 		return autoUnsure
 	}
 	if write {

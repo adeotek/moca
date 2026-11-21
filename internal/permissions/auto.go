@@ -99,22 +99,52 @@ func autoClassify(ws []Word, conf pathFunc) autoVerdict {
 	head := ws[0].Text
 	lower := strings.ToLower(filepath.Base(head))
 	v := toolVerdict(ws, lower, conf)
-	if v == autoAllow && (head != lower || anyNonLiteral(ws[1:])) {
+	if v == autoAllow && (head != lower || anyUnplaceable(ws[1:])) {
 		// Only the bare, exact-case name is the table's tool: `./ls` is
-		// whatever the agent wrote there, and a non-literal word has no
-		// knowable value.
+		// whatever the agent wrote there, and a word whose value is unknowable
+		// has nothing to place.
 		v = autoUnsure
 	}
 	return v
 }
 
-func anyNonLiteral(ws []Word) bool {
+// anyUnplaceable reports a word the table cannot place: a non-literal word that
+// is not a relative glob. A relative glob cannot leave the workdir — escaping
+// needs `..`, a drive, a provider or a root, each of which relGlob refuses — so
+// `grep x *.go` is as placeable as `grep x go.mod`, while `grep x ../*.go` is
+// not.
+func anyUnplaceable(ws []Word) bool {
 	for _, w := range ws {
-		if !w.Literal {
+		if !w.Literal && !relGlob(w.Text) {
 			return true
 		}
 	}
 	return false
+}
+
+// relGlob reports a word that is a relative wildcard pattern: at least one `*`,
+// `?` or `[`, and nothing that could anchor it outside the workdir (a root, a
+// drive or provider colon, `..`, `~`, a variable `$`, a subexpression, a
+// Windows `%var%` or backtick escape). The shell expands it against the cwd, so
+// the set it can name is enclosed by the same rule that makes a literal
+// relative path readable.
+func relGlob(s string) bool {
+	s = strings.Trim(s, `"'`)
+	if s == "" || strings.HasPrefix(s, "/") || strings.HasPrefix(s, `\`) {
+		return false
+	}
+	if strings.ContainsAny(s, ":~$`%{}()@") {
+		return false
+	}
+	if !strings.ContainsAny(s, "*?[") {
+		return false
+	}
+	for _, c := range strings.FieldsFunc(s, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if c == ".." || (c != "" && strings.TrimRight(c, ". ") != c) {
+			return false
+		}
+	}
+	return true
 }
 
 func toolVerdict(ws []Word, lower string, conf pathFunc) autoVerdict {
