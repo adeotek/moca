@@ -48,7 +48,8 @@ type winParam int
 const (
 	pSwitch winParam = iota // takes no value
 	pValue                  // takes a value that is not a path
-	pPath                   // takes a path operand
+	pPath                   // takes a path operand it reads
+	pDst                    // takes a path operand it writes
 )
 
 // winSpec is one cmdlet's row.
@@ -220,6 +221,43 @@ var winCmdlets = map[string]winSpec{
 		"depth": pValue, "as": pValue, "inputobject": pValue, "noTypeInformation": pSwitch,
 	})},
 	"convertfrom-xml": {kind: winKindRead, pos: posNone, params: wp(nil)},
+
+	// Writers. Every destination must be literal and confined; a destination
+	// that is the workdir root itself is ordinary for the copy/create family
+	// (Unix guardNone) and asks for the ones that write into a file (the Unix
+	// tee/set-content shape, writeTargets allowRoot=false).
+	"new-item": {kind: winKindConfined, guard: guardNone, pos: posFirstWrite, params: wp(map[string]winParam{
+		"path": pPath, "name": pDst, "itemtype": pValue, "value": pValue,
+	})},
+	"copy-item": {kind: winKindConfined, guard: guardNone, pos: posSrcsDst, params: wp(map[string]winParam{
+		"path": pPath, "literalpath": pPath, "destination": pDst,
+		"container": pSwitch, "recurse": pSwitch,
+		"filter": pValue, "include": pValue, "exclude": pValue,
+	})},
+	"move-item": {kind: winKindConfined, guard: guardNone, pos: posSrcsDst, params: wp(map[string]winParam{
+		"path": pPath, "literalpath": pPath, "destination": pDst, "recurse": pSwitch,
+		"filter": pValue, "include": pValue, "exclude": pValue,
+	})},
+	"rename-item": {kind: winKindConfined, guard: guardNone, pos: posSrcsDst, params: wp(map[string]winParam{
+		"path": pPath, "literalpath": pPath, "destination": pDst, "newname": pValue,
+	})},
+	"set-content": {kind: winKindConfined, guard: guardAll, pos: posFirstWrite, params: wp(map[string]winParam{
+		"path": pDst, "literalpath": pDst, "value": pValue, "encoding": pValue, "stream": pValue,
+		"nonewline": pSwitch, "append": pSwitch, "asbytestream": pSwitch,
+	})},
+	"add-content": {kind: winKindConfined, guard: guardAll, pos: posFirstWrite, params: wp(map[string]winParam{
+		"path": pDst, "literalpath": pDst, "value": pValue, "encoding": pValue, "stream": pValue,
+		"nonewline": pSwitch, "append": pSwitch, "asbytestream": pSwitch,
+	})},
+	"out-file": {kind: winKindConfined, guard: guardAll, pos: posFirstWrite, params: wp(map[string]winParam{
+		"path": pDst, "literalpath": pDst, "filepath": pDst,
+		"encoding": pValue, "width": pValue,
+		"append": pSwitch, "nonewline": pSwitch, "noclobber": pSwitch,
+	})},
+	"tee-object": {kind: winKindConfined, guard: guardAll, pos: posFirstWrite, params: wp(map[string]winParam{
+		"path": pDst, "literalpath": pDst, "filepath": pDst,
+		"variable": pValue, "encoding": pValue, "append": pSwitch,
+	})},
 }
 
 // winAbsPath reports a word whose raw text names an absolute or provider path
@@ -276,6 +314,8 @@ func winVerdict(ws []Word, conf pathFunc) (autoVerdict, bool) {
 	switch spec.kind {
 	case winKindRead:
 		return winReadVerdict(ws[1:], spec, conf), true
+	case winKindConfined:
+		return winConfinedVerdict(ws[1:], spec, conf), true
 	default:
 		return autoUnsure, false
 	}
@@ -289,7 +329,7 @@ func winReadVerdict(args []Word, spec winSpec, conf pathFunc) autoVerdict {
 		if op.role != opRead {
 			continue
 		}
-		v = v.and(winOperand(op.w, conf, false))
+		v = v.and(winOperand(op.w, conf, false, false))
 	}
 	return v
 }
@@ -304,20 +344,21 @@ func winOperands(args []Word, spec winSpec) ([]winOp, autoVerdict) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if strings.HasPrefix(a.Text, "-") && a.Text != "-" && a.Text != "--" {
-			name, attached, has := winParamName(a.Text)
+			name, _, has := winParamName(a.Text)
 			p, known := spec.params[name]
 			if !known {
 				v = v.and(autoUnsure)
 				continue
 			}
 			if has {
-				// `-Name:value`: the value rides in the word.
-				if p == pPath {
-					if winAbsPathText(attached) {
-						v = v.and(autoAsk)
-					} else {
-						v = v.and(autoUnsure)
-					}
+				// `-Name:value`: the value rides in the word, so it cannot be
+				// placed — but a write target that names a drive or provider
+				// path still asks, which is the one fact the text carries.
+				switch p {
+				case pPath:
+					v = v.and(autoUnsure)
+				case pDst:
+					v = v.and(autoAsk)
 				}
 				continue
 			}
@@ -327,10 +368,14 @@ func winOperands(args []Word, spec winSpec) ([]winOp, autoVerdict) {
 				if i+1 < len(args) {
 					i++
 				}
-			case pPath:
+			case pPath, pDst:
 				if i+1 < len(args) {
 					i++
-					ops = append(ops, winOp{w: args[i], role: opRead})
+					role := opRead
+					if p == pDst {
+						role = opWrite
+					}
+					ops = append(ops, winOp{w: args[i], role: role})
 				}
 			}
 			continue
@@ -386,23 +431,69 @@ func winParamName(text string) (name, attached string, hasValue bool) {
 // can still read that much, and a write outside the confinement must ask
 // rather than be handed to the classifier (`Set-Content C:\Windows\x`). A read
 // follows Unix: outside the confinement is the classifier's call.
-func winOperand(w Word, conf pathFunc, write bool) autoVerdict {
+func winOperand(w Word, conf pathFunc, write, guarded bool) autoVerdict {
 	if !w.Literal {
-		if write && winAbsPathText(w.Text) {
+		if write {
+			// On Windows this table is the only gate for a write target — there
+			// is no redirect walk to fall back on — so a destination the words
+			// cannot place asks every time rather than reaching the classifier
+			// (which cannot place it either). This is the existing `tee` rule.
 			return autoAsk
 		}
 		return autoUnsure
 	}
 	if write {
-		if conf(w.Text, true) == pathOK {
+		switch conf(w.Text, true) {
+		case pathOK:
 			return autoAllow
+		case pathRoot:
+			// Writing AT the workdir root is ordinary for cp/mkdir-shaped
+			// cmdlets (Unix guardNone) and asks for the ones that write INTO
+			// a file (tee, set-content — Unix writeTargets allowRoot=false).
+			if !guarded {
+				return autoAllow
+			}
 		}
-		return autoAsk // the root, .git, outside, or unresolvable
+		return autoAsk // .git, outside, unresolvable, or a guarded root
 	}
 	if readOK(conf(w.Text, false)) {
 		return autoAllow
 	}
 	return autoUnsure
+}
+
+// winConfinedVerdict judges a writer: every source must be readable, every
+// destination must be a literal path inside the workdir or a temp root, and a
+// recursive copy or move onto the workdir root is the classifier's call — a
+// tree merged into the root may carry a .git (the Unix `cp -r evil/. .` rule).
+func winConfinedVerdict(args []Word, spec winSpec, conf pathFunc) autoVerdict {
+	ops, v := winOperands(args, spec)
+	guarded := spec.guard != guardNone
+	mergeRoot := spec.pos == posSrcsDst && winRecursive(args)
+	for i, op := range ops {
+		if op.role == opData {
+			continue
+		}
+		write := op.role == opWrite
+		ov := winOperand(op.w, conf, write, guarded)
+		if write && mergeRoot && i == len(ops)-1 && op.w.Literal &&
+			conf(op.w.Text, true) == pathRoot {
+			ov = autoUnsure // the classifier judges it, as on Unix
+		}
+		v = v.and(ov)
+	}
+	return v
+}
+
+// winRecursive reports a recursive cmdlet invocation (-Recurse / -r).
+func winRecursive(args []Word) bool {
+	for _, a := range args {
+		name, _, _ := winParamName(a.Text)
+		if name == "recurse" || name == "r" {
+			return true
+		}
+	}
+	return false
 }
 
 // winRedirect reports a segment that redirects. The word model cannot tell a

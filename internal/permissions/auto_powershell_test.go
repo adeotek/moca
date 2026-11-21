@@ -90,6 +90,45 @@ func TestAutoWindowsCmdletsAreAskModeNeutral(t *testing.T) {
 	}
 }
 
+// TestAutoWindowsConfinedMutators: a PowerShell writer runs without a prompt
+// only when every path it touches is literal and confined, exactly as the Unix
+// confined mutators do. The write target is the row's role (posFirstWrite for
+// the file writers, the last positional for the copy/rename family), never a
+// word the table guessed at.
+func TestAutoWindowsConfinedMutators(t *testing.T) {
+	s := winAuto(t)
+	cases := map[string]verdict{
+		// confined destinations
+		"New-Item -ItemType Directory out": {},
+		"New-Item out/x.txt":               {},
+		"Copy-Item a.txt b.txt":            {},
+		"Move-Item src old":                {},
+		"Rename-Item a.txt b.txt":          {},
+		"Set-Content out.txt hi":           {},
+		"Add-Content out.txt more":         {},
+		"Out-File -FilePath out.txt":       {},
+		"Tee-Object -FilePath out.txt":     {},
+		"Get-ChildItem | Out-File out.txt": {},
+		// outside, a drive path, a provider path, .git and the guarded root
+		`Set-Content C:\Windows\x hi`:   {every: []string{"set-content"}},
+		`Copy-Item a.txt C:\temp\b.txt`: {every: []string{"copy-item"}},
+		`New-Item -Path .`:              {},
+		"Move-Item x .git/y":            {every: []string{"move-item"}},
+		"Set-Content . hi":              {every: []string{"set-content"}},
+		`Out-File HKLM:\x`:              {every: []string{"out-file"}},
+		// a tree merged into the workdir root may carry .git: the classifier
+		// judges it (the Unix `cp -r evil/. .` rule)
+		"Copy-Item -Recurse . .": {unsure: []string{"copy-item"}},
+		// a destination the words cannot place asks every time: this table is
+		// the only gate for a Windows write target (no redirect walk)
+		"Set-Content $env:TEMP\\x hi": {every: []string{"set-content"}},
+	}
+	for cmd, want := range cases {
+		need, every, unsure, err := s.Check(cmd)
+		assertVerdict(t, cmd, want, need, every, unsure, err)
+	}
+}
+
 // TestAutoWindowsScriptblockAsks: a scriptblock, a subexpression or an
 // array-subexpression runs code the table cannot see, and the classifier cannot
 // see it either (it receives the command as text), so these ask every time
