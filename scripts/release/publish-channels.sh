@@ -16,6 +16,10 @@
 # PR commands. Pushing is a human decision, and for winget the PR must go through the
 # contents API anyway (that repository is far too large to clone).
 #
+# For an unattended release that does push and open the PRs, run
+# scripts/release/release-channels.sh --version <tag> [--channel …]; this script stays
+# the render-and-inspect path (--out/--verify, no writes outside --out/clones).
+#
 # The renderers read the release's own checksums.txt, so every URL and hash matches the
 # published archives; a tag whose packages are not all published fails loudly and names
 # what is missing. Publish the release BEFORE running this.
