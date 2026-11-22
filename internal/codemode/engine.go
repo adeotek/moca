@@ -102,9 +102,9 @@ func DefaultEngine() *Engine {
 	return defaultEngine
 }
 
-// reactorBytes is the embedded artifact. It stays nil until the build in
-// reactor/BUILD.md has produced reactor/qjs-moca-reactor.wasm and an embed
-// line is added here; TestReactorIsEmbedded fails (not skips) once the file
+// reactorBytes is the embedded artifact. It stays nil until a build of
+// reactor/moca_host.c (reactor/BUILD.md) produces an artifact whose imports
+// VerifyModule accepts; TestReactorIsEmbedded fails (not skips) once the file
 // exists, so the gap cannot be forgotten.
 var reactorBytes []byte
 

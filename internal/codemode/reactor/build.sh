@@ -24,21 +24,25 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
+WASI_TAG="wasi-sdk-29"
 WASI_VERSION="29.0"
 WASI_TARBALL="wasi-sdk-${WASI_VERSION}-x86_64-linux.tar.gz"
 WASI_BYTES=119441678
+# Verified 2026-11-23 against the release asset: size and digest both match the
+# plan's truncated pin (87d1d1a2…a0171).
+WASI_SHA256="87d1d1a2879d139cdc624b968efad3d4a97b8078cdff95e63ac88ecafd1a0171"
 QJS_URL="${QJS_URL:-https://github.com/quickjs-ng/quickjs.git}"
 OUT="qjs-moca-reactor.wasm"
 
 die() { echo "build.sh: $*" >&2; exit 1; }
 
+QJS_PIN="670492dd342dace0bb7bd6fbfbde8f0bc5651224"
+
 [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ] \
   || die "the pinned SDK is x86_64 Linux only (the plan's build host)"
 
-QJS_REF="${QJS_REF:-}"
-[ -n "$QJS_REF" ] || die "set QJS_REF to the quickjs-ng commit/tag to build (pin a commit)"
-WASI_SDK_SHA256="${WASI_SDK_SHA256:-}"
-[ -n "$WASI_SDK_SHA256" ] || die "set WASI_SDK_SHA256 to the full digest of $WASI_TARBALL"
+QJS_REF="${QJS_REF:-$QJS_PIN}"
+WASI_SDK_SHA256="${WASI_SDK_SHA256:-$WASI_SHA256}"
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/moca-reactor.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
@@ -46,7 +50,7 @@ trap 'rm -rf "$work"' EXIT
 sdk="$work/wasi-sdk"
 if [ ! -x "$sdk/bin/clang" ]; then
   [ -f "$work/$WASI_TARBALL" ] || curl -fsSL --retry 3 -o "$work/$WASI_TARBALL" \
-    "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_VERSION}/${WASI_TARBALL}"
+    "https://github.com/WebAssembly/wasi-sdk/releases/download/${WASI_TAG}/${WASI_TARBALL}"
   got_bytes=$(wc -c < "$work/$WASI_TARBALL")
   [ "$got_bytes" = "$WASI_BYTES" ] || die "$WASI_TARBALL is $got_bytes bytes, the pin says $WASI_BYTES"
   got_sha=$(sha256sum "$work/$WASI_TARBALL" | cut -d' ' -f1)
@@ -68,30 +72,30 @@ CC="$sdk/bin/clang"
 "$CC" --target=wasm32-wasi --sysroot="$sdk/share/wasi-sysroot" \
   -O2 -flto -fno-exceptions -DQUICKJS_NG=1 \
   -I"$work/quickjs" \
-  -Wl,--no-entry -Wl,--export=_initialize -Wl,--export=memory \
+  -mexec-model=reactor -Wl,--export=memory \
   -Wl,--export=qjs_init -Wl,--export=qjs_run -Wl,--export=qjs_destroy \
   -Wl,--export=moca_alloc -Wl,--export=moca_free \
-  -Wl,--allow-undefined -Wl,--initial-memory=$((32*1024*1024)) \
+  -Wl,--initial-memory=$((32*1024*1024)) \
   -Wl,--max-memory=$((32*1024*1024)) \
   -o "$work/$OUT" \
   moca_host.c \
   "$work/quickjs/quickjs.c" "$work/quickjs/libregexp.c" "$work/quickjs/libunicode.c" \
-  "$work/quickjs/cutils.c" "$work/quickjs/quickjs-libc.c" "$work/quickjs/libbf.c"
+  "$work/quickjs/cutils.c" "$work/quickjs/libbf.c"
 
 # Reproducibility: the same inputs must produce the same bytes, or the
 # committed artifact cannot be audited against its source.
 "$CC" --target=wasm32-wasi --sysroot="$sdk/share/wasi-sysroot" \
   -O2 -flto -fno-exceptions -DQUICKJS_NG=1 \
   -I"$work/quickjs" \
-  -Wl,--no-entry -Wl,--export=_initialize -Wl,--export=memory \
+  -mexec-model=reactor -Wl,--export=memory \
   -Wl,--export=qjs_init -Wl,--export=qjs_run -Wl,--export=qjs_destroy \
   -Wl,--export=moca_alloc -Wl,--export=moca_free \
-  -Wl,--allow-undefined -Wl,--initial-memory=$((32*1024*1024)) \
+  -Wl,--initial-memory=$((32*1024*1024)) \
   -Wl,--max-memory=$((32*1024*1024)) \
   -o "$work/$OUT.2" \
   moca_host.c \
   "$work/quickjs/quickjs.c" "$work/quickjs/libregexp.c" "$work/quickjs/libunicode.c" \
-  "$work/quickjs/cutils.c" "$work/quickjs/quickjs-libc.c" "$work/quickjs/libbf.c"
+  "$work/quickjs/cutils.c" "$work/quickjs/libbf.c"
 cmp "$work/$OUT" "$work/$OUT.2" || die "two clean builds differ — the artifact is not reproducible"
 
 if [ "${1:-}" = "--check" ]; then

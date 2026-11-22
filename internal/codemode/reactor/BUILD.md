@@ -38,20 +38,18 @@ fails `VerifyModule` instead of shipping.
 ## Build
 
 ```sh
-WASI_SDK_SHA256=<full sha256 of wasi-sdk-29.0-x86_64-linux.tar.gz> \
-QJS_REF=<quickjs-ng commit> ./build.sh
+./build.sh          # uses the pins below
+./build.sh --check  # rebuild and compare against the committed artifact
 ```
 
-Two inputs are required rather than defaulted, on purpose:
+Both pins are now resolved and live in `build.sh`:
 
-- **The SDK digest.** The plan pins `wasi-sdk-29.0-x86_64-linux.tar.gz`,
-  119,441,678 bytes (macOS: 113,028,367). The plan records the digest only
-  truncated (`87d1d1a2…a0171`), and a truncated digest cannot be verified, so
-  `build.sh` refuses to unpack a toolchain it cannot check. Supply the full
-  value; it belongs in this file once confirmed.
-- **The QuickJS-NG revision.** The plan does not pin one yet — an open decision.
-  Pin a commit, not a branch: the artifact is committed, so the build has to be
-  reproducible from source.
+- **wasi-sdk 29.0**, asset `wasi-sdk-29.0-x86_64-linux.tar.gz` under the
+  `wasi-sdk-29` release tag (the plan wrote `wasi-sdk-29.0`, which 404s — the
+  tag has no minor). 119,441,678 bytes,
+  sha256 `87d1d1a2879d139cdc624b968efad3d4a97b8078cdff95e63ac88ecafd1a0171` —
+  both match the plan's truncated pin, verified 2026-11-23.
+- **quickjs-ng v0.9.0**, commit `670492dd342dace0bb7bd6fbfbde8f0bc5651224`.
 
 `build.sh` then:
 
@@ -67,6 +65,40 @@ checkout — the license text is never retyped by hand).
 The build host is **x86_64 Linux only**, matching the pinned SDK. The artifact
 it produces is platform-independent, so macOS and Windows users run the same
 committed module.
+
+## Build notes (learned from the first real build)
+
+- **`--allow-undefined` must not be passed.** It makes wasm-ld satisfy every
+  undefined symbol as an import, so libc is never pulled in and the whole import
+  section lands under a synthetic module named after the output file. Drop it
+  and let `-lc` resolve the WASI stubs.
+- **`-mexec-model=reactor`** (not `--no-entry`) is what produces `_initialize`
+  and no `_start`.
+- **Do not link `quickjs-libc.c`.** It brings the `os`/`std` helpers, whose WASI
+  file APIs would add exactly the imports `abi.json` forbids.
+- **`--export=memory` fails** ("symbol exported via --export not found"):
+  memory is defined by wasm-ld, not a symbol. Export it with
+  `-Wl,--export-memory`-style options only if a later SDK needs it.
+
+## Open: the import module name
+
+The first artifact built here linked and exported correctly but placed **all**
+its imports under module `qjs-moca-reactor.wasm` (wasm-ld's fallback naming)
+instead of `moca.invoke` and `wasi_snapshot_preview1.*`. The
+`__attribute__((import_module(...), import_name(...)))` declaration in
+`moca_host.c` reproduces as the fallback even in a six-line test file linked
+with the same flags, so it is not a moca_host.c bug; `VerifyModule` refuses the
+artifact, which is why `reactorBytes` is still nil.
+
+Two candidate fixes for the first run with the toolchain in hand:
+
+1. compile with `-Xclang -target-abi` / check the SDK's clang version honours
+   the attribute (the attribute is documented for clang ≥ 15), or
+2. post-process the import module names with `wasm-tools` / `wasm-objdump`
+   rewriting, pinning the tool version in this recipe.
+
+Until then the reactor is **not** built, `TestReactorIsEmbedded` skips, and no
+codemode execution is claimed.
 
 ## Wiring the artifact in
 

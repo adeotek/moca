@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tetratelabs/wazero"
 )
 
 // The deadline is clamped at task start, not trusted from the model: a
@@ -232,6 +234,7 @@ func TestReactorIsEmbedded(t *testing.T) {
 	if len(reactorBytes) == 0 {
 		t.Fatalf("%s exists but is not embedded — add the //go:embed line in engine.go", path)
 	}
+	t.Logf("imports: %v", moduleImports(t, reactorBytes))
 	if err := VerifyModule(reactorBytes); err != nil {
 		t.Fatalf("the embedded reactor violates abi.json: %v", err)
 	}
@@ -262,4 +265,22 @@ func TestPackageIsALeaf(t *testing.T) {
 			}
 		}
 	}
+}
+
+// moduleImports lists a module's imports, for a failed artifact gate's message.
+func moduleImports(t *testing.T, wasm []byte) []string {
+	t.Helper()
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	defer rt.Close(ctx)
+	cm, err := rt.CompileModule(ctx, wasm)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	defer cm.Close(ctx)
+	var out []string
+	for _, f := range cm.ImportedFunctions() {
+		out = append(out, f.ModuleName()+"."+f.Name())
+	}
+	return out
 }
