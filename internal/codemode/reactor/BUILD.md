@@ -80,25 +80,32 @@ committed module.
   memory is defined by wasm-ld, not a symbol. Export it with
   `-Wl,--export-memory`-style options only if a later SDK needs it.
 
-## Open: the import module name
+## The import-name question, resolved
 
-The first artifact built here linked and exported correctly but placed **all**
-its imports under module `qjs-moca-reactor.wasm` (wasm-ld's fallback naming)
-instead of `moca.invoke` and `wasi_snapshot_preview1.*`. The
-`__attribute__((import_module(...), import_name(...)))` declaration in
-`moca_host.c` reproduces as the fallback even in a six-line test file linked
-with the same flags, so it is not a moca_host.c bug; `VerifyModule` refuses the
-artifact, which is why `reactorBytes` is still nil.
+The first artifact looked like it imported everything from a module named after
+the output file. It did not: **wasm-ld was right and the gate was wrong.** The
+ABI check called `CompiledModule.ImportedFunctions()`, and wazero reports the
+NAME SECTION's module name for an imported function — which wasm-ld sets to the
+output file's basename. Reading the import section directly shows the truth:
 
-Two candidate fixes for the first run with the toolchain in hand:
+```
+moca.invoke
+wasi_snapshot_preview1.clock_time_get, fd_close, fd_fdstat_get, fd_seek, fd_write
+```
 
-1. compile with `-Xclang -target-abi` / check the SDK's clang version honours
-   the attribute (the attribute is documented for clang ≥ 15), or
-2. post-process the import module names with `wasm-tools` / `wasm-objdump`
-   rewriting, pinning the tool version in this recipe.
+`VerifyModule` now parses section 2 itself (`imports.go`), so the gate reads the
+bytes and neither falsely rejects nor falsely accepts.
 
-Until then the reactor is **not** built, `TestReactorIsEmbedded` skips, and no
-codemode execution is claimed.
+Two related traps, both fixed in `build.sh`:
+
+- the artifact's bytes depend on the output **basename** (it goes into the name
+  section), so two builds must use the same basename in different directories;
+- even stripped, quickjs embeds its source paths through `__FILE__`, so builds
+  in different directories differ by a few dozen bytes without
+  `-ffile-prefix-map`/`-fmacro-prefix-map`.
+
+With `-g0`, `-Wl,--strip-debug` and the prefix maps, two clean builds are
+byte-identical: **989,272 bytes**, which `build.sh --check` verifies.
 
 ## Wiring the artifact in
 

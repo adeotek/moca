@@ -140,36 +140,60 @@ static const char *prop_cstr(JSContext *c, JSValueConst obj, const char *name) {
     return s; /* caller frees with JS_FreeCString */
 }
 
-/* status_of names the class qjs_run reports. The Go side applies the R71
- * allowlist anyway; this only distinguishes a parse error from a throw so the
- * outer result can say `syntax` without a second round trip. */
-static int status_of(JSContext *c, JSValueConst exc, const char **class_out, char **msg_out, int *line_out) {
-    *class_out = "script";
-    *msg_out = NULL;
-    *line_out = 0;
-    if (JS_IsUndefined(exc) || JS_IsNull(exc)) return 2;
+/* failure is one classified guest failure: the ABI's status plus the class,
+ * message and line the Go side will apply its own allowlist to. */
+typedef struct {
+    int status;       /* 0 ok, 1 syntax, 2 throw, 3 oom */
+    char cls[64];     /* the class named by the guest, or the default */
+    char *msg;        /* strdup'ed, freed by the caller */
+    int line;
+} failure;
+
+/* classify fills f from a pending exception. def is the class to use when the
+ * guest named none: "syntax" for a compile error, "script" for a throw. The
+ * guest may name any class it likes; the Go side keeps only the ones the prelude
+ * is allowed to raise (R71), so nothing here has to police that. */
+static void classify(JSContext *c, int def_status, const char *def_class, failure *f) {
+    f->status = def_status;
+    f->line = 0;
+    f->msg = NULL;
+    snprintf(f->cls, sizeof f->cls, "%s", def_class);
+
+    JSValue exc = JS_GetException(c);
+    if (JS_IsUndefined(exc) || JS_IsNull(exc)) {
+        JS_FreeValue(c, exc);
+        f->msg = strdup("the script failed");
+        return;
+    }
+
+    const char *k = prop_cstr(c, exc, "class");
+    if (k) {
+        if (*k) snprintf(f->cls, sizeof f->cls, "%s", k);
+        JS_FreeCString(c, k);
+    }
 
     const char *name = prop_cstr(c, exc, "name");
     const char *msg = prop_cstr(c, exc, "message");
     if (msg) {
-        *msg_out = strdup(msg);
+        f->msg = strdup(msg);
         JS_FreeCString(c, msg);
     }
     JSValue ln = JS_GetPropertyStr(c, exc, "lineNumber");
     int32_t v = 0;
-    if (JS_IsNumber(ln) && JS_ToInt32(c, &v, ln) == 0) *line_out = (int)v;
+    if (JS_IsNumber(ln) && JS_ToInt32(c, &v, ln) == 0) f->line = (int)v;
     JS_FreeValue(c, ln);
-    int syntax = 0, oom = 0;
+
+    /* The memory limit surfaces as InternalError("out of memory"): that is the
+     * ABI's `oom`, not a script bug. */
     if (name) {
-        syntax = strcmp(name, "SyntaxError") == 0;
-        /* quickjs reports the memory limit as InternalError("out of memory"):
-         * it is the ABI's `oom` status, not a script bug. */
-        oom = strcmp(name, "InternalError") == 0 && *msg_out && strstr(*msg_out, "out of memory") != NULL;
+        /* quickjs names a parse error SyntaxError wherever it is raised, so the
+         * status follows the exception rather than the phase. */
+        if (strcmp(name, "SyntaxError") == 0) f->status = 1;
+        if (strcmp(name, "InternalError") == 0 && f->msg && strstr(f->msg, "out of memory")) f->status = 3;
         JS_FreeCString(c, name);
     }
-    if (oom) return 3;
-    if (*msg_out == NULL) *msg_out = strdup("the script failed");
-    return syntax ? 1 : 2;
+    if (f->msg == NULL) f->msg = strdup("the script failed");
+    JS_FreeValue(c, exc);
 }
 
 /* ---- lifecycle ---------------------------------------------------------- */
@@ -218,26 +242,27 @@ int32_t qjs_run(int32_t src_ptr, int32_t src_len, int32_t out_ptr, int32_t out_c
     const char *src = (const char *)(intptr_t)src_ptr;
 
     outbuf o = {.buf = (char *)(intptr_t)out_ptr, .cap = (size_t)out_cap, .len = 0, .overflow = 0};
-    JSValue v = JS_Eval(ctx, src, (size_t)src_len, "<codemode>", JS_EVAL_TYPE_GLOBAL);
-
-    int status = 0;
-    const char *cls = NULL;
-    char *msg = NULL;
-    int line = 0;
+    failure f = {0};
+    snprintf(f.cls, sizeof f.cls, "script");
     JSValue json = JS_UNDEFINED;
+    JSValue v = JS_UNDEFINED;
 
-    if (JS_IsException(v)) {
-        JSValue exc = JS_GetException(ctx);
-        status = status_of(ctx, exc, &cls, &msg, &line);
-        if (status == 3) cls = "oom";
-        JS_FreeValue(ctx, exc);
-        if (cls == NULL) cls = "script";
+    /* Compile first: a parse error is `syntax` and must not be reported as a
+     * runtime throw. JS_EvalFunction then runs the compiled global code. */
+    JSValue fn = JS_Eval(ctx, src, (size_t)src_len, "<codemode>",
+                         JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+    if (JS_IsException(fn)) {
+        classify(ctx, 1, "syntax", &f);
     } else {
-        json = JS_JSONStringify(ctx, v, JS_UNDEFINED, JS_UNDEFINED);
-        if (JS_IsException(json)) {
-            JSValue e2 = JS_GetException(ctx);
-            JS_FreeValue(ctx, e2);
-            json = JS_UNDEFINED;
+        v = JS_EvalFunction(ctx, fn);
+        if (JS_IsException(v)) {
+            classify(ctx, 2, "script", &f);
+        } else {
+            json = JS_JSONStringify(ctx, v, JS_UNDEFINED, JS_UNDEFINED);
+            if (JS_IsException(json)) {
+                JS_FreeValue(ctx, JS_GetException(ctx));
+                json = JS_UNDEFINED;
+            }
         }
     }
 
@@ -250,13 +275,13 @@ int32_t qjs_run(int32_t src_ptr, int32_t src_len, int32_t out_ptr, int32_t out_c
         ob_str(&o, "null");
     }
     ob_str(&o, ",\"texts\":[],\"logs\":[],\"error\":");
-    if (status != 0) {
+    if (f.status != 0) {
         char num[24];
         ob_str(&o, "{\"class\":");
-        ob_json_string(&o, cls ? cls : "script", strlen(cls ? cls : "script"));
+        ob_json_string(&o, f.cls, strlen(f.cls));
         ob_str(&o, ",\"message\":");
-        ob_json_string(&o, msg ? msg : "the script failed", strlen(msg ? msg : "the script failed"));
-        snprintf(num, sizeof num, ",\"line\":%d", line);
+        ob_json_string(&o, f.msg ? f.msg : "the script failed", strlen(f.msg ? f.msg : "the script failed"));
+        snprintf(num, sizeof num, ",\"line\":%d", f.line);
         ob_str(&o, num);
         ob_str(&o, "}");
     } else {
@@ -264,7 +289,7 @@ int32_t qjs_run(int32_t src_ptr, int32_t src_len, int32_t out_ptr, int32_t out_c
     }
     ob_str(&o, "}");
 
-    if (msg) free(msg);
+    if (f.msg) free(f.msg);
     JS_FreeValue(ctx, json);
     JS_FreeValue(ctx, v);
 
@@ -273,7 +298,7 @@ int32_t qjs_run(int32_t src_ptr, int32_t src_len, int32_t out_ptr, int32_t out_c
         return 5; /* output too large: the Go side reports `limit` */
     }
     write_len(len_ptr, (uint32_t)o.len);
-    return status;
+    return f.status;
 }
 
 EXPORT(moca_alloc)

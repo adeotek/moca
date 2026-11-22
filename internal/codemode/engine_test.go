@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/tetratelabs/wazero"
 )
 
 // The deadline is clamped at task start, not trusted from the model: a
@@ -267,20 +265,17 @@ func TestPackageIsALeaf(t *testing.T) {
 	}
 }
 
-// moduleImports lists a module's imports, for a failed artifact gate's message.
+// moduleImports lists a module's imports for a failed artifact gate's message.
+// It reads the import section, not wazero's definitions: see imports.go.
 func moduleImports(t *testing.T, wasm []byte) []string {
 	t.Helper()
-	ctx := context.Background()
-	rt := wazero.NewRuntime(ctx)
-	defer rt.Close(ctx)
-	cm, err := rt.CompileModule(ctx, wasm)
+	imports, err := wasmImports(wasm)
 	if err != nil {
-		t.Fatalf("compile: %v", err)
+		t.Fatalf("parse imports: %v", err)
 	}
-	defer cm.Close(ctx)
-	var out []string
-	for _, f := range cm.ImportedFunctions() {
-		out = append(out, f.ModuleName()+"."+f.Name())
+	out := make([]string, 0, len(imports))
+	for _, imp := range imports {
+		out = append(out, imp.Module+"."+imp.Name)
 	}
 	return out
 }

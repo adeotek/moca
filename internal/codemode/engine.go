@@ -9,14 +9,17 @@ package codemode
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
 
 // ErrNoReactor means this build has no reactor artifact. The shipped binary
@@ -102,10 +105,11 @@ func DefaultEngine() *Engine {
 	return defaultEngine
 }
 
-// reactorBytes is the embedded artifact. It stays nil until a build of
-// reactor/moca_host.c (reactor/BUILD.md) produces an artifact whose imports
-// VerifyModule accepts; TestReactorIsEmbedded fails (not skips) once the file
-// exists, so the gap cannot be forgotten.
+// reactorBytes is the embedded artifact: quickjs-ng v0.9.0 plus moca_host.c,
+// built by reactor/build.sh (wasi-sdk 29.0, both pins verified). VerifyModule
+// checks it against abi.json at first use and in TestReactorIsEmbedded.
+//
+//go:embed reactor/qjs-moca-reactor.wasm
 var reactorBytes []byte
 
 // NewPrelude renders the guest prelude for one execution's capabilities.
@@ -152,15 +156,22 @@ func (e *Engine) Execute(ctx context.Context, caps ExecCaps, src string, dispatc
 		e.mu.Unlock()
 	}()
 
-	cctx, cancel := execDeadline(ctx, timeout)
-	defer cancel()
-
-	inst, cerr := e.instance(cctx)
+	// Compile and instantiate under the CALLER's context, not the script's
+	// deadline: the first execution in a process pays for the module compile,
+	// and charging that to a 1 s script budget would fail a script that runs in
+	// milliseconds.
+	inst, cerr := e.instance(ctx)
 	if cerr != nil {
 		return Result{}, cerr
 	}
-	defer inst.close(cctx)
-	return inst.run(cctx, src, dispatch)
+	defer inst.close(context.Background())
+
+	// The deadline starts when the SCRIPT does: the first execution in a process
+	// pays for the module compile, and charging that to a 1 s script budget would
+	// fail a script that runs in milliseconds.
+	cctx, cancel := execDeadline(ctx, timeout)
+	defer cancel()
+	return inst.run(cctx, caps, src, dispatch)
 }
 
 // instance compiles the module once and creates one guest for this script.
@@ -171,6 +182,14 @@ func (e *Engine) instance(ctx context.Context) (*instance, *CallError) {
 		rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
 			WithMemoryLimitPages(uint32(TheABI.Limits.LinearMemoryPages)).
 			WithCloseOnContextDone(true))
+		// WASI is instantiated for the handful of calls the reactor imports
+		// (clock, fd_write for its own diagnostics, random). Its stdio is
+		// discarded: a guest's output reaches the model through the bridge, never
+		// through our stdout.
+		if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
+			rt.Close(ctx)
+			return nil, &CallError{Class: "crash", Message: "instantiate wasi: " + err.Error()}
+		}
 		if err := registerHost(ctx, rt); err != nil {
 			rt.Close(ctx)
 			return nil, &CallError{Class: "crash", Message: err.Error()}
@@ -188,7 +207,8 @@ func (e *Engine) instance(ctx context.Context) (*instance, *CallError) {
 	}
 	// A reactor is initialized, never started: _initialize runs, _start must not.
 	mod, err := e.rt.InstantiateModule(ctx, e.compiled, wazero.NewModuleConfig().
-		WithStartFunctions("_initialize"))
+		WithStartFunctions("_initialize").
+		WithStdout(io.Discard).WithStderr(io.Discard))
 	if err != nil {
 		return nil, &CallError{Class: "crash", Message: "instantiate reactor: " + err.Error()}
 	}
@@ -251,14 +271,17 @@ func (in *instance) close(ctx context.Context) {
 // run copies the source in, calls qjs_run and decodes the envelope. The host
 // keeps the accepted events, so a trap still returns what the script already
 // printed (§Failure ABI).
-func (in *instance) run(ctx context.Context, src string, dispatch DispatchFunc) (Result, *CallError) {
+func (in *instance) run(ctx context.Context, caps ExecCaps, src string, dispatch DispatchFunc) (Result, *CallError) {
 	if len(src) > TheABI.Limits.RequestBytes {
 		return Result{}, &CallError{Class: "limit", Message: "script is larger than 64 KiB"}
 	}
 	cctx, st := withHost(ctx, dispatch)
 	cctx = withMemory(cctx, in.mem)
 
-	srcPtr, cerr := in.write(cctx, []byte(src))
+	// The prelude is prepended on the Go side: the guest evaluates one script,
+	// and the model's own source keeps its own line numbering from there on.
+	full := renderPrelude(caps) + "\n" + src
+	srcPtr, cerr := in.write(cctx, []byte(full))
 	if cerr != nil {
 		return Result{}, cerr
 	}
@@ -269,7 +292,7 @@ func (in *instance) run(ctx context.Context, src string, dispatch DispatchFunc) 
 	}
 	defer in.free(cctx, lenPtr)
 
-	res, err := in.qjsRun.Call(cctx, uint64(srcPtr), uint64(len(src)),
+	res, err := in.qjsRun.Call(cctx, uint64(srcPtr), uint64(len(full)),
 		uint64(in.outPtr), uint64(in.outCap), uint64(lenPtr))
 	out := Result{Texts: st.texts, Logs: st.logs}
 	if err != nil {
@@ -368,6 +391,22 @@ func classOf(class string) string {
 	}
 }
 
+// classFromStatus settles the class of a guest failure. The STATUS decides the
+// classes only the host can know (syntax, oom, limit); the guest-named class is
+// consulted last and always through the allowlist, so a script that throws
+// {class:"syntax"} on a runtime error still reads as `script`.
+func classFromStatus(status int32, guestNamed string) string {
+	switch status {
+	case 1:
+		return "syntax"
+	case 3:
+		return "oom"
+	case 4, 5:
+		return "limit"
+	}
+	return classOf(guestNamed)
+}
+
 // decodeEnvelope turns qjs_run's status and buffer into the Go result. A status
 // with no epilogue still returns a classified error.
 func decodeEnvelope(status int32, raw []byte) (Result, *CallError) {
@@ -377,7 +416,7 @@ func decodeEnvelope(status int32, raw []byte) (Result, *CallError) {
 		if err := json.Unmarshal(raw, &env); err == nil {
 			out.Value, out.Texts, out.Logs = env.Value, env.Texts, env.Logs
 			if env.Error != nil {
-				return out, &CallError{Class: classOf(env.Error.Class), Message: env.Error.Message, Line: env.Error.Line}
+				return out, &CallError{Class: classFromStatus(status, env.Error.Class), Message: env.Error.Message, Line: env.Error.Line}
 			}
 		}
 	}

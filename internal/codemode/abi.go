@@ -139,6 +139,10 @@ func VerifyModule(wasm []byte) error {
 		return fmt.Errorf("reactor is missing export(s): %s", strings.Join(missing, ", "))
 	}
 
+	imports, err := wasmImports(wasm)
+	if err != nil {
+		return fmt.Errorf("reactor: %w", err)
+	}
 	allowed := map[string]bool{}
 	for _, i := range TheABI.AllowedImports {
 		allowed[i] = true
@@ -147,8 +151,8 @@ func VerifyModule(wasm []byte) error {
 		allowed[i] = true
 	}
 	seen := map[string]bool{}
-	for _, f := range compiled.ImportedFunctions() {
-		name := f.ModuleName() + "." + f.Name()
+	for _, imp := range imports {
+		name := imp.Module + "." + imp.Name
 		seen[name] = true
 		if !allowed[name] {
 			return fmt.Errorf("reactor imports %q, which is not in abi.json's allowlist", name)
