@@ -495,6 +495,10 @@ func rescueLevel(e llm.Effort, m provider.Model) llm.Effort {
 func (a *Agent) turn(ctx context.Context, choice llm.ToolChoice) (llm.Response, []llm.ToolCall, error) {
 	req := a.request(choice)
 	reqChars := compact.RequestChars(req.System+req.SystemTail, req.Tools, req.Messages)
+	// The carry instrument's only call site (codemode plan v13, Task 1): a
+	// no-op in every shipping build, one JSONL observation per outbound
+	// request under -tags codemodecarry.
+	a.carryObserve(req)
 	resp, err := a.adapter.Stream(ctx, req, func(e llm.Event) {
 		switch e.Type {
 		case llm.EventText:

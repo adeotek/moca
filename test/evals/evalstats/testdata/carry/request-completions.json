@@ -1,0 +1,18 @@
+{
+  "model": "glm-5.3-flash",
+  "messages": [
+    { "role": "system", "content": "You are moca." },
+    { "role": "user", "content": "Join the manifests and tell me which services lose their override." },
+    { "role": "assistant", "content": "", "tool_calls": [
+      { "id": "c1", "type": "function", "function": { "name": "read", "arguments": "{\"path\":\"a.yaml\"}" } },
+      { "id": "c2", "type": "function", "function": { "name": "read", "arguments": "{\"path\":\"b.yaml\"}" } }
+    ] },
+    { "role": "tool", "tool_call_id": "c1", "content": "0123456789abcdef" },
+    { "role": "tool", "tool_call_id": "c2", "content": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
+    { "role": "assistant", "content": "Reading both manifests." },
+    { "role": "user", "content": "Now answer." }
+  ],
+  "stream": true,
+  "max_tokens": 8192,
+  "tools": []
+}

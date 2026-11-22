@@ -1,0 +1,5 @@
+Every service under services/ inherits each value it does not state itself from defaults.yaml. For every service, report its effective CPU limit, where that value comes from, and the policy it uses with that policy's priority.
+
+Answer as one line per service, alphabetically by service name, and nothing else:
+
+name=<service> cpu=<value> source=<override|default> policy=<name> priority=<n>

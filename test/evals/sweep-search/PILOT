@@ -1,0 +1,3 @@
+Opt-in pilot scenario: it runs only when named explicitly and only with an
+approved spend (codemode plan v13, Task 7). Default discovery skips this
+directory, so an ordinary corpus sweep never pays for it.

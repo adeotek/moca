@@ -1,0 +1,34 @@
+# metrics — managed by platform-config; change it in the deploy repo, not here.
+apiVersion: v1
+kind: ServiceManifest
+metadata:
+  name: metrics
+  team: data
+  tier: backend
+  labels:
+    env: production
+    app.kubernetes.io/name: metrics
+    app.kubernetes.io/part-of: backoffice
+    billing/unit: cpu-hour
+spec:
+  image: registry.internal/metrics:1.4.2
+  replicas: 2
+  resources:
+    memory: 512Mi
+  env:
+    - name: LOG_LEVEL
+      value: info
+    - name: OTEL_EXPORTER
+      value: otlp
+    - name: HTTP_IDLE_TIMEOUT
+      value: "30s"
+  probes:
+    readiness: /healthz
+    liveness: /livez
+    startup: /startupz
+  rollout:
+    strategy: rolling
+    maxUnavailable: 1
+  policy: shared-a
+  # suspended after the 2026-11 reorg
+  disabled: true

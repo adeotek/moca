@@ -7,18 +7,26 @@
 #
 # Each scenario dir holds fixture/ (the repo, committed as the base), prompt.txt
 # (or sessions.txt: one prompt per line, run in order against the SAME
-# workdir/data/cfg, so a later session sees an earlier one's skills),
+# workdir/data/cfg, so a later session sees an earlier one's skills; or a
+# followup.txt: a TWO-TURN TRIAL — prompt.txt, then --continue with
+# followup.txt, one schema-2 row per trial, see _lib/trial.sh),
 # check.sh (run in the repo; exit 0 = pass; SESSION is the newest transcript,
 # DATA the run's data dir), an optional flags file (extra moca flags, e.g.
 # --mode plan) and testdata/reference/ (a known-good solution overlay for
-# --selftest). A per-scenario config.jsonc (or config.<variant>.jsonc, picked
+# --selftest; a transcript-graded scenario also ships
+# testdata/reference_session.jsonl, and optionally reference_session_wrong.jsonl
+# — a deliberately wrong answer the checker must reject).
+# A per-scenario config.jsonc (or config.<variant>.jsonc, picked
 # with -c <variant>) overrides the shared one; a scenario with no config of its
 # own falls back to config.<variant>.jsonc, then config.jsonc (that is how the
-# corpus-wide switch A/B is run: `-c on` → config.on.jsonc). The scenario list
-# defaults to the dirs holding prompt.txt; a sessions.txt-only measurement
-# scenario (skills-cold: it ships no .moca/skills and measures whether a run
-# records what it had to discover — expected to fail most runs) is named
-# explicitly so it does not drag every corpus run's pass rate.
+# corpus-wide switch A/B is run: `-c on` → config.on.jsonc).
+# The scenario list defaults to the dirs holding prompt.txt and no PILOT
+# marker; a sessions.txt-only measurement scenario (skills-cold: it ships no
+# .moca/skills and measures whether a run records what it had to discover —
+# expected to fail most runs) is named explicitly so it does not drag every
+# corpus run's pass rate, and the codemode pilot scenarios (sweep,
+# sweep-search, web-sweep) are opt-in for the same reason plus cost: their
+# `-c cm-on|cm-off` arms are the only way they run.
 # The model key comes from the repo .env via env: indirection (never echoed).
 set -u
 EVALS="$(cd "$(dirname "$0")" && pwd)"
@@ -37,12 +45,16 @@ while [ $# -gt 0 ]; do
     -m) MODEL="$2"; shift 2 ;;
     -c) VARIANT="$2"; shift 2 ;;
     --selftest) SELFTEST=1; shift ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     *) SCENARIOS+=("$1"); shift ;;
   esac
 done
 if [ ${#SCENARIOS[@]} -eq 0 ]; then
-  for d in "$EVALS"/*/; do [ -f "$d/prompt.txt" ] && SCENARIOS+=("$(basename "$d")"); done
+  for d in "$EVALS"/*/; do
+    # A PILOT dir is opt-in (R36/R43): default discovery must never enumerate
+    # a scenario whose run costs money or needs an approved arm.
+    [ -f "$d/prompt.txt" ] && [ ! -f "$d/PILOT" ] && SCENARIOS+=("$(basename "$d")")
+  done
 fi
 
 if ! command -v go >/dev/null 2>&1; then
@@ -114,12 +126,22 @@ size_of() {
   echo "$a $d $f $nf"
 }
 
+# The two-turn trial runner, pilot opt-in and the shared secret scan live in
+# _lib/trial.sh; it reads the globals above at call time.
+. "$EVALS/_lib/trial.sh"
+
 if [ "$SELFTEST" = 1 ]; then
   bad=0
   # skills-cold is sessions.txt-only (kept out of the default scenario list on
   # purpose), but its checker's file-state arms need the gate like the rest —
   # with SESSION unset, so the loop below covers it without naming it here.
   for s in "${SCENARIOS[@]}" skills-cold; do
+    # A two-turn trial is graded through its transcript by construction, so a
+    # scenario that ships followup.txt without a reference transcript cannot be
+    # gated at all (F22): fail closed rather than pretend the arm ran.
+    if [ -f "$EVALS/$s/followup.txt" ] && [ ! -f "$EVALS/$s/testdata/reference_session.jsonl" ]; then
+      echo "FAIL $s: a two-turn scenario ships no testdata/reference_session.jsonl"; bad=1
+    fi
     work=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-self.XXXXXX")
     fresh_repo "$s" "$work"
     if (cd "$work" && VARIANT=on bash "$EVALS/$s/check.sh" >/dev/null 2>&1); then
@@ -142,6 +164,22 @@ if [ "$SELFTEST" = 1 ]; then
       echo "ok   $s"
     else
       echo "FAIL $s: checker rejects the reference: $out"; bad=1
+    fi
+    # F22, the two arms that keep the reference transcript honest: a checker
+    # that grades presence rather than correctness would pass either of these.
+    if [ -f "$EVALS/$s/testdata/reference_session.jsonl" ]; then
+      if (cd "$work" && SESSION="" VARIANT=on bash "$EVALS/$s/check.sh" >/dev/null 2>&1); then
+        echo "FAIL $s: the checker passes with no transcript"; bad=1
+      else
+        echo "ok   $s-fails-closed"
+      fi
+      if [ -f "$EVALS/$s/testdata/reference_session_wrong.jsonl" ]; then
+        if (cd "$work" && SESSION="$EVALS/$s/testdata/reference_session_wrong.jsonl" VARIANT=on bash "$EVALS/$s/check.sh" >/dev/null 2>&1); then
+          echo "FAIL $s: a deliberately wrong answer passed the checker"; bad=1
+        else
+          echo "ok   $s-rejects-a-wrong-answer"
+        fi
+      fi
     fi
     rm -rf "$work"
   done
@@ -287,11 +325,50 @@ if [ "$SELFTEST" = 1 ]; then
     echo "FAIL writeup-therefore: a correct write-up using \"therefore\" was failed: $out"; bad=1
   fi
   rm -rf "$work"
+  # The pilot checker's untouched-tree contract, one arm per way the tree can
+  # move: a modified file, a committed change and an untracked file each have
+  # to fail for their own reason. Without these, a run that edited a manifest
+  # to fit its guess would grade as a correct answer.
+  for kind in modified committed untracked; do
+    work=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-sweep-tree.XXXXXX")
+    fresh_repo sweep "$work"
+    case "$kind" in
+      modified) printf '\n# probe\n' >> "$work/defaults.yaml" ;;
+      committed) printf '\n# probe\n' >> "$work/services/api/service.yaml"
+                 (cd "$work" && git add -A && git commit -qm probe) ;;
+      untracked) printf 'probe\n' > "$work/probe.md" ;;
+    esac
+    if out=$(cd "$work" && SESSION="$EVALS/sweep/testdata/reference_session.jsonl" VARIANT=cm-on bash "$EVALS/sweep/check.sh" 2>&1); then
+      echo "FAIL sweep-tree-$kind: the checker passed a $kind fixture"; bad=1
+    else
+      case "$kind:$out" in
+        modified:*"modified tracked files"*) echo "ok   sweep-tree-modified" ;;
+        committed:*"committed changes"*) echo "ok   sweep-tree-committed" ;;
+        untracked:*"untracked files"*) echo "ok   sweep-tree-untracked" ;;
+        *) echo "FAIL sweep-tree-$kind: failed for the wrong reason: $out"; bad=1 ;;
+      esac
+    fi
+    rm -rf "$work"
+  done
+  # The pre-change goldens (rendered prompt, ordered wire schema, direct-tool
+  # output): captured before any codemode code so Tasks 3/4/8 can prove "nothing
+  # else moved" against real bytes rather than an empty diff. No model, no
+  # binary — one capture and one comparison.
+  mkdir -p "$EVALS/results"
+  stats="$EVALS/results/.evalstats"
+  if (cd "$REPO" && go build -o "$stats" ./test/evals/evalstats) && "$stats" -prechangeCheck >/dev/null 2>&1; then
+    echo "ok   prechange-goldens"
+  else
+    echo "FAIL prechange-goldens: run go run ./test/evals/evalstats -prechangeCheck for the first difference"; bad=1
+  fi
   exit "$bad"
 fi
 
 if [ -f "$REPO/.env" ]; then set -a; . "$REPO/.env"; set +a; fi
 [ -n "${OPENCODE_API_KEY:-}" ] || { echo "OPENCODE_API_KEY not set (repo .env missing?)"; exit 2; }
+# A pilot scenario runs only under its own arm and only when named: refuse
+# before any binary runs, so a label can never measure another arm's config.
+if ! pilot_preflight "${SCENARIOS[@]}"; then exit 2; fi
 [ -x "$MOCA" ] || { echo "build moca first: make build (looked for $MOCA)"; exit 2; }
 mkdir -p "$EVALS/results"
 OUT="$EVALS/results/$LABEL.jsonl"
@@ -352,25 +429,16 @@ one() {
   # diagnostic log is scanned, not just the newest session: XDG_STATE_HOME
   # points at the run's data dir, so the logs land under it (moca writes
   # <state>/logs, and without it they would escape both the scan and the
-  # cleanup into the host's real state dir).
+  # cleanup into the host's real state dir). The workdir is scanned too: a run
+  # that echoed the key into a file leaked it just as badly, and that copy
+  # would otherwise survive the data-dir cleanup. secret_leak (in
+  # _lib/trial.sh) is the one implementation, shared with run_trial.
   local leaked=false
-  if [ -n "${OPENCODE_API_KEY:-}" ]; then
-    local f
-    for f in "$data"/moca/sessions/*.jsonl "$data"/moca/logs/* "$data"/stdout.*.txt "$data"/stderr.*.txt; do
-      [ -f "$f" ] || continue
-      if grep -qF -- "$OPENCODE_API_KEY" "$f"; then
-        pass=false
-        leaked=true
-        why="secret leaked into $(basename "$f")" # the file, never the value
-      fi
-    done
-    # The workdir too: a run that echoed the key into a file leaked it just as
-    # badly, and that copy would otherwise survive the data-dir cleanup.
-    if grep -rqF -- "$OPENCODE_API_KEY" "$work" 2>/dev/null; then
-      pass=false
-      leaked=true
-      why="secret leaked into the workdir"
-    fi
+  secret_leak "$data" "$work"
+  if [ -n "$LEAK_WHY" ]; then
+    pass=false
+    leaked=true
+    why="$LEAK_WHY" # the file, never the value
   fi
   if [ -n "$sess" ]; then
     # Keep every session transcript: a passing run's data dir is deleted below,
@@ -412,7 +480,13 @@ one() {
 for n in $(seq 1 "$RUNS"); do
   for s in "${SCENARIOS[@]}"; do
     while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n; done
-    one "$s" "$n" &
+    # A scenario with followup.txt is a two-turn trial (one schema-2 row);
+    # everything else keeps the one-prompt-per-run path.
+    if [ -f "$EVALS/$s/followup.txt" ]; then
+      run_trial "$s" "$n" &
+    else
+      one "$s" "$n" &
+    fi
   done
 done
 wait

@@ -1,0 +1,15 @@
+# shared-c — shared across every team; its priority orders the admission rules.
+apiVersion: v1
+kind: Policy
+metadata:
+  name: shared-c
+  owner: platform-team
+spec:
+  priority: 30
+  allow:
+    - ingress
+    - egress
+    - metrics-scrape
+  deny:
+    - host-network
+    - privileged

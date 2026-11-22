@@ -1207,3 +1207,104 @@ So the row is not evidence that the contract reshapes refactors — it is the in
 model habit that costs a full step when it fires. The lever, if this is worth one, is the index (a smaller
 description per built-in), not the working style. Anything that *removes* a built-in shrinks this row; nothing
 in the prompt does.
+
+## codemode v1 — Task 1: the instrument, the pilot fixtures and the row contract (unbilled)
+
+**Nothing in this section was measured with a model.** Task 1 of the codemode plan (v13) builds the
+instruments and the oracles the later tasks depend on, under the plan's own unbilled constraint: no
+key, no request, no spend. The figures below are byte counts, token *estimates* and harness facts.
+The first real numbers for these scenarios arrive in Task 7 (Stage A) under its own approval.
+
+### The implementation baseline (F23)
+
+| fact | value |
+|---|---|
+| baseline commit | `f2809553e95b27a9e0f896179652cd7e07601324` — `origin/main`, "v0.8.5: the release entry (#133)" |
+| plan branch head at the gate | `003282c` (`feat/codemode-plan`), `git status --porcelain` empty |
+| `git merge-base --is-ancestor $BASE HEAD` | true |
+| product-code delta on the plan branch | none (`git diff --quiet HEAD -- . ':!docs'`) |
+
+`81fc50d` is **not** the baseline. Tasks 3/4/8 compare against captures taken at `f280955`; Task 2's
+recount and Task 11's refreshed baseline each repeat the gate.
+
+### The carry instrument
+
+A two-turn trial measures what the second process had to re-read from the first: moca's own token
+estimate (`compact.Tokens`, ceil(bytes/4)) over **every retained tool-result block** in the first
+outbound request after `--continue` — all tools, after reconstruction, trim, elision and compaction.
+A compaction summary is a text message, the classifier never enters `turn()`, and a retry re-sends the
+same request, so none of them can inflate the first observation.
+
+- Hook: `internal/agent/carry_hook.go` (`//go:build codemodecarry`) — one call site in `turn()` before
+  `adapter.Stream`, one JSONL line per outbound request to `$MOCA_CARRY_OUT`
+  (`{session,trial,turn,carry}`), best-effort so an instrument can never fail a run.
+- `carry_nop.go` is the shipped arm: a normal build records nothing and carries no measurement code.
+- Cross-check: `evalstats -carryOf <file>,<turn>` reads the observation, and `WireCarry` re-derives the
+  same figure from a **serialized** openai-completions request body (one `role:"tool"` message per
+  result) — decoding the wire, not a re-marshalled copy of the same Go value.
+- The recorded request fixture is `test/evals/evalstats/testdata/carry/request-completions.json`
+  (`4 + 108 = 112` tokens); the Go-side pin covers a summary, an elided stub, a real zero and a retry.
+
+### The row contract (schema 2)
+
+One row per two-turn trial, written by `evalstats -session … -schema 2`:
+
+```
+{"schema":2,"scenario":"sweep","label":"…","trial":3,"turns":2,"arm":"cm-on","session":"ab12cd34",
+ "pass":true,"steps":…,"carry":4096,"carryMeasured":true,"ms":…,"cmAttempted":…,"cmOk":…,…}
+```
+
+- Schema 1 rows (no `schema`) are unchanged and `-compare` refuses schema-2 rows; `-compareCarry`
+  requires schema 2, a single arm per file, two different arms across the files, no duplicate
+  `(scenario,trial)`, and a matched pair for every tuple — a missing, extra or duplicated tuple names
+  what it found instead of comparing a silently reduced set.
+- `carryMeasured` is an additive field beyond the plan's illustrative row, and it is load-bearing:
+  `carry:0` is a *measurement* (a second turn that carried no tool output), while an absent
+  observation is a gap. A trial with no observation fails, writes `carryMeasured` absent, and
+  `-compare-carry` refuses the label rather than read the gap as free context.
+- Pairing is by `(scenario,trial)`, resampled as a block: a trial's two arms move together, so this is
+  a paired read, not two independent samples. Verdict rules, in order: a lost pass → worse; a step
+  increase → worse; adoption in fewer than half the candidate trials (`cmOk>0` and pass) →
+  inconclusive; carry ratio `Hi ≤ 0.75` **and** ≥512 tokens saved → better; `Lo > 1.0` → worse; else
+  inconclusive. `cmAttempted`/`cmOk` come from the transcript's `tool_use`/`tool_result` entries and
+  are independent of the checker.
+- `-trialCheck` proves the two-turn shape: exactly two user prompts in order, an answer after each one,
+  which is what makes "a new session instead of `--continue`", a merged turn and a missing first
+  answer fail for their own reasons.
+
+### The pilot fixtures and their headroom
+
+| scenario | task | fixture | constraint |
+|---|---|---|---|
+| `sweep` | 12 service manifests × `defaults.yaml` × 3 shared policies; 6 fields per line | 16 files, 9 798 B | direct scripted carry **≥2 048** est. tokens: the fixture is ≈2 449 tokens of raw content (≈2 525 with the read tool's line numbering); the billed reading is Task 7's |
+| `sweep-search` | an ordinary single search, then one cheap config lookup | 10 files, 1 349 B | the shape itself: nothing here needs a script, which is what makes it a control |
+| `sweep` join cost | the scripted join must stay ≤40 of the 50 inspection attempts (orientation + pages) | 16 reads with slack | **planned, not measured** — Task 7's scripted trial is the instrument |
+
+Both checkers grade **exactly** (every line, in order) over an **untouched tree**, and each way the
+tree can move reports itself. `run.sh --selftest` pins all three (`sweep-tree-modified`,
+`-committed`, `-untracked`), plus `sweep-fails-closed`, `sweep-rejects-a-wrong-answer` and the same two
+arms for `sweep-search`.
+
+### What Task 1 does not do
+
+- Both pilot scenarios are opt-in: a `PILOT` marker keeps them out of default discovery, and
+  `pilot_preflight` refuses a named pilot run whose `-c cm-on|cm-off` arm file is missing — before any
+  binary runs.
+- `config.cm-off.jsonc` and `config.cm-on.jsonc` exist so the arm labels resolve, and are
+  **byte-identical apart from their comment**: the `codemode` key does not exist until Task 5 and the
+  config decode is strict. The arm difference (and Task 6's decoded-config assertion) lands with the
+  key.
+- No trial has been run, no carry has been observed, and no pass rate is claimed for either scenario.
+
+### Pre-change goldens (Tasks 3/4/8 compare against these)
+
+| golden | bytes | contents |
+|---|---|---|
+| `test/evals/testdata/prechange/system-prompt.txt` | 6 181 | the rendered system prompt for a fully pinned `PromptInput` (`/work`, linux/amd64, 2026-11-22, `main`, v0.8.5) |
+| `test/evals/testdata/prechange/wire-tools.json` | 7 834 | the eight frozen tools in model-facing order (`read, write, edit, shell, search, ls, web, mcp`) with description + schema |
+| `internal/tools/testdata/direct-output.golden.json` | 55 113 | 12 direct-tool cases over a generated fixture: read window, the over-budget **hole** (line 25 skipped while 26–30 print and the footer claims `lines 1-30 of 30` — the bug Task 3 fixes and the one case it may change), clip, binary, 256 MiB+1 refusal, missing file; search hits / files-only / no-matches with a >4 MiB skip; ls plain / hidden / file-not-a-directory |
+
+Capture is a program, not a hand-edit: `go run ./test/evals/evalstats -prechange` re-captures,
+`-prechangeCheck` compares and names the first differing line. The arm is pinned by a test that mutates
+one byte and requires the check to fail. `run.sh --selftest` ends with `prechange-goldens` so the
+unbilled gate exercises it.

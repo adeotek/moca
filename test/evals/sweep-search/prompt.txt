@@ -1,0 +1,5 @@
+The HTTP client's retry policy is documented somewhere in this repository. Find it and answer exactly:
+
+retries=<n> base=<ms>ms cap=<ms>ms
+
+Nothing else.

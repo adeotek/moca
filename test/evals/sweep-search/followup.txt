@@ -1,0 +1,5 @@
+And the configured connect timeout? Append it to the same line, keeping the retry fields:
+
+retries=<n> base=<ms>ms cap=<ms>ms connect=<ms>ms
+
+Nothing else.

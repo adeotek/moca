@@ -1,0 +1,5 @@
+{
+  "connectMs": 2500,
+  "readMs": 9000,
+  "writeMs": 5000
+}

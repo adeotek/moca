@@ -39,13 +39,38 @@ type CacheBreak struct {
 	After    string `json:"after"`
 }
 
-// Metrics is one scenario run.
+// Metrics is one scenario run. Rows are versioned by Schema (codemode plan
+// v13, Task 1): a row without one is schema 1 (a single-prompt `-p` run,
+// identified by Run). Schema 2 is one two-turn trial (E2): the second process
+// resumed the first with --continue, so Trial identifies the repetition and
+// Turns records the boundary. `-compare` refuses schema-2 rows (its paired
+// statistics assume one prompt per row) and `-compare-carry` requires them.
 type Metrics struct {
+	Schema   int    `json:"schema,omitempty"`
 	Scenario string `json:"scenario,omitempty"`
 	Label    string `json:"label,omitempty"` // e.g. "baseline" / "after-B"
-	Run      int    `json:"run,omitempty"`
-	Pass     bool   `json:"pass"`
-	Exit     int    `json:"exit"`
+	Run      int    `json:"run,omitempty"`   // schema 1: the repetition number
+	// Trial/Turns/Arm are schema 2's identity. Arm names the config arm
+	// (`cm-on`/`cm-off`; `on`/`off` are reserved by the corpus skills arm).
+	Trial int    `json:"trial,omitempty"`
+	Turns int    `json:"turns,omitempty"`
+	Arm   string `json:"arm,omitempty"`
+	// Session is the transcript's id8: the join key between a row and the
+	// carry observations written for that trial.
+	Session string `json:"session,omitempty"`
+	// Carry is the pre-change instrument's figure: moca's token estimate for
+	// the tool-result content in the first outbound request of the resuming
+	// process (see internal/agent/carry_hook.go). CarryMeasured separates an
+	// observed zero (a second turn that carried no tool output) from a
+	// missing observation — a missing one fails the trial and no comparison
+	// may silently read it as free.
+	Carry         int   `json:"carry,omitempty"`
+	CarryMeasured bool  `json:"carryMeasured,omitempty"`
+	MS            int64 `json:"ms,omitempty"`
+	CMAttempted   int   `json:"cmAttempted,omitempty"`
+	CMOk          int   `json:"cmOk,omitempty"`
+	Pass          bool  `json:"pass"`
+	Exit          int   `json:"exit"`
 	// Steps counts assistant turns (each one is a model request).
 	Steps int            `json:"steps"`
 	Calls map[string]int `json:"calls"`
@@ -193,6 +218,10 @@ func Collect(entries []session.Entry) Metrics {
 	// skillWrite marks call ids whose write/edit targets .moca/skills/: the
 	// landing (or refusal) is decided by the result, not by the call.
 	skillWrite := map[string]bool{}
+	// cmCall marks tool calls the codemode tool made: attempted on the call,
+	// completed only when its result is not an error (schema 2's adoption
+	// counters, independent of whether the scenario passed).
+	cmCall := map[string]bool{}
 	elided := map[string]bool{}
 	index := map[string]int{}
 	windows := map[string][]*readWindow{}
@@ -262,6 +291,10 @@ func Collect(entries []session.Entry) Metrics {
 				Limit  int    `json:"limit"`
 			}
 			_ = json.Unmarshal(c.Input, &in)
+			if c.Name == "codemode" {
+				cmCall[c.ID] = true
+				m.CMAttempted++
+			}
 			switch c.Name {
 			case "read":
 				pending[c.ID] = readArgs{path: in.Path, offset: in.Offset, limit: in.Limit}
@@ -278,6 +311,12 @@ func Collect(entries []session.Entry) Metrics {
 				continue
 			}
 			tr := e.ToolResult
+			if cmCall[tr.CallID] {
+				if !tr.IsError {
+					m.CMOk++
+				}
+				delete(cmCall, tr.CallID)
+			}
 			if skillWrite[tr.CallID] {
 				// A refused skill write is not a write: the guard said no.
 				if tr.IsError {
@@ -404,11 +443,26 @@ func main() {
 	sess := flag.String("session", "", "session jsonl to measure")
 	summary := flag.String("summary", "", "results jsonl to aggregate")
 	compare := flag.String("compare", "", "two results jsonl paths, base.jsonl,cand.jsonl — bootstrap comparison")
-	iters := flag.Int("iters", 2000, "bootstrap iterations for -compare")
-	seed := flag.Int64("seed", 1, "bootstrap RNG seed for -compare (deterministic output)")
+	compareCarry := flag.String("compare-carry", "", "two schema-2 results files, base.jsonl,cand.jsonl — paired carry comparison")
+	iters := flag.Int("iters", 2000, "bootstrap iterations for -compare / -compare-carry")
+	seed := flag.Int64("seed", 1, "bootstrap RNG seed for -compare / -compare-carry (deterministic output)")
 	scenario := flag.String("scenario", "", "scenario name")
 	label := flag.String("label", "", "run label")
-	run := flag.Int("run", 0, "run number")
+	run := flag.Int("run", 0, "run number (schema 1)")
+	schema := flag.Int("schema", 0, "row schema: 2 = one two-turn trial")
+	trial := flag.Int("trial", 0, "trial number (schema 2)")
+	turns := flag.Int("turns", 0, "turns the trial ran (schema 2: 2)")
+	arm := flag.String("arm", "", "config arm, cm-on|cm-off (schema 2)")
+	sessionID := flag.String("sessionId", "", "the transcript's id8 (schema 2)")
+	carry := flag.Int("carry", 0, "carried tool-result tokens of the resuming turn (schema 2)")
+	carryMissing := flag.Bool("carryMissing", false, "the carry observation was absent: write the row with carryMeasured=false")
+	ms := flag.Int64("ms", 0, "trial wall-clock milliseconds (schema 2)")
+	carryOf := flag.String("carryOf", "", "print the carry of file.jsonl,turn (exit 1 when unobserved)")
+	trialCheck := flag.String("trialCheck", "", "verify a two-turn transcript")
+	p1 := flag.String("p1", "", "turn 1 prompt file (-trialCheck)")
+	p2 := flag.String("p2", "", "turn 2 prompt file (-trialCheck)")
+	prechange := flag.Bool("prechange", false, "re-capture the pre-change goldens (prompt, wire schema, direct-tool output)")
+	prechangeCheck := flag.Bool("prechangeCheck", false, "verify the committed pre-change goldens")
 	pass := flag.Bool("pass", false, "the scenario checker passed")
 	exit := flag.Int("exit", 0, "moca exit code")
 	added := flag.Int("added", 0, "lines the run added (run.sh size_of, .moca/ excluded)")
@@ -416,16 +470,74 @@ func main() {
 	files := flag.Int("files", 0, "files with at least one changed line")
 	newFiles := flag.Int("newFiles", 0, "files the fixture did not have")
 	flag.Parse()
+	set := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	switch {
+	case *prechange:
+		if err := WritePrechange(); err != nil {
+			fatal(err)
+		}
+	case *prechangeCheck:
+		if err := CheckPrechange(); err != nil {
+			fatal(err)
+		}
+		fmt.Println("pre-change goldens: unchanged")
+	case *carryOf != "":
+		parts := strings.SplitN(*carryOf, ",", 2)
+		if len(parts) != 2 {
+			fatal(fmt.Errorf("-carryOf wants file.jsonl,turn (got %q)", *carryOf))
+		}
+		turn, err := strconv.Atoi(parts[1])
+		if err != nil {
+			fatal(fmt.Errorf("-carryOf turn: %w", err))
+		}
+		obs, err := ReadCarryObservations(parts[0])
+		if err != nil {
+			fatal(err)
+		}
+		c, ok := CarryOfTurn(obs, turn)
+		if !ok {
+			fatal(fmt.Errorf("no carry observation for turn %d in %s", turn, parts[0]))
+		}
+		fmt.Println(c)
+	case *trialCheck != "":
+		a, err := os.ReadFile(*p1)
+		if err != nil {
+			fatal(err)
+		}
+		b, err := os.ReadFile(*p2)
+		if err != nil {
+			fatal(err)
+		}
+		if err := CheckTrialSession(*trialCheck, string(a), string(b)); err != nil {
+			fatal(err)
+		}
 	case *compare != "":
 		parts := strings.SplitN(*compare, ",", 2)
 		if len(parts) != 2 {
 			fatal(fmt.Errorf("-compare wants base.jsonl,cand.jsonl (got %q)", *compare))
 		}
-		fmt.Print(RenderComparison(Compare(readResultsFile(parts[0]), readResultsFile(parts[1]), *iters, *seed)))
+		base, cand := readResultsFile(parts[0]), readResultsFile(parts[1])
+		if err := refuseSchema2(base, cand); err != nil {
+			fatal(err)
+		}
+		fmt.Print(RenderComparison(Compare(base, cand, *iters, *seed)))
+	case *compareCarry != "":
+		parts := strings.SplitN(*compareCarry, ",", 2)
+		if len(parts) != 2 {
+			fatal(fmt.Errorf("-compare-carry wants base.jsonl,cand.jsonl (got %q)", *compareCarry))
+		}
+		c, err := CompareCarry(readResultsFile(parts[0]), readResultsFile(parts[1]), *iters, *seed)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Print(RenderCarryComparison(c))
 	case *summary != "":
 		fmt.Print(Summarize(readResultsFile(*summary)))
 	case *sess != "":
+		if err := checkRowContract(*schema, set, *carryMissing, *trial, *turns, *arm, *sessionID); err != nil {
+			fatal(err)
+		}
 		entries, err := session.ReadFile(*sess)
 		if err != nil {
 			fatal(err)
@@ -433,12 +545,66 @@ func main() {
 		m := Collect(entries)
 		m.Scenario, m.Label, m.Run, m.Pass, m.Exit = *scenario, *label, *run, *pass, *exit
 		m.Added, m.Removed, m.Files, m.NewFiles = *added, *removed, *files, *newFiles
+		m.Schema, m.Trial, m.Turns, m.Arm, m.Session = *schema, *trial, *turns, *arm, *sessionID
+		m.Carry, m.CarryMeasured, m.MS = *carry, set["carry"], *ms
+		if *carryMissing {
+			m.CarryMeasured = false
+		}
 		b, _ := json.Marshal(m)
 		fmt.Println(string(b))
 	default:
 		flag.Usage()
 		os.Exit(2)
 	}
+}
+
+// refuseSchema2 keeps -compare's paired statistics off schema-2 rows: one
+// row is one trial with two turns, so its token volume is not the single-prompt
+// quantity -compare was built for. The message names the flag that does read
+// them. A row without a schema is schema 1 and stays comparable.
+func refuseSchema2(rows ...[]Metrics) error {
+	for _, group := range rows {
+		for _, m := range group {
+			if m.Schema >= 2 {
+				return fmt.Errorf("-compare is for schema-1 rows; %s has a schema-%d trial row (use -compare-carry)", m.Scenario, m.Schema)
+			}
+		}
+	}
+	return nil
+}
+
+// checkRowContract refuses an incomplete row instead of writing one: a
+// schema-2 trial row without its arm, its trial number, its session id or a
+// carry observation is how a harness bug would become a silent zero in the
+// statistics (plan v13, Task 1 — "missing carry" and "mixed schemas" must
+// fail for the intended reason).
+func checkRowContract(schema int, set map[string]bool, carryMissing bool, trial, turns int, arm, sessionID string) error {
+	if schema == 0 {
+		if set["trial"] || set["arm"] || set["carry"] {
+			return fmt.Errorf("schema-2 flags given without -schema 2")
+		}
+		return nil
+	}
+	if schema != 2 {
+		return fmt.Errorf("unknown row schema %d (want 2)", schema)
+	}
+	for _, req := range []struct {
+		name string
+		ok   bool
+	}{
+		{"trial", trial > 0},
+		{"turns", turns > 0},
+		{"arm", arm != ""},
+		{"sessionId", sessionID != ""},
+	} {
+		if !req.ok {
+			return fmt.Errorf("schema 2 row needs -%s", req.name)
+		}
+	}
+	if !set["carry"] && !carryMissing {
+		return fmt.Errorf("schema 2 row needs -carry (or -carryMissing to record the gap): an unmeasured trial must not read as zero")
+	}
+	return nil
 }
 
 func readResultsFile(path string) []Metrics {

@@ -1,0 +1,5 @@
+Now add whether each service is disabled, keeping the same order and every earlier field:
+
+name=<service> cpu=<value> source=<override|default> policy=<name> priority=<n> disabled=<true|false>
+
+Nothing else.

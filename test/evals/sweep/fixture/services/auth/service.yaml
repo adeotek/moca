@@ -1,0 +1,32 @@
+# auth — managed by platform-config; change it in the deploy repo, not here.
+apiVersion: v1
+kind: ServiceManifest
+metadata:
+  name: auth
+  team: identity
+  tier: backend
+  labels:
+    env: production
+    app.kubernetes.io/name: auth
+    app.kubernetes.io/part-of: backoffice
+    billing/unit: cpu-hour
+spec:
+  image: registry.internal/auth:1.4.2
+  replicas: 2
+  resources:
+    memory: 256Mi
+  env:
+    - name: LOG_LEVEL
+      value: info
+    - name: OTEL_EXPORTER
+      value: otlp
+    - name: HTTP_IDLE_TIMEOUT
+      value: "30s"
+  probes:
+    readiness: /healthz
+    liveness: /livez
+    startup: /startupz
+  rollout:
+    strategy: rolling
+    maxUnavailable: 1
+  policy: shared-a

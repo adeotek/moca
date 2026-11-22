@@ -1,0 +1,15 @@
+# shared-a — shared across every team; its priority orders the admission rules.
+apiVersion: v1
+kind: Policy
+metadata:
+  name: shared-a
+  owner: platform-team
+spec:
+  priority: 10
+  allow:
+    - ingress
+    - egress
+    - metrics-scrape
+  deny:
+    - host-network
+    - privileged
