@@ -22,7 +22,7 @@
 
 ## Errors
 
-**E1 — the WASI SDK pin is self-contradictory.** v5 names `wasi-sdk-29.0-x86_64-linux.tar.gz` and pins `87d1d1a2…a0171`. That is the **`.deb`** digest; the `.tar.gz` is `d0de2fd3ea5c57060efa87e4356c164bec3689972f2386f0c9a89c58e10cec8d`. Following "verify on download" fails at the first step of Task 2.
+**E1 — the WASI SDK pin is self-contradictory.** ~~v5 names `wasi-sdk-29.0-x86_64-linux.tar.gz` and pins `87d1d1a2…a0171`. That is the **`.deb`** digest; the `.tar.gz` is `d0de2fd3ea5c57060efa87e4356c164bec3689972f2386f0c9a89c58e10cec8d`. Following "verify on download" fails at the first step of Task 2.~~ **AMENDED (2026-11-22, v7): this correction was wrong.** The release record assigns `d0de2fd3…` (113,028,367 bytes) to `wasi-sdk-29.0-x86_64-**macos**.tar.gz`; the Linux `.tar.gz` is **119,441,678 bytes**, SHA-256 `87d1d1a2…a0171` — exactly v5's pin. Verified against the release API's `(name, size, digest)` record and by downloading the asset and hashing it; the `.deb` digest is `20a5b880…`. v7 restores the original pin.
 
 **E2 — `run.sh:327–346` does not use `--continue`.** The loop runs one independent `moca … -p "$p"` per `sessions.txt` line, then picks the newest transcript with `ls -t`. `--continue` exists (`cmd/moca/cli.go:132`), so the two-turn trial is feasible — but the premise that the harness already appends to one transcript is wrong: today it produces N sessions and N rows, one per invocation.
 
