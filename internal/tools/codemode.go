@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -56,6 +57,19 @@ type CodemodeHolder struct {
 	openErr error
 	prelude string
 	built   bool
+	// runs counts the scripts this policy has executed. It exists so the second
+	// call can say "one program does the whole task": the pilot measured the
+	// model writing 4-5 small scripts per task, using the tool as a REPL, which
+	// saves carry and adds turns (Task 7 rounds 1-2).
+	runs atomic.Int64
+}
+
+// noteRun counts one executed script and returns the new total.
+func (h *CodemodeHolder) noteRun() int64 {
+	if h == nil {
+		return 0
+	}
+	return h.runs.Add(1)
 }
 
 // Engine resolves the engine once, memoizing both the success and the error.
@@ -120,6 +134,10 @@ type bridge struct {
 	gaps    int
 	reasons []string
 }
+
+// idiomEchoLead opens the result-side idiom reminder. It is matched, never
+// repeated: a result that already carries it is not appended twice.
+const idiomEchoLead = "hint:"
 
 // codemodeSpec is the tool's whole spec in the F17 form: name, description and
 // schema together, because a description edit resets the prompt cache for every
@@ -205,6 +223,17 @@ func (t codemodeTool) Run(ctx context.Context, env *Env, input json.RawMessage) 
 	steered := !admit() || res.Steered
 
 	content, isErr := br.render(res, cerr)
+	// The idiom echo: after the first script, say what one program would have
+	// done. It rides the result (the model's own turn) rather than the prompt,
+	// because the prompt's "one program" sentence was already there and the
+	// pilot showed it does not survive contact with a real task.
+	if n := t.holder.noteRun(); n >= 2 && !isErr && !strings.Contains(content, idiomEchoLead) {
+		joiner := "\n"
+		if content == "" {
+			joiner = ""
+		}
+		content += joiner + fmt.Sprintf("%s this run has called codemode %d times; one program that loops over the files does the whole task in one call.", idiomEchoLead, n)
+	}
 	return Result{Content: content, IsError: isErr, Summary: br.summary(cerr), Steered: steered}
 }
 

@@ -1474,3 +1474,80 @@ description problem of the same kind as the shapes, and it is testable with one 
 — or it is where the feature stops, if the budget for tuning a ninth tool's prompt is judged not worth
 $0.08. **No round 3 runs without a predeclaration written first, and none runs on the same instrument
 to chase a number.**
+
+## codemode v1 — Task 7 Stage A **round 3** (last round): the idiom, stated and echoed (predeclared)
+
+Rounds 1-2 moved the constraint twice: the API shape (fixed, script errors to zero) and now the
+**idiom** — adopting trials took 10.4 steps against 6.4 because the model wrote 4–5 small scripts per
+task. Round 3 tests the idiom fix and nothing else. **This is the last round of Stage A's pilot: if it
+fails, v1 stays unmerged and no round 4 runs, whatever the numbers say.**
+
+**The change, two surfaces, one claim.**
+1. The batch rule now reads "…ONE read-only JS program over read/search/ls **that loops inside itself,
+   never one call per file**; ordinary dependent calls still need separate turns." (prompt budget
+   unchanged: the render still fits 6 400/6 404 B.)
+2. The tool result itself carries the reminder from the **second** script of a session on:
+   `hint: this run has called codemode N times; one program that loops over the files does the whole
+   task in one call.` It rides the model's own turn rather than the prompt because the prompt's "one
+   program" sentence was already there in rounds 1-2 and did not survive contact with the task.
+
+**Primary endpoint.** On `sweep`: **≥ 6 of 10** trials adopted (`cmOk > 0` and the checker passed)
+**and** the adopted trials' mean steps **≤ the control arm's mean steps** (round 2 control: 7.5).
+Adoption alone is not enough this time: the feature has to pay in turns, which is the claim that
+failed in round 2.
+
+**Secondary gates.** Carry ratio upper CI ≤ 0.75, ≥ 512 tokens saved per trial, no lost pass, no step
+increase for the arm as a whole. `sweep-search` has no adoption requirement and is reported, not gated.
+
+**Instrument.** `go build -tags codemodecarry -o /tmp/moca-carry3 ./cmd/moca` (digest `0b06f35bf4cf822d`), model
+`opencode-go/deepseek-v4.1-flash`, arms unchanged, 10 trials/arm/scenario, `-j 1`, `-cap 20`, same
+checkers and carry instrument.
+
+**Decision rule, final.** Primary + all secondaries ⇒ merge v1 and record the numbers. Anything else ⇒
+**v1 stays unmerged, the branch is parked, and Task 8 documents "implemented, qualified, unproven"
+with these tables.** No further pilot round on this instrument.
+
+### Round 3 result — **the idiom did not land; v1 is parked, unmerged**
+
+10 trials per arm per scenario, `-j 1`, binary `0b06f35b…`, spend **US$0.0793** (on $0.0393 + off
+$0.0400). **Cumulative Stage A spend across all three rounds: US$0.2074 of US$20.**
+
+| scenario | pass off→on | carry off→on | ratio [95% CI] | saved tok [CI] | steps off→on | attempted / adopted+passed |
+|---|---|---|---|---|---|---|
+| `sweep` | 8/10 → 8/10 | 3 654 → 2 170 | **0.59** [0.41, 0.85] | **1 484** [468, 2 723] | 7.7 → 8.2 | 7/10 → **5/10** |
+| `sweep-search` | 10/10 → 10/10 | 221 → 262 | 1.19 [0.90, 1.54] | −41 | 7.5 → 7.6 | 1/10 → 1/10 |
+
+**Primary failed on both legs**: adopted-and-passed **5/10** against the predeclared ≥6/10, and
+adopted-trial steps **9.0** against the 7.5 control bar. `evalstats`: **"worse — steps per trial rose
+7.60→7.90"**. The secondary ratio leg fails too (hi 0.85 > 0.75), though the point estimate finally
+clears the token floor (1 484 saved). Per the predeclared rule: **no round 4, v1 stays unmerged.**
+
+**What three rounds established, in one place:**
+
+| | round 1 | round 2 | round 3 |
+|---|---|---|---|
+| script errors | 1 in 2 adopting trials | 0 / 15 calls | **0 / 22 calls** |
+| attempted (sweep) | 2/6 | 5/10 | **7/10** |
+| adopted+passed | 1/6 | 4/10 | **5/10** |
+| carry ratio (sweep) | 0.87 [0.77, 0.97] | 0.77 [0.63, 0.91] | **0.59 [0.41, 0.85]** |
+| saved tok | 412 | 697 | **1 484** |
+| steps, adopted vs not | — | 10.4 vs 6.4 | **9.0 vs 6.3** |
+| scripts per adopting trial | — | 2,3,5,5,4 | **3,2,3,3,5,5,1** |
+
+- **The description work paid, twice, and is worth keeping whatever happens to the feature.** Naming
+  the result shapes took script errors to zero and doubled adoption; the idiom sentence did not change
+  the script count at all.
+- **The carry benefit is real and now large**: adopted trials carried 1 787 tokens against 3 062 for
+  non-adopted trials of the same arm (42 % less), and `sweep`'s ratio fell 0.87 → 0.59 across rounds.
+- **The killer is turn count, and it is structural for this model.** Seven adopting trials wrote
+  3, 2, 3, 3, 5, 5 and 1 scripts. A result-side reminder that lands *after* the second script cannot
+  prevent the second script; by then the pattern is set. Nothing in the description changed that,
+  which is why the predeclaration said this was the last round.
+- **Checker failures are format, not feature**: across six labels the same two shapes recur on both
+  arms — `api cpu=…` for `name=api cpu=…`, and a prose answer where a list was required. The control
+  failed 2/10 on `sweep` this round; the treatment's two failures are the same shapes.
+
+**Decision recorded: the branch is parked with v1 unmerged.** Task 8 documents "implemented,
+qualified, unproven" and carries these three tables. A future attempt needs a different mechanism than
+a description — a run-scoped script counter with a hard "one script per turn" behaviour, or a fixture
+whose work genuinely cannot be split per file — and it needs its own predeclaration and approval.

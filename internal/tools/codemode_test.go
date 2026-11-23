@@ -130,6 +130,34 @@ func TestCodemodeDispatchRefusesUnknownNames(t *testing.T) {
 	}
 }
 
+// The idiom echo (Task 7 round 3): the FIRST script's result says nothing about
+// how to use the tool, and every later one carries the reminder. The pilot
+// measured 4-5 small scripts per task, so the tool names the pattern where the
+// model is actually looking -- its own result -- not only in the prompt.
+func TestCodemodeIdiomEchoStartsAtTheSecondScript(t *testing.T) {
+	env, _ := newEnv(t)
+	eng := &fakeEngine{result: codemode.Result{Value: json.RawMessage(`42`)}}
+	tool := NewCodemode(&CodemodeHolder{Open: func() (CodemodeEngine, error) { return eng, nil }})
+	first := tool.Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
+	if strings.Contains(first.Content, idiomEchoLead) {
+		t.Fatalf("the first script was nagged: %q", first.Content)
+	}
+	second := tool.Run(context.Background(), env, json.RawMessage(`{"code":"2"}`))
+	if !strings.Contains(second.Content, idiomEchoLead) || !strings.Contains(second.Content, "codemode 2 times") {
+		t.Fatalf("the second script got no idiom echo: %q", second.Content)
+	}
+	third := tool.Run(context.Background(), env, json.RawMessage(`{"code":"3"}`))
+	if n := strings.Count(third.Content, idiomEchoLead); n != 1 {
+		t.Fatalf("the echo repeated %d times: %q", n, third.Content)
+	}
+	// A refusal-only tool has no holder: nothing to count, nothing to say.
+	ref := NewCodemodeRefusal(false)
+	res := ref.Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
+	if strings.Contains(res.Content, idiomEchoLead) {
+		t.Fatalf("the refusing tool echoed the idiom: %q", res.Content)
+	}
+}
+
 // ---- admission -----------------------------------------------------------
 
 func TestCodemodeNilAdmitAdmits(t *testing.T) {

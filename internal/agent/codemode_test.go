@@ -75,7 +75,7 @@ func TestBuildSystemPromptCodemodeBudget(t *testing.T) {
 			t.Fatalf("%s adds %d newlines", name, n-strings.Count(base, "\n"))
 		}
 	}
-	if !strings.Contains(ws, "one read-only JS program over read/search/ls") {
+	if !strings.Contains(ws, "ONE read-only JS program over read/search/ls that loops inside itself") {
 		t.Fatalf("workspace hint missing: %q", ws)
 	}
 	if !strings.Contains(net, "over read/search/ls/web") {

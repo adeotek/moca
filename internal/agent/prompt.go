@@ -109,8 +109,8 @@ func codemodeHint(in PromptInput) string {
 	if in.CodemodeNetwork {
 		list = "read/search/ls/web"
 	}
-	return " Use `codemode` for a multi-file join or to filter a large result (one read-only JS program over " +
-		list + "); ordinary dependent calls still need separate turns."
+	return " Use `codemode` for a multi-file join or to filter a large result: ONE read-only JS program over " +
+		list + " that loops inside itself, never one call per file; ordinary dependent calls still need separate turns."
 }
 
 // BuildSystemPrompt renders the two templates and the session's appended
