@@ -52,6 +52,19 @@ func steered(ctx context.Context) bool {
 	return false
 }
 
+// hostClass normalises a dispatcher-raised class. An unknown one becomes
+// `script` rather than escaping into the result as noise.
+func hostClass(class string) string {
+	switch class {
+	case "invalid_args", "invalid_cursor_args", "not_found", "not_regular",
+		"outside", "denied", "changed", "limit", "cancelled", "refused",
+		"script", "network_disabled":
+		return class
+	default:
+		return "script"
+	}
+}
+
 // frame is the guest→host message the prelude writes.
 type frame struct {
 	Op   string          `json:"op"`
@@ -97,7 +110,12 @@ func hostInvoke(ctx context.Context, reqPtr, reqLen, resPtr, resCap uint32) int3
 		}
 		value, cerr := st.dispatch(ctx, f.Name, args)
 		if cerr != nil {
-			out.Error = &CallError{Class: classOf(cerr.Class), Message: cerr.Message, Line: cerr.Line}
+			// The dispatcher is HOST code: its class is trusted and only
+			// normalised against the classes the adapter defines. R71's
+			// allowlist governs what a GUEST may throw (classFromStatus), not
+			// what the host reports — otherwise every typed inspection error
+			// would decay to `script`.
+			out.Error = &CallError{Class: hostClass(cerr.Class), Message: cerr.Message, Line: cerr.Line}
 		} else {
 			out.Value = value
 		}

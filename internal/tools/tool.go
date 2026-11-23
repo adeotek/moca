@@ -21,6 +21,11 @@ type Result struct {
 	IsError bool
 	Summary string
 	Detail  string
+	// Steered reports that annotation was withdrawn while this call ran (or
+	// before it started), so the agent delivers pending steering instead of
+	// finishing the batch. Only a codemode call can set it: nothing else runs
+	// long enough for admission to change mid-call.
+	Steered bool
 }
 
 type Tool interface {
@@ -237,6 +242,11 @@ type Env struct {
 	// write/edit there and read by the agent at run end.
 	Plan      bool
 	PlanWrote bool
+	// Admit is the nested-capability gate: it reports whether new work may
+	// still be admitted (steering is not pending, the run is not being
+	// cancelled). A nil Admit admits everything, so every hand-built Env —
+	// tests included — keeps working without a stub.
+	Admit func() bool
 	// Judge clears the auto table's unsure tier with one classifier call
 	// (built by the agent in auto mode when permissions.auto.classifier is
 	// on; nil otherwise — the tier then lands in the ask ladder).
