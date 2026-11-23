@@ -51,8 +51,12 @@ func inspectErr(class, format string, a ...any) *InspectError {
 	return &InspectError{Class: class, Message: fmt.Sprintf(format, a...)}
 }
 
-// Inspection is one script's view of the workspace.
+// Inspection is one script's view of the workspace. The root is opened on first
+// use, not at construction: the refusal-only factory must be able to build one
+// without touching the filesystem, and a script that never inspects anything
+// should cost nothing.
 type Inspection struct {
+	dir      string
 	ws       *workspace
 	attempts int
 	latched  bool
@@ -76,17 +80,41 @@ type cursor struct {
 	digest string
 }
 
-// NewInspection opens dir as the execution's containment boundary. Closing it
-// releases the root; the adapter owns that.
+// NewInspection records the execution's containment boundary. It opens nothing.
 func NewInspection(dir string) (*Inspection, error) {
-	w, err := openWorkspace(dir)
+	if dir == "" {
+		return nil, &InspectError{Class: "denied", Message: "no workspace root"}
+	}
+	return &Inspection{dir: dir, cursors: map[string]cursor{}}, nil
+}
+
+// openRoot opens the root once per execution. A single script is single
+// threaded by contract (one slot), so no lock is needed.
+func (i *Inspection) openRoot() (*workspace, error) {
+	if i.ws != nil {
+		return i.ws, nil
+	}
+	w, err := openWorkspace(i.dir)
 	if err != nil {
 		return nil, err
 	}
-	return &Inspection{ws: w, cursors: map[string]cursor{}}, nil
+	i.ws = w
+	return w, nil
 }
 
-func (i *Inspection) Close() error { return i.ws.close() }
+// RootOpened reports whether this execution has actually touched the
+// filesystem — the property the refusal-only factory is tested against.
+func (i *Inspection) RootOpened() bool { return i.ws != nil }
+
+// Close releases the root; it is safe on an Inspection that never opened one.
+func (i *Inspection) Close() error {
+	if i.ws == nil {
+		return nil
+	}
+	err := i.ws.close()
+	i.ws = nil
+	return err
+}
 
 // ---- budgets and coverage ------------------------------------------------
 
@@ -245,7 +273,11 @@ func (i *Inspection) Read(ctx context.Context, args json.RawMessage) (any, error
 		pageFrom = offset
 	}
 
-	f, fi, err := i.ws.openFile(c.path)
+	ws, err := i.openRoot()
+	if err != nil {
+		return nil, err
+	}
+	f, fi, err := ws.openFile(c.path)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +422,11 @@ func (i *Inspection) LS(ctx context.Context, args json.RawMessage) (any, error) 
 		return nil, err
 	}
 	payload := lsPayload{Entries: []lsEntry{}}
-	dir, oerr := i.ws.root.Open(rel)
+	ws, err := i.openRoot()
+	if err != nil {
+		return nil, err
+	}
+	dir, oerr := ws.root.Open(rel)
 	if oerr != nil {
 		return nil, inspectErr("not_found", "no such directory: %s", rel)
 	}
@@ -465,24 +501,30 @@ func (i *Inspection) Search(ctx context.Context, args json.RawMessage) (any, err
 			return nil, err
 		}
 	}
+	ws, err := i.openRoot()
+	if err != nil {
+		return nil, err
+	}
 	needle := strings.ToLower(a.Query)
-	ignore := i.loadIgnore()
+	rules := i.loadAncestorIgnores(ws, root)
 	payload := searchPayload{Matches: []searchMatch{}}
-	err := i.ws.walk(ctx, root, func(rel string, d os.DirEntry) bool {
-		return skipEntry(d) || ignore.match(rel)
+	err = ws.walk(ctx, root, func(rel string, d os.DirEntry) bool {
+		return skipEntry(d) || ignored(rules, rel, d.IsDir())
 	}, func(rel string, d os.DirEntry) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if skipEntry(d) || ignore.match(rel) {
+		if skipEntry(d) || ignored(rules, rel, d.IsDir()) {
+			return nil
+		}
+		if d.IsDir() {
+			// This directory's own ignore file applies to its children.
+			i.loadIgnoresInto(ws, &rules, rel)
 			return nil
 		}
 		if len(payload.Matches) >= inspectSearchHits {
 			i.gap("hit_budget")
 			return errSearchDone
-		}
-		if d.IsDir() {
-			return nil
 		}
 		if !d.Type().IsRegular() {
 			i.gap("not_regular")
@@ -497,7 +539,7 @@ func (i *Inspection) Search(ctx context.Context, args json.RawMessage) (any, err
 			i.gap("file_too_large")
 			return nil
 		}
-		f, _, err := i.ws.openFile(rel)
+		f, _, err := ws.openFile(rel)
 		if err != nil {
 			i.gap("unreadable")
 			return nil
@@ -628,23 +670,23 @@ func (r *lineReader) next(max int) (string, []byte, bool, error) {
 
 // ---- ignore files ---------------------------------------------------------
 
-// ignoreSet is the minimal .gitignore/.ignore subset a search needs: hidden
-// entries are skipped separately, and a rule is matched as a directory prefix,
-// a file-name suffix (*.ext) or an exact name. Anything richer belongs to the
-// direct search tool, not to a script.
-type ignoreSet struct {
-	prefixes []string
-	suffixes []string
-	names    []string
-}
-
-// loadIgnore reads the root's ignore files. A file larger than the cap is not
-// parsed at all and is reported as a gap: silently applying half of it would
-// change what "search the workspace" means.
-func (i *Inspection) loadIgnore() *ignoreSet {
-	set := &ignoreSet{}
+// loadIgnoresInto appends the rules of rel's .gitignore/.ignore. It reads
+// through the root and keys each rule to rel, exactly like the direct search
+// does — the matcher (parseIgnore/ignored) is shared, so the two views of the
+// workspace cannot disagree. A file larger than the cap is not parsed at all and
+// is reported, because applying half of it would silently change what "search
+// the workspace" means.
+func (i *Inspection) loadIgnoresInto(ws *workspace, rules *[]ignoreRule, rel string) {
+	base := ""
+	if rel != "." {
+		base = rel
+	}
 	for _, name := range []string{".gitignore", ".ignore"} {
-		f, fi, err := i.ws.openFile(name)
+		p := name
+		if base != "" {
+			p = base + "/" + name
+		}
+		f, fi, err := ws.openFile(p)
 		if err != nil {
 			continue
 		}
@@ -655,48 +697,27 @@ func (i *Inspection) loadIgnore() *ignoreSet {
 		}
 		data, _ := io.ReadAll(io.LimitReader(f, inspectIgnoreMax))
 		f.Close()
-		for _, line := range strings.Split(string(data), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
-				continue
-			}
-			line = strings.TrimPrefix(line, "/")
-			switch {
-			case strings.HasSuffix(line, "/"):
-				set.prefixes = append(set.prefixes, strings.TrimSuffix(line, "/"))
-			case strings.HasPrefix(line, "*."):
-				set.suffixes = append(set.suffixes, strings.TrimPrefix(line, "*"))
-			default:
-				set.names = append(set.names, line)
-			}
-		}
+		*rules = append(*rules, parseIgnore(base, data)...)
 	}
-	return set
 }
 
-// match reports whether rel is ignored.
-func (s *ignoreSet) match(rel string) bool {
-	if s == nil {
-		return false
+// loadAncestorIgnores loads the root's rules and then every directory from the
+// workspace down to the search root: a rule in a parent still applies, and a
+// deeper file overrides it because ignored() is last-match-wins.
+func (i *Inspection) loadAncestorIgnores(ws *workspace, root string) []ignoreRule {
+	var rules []ignoreRule
+	i.loadIgnoresInto(ws, &rules, ".")
+	if root == "." {
+		return rules
 	}
-	for _, p := range s.prefixes {
-		if rel == p || strings.HasPrefix(rel, p+"/") {
-			return true
+	cur := "."
+	for _, part := range strings.Split(root, "/") {
+		if cur == "." {
+			cur = part
+		} else {
+			cur += "/" + part
 		}
+		i.loadIgnoresInto(ws, &rules, cur)
 	}
-	base := rel
-	if k := strings.LastIndexByte(rel, '/'); k >= 0 {
-		base = rel[k+1:]
-	}
-	for _, suf := range s.suffixes {
-		if strings.HasSuffix(base, suf) {
-			return true
-		}
-	}
-	for _, n := range s.names {
-		if rel == n || base == n {
-			return true
-		}
-	}
-	return false
+	return rules
 }

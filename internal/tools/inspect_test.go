@@ -479,3 +479,84 @@ func TestDirectReadWindowIsContiguous(t *testing.T) {
 		t.Fatalf("footer does not name the window: %q", res.Content[len(res.Content)-120:])
 	}
 }
+
+// The root is a per-execution resource, opened on demand: a refusal-only
+// inspection (no engine) must be constructible without touching the disk, and a
+// script that never inspects must not pay for a root.
+func TestInspectionOpensTheRootLazily(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.txt", "x\n")
+	in, err := NewInspection(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.RootOpened() {
+		t.Fatal("NewInspection opened the root")
+	}
+	if err := in.Close(); err != nil {
+		t.Fatalf("Close on an unopened inspection: %v", err)
+	}
+	if _, err := in.Read(context.Background(), json.RawMessage(`{"path":"a.txt"}`)); err != nil {
+		t.Fatalf("read after Close: %v", err)
+	}
+	if !in.RootOpened() {
+		t.Fatal("a read did not open the root")
+	}
+	in.Close()
+}
+
+// The nested path shares parseIgnore/ignored with the direct search, so the
+// cases the hand-rolled subset got wrong must now behave: a negation restores a
+// file, and a nested ignore file overrides its parent.
+func TestInspectSearchHonoursNegationAndNestedIgnores(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, ".gitignore", "*.log\n!keep.log\n")
+	writeFile(t, dir, "a.log", "needle\n")
+	writeFile(t, dir, "keep.log", "needle\n")
+	writeFile(t, dir, "sub/.gitignore", "secret.txt\n")
+	writeFile(t, dir, "sub/secret.txt", "needle\n")
+	writeFile(t, dir, "sub/open.txt", "needle\n")
+	in := newInspect(t, dir)
+
+	p, err := call[searchPayload](t, in.Search, `{"query":"needle"}`)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	got := map[string]bool{}
+	for _, m := range p.Matches {
+		got[m.Path] = true
+	}
+	if got["a.log"] {
+		t.Fatal("an ignored file was searched")
+	}
+	if !got["keep.log"] {
+		t.Fatal("a negated rule did not restore the file")
+	}
+	if got["sub/secret.txt"] {
+		t.Fatal("a nested .gitignore was not applied")
+	}
+	if !got["sub/open.txt"] {
+		t.Fatal("a nested ignore file hid an unrelated file")
+	}
+}
+
+// A directive directory rule still prunes the walk.
+func TestInspectSearchSkipsIgnoredDirectories(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, ".gitignore", "build/\n")
+	writeFile(t, dir, "build/gen.txt", "needle\n")
+	writeFile(t, dir, "src/real.txt", "needle\n")
+	in := newInspect(t, dir)
+	p, err := call[searchPayload](t, in.Search, `{"query":"needle"}`)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	for _, m := range p.Matches {
+		if strings.HasPrefix(m.Path, "build/") {
+			t.Fatalf("an ignored directory was searched: %s", m.Path)
+		}
+	}
+	if len(p.Matches) != 1 {
+		t.Fatalf("matches = %+v", p.Matches)
+	}
+}
