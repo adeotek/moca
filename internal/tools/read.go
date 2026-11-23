@@ -99,6 +99,7 @@ func (readTool) Run(_ context.Context, env *Env, input json.RawMessage) Result {
 	br := bufio.NewReaderSize(f, 64<<10)
 	var sb strings.Builder
 	lineNo, last, total := 0, offset-1, 0
+	budgetStopped := false
 	for {
 		line, more, rerr := readLine(br, readMaxLineLen)
 		if rerr != nil {
@@ -116,8 +117,13 @@ func (readTool) Run(_ context.Context, env *Env, input json.RawMessage) Result {
 			line += "[… line truncated]"
 		}
 		entry := fmt.Sprintf("%d|%s\n", lineNo, line)
-		if sb.Len()+len(entry) > readMaxChars && lineNo > offset {
-			continue // keep scanning to report the real total
+		if budgetStopped || (sb.Len()+len(entry) > readMaxChars && lineNo > offset) {
+			// The window stops at the FIRST row that does not fit: printing a
+			// later, shorter line would make the reported range non-contiguous
+			// and hide that the file was not read in order. The scan keeps going
+			// only to report the true total.
+			budgetStopped = true
+			continue
 		}
 		sb.WriteString(entry)
 		last = lineNo
@@ -131,6 +137,9 @@ func (readTool) Run(_ context.Context, env *Env, input json.RawMessage) Result {
 	footer := fmt.Sprintf("[lines %d-%d of %d]", offset, last, total)
 	if last < total {
 		footer = fmt.Sprintf("[lines %d-%d of %d — use offset=%d to continue, or search for what you need]", offset, last, total, last+1)
+	}
+	if budgetStopped {
+		footer = fmt.Sprintf("[lines %d-%d of %d — stopped at the %d-char window, use offset=%d to continue]", offset, last, total, readMaxChars, last+1)
 	}
 	sb.WriteString(footer)
 	return Result{Content: sb.String(), Summary: fmt.Sprintf("%s %d-%d/%d", a.Path, offset, last, total)}

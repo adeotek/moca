@@ -96,6 +96,11 @@ func TestWireToolsCaptureShape(t *testing.T) {
 // over-budget line with later lines still printed and a contiguous footer.
 // Task 3 changes exactly this case; pinning the shape here means the golden
 // cannot quietly be re-captured after the fix without that being visible.
+// TestDirectOutputPinsTheReadHole pins the fix that Task 3 makes to the direct
+// read window: the capture must stop at the first row that does not fit, report
+// the contiguous range it actually returned, and tell the caller where to
+// continue. Before the fix this case skipped the long line, printed the tail
+// anyway and claimed "[lines 1-30 of 30]".
 func TestDirectOutputPinsTheReadHole(t *testing.T) {
 	cases, err := DirectOutput()
 	if err != nil {
@@ -114,11 +119,14 @@ func TestDirectOutputPinsTheReadHole(t *testing.T) {
 		t.Fatal("line 25 fits the budget in the capture — the fixture no longer reproduces the hole")
 	}
 	for _, later := range []string{"26|tail line 26", "30|tail line 30"} {
-		if !strings.Contains(hole.Content, later) {
-			t.Fatalf("the capture lost %q: it no longer shows a later line after the hole", later)
+		if strings.Contains(hole.Content, later) {
+			t.Fatalf("the capture printed %q after the row that did not fit: the range is not contiguous", later)
 		}
 	}
-	if !strings.Contains(hole.Content, "[lines 1-30 of 30]") {
-		t.Fatal("the capture must show the pre-fix footer claiming a contiguous range")
+	if strings.Contains(hole.Content, "[lines 1-30 of 30]") {
+		t.Fatal("the capture still claims the whole file was returned")
+	}
+	if !strings.Contains(hole.Content, "stopped at the") || !strings.Contains(hole.Content, "use offset=25 to continue") {
+		t.Fatalf("the footer does not name the window and the continuation: %q", hole.Content[len(hole.Content)-100:])
 	}
 }
