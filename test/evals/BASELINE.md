@@ -1323,3 +1323,86 @@ Capture is a program, not a hand-edit: `go run ./test/evals/evalstats -prechange
 `-prechangeCheck` compares and names the first differing line. The arm is pinned by a test that mutates
 one byte and requires the check to fail. `run.sh --selftest` ends with `prechange-goldens` so the
 unbilled gate exercises it.
+
+## codemode v1 — Task 7 Stage A: the benefit pilot (**predeclared protocol**, recorded before the first trial)
+
+Written before any exploratory trial ran, so the confirmation cannot be shaped by what the exploration
+says. Approval: the owner approved Task 7 spending on 2026-11-23; the ceiling is **US$20 for Stage A
+only** (R67 — Stage B re-requests its own US$20; neither approval covers the other).
+
+**Instrument (frozen before the run).** Pilot binary `go build -tags codemodecarry -o /tmp/moca-carry
+./cmd/moca`, sha256 `014172b9d40109fb84a6…`; model `opencode-go/deepseek-v4.1-flash` in every config
+(`TestEvalConfigsPinTheCorpusModel`); arms `cm-off` (no codemode block — eight tools) and `cm-on`
+(`"codemode": {"enabled": true}` — nine), differing in exactly that key
+(`TestPilotArmsDifferOnlyInCodemode`); scenarios `sweep` and `sweep-search` with their shipped checkers;
+carry = the first outbound work request of process two, measured by the tagged hook; a missing
+observation fails the trial, an observed zero is kept as a number.
+
+**Exploratory.** 6 trials per arm per scenario (24 trials), `-j 1`, arms run in blocks (`cm-on` then
+`cm-off` — Stage B's interleaving control is not a Stage A requirement), `-cap 20`.
+
+**Predeclared confirmation.** If and only if the exploratory read shows a signal on a scenario, that
+scenario gets **10 trials per arm** (20 more), same binary, same configs, same rule, run once with no
+further peeking and no further protocol change. No confirmation runs on a scenario without an
+exploratory signal.
+
+**Ship rule (unchanged from the plan).** Per scenario, `-compare-carry base,cand` must show the carry
+ratio's **upper CI bound ≤ 0.75** *and* **≥512 tokens saved per trial**, with **no lost pass** and **no
+step increase**; adoption counts only if **≥ half** the treatment trials both adopted (`cmOk`) and
+passed the checker. Overall adoption is judged across the trials of a scenario, not per arm.
+
+**Reading rules.** No signal on either scenario ⇒ the feature stays unmerged and this section records
+that. A signal on one scenario only is reported as exactly that, not as a general result. Nothing here
+is compared with a pre-2026-11-23 label (the model boundary note above).
+
+### Stage A result — **no signal on either scenario; the feature stays unmerged**
+
+Run 2026-11-23, labels `cma-off` / `cma-on`, 6 trials per arm per scenario, `-j 1`, binary
+`/tmp/moca-carry` (sha256 `014172b9…`), model `opencode-go/deepseek-v4.1-flash`. Exploratory spend
+**US$0.0483** of the US$20 ceiling (on $0.0239 + off $0.0244).
+
+```
+go run ./test/evals/evalstats -compare-carry \
+  test/evals/results/cma-off.jsonl,test/evals/results/cma-on.jsonl
+```
+
+| scenario | carry off → on (mean) | ratio [95% CI] | saved tok [CI] | passes | steps | adopted & passed |
+|---|---|---|---|---|---|---|
+| `sweep` | 3 107 → 2 696 | 0.87 [0.77, 0.97] | 412 [77, 768] | 6→**5** | 7.5→8.2 | **1/6** |
+| `sweep-search` | 224 → 141 | 0.63 [0.45, 0.87] | 84 [24, 157] | 6→6 | 7.7→6.8 | **0/6** |
+| ∑ | — | 0.85 [0.75, 0.96] | 248 [70, 441] | 12→11 | 7.6→7.5 | 1/12 |
+
+`evalstats`' verdict line: **"worse — lost a pass (12→11 pairs passed)"**. Every leg of the ship rule
+fails on `sweep` (ratio hi 0.97 > 0.75, saving 412 < 512, lost a pass, steps up, adoption 17 % < half)
+and three of five on `sweep-search` (ratio hi 0.87 > 0.75, saving 84 < 512, adoption 0/6). Per the
+predeclared rules above: **no confirmation runs on a scenario without an exploratory signal, so none
+ran, and the feature stays unmerged.**
+
+### Why — the two facts that matter more than the ratio
+
+1. **The tool was barely used: 2 of 6 `sweep` trials tried it, 0 of 6 `sweep-search` trials.** The
+   `sweep-search` "ratio 0.63" is therefore not a codemode effect at all — nobody called the tool in
+   either arm; it is run-to-run variance on carries of ~150 tokens. With 17 % qualifying adoption and
+   n=6, the study cannot measure the feature's effect even if it has one.
+2. **Where it was used, the API shape cost more than it saved.** Trial `sweep.1-1` (the one clean
+   adoption) wrote three scripts that read all 12 manifests and filtered in-script, and carried the
+   **cheapest** history of the six (2 049 tokens vs a 3 107 control mean) — the mechanism works. Trial
+   `sweep.1-2` made **seven** `codemode` attempts, guessing the nested shapes one at a time
+   (`r.content`, `d.endsWith("/")` on `ls`, `e.kind !== "dir"`, `r.lines.filter(…)`), carried the
+   *largest* history of the six (3 327), and then failed the checker on a formatting slip. The prelude's
+   return shapes are not discoverable from the frozen description, so adoption is a coin-flip on
+   whether the model guesses right.
+3. **Total tokens did not move**: 12 197 → 12 158 on `sweep`, 5 864 → 5 871 on `sweep-search`. The
+   carry saving was spent elsewhere in the run (the same investigation, in more attempts), which is
+   what the near-identical totals say.
+
+### What would change the answer (not run; each needs its own approval)
+
+- **Make the shapes discoverable** — one line in the frozen description naming `read`→`lines{n,text}`,
+  `ls`→`entries{kind,name}`, `search`→`matches`; the failing trial is evidence this is the binding
+  constraint, and it is a description-only edit (a prompt-cache reset, not a schema change).
+- **Make adoption the primary endpoint** — predeclare N from an adoption-rate estimate (17 % observed
+  ⇒ detecting a 25 % carry win at that rate needs ~10× the trials this stage ran, still ≪ the ceiling),
+  and only then test the carry effect.
+- **A fixture `shell` cannot batch** — the control arm's `find`/`cat` one-liners already read several
+  manifests per call, which is why the ninth tool had so little to add on `sweep`.

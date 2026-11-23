@@ -34,8 +34,11 @@ func CheckTrialSession(path, prompt1, prompt2 string) error {
 		if e.Type != session.TypeMessage || e.Message == nil || e.Message.Role != llm.RoleUser {
 			continue
 		}
+		if e.Nudge != "" {
+			continue // moca's own nudge (§14), not a prompt the harness sent
+		}
 		if strings.TrimSpace(llm.TextOf(*e.Message)) == "" {
-			continue // a nudge-only or tool-result user message is not a prompt
+			continue // a tool-result-only user message is not a prompt
 		}
 		users = append(users, i)
 	}

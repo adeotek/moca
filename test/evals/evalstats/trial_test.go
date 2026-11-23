@@ -40,6 +40,37 @@ func trial(t *testing.T, turns ...[2]string) string {
 	return w.Path()
 }
 
+// A headless run that answers without touching a tool earns moca's action
+// nudge (§14). It is a user message in the transcript but not a prompt the
+// harness sent, so it must not read as a third turn -- while its own kind
+// still marks it as a nudge for attribution.
+func TestCheckTrialSessionIgnoresMocaNudges(t *testing.T) {
+	dir := t.TempDir()
+	w, err := session.Create(dir, session.Header{Workdir: "/tmp", StartedAt: time.Now()}, "nudged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendMsg := func(role llm.Role, text, nudge string) {
+		t.Helper()
+		if _, err := w.Append(session.Entry{Type: session.TypeMessage, Nudge: nudge, Message: &llm.Message{
+			Role: role, Content: []llm.ContentBlock{{Type: llm.BlockText, Text: text}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendMsg(llm.RoleUser, "first", "")
+	appendMsg(llm.RoleAssistant, "answer one", "")
+	appendMsg(llm.RoleUser, "follow up", "")
+	appendMsg(llm.RoleUser, "Your reply would end this run without a single tool call. ...", "action")
+	appendMsg(llm.RoleAssistant, "answer two", "")
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckTrialSession(w.Path(), "first", "follow up"); err != nil {
+		t.Fatalf("a nudged but correct trial was refused: %v", err)
+	}
+}
+
 func TestCheckTrialSessionAcceptsATwoTurnTrial(t *testing.T) {
 	path := trial(t, [2]string{"first", "answer one"}, [2]string{"follow up", "answer two"})
 	if err := CheckTrialSession(path, "first", "follow up"); err != nil {
