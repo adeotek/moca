@@ -226,6 +226,16 @@ func (a *Agent) Steer(text, typed string) {
 	a.mu.Unlock()
 }
 
+// admitNested is the codemode capability gate (D3): a nested call may start only
+// while no steering is pending. Taking the mutex is the point — Steer appends
+// under it, so the check cannot race a message that has just arrived. Run
+// cancellation is the context's job; the engine watches it.
+func (a *Agent) admitNested() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.steer) == 0
+}
+
 // PendingSteering is the number of queued steering messages not yet applied.
 func (a *Agent) PendingSteering() int {
 	a.mu.Lock()

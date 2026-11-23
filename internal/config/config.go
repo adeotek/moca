@@ -130,6 +130,7 @@ type Config struct {
 	// joins the MCP servers (§4, §10.5).
 	Permissions PermissionsConfig `json:"permissions"`
 	Skills      SkillsConfig      `json:"skills"`
+	Codemode    CodemodeConfig    `json:"codemode"`
 	Project     *ProjectConfig    `json:"-"`
 }
 
@@ -143,6 +144,71 @@ type SkillsConfig struct {
 	// is on by default; either layer can turn it off with false and no layer
 	// needs to turn it on — a project true is declarative, like SelfManaged's.
 	RecordNudge *bool `json:"recordNudge,omitempty"`
+}
+
+// CodemodeConfig is the nested-JavaScript tool's opt-in (SPECS §4/§11). Both
+// keys are *bool: absence is not an explicit false, and a trusted project's
+// true is declarative — it can warn, never enable.
+type CodemodeConfig struct {
+	Enabled *bool `json:"enabled,omitempty"`
+	Network *bool `json:"network,omitempty"`
+}
+
+// CodemodeState is the resolved codemode switch. Warning and Note are the
+// user-facing texts prepare() emits once per start/resume; both are empty when
+// the answer is the plain on/off. Network is only ever set when On is.
+type CodemodeState struct {
+	On      bool
+	Network bool
+	Warning string
+	Note    string
+}
+
+// ResolveCodemode mirrors ResolveSelfManagedSkills' precedence exactly (F20):
+// on only when the USER says true and a trusted project does not veto it; a
+// project true alone warns, including when the user explicitly said false; an
+// untrusted project contributes nothing. Network is resolved the same way, but
+// only while codemode is on — a project network key decides nothing while the
+// feature is off, and produces neither a warning nor a note.
+func ResolveCodemode(cfg Config) CodemodeState {
+	var projEnabled, projNetwork *bool
+	if cfg.Project != nil {
+		projEnabled, projNetwork = cfg.Project.Codemode.Enabled, cfg.Project.Codemode.Network
+	}
+	userEnabled, userNetwork := cfg.Codemode.Enabled, cfg.Codemode.Network
+	userOn := userEnabled != nil && *userEnabled
+
+	var st CodemodeState
+	switch {
+	case userOn && projEnabled != nil && !*projEnabled:
+		st.Note = "codemode is off in this project: its .moca/config.jsonc sets codemode.enabled false"
+		return st
+	case !userOn && projEnabled != nil && *projEnabled:
+		how := "does not enable it"
+		if userEnabled != nil {
+			how = "sets it false"
+		}
+		st.Warning = fmt.Sprintf("this project's .moca/config.jsonc sets codemode.enabled true, but your user config %s — codemode is off; "+
+			"set \"codemode\": {\"enabled\": true} in %s and restart moca to use it", how, ConfigFile())
+		return st
+	case !userOn:
+		return st
+	}
+	st.On = true
+
+	if userNetwork != nil && *userNetwork {
+		if projNetwork != nil && !*projNetwork {
+			st.Note = "codemode web access is off in this project: its .moca/config.jsonc sets codemode.network false"
+			return st
+		}
+		st.Network = true
+		return st
+	}
+	if projNetwork != nil && *projNetwork {
+		st.Warning = fmt.Sprintf("this project enables codemode web access, but only your user config can — "+
+			"set \"codemode\": {\"enabled\": true, \"network\": true} in %s and restart moca", ConfigFile())
+	}
+	return st
 }
 
 // SelfManagedState is the resolved skills.selfManaged switch (§3.3). Warning

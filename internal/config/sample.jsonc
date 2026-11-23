@@ -139,6 +139,12 @@
     // "recordNudge": true
   },
 
+  // Nested JavaScript tool (SPECS §11). OFF unless this is true: one read-only
+  // script over read/search/ls instead of many tool calls. `network: true` also
+  // admits web fetches inside a script. Both keys are opt-in — a trusted project
+  // file can veto them or declare them, never enable them.
+  // "codemode": { "enabled": true, "network": false },
+
   // Diagnostic log: ~/.local/state/moca/logs (MOCA_LOG overrides for one run).
   "log": { "level": "info" } // "info" | "debug" | "off"
 }

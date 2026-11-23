@@ -482,14 +482,14 @@ func kindOf(d os.DirEntry) string {
 // files, with every skip recorded as a reason rather than silently dropped.
 func (i *Inspection) Search(ctx context.Context, args json.RawMessage) (any, error) {
 	var a struct {
-		Query string `json:"query"`
-		Path  string `json:"path"`
+		Pattern string `json:"pattern"`
+		Path    string `json:"path"`
 	}
 	if r := decodeArgs(args, &a); r != nil {
 		return nil, r
 	}
-	if strings.TrimSpace(a.Query) == "" {
-		return nil, inspectErr("invalid_args", "query is required")
+	if strings.TrimSpace(a.Pattern) == "" {
+		return nil, inspectErr("invalid_args", "pattern is required")
 	}
 	if err := i.charge(); err != nil {
 		return nil, err
@@ -505,7 +505,7 @@ func (i *Inspection) Search(ctx context.Context, args json.RawMessage) (any, err
 	if err != nil {
 		return nil, err
 	}
-	needle := strings.ToLower(a.Query)
+	needle := strings.ToLower(a.Pattern)
 	rules := i.loadAncestorIgnores(ws, root)
 	payload := searchPayload{Matches: []searchMatch{}}
 	err = ws.walk(ctx, root, func(rel string, d os.DirEntry) bool {

@@ -32,6 +32,9 @@ type ProjectConfig struct {
 	// Skills may opt the repository out (selfManaged: false); a `true` is
 	// declarative and never enables the feature on its own (§4/§12).
 	Skills SkillsConfig `json:"skills"`
+	// Codemode may opt the repository out (enabled: false) or declare a
+	// want (true); the declared values warn, they never enable (SPECS §11).
+	Codemode CodemodeConfig `json:"codemode"`
 }
 
 // Mode is the project layer's default permission mode ("" when unset).

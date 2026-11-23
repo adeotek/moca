@@ -46,25 +46,49 @@ type CodemodeEngine interface {
 // NewPrelude and Execute — the prelude the model was promised and the
 // capabilities it actually gets cannot drift (R47/R38).
 type CodemodeHolder struct {
-	Engine  CodemodeEngine
-	Caps    codemode.ExecCaps
+	// Open constructs the engine on first use. It is lazy because creating the
+	// handle compiles no module and opens no root, and because a session whose
+	// artifact is missing must fail its first call, not its start.
+	Open func() (CodemodeEngine, error)
+	Caps codemode.ExecCaps
+
+	engine  CodemodeEngine
+	openErr error
 	prelude string
 	built   bool
+}
+
+// Engine resolves the engine once, memoizing both the success and the error.
+func (h *CodemodeHolder) Engine() (CodemodeEngine, error) {
+	if h.engine == nil && h.openErr == nil {
+		if h.Open == nil {
+			h.openErr = errors.New("codemode: no engine")
+		} else {
+			h.engine, h.openErr = h.Open()
+		}
+	}
+	return h.engine, h.openErr
 }
 
 // Prelude renders the prelude for this policy exactly once. It is the only
 // caller of NewPrelude, so the prelude the model was shown and the capabilities
 // Execute receives come from one immutable ExecCaps value (R38).
 func (h *CodemodeHolder) Prelude() string {
-	if !h.built && h.Engine != nil {
-		h.prelude = h.Engine.NewPrelude(h.Caps)
+	if !h.built {
 		h.built = true
+		if eng, err := h.Engine(); err == nil {
+			h.prelude = eng.NewPrelude(h.Caps)
+		}
 	}
 	return h.prelude
 }
 
 type codemodeTool struct {
 	holder *CodemodeHolder
+	// variant is the stored prelude variant for a refusal-only tool, which has
+	// no holder to read it from: a resumed session whose frozen prompt promises
+	// codemode still sees the spec that matches that prompt.
+	variant bool
 }
 
 // NewCodemode returns a codemode tool that runs scripts with holder's engine and
@@ -72,8 +96,10 @@ type codemodeTool struct {
 func NewCodemode(holder *CodemodeHolder) Tool { return codemodeTool{holder: holder} }
 
 // NewCodemodeRefusal returns the same tool with no engine: every call is
-// refused, nothing is opened, and the spec is byte-identical.
-func NewCodemodeRefusal() Tool { return codemodeTool{} }
+// refused, nothing is opened, and the spec matches the stored prompt variant.
+func NewCodemodeRefusal(networkPrelude bool) Tool {
+	return codemodeTool{variant: networkPrelude}
+}
 
 // capability is one entry of the guest's table. The table is the whole
 // security boundary on the workspace side: a name that is not in it cannot be
@@ -95,32 +121,45 @@ type bridge struct {
 	reasons []string
 }
 
-// codemodeSpec is the tool's whole spec. It is the F17 form: name, description
-// and schema together, because a description edit resets the prompt cache for
-// every enabled session and the size budget (512 bytes) applies to the whole
-// thing.
-func codemodeSpec() llm.ToolSpec {
+// codemodeSpec is the tool's whole spec in the F17 form: name, description and
+// schema together, because a description edit resets the prompt cache for every
+// enabled session. Both descriptions are frozen and measured (453 B workspace,
+// 539 B network against the 512/640 budgets); the schema is identical in both
+// variants, so only the description moves.
+func codemodeSpec(network bool) llm.ToolSpec {
+	desc := "Run read-only workspace JS. Await tools.read({path}) or tools.read({next}), " +
+		"tools.search({pattern}), tools.ls({path}). Return your answer; bare expressions return null."
+	if network {
+		desc = "Run read-only workspace JS. Await tools.read({path}) or tools.read({next}), " +
+			"tools.search({pattern}), tools.ls({path}); with network enabled also await " +
+			"tools.web.fetch({url}) and tools.web.search({query}). Return your answer; bare expressions return null."
+	}
 	return llm.ToolSpec{
-		Name: "codemode",
-		Description: "Run JavaScript to inspect the workspace in one call. " +
-			"tools.read({path,offset?,limit?}), tools.search({query,path?}), tools.ls({path}) " +
-			"return {value, complete, reasons}; text(x) shows output; the final value is returned.",
+		Name:        "codemode",
+		Description: desc,
 		Schema: json.RawMessage(`{"type":"object","properties":{` +
-			`"code":{"type":"string","description":"JavaScript body"},` +
-			`"timeout":{"type":"integer","minimum":1,"maximum":30}},` +
+			`"code":{"type":"string"},` +
+			`"timeoutSeconds":{"type":"integer","minimum":1,"maximum":30,` +
+			`"description":"Guest deadline; default 10s. Host I/O may finish later."}},` +
 			`"required":["code"],"additionalProperties":false}`),
 	}
 }
 
-func (codemodeTool) Spec() llm.ToolSpec { return codemodeSpec() }
+func (t codemodeTool) Spec() llm.ToolSpec {
+	v := t.variant
+	if t.holder != nil {
+		v = t.holder.Caps.NetworkPrelude
+	}
+	return codemodeSpec(v)
+}
 
 // Run runs one script. Admission is checked before the call and again after it
 // returns: a run that was admitted may still lose its annotation while the
 // script is executing, and the agent needs to know that before it summarises.
 func (t codemodeTool) Run(ctx context.Context, env *Env, input json.RawMessage) Result {
 	var a struct {
-		Code    string `json:"code"`
-		Timeout *int   `json:"timeout"`
+		Code           string `json:"code"`
+		TimeoutSeconds *int   `json:"timeoutSeconds"`
 	}
 	if r := decodeArgs(input, &a); r != nil {
 		return Result{Content: "codemode: " + r.Message, IsError: true, Summary: "codemode (invalid)"}
@@ -129,7 +168,11 @@ func (t codemodeTool) Run(ctx context.Context, env *Env, input json.RawMessage) 
 	if admit == nil {
 		admit = func() bool { return true }
 	}
-	if t.holder == nil || t.holder.Engine == nil {
+	var eng CodemodeEngine
+	if t.holder != nil {
+		eng, _ = t.holder.Engine()
+	}
+	if eng == nil {
 		return Result{
 			Content: "codemode is not enabled in this session; use read, search and ls directly.",
 			IsError: true,
@@ -145,7 +188,7 @@ func (t codemodeTool) Run(ctx context.Context, env *Env, input json.RawMessage) 
 	br := &bridge{in: mustInspection(env.Root), caps: workspaceCapabilities()}
 	defer br.in.Close()
 
-	res, cerr := t.holder.Engine.Execute(ctx, t.holder.Caps, a.Code, br.dispatch, timeoutOf(a.Timeout))
+	res, cerr := eng.Execute(ctx, t.holder.Caps, a.Code, br.dispatch, timeoutOf(a.TimeoutSeconds))
 	steered := !admit() || res.Steered
 
 	content, isErr := br.render(res, cerr)

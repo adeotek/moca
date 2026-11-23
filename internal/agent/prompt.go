@@ -31,6 +31,11 @@ type PromptInput struct {
 	// SelfManaged carries the self-managed skills policy (nil = the feature
 	// is off for this session, and the prompt carries nothing about it).
 	SelfManaged *SelfManagedInput
+	// Codemode/CodemodeNetwork select the batch-rule sentence's variant: off
+	// renders nothing at all, so the prompt stays byte-identical when the tool
+	// is absent. TestBuildSystemPromptCodemodeBudget pins both lengths.
+	Codemode        bool
+	CodemodeNetwork bool
 }
 
 // SelfManagedInput carries the self-managed skills policy into the system
@@ -89,7 +94,23 @@ func renderPrompt(templ string, in PromptInput, verify, rtk string) string {
 		"{{config_dir}}", in.ConfigDir,
 		"{{prompts_dir}}", in.PromptsDir,
 		"{{skills_dir}}", in.SkillsDir,
+		"{{codemode}}", codemodeHint(in),
 	).Replace(templ)
+}
+
+// codemodeHint is the batch-rule sentence's codemode variant (v13 §Policy): the
+// first line is today's text and the addition is one sentence. The network
+// variant names the web globals and is exactly four bytes longer.
+func codemodeHint(in PromptInput) string {
+	if !in.Codemode {
+		return ""
+	}
+	list := "read/search/ls"
+	if in.CodemodeNetwork {
+		list = "read/search/ls/web"
+	}
+	return " Use `codemode` for a multi-file join or to filter a large result (one read-only JS program over " +
+		list + "); ordinary dependent calls still need separate turns."
 }
 
 // BuildSystemPrompt renders the two templates and the session's appended

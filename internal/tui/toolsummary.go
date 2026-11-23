@@ -20,6 +20,7 @@ func toolArgSummary(call llm.ToolCall) string {
 		Action  string `json:"action"`
 		Query   string `json:"query"`
 		URL     string `json:"url"`
+		Code    string `json:"code"`
 	}
 	if json.Unmarshal(call.Input, &a) != nil {
 		return ""
@@ -45,6 +46,12 @@ func toolArgSummary(call llm.ToolCall) string {
 			s = a.URL
 		} else {
 			s = a.Query
+		}
+	case "codemode":
+		// The script's own first line says more than the tool name does.
+		s = firstLineOf(a.Code)
+		if s == "" {
+			s = "script"
 		}
 	case "mcp":
 		switch {

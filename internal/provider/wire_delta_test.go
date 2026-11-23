@@ -50,8 +50,19 @@ func wireTools(t *testing.T, req llm.Request) []string {
 }
 
 func TestAnthropicWireDeltaNoCache(t *testing.T) {
+	for _, variant := range []struct {
+		name string
+		net  bool
+	}{{"workspace", false}, {"network", true}} {
+		t.Run(variant.name, func(t *testing.T) {
+			testAnthropicWireDeltaNoCache(t, variant.net)
+		})
+	}
+}
+
+func testAnthropicWireDeltaNoCache(t *testing.T, network bool) {
 	base := builtins(t)
-	nine := append(append([]llm.ToolSpec(nil), base...), tools.NewCodemodeRefusal().Spec())
+	nine := append(append([]llm.ToolSpec(nil), base...), tools.NewCodemodeRefusal(network).Spec())
 
 	with8 := wireTools(t, llm.Request{Model: "m", MaxTokens: 1, Tools: base, NoCacheWrite: true})
 	with9 := wireTools(t, llm.Request{Model: "m", MaxTokens: 1, Tools: nine, NoCacheWrite: true})
@@ -75,8 +86,19 @@ func TestAnthropicWireDeltaNoCache(t *testing.T) {
 }
 
 func TestAnthropicWireDeltaMovesTheBreakpoint(t *testing.T) {
+	for _, variant := range []struct {
+		name string
+		net  bool
+	}{{"workspace", false}, {"network", true}} {
+		t.Run(variant.name, func(t *testing.T) {
+			testAnthropicWireDeltaMovesTheBreakpoint(t, variant.net)
+		})
+	}
+}
+
+func testAnthropicWireDeltaMovesTheBreakpoint(t *testing.T, network bool) {
 	base := builtins(t)
-	nine := append(append([]llm.ToolSpec(nil), base...), tools.NewCodemodeRefusal().Spec())
+	nine := append(append([]llm.ToolSpec(nil), base...), tools.NewCodemodeRefusal(network).Spec())
 
 	with8 := wireTools(t, llm.Request{Model: "m", MaxTokens: 1, Tools: base})
 	with9 := wireTools(t, llm.Request{Model: "m", MaxTokens: 1, Tools: nine})

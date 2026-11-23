@@ -195,7 +195,7 @@ func TestFilterSkillsDropsSeededSkillsWithoutTheirCLI(t *testing.T) {
 // used (a dead slot is silent debt).
 func TestPromptTemplateSlots(t *testing.T) {
 	known := []string{"{{workdir}}", "{{os}}", "{{arch}}", "{{date}}", "{{git}}", "{{verify}}", "{{rtk}}", "{{version}}",
-		"{{config_dir}}", "{{prompts_dir}}", "{{skills_dir}}"}
+		"{{config_dir}}", "{{prompts_dir}}", "{{skills_dir}}", "{{codemode}}"}
 	re := regexp.MustCompile(`\{\{[a-z_-]+\}\}`)
 	used := map[string]bool{}
 	for _, templ := range []string{promptTemplate, envTemplate} {

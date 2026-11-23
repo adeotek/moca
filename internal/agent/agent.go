@@ -22,6 +22,18 @@ import (
 	"github.com/adeotek/moca/internal/tools"
 )
 
+// batchHasCodemode reports whether the batch issued a codemode call. It gates
+// the early steering delivery (R64): without it an ordinary batch with queued
+// steering would change today's order.
+func batchHasCodemode(calls []llm.ToolCall) bool {
+	for _, c := range calls {
+		if c.Name == "codemode" {
+			return true
+		}
+	}
+	return false
+}
+
 const wrapUpText = "You have reached the step limit for this run. Do not call tools. " +
 	"Summarize what you did, what remains, and how to continue."
 
@@ -231,6 +243,12 @@ type Agent struct {
 }
 
 func New(o Options) (*Agent, error) {
+	// F24: nil Admit means admit, normalized here so every batch path — and a
+	// bare constructor used by resume or a test — can call it unconditionally.
+	// build() replaces it with a.admitNested once the agent exists.
+	if o.Env != nil && o.Env.Admit == nil {
+		o.Env.Admit = func() bool { return true }
+	}
 	a := &Agent{opts: o, entries: o.Prior}
 	// One Agent is one session: the "allow for this session" set lives in
 	// this wrapper, so /clear and /resume (a new Agent) start empty and
@@ -881,6 +899,7 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 			}
 			return Outcome{Text: llm.TextOf(resp.Message)}, nil
 		}
+		steeredInBatch := false
 		for _, call := range calls {
 			if ctx.Err() != nil {
 				a.abort(session.AbortedByUser)
@@ -894,6 +913,7 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 			} else {
 				r = a.opts.Tools.Run(ctx, a.opts.Env, call)
 			}
+			steeredInBatch = steeredInBatch || r.Steered
 			if err := a.result(call, r); err != nil {
 				return Outcome{}, err
 			}
@@ -901,6 +921,17 @@ func (a *Agent) run(ctx context.Context, prompt string, o RunOpts) (Outcome, err
 		if ctx.Err() != nil {
 			a.abort(session.AbortedByUser)
 			return Outcome{}, ctx.Err()
+		}
+		// R26/R64: in a batch that contains a codemode call, pending or observed
+		// steering is delivered before the repeat-stop can end the run — a
+		// steered codemode call with the stop armed used to lose the message
+		// entirely. Ordinary batches keep today's order (wrap-up first), which
+		// is why batchHasCodemode is part of the trigger and not only of the
+		// skip logic.
+		if batchHasCodemode(calls) && (steeredInBatch || a.PendingSteering() > 0) {
+			if _, err := a.applySteering(); err != nil {
+				return Outcome{}, err
+			}
 		}
 		if a.opts.Env.MaxRepeat >= tools.RepeatStopAt {
 			a.emit(Warning{fmt.Sprintf("run stopped: the same failing call repeated %d times", a.opts.Env.MaxRepeat)})

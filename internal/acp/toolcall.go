@@ -15,7 +15,7 @@ import (
 // editor shows it, the model already has the full result.
 const outputCap = 8 << 10
 
-// toolInput is the union of the eight frozen tools' input fields moca maps.
+// toolInput is the union of the nine tools' input fields moca maps.
 type toolInput struct {
 	Path      string  `json:"path"`
 	Content   *string `json:"content"`
@@ -29,11 +29,12 @@ type toolInput struct {
 	Action    string  `json:"action"`
 	Server    string  `json:"server"`
 	Tool      string  `json:"tool"`
+	Code      string  `json:"code"`
 }
 
 var toolKinds = map[string]string{
 	"read": "read", "write": "edit", "edit": "edit", "shell": "execute",
-	"search": "search", "ls": "search", "web": "fetch",
+	"search": "search", "ls": "search", "web": "fetch", "codemode": "execute",
 }
 
 func toolKind(name string) string {
@@ -81,6 +82,12 @@ func toolTitle(name string, in toolInput, ok bool) string {
 			return "search " + in.Query
 		}
 		return "fetch " + in.URL
+	case "codemode":
+		line, _, _ := strings.Cut(in.Code, "\n")
+		if line = strings.TrimSpace(line); line != "" {
+			return "codemode " + line
+		}
+		return "codemode"
 	case "mcp":
 		if in.Action == "call" {
 			return fmt.Sprintf("mcp %s/%s", in.Server, in.Tool)

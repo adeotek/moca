@@ -51,7 +51,7 @@ func newEnv(t *testing.T) (*Env, string) {
 // sent on every request and a description edit resets the prompt cache.
 func TestCodemodeSpec(t *testing.T) {
 	const golden = "testdata/codemode-schema.golden.json"
-	spec := codemodeSpec()
+	spec := codemodeSpec(false)
 	raw, err := json.Marshal(spec)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -80,8 +80,8 @@ func TestCodemodeSpec(t *testing.T) {
 // The refusal-only factory ships the same bytes: a session without codemode must
 // not see a different tool list.
 func TestCodemodeRefusalHasTheSameSpec(t *testing.T) {
-	a, _ := json.Marshal(NewCodemodeRefusal().Spec())
-	b, _ := json.Marshal(codemodeSpec())
+	a, _ := json.Marshal(NewCodemodeRefusal(false).Spec())
+	b, _ := json.Marshal(codemodeSpec(false))
 	if string(a) != string(b) {
 		t.Fatalf("refusal spec differs:\n%s\n%s", a, b)
 	}
@@ -135,7 +135,7 @@ func TestCodemodeDispatchRefusesUnknownNames(t *testing.T) {
 func TestCodemodeNilAdmitAdmits(t *testing.T) {
 	env, _ := newEnv(t)
 	eng := &fakeEngine{result: codemode.Result{Value: json.RawMessage(`42`)}}
-	tool := NewCodemode(&CodemodeHolder{Engine: eng})
+	tool := NewCodemode(&CodemodeHolder{Open: func() (CodemodeEngine, error) { return eng, nil }})
 	res := tool.Run(context.Background(), env, json.RawMessage(`{"code":"1+1"}`))
 	if res.IsError || res.Steered {
 		t.Fatalf("nil Admit refused the call: %+v", res)
@@ -149,7 +149,7 @@ func TestCodemodeNotAdmittedDoesNotRun(t *testing.T) {
 	env, _ := newEnv(t)
 	env.Admit = func() bool { return false }
 	eng := &fakeEngine{}
-	res := NewCodemode(&CodemodeHolder{Engine: eng}).Run(context.Background(), env, json.RawMessage(`{"code":"1+1"}`))
+	res := NewCodemode(&CodemodeHolder{Open: func() (CodemodeEngine, error) { return eng, nil }}).Run(context.Background(), env, json.RawMessage(`{"code":"1+1"}`))
 	if !res.Steered {
 		t.Fatal("a refused admission did not set Steered")
 	}
@@ -165,7 +165,7 @@ func TestCodemodeSteeredAfterExecute(t *testing.T) {
 	calls := 0
 	env.Admit = func() bool { calls++; return calls == 1 }
 	eng := &fakeEngine{result: codemode.Result{Value: json.RawMessage(`1`)}}
-	res := NewCodemode(&CodemodeHolder{Engine: eng}).Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
+	res := NewCodemode(&CodemodeHolder{Open: func() (CodemodeEngine, error) { return eng, nil }}).Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
 	if !res.Steered {
 		t.Fatal("admission lost mid-call was not reported")
 	}
@@ -184,7 +184,7 @@ func TestCodemodeTimeoutKeepsAcceptedText(t *testing.T) {
 		result: codemode.Result{Texts: []string{"partial result"}},
 		err:    &codemode.CallError{Class: "timeout", Message: "the script exceeded its deadline"},
 	}
-	res := NewCodemode(&CodemodeHolder{Engine: eng}).Run(context.Background(), env, json.RawMessage(`{"code":"while(1){}"}`))
+	res := NewCodemode(&CodemodeHolder{Open: func() (CodemodeEngine, error) { return eng, nil }}).Run(context.Background(), env, json.RawMessage(`{"code":"while(1){}"}`))
 	if !res.IsError {
 		t.Fatal("a timeout was reported as success")
 	}
@@ -203,7 +203,7 @@ func TestCodemodeClampsLongOutput(t *testing.T) {
 		texts = append(texts, strings.Repeat("x", 100))
 	}
 	eng := &fakeEngine{result: codemode.Result{Texts: texts, Value: json.RawMessage(`{"k":"` + strings.Repeat("v", 5000) + `"}`)}}
-	res := NewCodemode(&CodemodeHolder{Engine: eng}).Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
+	res := NewCodemode(&CodemodeHolder{Open: func() (CodemodeEngine, error) { return eng, nil }}).Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
 	if n := utf8.RuneCountInString(res.Content); n > codemodeResultMax+len("…[truncated]") {
 		t.Fatalf("result is %d runes, cap is %d", n, codemodeResultMax)
 	}
@@ -216,12 +216,12 @@ func TestCodemodeClampsLongOutput(t *testing.T) {
 func TestCodemodeLedgerOnlyWhenItMatters(t *testing.T) {
 	env, _ := newEnv(t)
 	clean := &fakeEngine{result: codemode.Result{Value: json.RawMessage(`1`)}}
-	res := NewCodemode(&CodemodeHolder{Engine: clean}).Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
+	res := NewCodemode(&CodemodeHolder{Open: func() (CodemodeEngine, error) { return clean, nil }}).Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
 	if strings.Contains(res.Content, "[codemode:") {
 		t.Fatalf("a clean run carried a ledger: %q", res.Content)
 	}
 	failed := &fakeEngine{err: &codemode.CallError{Class: "script", Message: "boom"}}
-	res = NewCodemode(&CodemodeHolder{Engine: failed}).Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
+	res = NewCodemode(&CodemodeHolder{Open: func() (CodemodeEngine, error) { return failed, nil }}).Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
 	if !strings.Contains(res.Content, "[codemode:") {
 		t.Fatalf("a failed run has no ledger: %q", res.Content)
 	}
@@ -241,7 +241,7 @@ func TestCodemodeAsksNothingSpillsNothingAndRecordsNoRead(t *testing.T) {
 		return Deny
 	}
 	eng := &fakeEngine{result: codemode.Result{Value: json.RawMessage(`1`)}}
-	NewCodemode(&CodemodeHolder{Engine: eng}).Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
+	NewCodemode(&CodemodeHolder{Open: func() (CodemodeEngine, error) { return eng, nil }}).Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
 
 	// The bridge the adapter builds is the real dispatch path; exercise it
 	// directly so the assertions are about that code and not a stub.
@@ -270,7 +270,7 @@ func TestCodemodeSameCapsForPreludeAndExecute(t *testing.T) {
 	env, _ := newEnv(t)
 	eng := &fakeEngine{result: codemode.Result{Value: json.RawMessage(`1`)}}
 	caps := codemode.ExecCaps{NetworkPrelude: true, Network: false}
-	holder := &CodemodeHolder{Engine: eng, Caps: caps}
+	holder := &CodemodeHolder{Open: func() (CodemodeEngine, error) { return eng, nil }, Caps: caps}
 	tool := NewCodemode(holder)
 	if p := holder.Prelude(); p == "" {
 		t.Fatal("no prelude")
@@ -291,5 +291,32 @@ func TestCodemodeSameCapsForPreludeAndExecute(t *testing.T) {
 	}
 	if eng.preludes != 2 {
 		t.Fatalf("preludes = %d", eng.preludes)
+	}
+}
+
+// The network variant is the same schema with the frozen longer description: a
+// second golden, because a schema-only fixture would byte-duplicate the first.
+func TestCodemodeWebSpec(t *testing.T) {
+	const golden = "testdata/codemode-web-schema.golden.json"
+	spec := codemodeSpec(true)
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	raw = append(raw, '\n')
+	if *update {
+		if err := os.WriteFile(golden, raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("no golden (run with -update): %v", err)
+	}
+	if string(raw) != string(want) {
+		t.Fatalf("network spec changed:\n got %s\nwant %s", raw, want)
+	}
+	if n := len(raw); n > 640 {
+		t.Fatalf("network whole spec is %d bytes, budget is 640", n)
 	}
 }

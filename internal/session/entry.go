@@ -55,6 +55,14 @@ type Header struct {
 	// stored prompt, whose text embeds an absolute path (a moved repo or a
 	// changed symlink layout would make the probe lie) — M7.
 	SelfManagedSkills bool `json:"selfManagedSkills,omitempty"`
+	// Codemode records that the session's frozen prompt and tool list carry
+	// the codemode tool, and CodemodeNetwork that they carry the network
+	// variant. Resume reads them back instead of re-resolving: the stored
+	// prompt selects the spec and the prelude, the current policy only decides
+	// whether web is admitted now (SPECS §11). Both are bool so legacy headers
+	// decode to false — a session that never had the tool.
+	Codemode        bool `json:"codemode,omitempty"`
+	CodemodeNetwork bool `json:"codemodeNetwork,omitempty"`
 	// SpillDir is the session-scoped overflow directory admitted to the jail.
 	// It is chosen before the header and reused on resume; old headers have
 	// none and use a degraded stub for their pointers.

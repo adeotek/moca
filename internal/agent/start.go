@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/adeotek/moca/internal/codemode"
 	"github.com/adeotek/moca/internal/config"
 	"github.com/adeotek/moca/internal/llm"
 	"github.com/adeotek/moca/internal/mcp"
@@ -92,6 +93,10 @@ type setup struct {
 	// resolved. Start's block, the header field and hygiene read it; build()
 	// adds the resume rule on top.
 	smOn bool
+	// cm is the resolved codemode switch (SPECS §11), resolved once here like
+	// sm. Start stamps the header from it and build() registers the ninth
+	// adapter; its Warning/Note were emitted above.
+	cm config.CodemodeState
 }
 
 // effectiveConfig is o.Config as a session over o runs it: the --model
@@ -192,6 +197,15 @@ func prepare(o StartOptions, jailRoot string, applyHygiene bool, spillDir string
 			emit(Note{Text: sm.Note})
 		}
 	}
+	cm := config.ResolveCodemode(cfg)
+	if o.Trusted && emit != nil {
+		if cm.Warning != "" {
+			emit(Warning{Text: cm.Warning})
+		}
+		if cm.Note != "" {
+			emit(Note{Text: cm.Note})
+		}
+	}
 	// The dir the feature writes into, resolved by the jail's own resolver so
 	// a symlinked workdir, .moca or .moca/skills resolves exactly as a write
 	// target would — never filepath.Join(jailRoot, ".moca", "skills").
@@ -270,7 +284,7 @@ func prepare(o StartOptions, jailRoot string, applyHygiene bool, spillDir string
 		cfg.MCP.IdleTimeout = projMCP.IdleTimeout
 	}
 	return &setup{cfg: cfg, reg: reg, builtinDir: builtinDir, jail: jail, spillDir: spillDir, skills: sk, skillDirs: skillDirs,
-		sm: sm, skillDir: skillDir, skillDirErr: skillDirErr, sessionDate: time.Now(), smOn: smOn}, nil
+		sm: sm, skillDir: skillDir, skillDirErr: skillDirErr, sessionDate: time.Now(), smOn: smOn, cm: cm}, nil
 }
 
 // hygieneSummary renders one startup warning for what the hygiene pass did
@@ -480,6 +494,22 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 		mgr = mcp.NewManager(cfg.MCP.Servers, time.Duration(cfg.MCP.IdleTimeout)*time.Second, ix, mcp.Options{BaseEnv: os.Environ()})
 		reg.Register(mcp.NewTool(mgr, cfg.MCP.Servers))
 	}
+	// codemode (SPECS §11): the stored header owns the spec and the prelude, the
+	// current policy owns admission. A fresh session stamps both from the
+	// resolver; a resumed one keeps what its frozen prompt promised — including
+	// a refusal-only tool when the switch has since gone off, because removing
+	// the tool would contradict the prompt the model is reading.
+	var hadCodemode, storedNetwork bool
+	if resumed && prior[0].Session != nil {
+		hadCodemode, storedNetwork = prior[0].Session.Codemode, prior[0].Session.CodemodeNetwork
+	}
+	plan := planCodemode(resumed, hadCodemode, storedNetwork, st.cm)
+	switch {
+	case plan.refusal:
+		reg.Register(tools.NewCodemodeRefusal(plan.preludeNetwork))
+	case plan.present:
+		reg.Register(tools.NewCodemode(codemodeHolder(plan.preludeNetwork, plan.admittedNetwork)))
+	}
 	a, err := New(Options{Config: cfg, Providers: st.reg, Tools: reg, Env: env,
 		Session: w, Snapshots: snaps, System: system, Model: model, Effort: effort, Emit: o.Emit, Prior: prior, MCP: mgr,
 		Headless: o.Headless})
@@ -489,6 +519,7 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	// The mode and plan never cross: plan rides only on default (a plan
 	// run at default even when the resolved mode is wider — the TUI's
 	// SetPlan-to-plan lands there the same way).
+	a.opts.Env.Admit = a.admitNested // D3: the nested capability gate, from here on
 	a.skills, a.skillDirs = st.skills, st.skillDirs
 	a.applyMode(o.mode())
 	if o.Plan {
@@ -668,7 +699,8 @@ func Start(o StartOptions) (*Agent, error) {
 	system := BuildSystemPrompt(PromptInput{Workdir: jail.Root(), OS: osName, Arch: arch, Verify: verify, VerifySource: verifySrc,
 		Date: time.Now().Format("2006-01-02"), Git: GitState(jail.Root()), Version: config.Version,
 		ConfigDir: config.ConfigDir(), PromptsDir: config.PromptsDir(), SkillsDir: filepath.Join(config.ConfigDir(), "skills"),
-		RTK: toolOnPath("rtk"), Skills: st.skills, Servers: servers, Instructions: instr, SelfManaged: selfManaged})
+		RTK: toolOnPath("rtk"), Skills: st.skills, Servers: servers, Instructions: instr, SelfManaged: selfManaged,
+		Codemode: st.cm.On, CodemodeNetwork: st.cm.On && st.cm.Network})
 
 	session.Prune(filepath.Join(config.DataDir(), "snapshot"), cfg.RetentionDays())
 	pruneOverflow(cfg.RetentionDays())
@@ -684,7 +716,8 @@ func Start(o StartOptions) (*Agent, error) {
 	h := session.Header{
 		Workdir: jail.Root(), Provider: m.Provider, Model: cfg.Model, Effort: string(effort),
 		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.mode() == ModeYolo, Mode: string(o.mode()),
-		SelfManagedSkills: selfManaged != nil, SpillDir: st.spillDir}
+		SelfManagedSkills: selfManaged != nil, SpillDir: st.spillDir,
+		Codemode: st.cm.On, CodemodeNetwork: st.cm.On && st.cm.Network}
 	var w *session.Writer
 	if o.DeferSession {
 		w, err = session.CreateLazy(filepath.Join(config.DataDir(), "sessions"), h, slug)
@@ -845,4 +878,46 @@ func refusingAutoGuard(dir string) func(abs, rel string, data []byte) error {
 func isAutoSkill(data []byte, dirName string) bool {
 	f, err := skills.ParseSkill(data, dirName)
 	return err == nil && f.Auto
+}
+
+// codemodePlan is the tool-list decision for one start or resume (SPECS §11's
+// session table). The stored header owns the spec and the prelude variant, the
+// current policy owns admission — and a resumed session whose header had the
+// tool keeps it even when the switch is off now, as a refusal-only factory,
+// because its frozen prompt still promises it.
+type codemodePlan struct {
+	present         bool
+	refusal         bool
+	preludeNetwork  bool
+	admittedNetwork bool
+}
+
+func planCodemode(resumed, hadCodemode, storedNetwork bool, cm config.CodemodeState) codemodePlan {
+	if !resumed {
+		if !cm.On {
+			return codemodePlan{}
+		}
+		return codemodePlan{present: true, preludeNetwork: cm.Network, admittedNetwork: cm.Network}
+	}
+	if !hadCodemode {
+		return codemodePlan{} // never retroactive
+	}
+	return codemodePlan{
+		present: true,
+		refusal: !cm.On,
+		// A resumed network-header session with the switch off is {true,false}:
+		// the network spec is what its prompt shows, and web is refused.
+		preludeNetwork:  storedNetwork,
+		admittedNetwork: storedNetwork && cm.Network,
+	}
+}
+
+// codemodeHolder builds the {engine, caps} holder for one effective policy. The
+// engine is lazy: constructing the holder compiles no module and opens no root,
+// so a session that never calls codemode pays nothing for having it.
+func codemodeHolder(preludeNetwork, admittedNetwork bool) *tools.CodemodeHolder {
+	return &tools.CodemodeHolder{
+		Open: func() (tools.CodemodeEngine, error) { return codemode.DefaultEngine(), nil },
+		Caps: codemode.ExecCaps{NetworkPrelude: preludeNetwork, Network: admittedNetwork},
+	}
 }

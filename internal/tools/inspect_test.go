@@ -388,7 +388,7 @@ func TestInspectSearchFindsAndSkips(t *testing.T) {
 	writeFile(t, dir, ".gitignore", "*.log\n")
 	in := newInspect(t, dir)
 
-	p, err := call[searchPayload](t, in.Search, `{"query":"needle"}`)
+	p, err := call[searchPayload](t, in.Search, `{"pattern":"needle"}`)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestInspectSearchCapsHits(t *testing.T) {
 	}
 	writeFile(t, dir, "many.txt", sb.String())
 	in := newInspect(t, dir)
-	p, err := call[searchPayload](t, in.Search, `{"query":"needle"}`)
+	p, err := call[searchPayload](t, in.Search, `{"pattern":"needle"}`)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -425,7 +425,7 @@ func TestInspectSearchSkipsOversizedIgnore(t *testing.T) {
 	writeFile(t, dir, "keep.txt", "needle\n")
 	writeFile(t, dir, ".gitignore", strings.Repeat("*.log\n", (inspectIgnoreMax/6)+10))
 	in := newInspect(t, dir)
-	p, err := call[searchPayload](t, in.Search, `{"query":"needle"}`)
+	p, err := call[searchPayload](t, in.Search, `{"pattern":"needle"}`)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestInspectSearchCancelled(t *testing.T) {
 	in := newInspect(t, dir)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancelled before the walk starts
-	_, err := in.Search(ctx, json.RawMessage(`{"query":"needle"}`))
+	_, err := in.Search(ctx, json.RawMessage(`{"pattern":"needle"}`))
 	var ie *InspectError
 	if !errors.As(err, &ie) || ie.Class != "cancelled" {
 		t.Fatalf("search = %v, want cancelled", err)
@@ -518,7 +518,7 @@ func TestInspectSearchHonoursNegationAndNestedIgnores(t *testing.T) {
 	writeFile(t, dir, "sub/open.txt", "needle\n")
 	in := newInspect(t, dir)
 
-	p, err := call[searchPayload](t, in.Search, `{"query":"needle"}`)
+	p, err := call[searchPayload](t, in.Search, `{"pattern":"needle"}`)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -547,7 +547,7 @@ func TestInspectSearchSkipsIgnoredDirectories(t *testing.T) {
 	writeFile(t, dir, "build/gen.txt", "needle\n")
 	writeFile(t, dir, "src/real.txt", "needle\n")
 	in := newInspect(t, dir)
-	p, err := call[searchPayload](t, in.Search, `{"query":"needle"}`)
+	p, err := call[searchPayload](t, in.Search, `{"pattern":"needle"}`)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
