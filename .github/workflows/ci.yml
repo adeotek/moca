@@ -86,3 +86,35 @@ jobs:
 
       - name: go test -race
         run: go test ./... -race
+
+  # The native matrix (R35/R60/R66): the codemode reactor is an embedded WASM
+  # module whose host is Go, but "hermetic on Linux" is not "works on the three
+  # shipped platforms". This job builds the real binary and drives it through
+  # the codemode gate on each OS, so a wazero/OS-specific regression fails here
+  # instead of at release. Dispatchable on its own for a candidate SHA.
+  native:
+    name: codemode gate (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go (version from go.mod)
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        shell: bash
+        run: go build -o bin/moca ./cmd/moca
+
+      - name: Codemode gate
+        shell: bash
+        run: go test -tags codemodegate -count=1 ./test/codemodegate -args -moca bin/moca
