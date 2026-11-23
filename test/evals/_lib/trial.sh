@@ -23,6 +23,12 @@ pilot_preflight() {
   local s bad=0
   for s in "$@"; do
     is_pilot "$s" || continue
+    # A pilot spends real money, so its ceiling is part of the approval and
+    # cannot be left to memory: no -cap, no run.
+    if [ -z "${CAP_USD:-}" ]; then
+      echo "pilot scenario $s needs -cap <usd> — the spend ceiling is part of the approval, not an honour system"
+      bad=1
+    fi
     case "$VARIANT" in
       cm-on|cm-off)
         if [ ! -f "$EVALS/$s/config.$VARIANT.jsonc" ]; then
@@ -169,4 +175,19 @@ run_trial() {
   else
     echo "FAIL $s#$n (exit $code): ${why:-no session} — kept $work $data"
   fi
+}
+
+# spend_total <jsonl>: the dollars already recorded for a label, 6dp.
+spend_total() {
+  [ -f "$1" ] || { echo "0.000000"; return; }
+  grep -o '"cost":[0-9eE.+-]*' "$1" 2>/dev/null | cut -d: -f2 |
+    awk '{s += $1} END {printf "%.6f", s + 0}'
+}
+
+# spend_guard <jsonl> <cap>: true when the recorded spend has reached the cap.
+# Checked before each run is launched, so a serial pilot stops on the run that
+# would cross the line rather than after it.
+spend_guard() {
+  [ -n "${2:-}" ] || return 1
+  awk -v t="$(spend_total "$1")" -v c="$2" 'BEGIN {exit !(t >= c)}'
 }

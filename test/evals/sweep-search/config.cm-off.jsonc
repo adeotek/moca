@@ -1,11 +1,8 @@
 {
-  // codemode pilot arm: workspace-only (the control).
-  // Task 1 ships the arm FILE so `-c cm-off` resolves and the missing-arm
-  // preflight agrees with the label; the `codemode` block itself cannot be
-  // written until the key exists (strict decode rejects unknown keys), so the
-  // arm difference lands with the config key in Task 5 and this file stays
-  // byte-identical to config.cm-on.jsonc until then. Task 6's preflight pins
-  // the decoded difference.
-  "model": "opencode-go/glm-5.3-flash",
+  // codemode pilot arm: the control. No `codemode` block, so the session gets
+  // the eight frozen tools and the baseline prompt. Its only difference from
+  // config.cm-on.jsonc is that block — keep it that way, or the comparison
+  // measures something else.
+  "model": "opencode-go/deepseek-v4.1-flash",
   "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } }
 }

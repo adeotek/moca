@@ -5,6 +5,11 @@ change; each section names its label, its n and its checker revision, and a rate
 those is not comparable to anything else here. The newest measurements are at the bottom
 (`v0.8.2` at the time of writing); SPECS §15 carries the release-level numbers and the reasons.
 
+**Corpus model (2026-11-23):** every eval config now names `opencode-go/deepseek-v4.1-flash`, and
+`cmd/moca/pilot_arms_test.go` keeps it that way. Sections below were measured on
+`opencode-go/glm-5.3-flash` — they stay as recorded, and a rate is comparable only inside one model's
+boundary. Do not read a new label against an old one across this line.
+
 The first table below is the **rev-21 baseline** (2026-10-09, `opencode-go/glm-5.3-flash`, 3 runs
 per scenario, `vague` 6 — its pass rate swings the most, `bash test/evals/run.sh -n 3 -j 4`), kept
 for historical comparison only:
@@ -1285,15 +1290,25 @@ tree can move reports itself. `run.sh --selftest` pins all three (`sweep-tree-mo
 `-committed`, `-untracked`), plus `sweep-fails-closed`, `sweep-rejects-a-wrong-answer` and the same two
 arms for `sweep-search`.
 
+### The spend ceiling (Task 7's precondition)
+
+A pilot spends real money, so the ceiling is enforced rather than remembered: `run.sh -cap <usd>`
+(also `MOCA_EVAL_CAP_USD`) sums the `cost` column of the label's JSONL before each launch and stops
+with exit 3 on the run that would cross the line, then reports the total and re-asserts it after the
+last run. `pilot_preflight` **refuses a pilot run with no `-cap`**, so an approval that names a
+ceiling cannot be run without one.
+
 ### What Task 1 does not do
 
 - Both pilot scenarios are opt-in: a `PILOT` marker keeps them out of default discovery, and
   `pilot_preflight` refuses a named pilot run whose `-c cm-on|cm-off` arm file is missing — before any
   binary runs.
-- `config.cm-off.jsonc` and `config.cm-on.jsonc` exist so the arm labels resolve, and are
-  **byte-identical apart from their comment**: the `codemode` key does not exist until Task 5 and the
-  config decode is strict. The arm difference (and Task 6's decoded-config assertion) lands with the
-  key.
+- `config.cm-off.jsonc` and `config.cm-on.jsonc` are the arms, and they now differ in exactly one
+  key: `cm-on` carries `"codemode": {"enabled": true}`, `cm-off` carries no `codemode` block at all.
+  `cmd/moca/pilot_arms_test.go` pins it — it loads both through the strict decoder and fails on any
+  other difference, and also pins every eval config's model. (They shipped byte-identical while the
+  key did not exist; this note used to say the difference "lands with the key", and nothing checked
+  that it did.)
 - No trial has been run, no carry has been observed, and no pass rate is claimed for either scenario.
 
 ### Pre-change goldens (Tasks 3/4/8 compare against these)

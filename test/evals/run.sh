@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # moca eval corpus — runs scenarios unattended and records metrics.
 #
-#   make build && bash test/evals/run.sh [-n runs] [-j jobs] [-l label] [-m model] [-c variant] [scenario...]
+#   make build && bash test/evals/run.sh [-n runs] [-j jobs] [-l label] [-m model] [-c variant] [-cap usd] [scenario...]
 #   bash test/evals/run.sh --selftest        # checkers: fail on the fixture, pass on testdata/reference
 #   go run ./test/evals/evalstats -summary test/evals/results/<label>.jsonl
 #
@@ -35,7 +35,7 @@ MOCA="${MOCA:-$REPO/bin/moca}"
 # VARIANT is set only by -c: without it every scenario runs its own config
 # (or the shared corpus config), never a variant arm; the checkers still see
 # "on" (the scenarios' own configs are the on arm).
-RUNS=1 JOBS=4 LABEL="dev" MODEL="" SELFTEST=0 VARIANT=""
+RUNS=1 JOBS=4 LABEL="dev" MODEL="" SELFTEST=0 VARIANT="" CAP_USD="${MOCA_EVAL_CAP_USD:-}"
 SCENARIOS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -44,6 +44,7 @@ while [ $# -gt 0 ]; do
     -l) LABEL="$2"; shift 2 ;;
     -m) MODEL="$2"; shift 2 ;;
     -c) VARIANT="$2"; shift 2 ;;
+    -cap) CAP_USD="$2"; shift 2 ;;
     --selftest) SELFTEST=1; shift ;;
     -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     *) SCENARIOS+=("$1"); shift ;;
@@ -480,6 +481,15 @@ one() {
 for n in $(seq 1 "$RUNS"); do
   for s in "${SCENARIOS[@]}"; do
     while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n; done
+    # Spend ceiling: checked before each launch, so a pilot stops on the run
+    # that would cross the line. Serial (-j 1) is exact; with more jobs the sum
+    # can lag by the in-flight runs, which is why the closing check below is a
+    # real assertion, not a print.
+    if spend_guard "$OUT" "${CAP_USD:-}"; then
+      echo "spend ceiling: $(spend_total "$OUT") USD recorded against a ${CAP_USD} USD cap — stopping (results: $OUT)" >&2
+      wait
+      exit 3
+    fi
     # A scenario with followup.txt is a two-turn trial (one schema-2 row);
     # everything else keeps the one-prompt-per-run path.
     if [ -f "$EVALS/$s/followup.txt" ]; then
@@ -490,6 +500,14 @@ for n in $(seq 1 "$RUNS"); do
   done
 done
 wait
+if [ -n "${CAP_USD:-}" ]; then
+  spent="$(spend_total "$OUT")"
+  echo "spend: $spent USD of the $CAP_USD USD cap"
+  if awk -v t="$spent" -v c="$CAP_USD" 'BEGIN {exit !(t > c)}'; then
+    echo "spend ceiling exceeded: $spent USD > $CAP_USD USD (results: $OUT)" >&2
+    exit 3
+  fi
+fi
 # Retention: keep the newest KEEP transcripts per label.
 if [ -d "$RESULTS_DIR" ]; then
   ls -1t "$RESULTS_DIR"/*.jsonl 2>/dev/null | tail -n "+$((KEEP + 1))" | while read -r f; do rm -f "$f"; done

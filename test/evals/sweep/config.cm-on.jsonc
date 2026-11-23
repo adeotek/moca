@@ -1,11 +1,9 @@
 {
-  // codemode pilot arm: workspace + nested web (the treatment).
-  // Task 1 ships the arm FILE so `-c cm-off` resolves and the missing-arm
-  // preflight agrees with the label; the `codemode` block itself cannot be
-  // written until the key exists (strict decode rejects unknown keys), so the
-  // arm difference lands with the config key in Task 5 and this file stays
-  // byte-identical to config.cm-on.jsonc until then. Task 6's preflight pins
-  // the decoded difference.
-  "model": "opencode-go/glm-5.3-flash",
-  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } }
+  // codemode pilot arm: the treatment. `codemode` is ON (workspace only — v1 has
+  // no network key), so the model gets the ninth tool. The control
+  // (config.cm-off.jsonc) carries no codemode block at all, which is the whole
+  // arm difference; `pilot_preflight` refuses a pilot run without -c.
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } },
+  "codemode": { "enabled": true }
 }
