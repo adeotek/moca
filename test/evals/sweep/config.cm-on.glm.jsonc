@@ -1,0 +1,10 @@
+{
+  // codemode pilot arm on the second model: the treatment, same one-key
+  // difference as config.cm-on.jsonc, pinned to glm-5.3-flash so the run is a
+  // model test and nothing else (authorised 2026-11-23 as the explicit
+  // exception to the deepseek-only corpus rule). The control is
+  // config.cm-off.glm.jsonc, which carries no codemode block.
+  "model": "opencode-go/glm-5.3-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } },
+  "codemode": { "enabled": true }
+}

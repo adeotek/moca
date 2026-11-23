@@ -1,0 +1,6 @@
+{
+  // codemode pilot arm on the second model: the control. No codemode block at
+  // all — the arm difference is exactly that key (TestPilotArmsDifferOnly...).
+  "model": "opencode-go/glm-5.3-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } }
+}

@@ -1632,3 +1632,36 @@ declines.
 mechanism that makes multiple scripts impossible in one turn (refusing the second script, run-scoped),
 or a different model — and the second is out of bounds under the corpus-model rule without an
 explicit exception.
+
+## codemode v1 — Task 7 Stage A **round 5**: the model arm (`glm-5.3-flash`)
+
+Round 4 falsified the primitive hypothesis on `deepseek-v4.1-flash`: with `tools.glob` and a worked
+example in the prompt, adopting trials still wrote a mean of 4.0 scripts. The one confound left is the
+model itself, which the corpus-model rule had put out of bounds — **authorised 2026-11-23 as the
+explicit exception**, on `opencode-go/glm-5.3-flash`, the model the corpus was measured on before the
+2026-11-23 boundary. **Predeclared before running.**
+
+**Instrument.** `/tmp/moca-carry4` (digest `0a9f99b6…`) — the same binary as round 4, so the only
+difference is the model; configs `sweep/config.cm-on.glm.jsonc` and `cm-off.glm.jsonc` (identical arms
+to round 4's, pinned to glm); 10 trials/arm/scenario, `-j 1`, `-cap 20`.
+
+**Primary, identical to round 4 so the two models are directly comparable.** On `sweep`, 10 trials:
+**mean scripts per adopting trial <= 2.0** *and* **adoption >= 7/10**.
+
+**Secondary, only if the primary passes.** `sweep` carry ratio upper CI <= 0.75, >= 512 tokens saved,
+no lost pass, and adopted-trial steps <= that arm's control mean.
+
+**What each outcome means, decided now:**
+
+- **glm batches (primary passes)** — the behaviour is a model property, not a prompt or primitive one.
+  That does *not* make v1 proven; it makes it **proven for models that batch**, and every doc claim
+  names the model, the version and the date. Secondary then decides whether it also pays in turns.
+- **glm does not batch (primary fails)** — the idiom is not reachable by either cheap model in the
+  stack, and the only remaining lever is a mechanism that forbids a second script in a turn. Stage A
+  ends with "unproven on both models tested".
+
+**Stop rule.** This is the last billed experiment of Stage A. No round 6, no threshold relaxation, and
+no third model without a separate approval.
+
+**Boundary note.** This label sits on the *glm* side of the 2026-11-23 model boundary: its rows are
+comparable with other glm runs (and the pre-boundary corpus), never with a deepseek label.

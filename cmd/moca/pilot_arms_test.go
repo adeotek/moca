@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/adeotek/moca/internal/config"
@@ -55,10 +56,12 @@ func TestPilotArmsDifferOnlyInCodemode(t *testing.T) {
 	}
 }
 
-// Every eval config names the one model the corpus is measured on: a run that
+// Every eval config names its model explicitly, and only two are allowed: the
+// corpus model, and the second model for the authorised model arms. A run that
 // silently measured another model would be a label nobody can compare.
 func TestEvalConfigsPinTheCorpusModel(t *testing.T) {
 	const want = "opencode-go/deepseek-v4.1-flash"
+	const second = "opencode-go/glm-5.3-flash"
 	dirs, err := filepath.Glob(filepath.Join(repoRoot, "test", "evals", "*", "config*.jsonc"))
 	if err != nil {
 		t.Fatal(err)
@@ -76,8 +79,12 @@ func TestEvalConfigsPinTheCorpusModel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
-		if cfg.Model != want {
-			t.Fatalf("%s: model = %q, want %q", path, cfg.Model, want)
+		expect := want
+		if strings.Contains(filepath.Base(path), ".glm.") {
+			expect = second
+		}
+		if cfg.Model != expect {
+			t.Fatalf("%s: model = %q, want %q", path, cfg.Model, expect)
 		}
 	}
 }
