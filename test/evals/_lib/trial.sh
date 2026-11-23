@@ -30,16 +30,19 @@ pilot_preflight() {
       bad=1
     fi
     case "$VARIANT" in
-      cm-on|cm-off)
+      cm-*)
+        # Any arm of the codemode family, so a model arm (cm-on.glm) runs on its
+        # own config — but only if that config exists: the refusal this whole
+        # case exists for is an arm label measured on another arm's config.
         if [ ! -f "$EVALS/$s/config.$VARIANT.jsonc" ]; then
           echo "pilot scenario $s has no config.$VARIANT.jsonc — refusing to run an arm label on another arm's config"
           bad=1
         fi ;;
       "")
-        echo "pilot scenario $s is opt-in and needs -c cm-on|cm-off"
+        echo "pilot scenario $s is opt-in and needs -c cm-on|cm-off (or a model arm, e.g. cm-on.glm)"
         bad=1 ;;
       *)
-        echo "pilot scenario $s cannot run under -c $VARIANT (its arms are cm-on/cm-off; 'on'/'off' are the corpus skills arm)"
+        echo "pilot scenario $s cannot run under -c $VARIANT (its arms are cm-*; 'on'/'off' are the corpus skills arm)"
         bad=1 ;;
     esac
   done
