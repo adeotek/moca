@@ -1551,3 +1551,84 @@ clears the token floor (1 484 saved). Per the predeclared rule: **no round 4, v1
 qualified, unproven" and carries these three tables. A future attempt needs a different mechanism than
 a description — a run-scoped script counter with a hard "one script per turn" behaviour, or a fixture
 whose work genuinely cannot be split per file — and it needs its own predeclaration and approval.
+
+## codemode v1 — Task 7 Stage A **round 4**: the missing primitive + a worked example (branch `feat/codemode-t2`)
+
+Rounds 1-3 measured a model that writes 3-5 scripts per task. The diagnosis was that the
+*primitive* to write one program was missing, not just the words: `ls` answers one directory, so a
+script that needs twelve paths it cannot name has to call the tool twelve times. This round changes
+the mechanism, then asks whether the behaviour moves. **Predeclared before running.**
+
+**The change** (branch `feat/codemode-t2`, cut from `feat/codemode-t1` so the three prior rounds stay
+reproducible):
+
+1. **`tools.glob({pattern, path?})` returns `{paths, complete, reasons}`** — a new nested capability
+   (not a new tool schema): the same walk, ignore rules and entry budget as `search`, matching `*`,
+   `?` and `[..]` per segment and `**` across segments, returning root-relative paths a script can
+   feed straight back into `tools.read`. Workspace spec 541 B (budget 576, raised from 512 for the
+   fourth call), network 627 B (budget 640).
+2. **A worked example in the batch rule** — one program that globs and reads in a loop, in the prompt
+   itself (workspace render 6 508 B, budget 6 528, up from 6 400).
+
+**Primary endpoint, behaviour not cost.** On `sweep`, 10 trials: **mean scripts per adopting trial
+<= 2.0** *and* **adoption >= 7/10**. Round 3 measured 3-5 scripts per adopting trial; one program is 1.
+This endpoint is chosen because it is low-variance and direct — a token ratio cannot tell "the model
+batched" from "the model got lucky".
+
+**Secondary, the property the round exists for.** Only if the primary passes: `sweep` carry ratio
+upper CI <= 0.75, >= 512 tokens saved, no lost pass, **and adopted-trial steps <= the control arm's
+mean** (round 3 control: 7.7). If the primary fails, the round is recorded as failed and no cost claim
+is made.
+
+**Stopping rule.** This is the last mechanism change Stage A pays for. If the primary fails here, the
+conclusion is that this model does not batch regardless of primitive or example, and v1 ships disabled
+by default with the carry claim only.
+
+**Instrument.** `go build -tags codemodecarry -o /tmp/moca-carry4 ./cmd/moca` (digest `0a9f99b69051854b`), model
+`opencode-go/deepseek-v4.1-flash`, 10 trials/arm/scenario, `-j 1`, `-cap 20`, same checkers.
+
+### Round 4 result — **the primitive was not the problem either; the pilot is over**
+
+10 trials per arm per scenario, `-j 1`, binary `0a9f99b6…`, spend **US$0.0793**.
+**Cumulative Stage A spend: US$0.2867 of US$20.**
+
+| scenario | pass off→on | carry off→on | ratio [95% CI] | saved tok [CI] | steps off→on | scripts/adopting trial |
+|---|---|---|---|---|---|---|
+| `sweep` | 8/10 → 9/10 | 3 006 → 2 555 | **0.85** [0.72, 1.00] | 452 [−9, 881] | 7.2 → **9.1** | **1, 2, 2, 4, 5, 6, 8 — mean 4.0** |
+| `sweep-search` | 10/10 → 10/10 | 166 → 176 | 1.06 [0.86, 1.36] | −10 | 7.3 → 7.6 | 0/10 |
+
+**Primary failed on the scripts leg**: mean **4.0 per adopting trial** against the predeclared ≤ 2.0, and
+it rose from round 3's 3.4 — with `tools.glob` in the API and the loop written into the prompt as a
+worked example. Adoption held at 7/10 attempts; adopted trials took **10.1 steps** against 6.3 without
+the feature. `evalstats`: **"worse — steps per trial rose 7.25→8.35"**. Secondary never applies.
+
+**What four rounds established, and the explanation that survived none of them:**
+
+| | r1 | r2 | r3 | r4 |
+|---|---|---|---|---|
+| hypothesis | the API can't be guessed | names + shapes will teach the idiom | say it, then echo it | the primitive is missing (`glob`) |
+| attempts (sweep) | 2/6 | 5/10 | 7/10 | 7/10 |
+| adopted+passed | 1/6 | 4/10 | 5/10 | **5/10** |
+| scripts/adopting trial | — | 3.8 | 3.4 | **4.0** |
+| carry ratio | 0.87 | 0.77 | **0.59** | 0.85 [0.72, 1.00] |
+| steps, adopted vs not | — | 10.4 / 6.4 | 9.0 / 6.3 | **10.1 / 6.3** |
+
+Four mechanisms — description, shape names, idiom sentence + result-side echo, and finally a
+capability that makes the loop writable in one call plus a literal example of it — moved adoption
+(2→7 attempts) and never once moved scripts-per-task. The pattern is not a knowledge gap, a wording
+gap, or a primitive gap: when this model reaches for `codemode` it plans in small sequential scripts,
+and each script is a turn.
+
+**Decision: Stage A is closed.** No further mechanism round is authorised or paid for. v1 ships
+disabled by default with the one claim four rounds support — *when a model uses it, it carries less
+context per task* (adopted trials 1 787–2 555 tokens against 3 000–3 062 for the same fixtures) —
+and an explicit note that on this model the turn cost exceeds that benefit. The `glob` capability,
+the shape names and the stricter batch rule stay: they are good API work with hermetic pins
+(`internal/tools/inspect_glob_test.go`, two reactor fixtures, the gate leg
+`TestGlobThenReadInOneProgram`), and a human writing a script by hand gets the benefit the model
+declines.
+
+**The next honest experiment, for whoever picks this up, is not another prompt.** It is either a
+mechanism that makes multiple scripts impossible in one turn (refusing the second script, run-scoped),
+or a different model — and the second is out of bounds under the corpus-model rule without an
+explicit exception.

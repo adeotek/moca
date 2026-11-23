@@ -61,11 +61,14 @@ func TestBuildSystemPromptCodemodeBudget(t *testing.T) {
 	}
 	ws := BuildSystemPrompt(PromptInput{Codemode: true})
 	net := BuildSystemPrompt(PromptInput{Codemode: true, CodemodeNetwork: true})
-	if len(ws) > 6400 {
-		t.Fatalf("workspace prompt is %d bytes, budget 6400", len(ws))
+	// The budget moved 6400 -> 6528 when the batch rule gained its worked
+	// example: the pilot showed a sentence about "one program" does not survive
+	// contact with a task, and a demonstration costs bytes the cap must allow.
+	if len(ws) > 6528 {
+		t.Fatalf("workspace prompt is %d bytes, budget 6528", len(ws))
 	}
-	if len(net) > 6404 {
-		t.Fatalf("network prompt is %d bytes, budget 6404", len(net))
+	if len(net) > 6532 {
+		t.Fatalf("network prompt is %d bytes, budget 6532", len(net))
 	}
 	if len(net)-len(ws) != 4 {
 		t.Fatalf("network variant differs by %d bytes, want 4", len(net)-len(ws))

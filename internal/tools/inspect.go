@@ -23,6 +23,7 @@ import (
 	"hash"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -32,6 +33,7 @@ const (
 	inspectEntries      = 20_000    // directory entries across calls
 	inspectLSEntries    = 1_000     // per ls call
 	inspectSearchHits   = 100       // per search call
+	inspectGlobPaths    = 1_000     // per glob call
 	inspectSearchLine   = 300       // chars per match
 	inspectIgnoreMax    = 64 << 10  // a larger ignore file is skipped, with a reason
 	inspectReasonSample = 5         // examples kept in coverage
@@ -200,6 +202,12 @@ type searchPayload struct {
 type lsEntry struct {
 	Name string `json:"name"`
 	Kind string `json:"kind"`
+}
+
+type globPayload struct {
+	Paths    []string `json:"paths"`
+	Complete bool     `json:"complete"`
+	Reasons  []string `json:"reasons"`
 }
 
 type lsPayload struct {
@@ -473,6 +481,127 @@ func kindOf(d os.DirEntry) string {
 	default:
 		return "other"
 	}
+}
+
+// ---- glob ----------------------------------------------------------------
+
+// Glob answers `tools.glob`: every path under a directory whose path relative to
+// that directory matches a pattern, with the same walk, ignore rules and entry
+// budget as search.
+//
+// It exists because "loop over the files" is impossible to write without their
+// names: `ls` answers one directory, so a script that needs twelve paths it
+// cannot enumerate has to call the tool twelve times, which is the REPL pattern
+// the pilot measured (Task 7 rounds 1-3: 3-5 scripts per task, 9.0 steps
+// against 6.3). Naming the paths is the missing half of the idiom.
+func (i *Inspection) Glob(ctx context.Context, args json.RawMessage) (any, error) {
+	var a struct {
+		Pattern string `json:"pattern"`
+		Path    string `json:"path"`
+	}
+	if r := decodeArgs(args, &a); r != nil {
+		return nil, r
+	}
+	pat := strings.TrimSpace(a.Pattern)
+	if pat == "" {
+		return nil, inspectErr("invalid_args", "pattern is required")
+	}
+	if strings.HasPrefix(pat, "/") || strings.Contains(pat, "..") {
+		return nil, inspectErr("invalid_args", "pattern must be relative and must not contain ..")
+	}
+	// A pattern is model-authored: cap its segments so `**` backtracking stays
+	// bounded (the walk is already capped by the entry budget).
+	if len(strings.Split(pat, "/")) > 16 {
+		return nil, inspectErr("invalid_args", "pattern has too many segments (max 16)")
+	}
+	if err := i.charge(); err != nil {
+		return nil, err
+	}
+	root := "."
+	if a.Path != "" {
+		var err error
+		if root, err = cleanRel(a.Path); err != nil {
+			return nil, err
+		}
+	}
+	ws, err := i.openRoot()
+	if err != nil {
+		return nil, err
+	}
+	segments := strings.Split(pat, "/")
+	rules := i.loadAncestorIgnores(ws, root)
+	payload := globPayload{Paths: []string{}}
+	err = ws.walk(ctx, root, func(rel string, d os.DirEntry) bool {
+		return skipEntry(d) || ignored(rules, rel, d.IsDir())
+	}, func(rel string, d os.DirEntry) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if skipEntry(d) || ignored(rules, rel, d.IsDir()) {
+			return nil
+		}
+		if d.IsDir() {
+			// This directory's own ignore file applies to its children.
+			i.loadIgnoresInto(ws, &rules, rel)
+		}
+		if i.entries >= inspectEntries || len(payload.Paths) >= inspectGlobPaths {
+			i.gap("entry_budget")
+			return errGlobDone
+		}
+		i.entries++
+		// The pattern is relative to the searched directory, so the comparison
+		// drops its prefix: a glob of "services/*/service.yaml" from "." and the
+		// same pattern from "services" (where it is "* /service.yaml") both name
+		// files the model can read.
+		relPath := rel
+		if root != "." {
+			relPath = strings.TrimPrefix(rel, root+"/")
+			if relPath == root {
+				return nil
+			}
+		}
+		if matchGlob(segments, strings.Split(relPath, "/")) {
+			payload.Paths = append(payload.Paths, rel)
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errGlobDone) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			i.gap("cancelled")
+			return nil, inspectErr("cancelled", "inspection cancelled")
+		}
+		return nil, err
+	}
+	payload.Complete = !errors.Is(err, errGlobDone)
+	payload.Reasons = i.coverage()
+	return payload, nil
+}
+
+var errGlobDone = errors.New("glob done")
+
+// matchGlob matches path segments against pattern segments: `**` spans any
+// number of segments (including none), every other segment uses path.Match, so
+// `*`, `?` and `[a-z]` behave as they do everywhere else in the tool.
+func matchGlob(pat, path []string) bool {
+	if len(pat) == 0 {
+		return len(path) == 0
+	}
+	if pat[0] == "**" {
+		for i := 0; i <= len(path); i++ {
+			if matchGlob(pat[1:], path[i:]) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(path) == 0 {
+		return false
+	}
+	ok, err := filepath.Match(pat[0], path[0])
+	if err != nil || !ok {
+		return false
+	}
+	return matchGlob(pat[1:], path[1:])
 }
 
 // ---- search --------------------------------------------------------------

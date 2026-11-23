@@ -238,6 +238,30 @@ func TestWorkspaceScript(t *testing.T) {
 
 // The capability table is the boundary: write and shell do not exist inside a
 // script, the refusal says so, and nothing lands on disk.
+// A script that names the paths itself and loops over them: one call, one
+// result. This is the shape rounds 1-3 of the pilot could not get out of the
+// model with a prompt, so the primitive it depends on is pinned here.
+func TestGlobThenReadInOneProgram(t *testing.T) {
+	h := newHarness(t)
+	h.cfg(enabled)
+	for _, svc := range []string{"api", "jobs", "ledger"} {
+		h.file("services/"+svc+"/service.yaml", "cpu: 500m\n")
+	}
+	h.file("services/README.md", "not a manifest\n")
+	h.script = []string{`{"code":"const g = await tools.glob({pattern: 'services/*/service.yaml'}); const out = []; for (const p of g.paths) { const r = await tools.read({path: p}); out.push(p + ':' + r.lines[0].text); } return out;"}`}
+	h.run("-p", "Read every service manifest and report them.")
+
+	res := h.lastResult()
+	for _, want := range []string{"services/api/service.yaml:cpu: 500m", "services/jobs/service.yaml", "services/ledger/service.yaml"} {
+		if !strings.Contains(res, want) {
+			t.Fatalf("the one-program result lost %q: %q", want, res)
+		}
+	}
+	if strings.Contains(res, "README.md") {
+		t.Fatalf("the glob matched a non-manifest: %q", res)
+	}
+}
+
 func TestCapabilityAllowlist(t *testing.T) {
 	h := newHarness(t, `{"code":"await tools.write({path: 'pwned.txt', content: 'x'})"}`)
 	h.cfg(enabled)

@@ -69,8 +69,8 @@ func TestCodemodeSpec(t *testing.T) {
 	if string(raw) != string(want) {
 		t.Fatalf("spec changed:\n got %s\nwant %s", raw, want)
 	}
-	if n := len(raw); n > 512 {
-		t.Fatalf("whole spec is %d bytes, budget is 512", n)
+	if n := len(raw); n > 576 {
+		t.Fatalf("whole spec is %d bytes, budget is 576", n)
 	}
 	if spec.Name != "codemode" {
 		t.Fatalf("name = %q", spec.Name)
@@ -91,7 +91,7 @@ func TestCodemodeRefusalHasTheSameSpec(t *testing.T) {
 
 func TestCodemodeCapabilityTableIsWorkspaceOnly(t *testing.T) {
 	caps := workspaceCapabilities()
-	want := map[string]bool{"read": true, "search": true, "ls": true}
+	want := map[string]bool{"read": true, "search": true, "ls": true, "glob": true}
 	if len(caps) != len(want) {
 		t.Fatalf("table has %d names, want %d", len(caps), len(want))
 	}

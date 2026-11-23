@@ -15,15 +15,19 @@ import (
 // recorder is a dispatcher that answers what a scenario asked for and counts
 // the calls, so a refusal can be proved to have reached no host work at all.
 type recorder struct {
-	calls []string
-	reply json.RawMessage
-	err   *CallError
+	calls  []string
+	reply  json.RawMessage
+	byName map[string]json.RawMessage // per-tool replies, checked before reply
+	err    *CallError
 }
 
 func (r *recorder) dispatch(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, *CallError) {
 	r.calls = append(r.calls, name+" "+string(args))
 	if r.err != nil {
 		return nil, r.err
+	}
+	if reply, ok := r.byName[name]; ok {
+		return reply, nil
 	}
 	if r.reply != nil {
 		return r.reply, nil
@@ -254,5 +258,39 @@ func TestFixtureAsyncRejectionForgedClass(t *testing.T) {
 	_, cerr := run(t, ExecCaps{}, `await 0; throw {class: "steered", message: "not yours"}`, rec, 5*time.Second)
 	if cerr == nil || cerr.Class != "script" {
 		t.Fatalf("forged class survived: %+v", cerr)
+	}
+}
+
+// tools.glob is the primitive that makes "one program over all the files"
+// writable: it must be reachable from a script, name paths, and let the script
+// loop over them without a second call.
+func TestFixtureGlobThenLoopOverThePaths(t *testing.T) {
+	rec := &recorder{byName: map[string]json.RawMessage{
+		"glob": json.RawMessage(`{"paths":["services/a/service.yaml","services/b/service.yaml"],"complete":true}`),
+		"read": json.RawMessage(`{"lines":[{"n":1,"text":"x"}],"complete":true}`),
+	}}
+	res, cerr := run(t, ExecCaps{}, `const g = await tools.glob({pattern: "services/*/service.yaml"}); `+
+		`const out = []; for (const p of g.paths) { const r = await tools.read({path: p}); out.push(r.lines.length); } return out;`, rec, 5*time.Second)
+	if cerr != nil {
+		t.Fatalf("glob script failed: %v", cerr)
+	}
+	if got := strings.TrimSpace(string(res.Value)); got != "[1,1]" {
+		t.Fatalf("value = %s", got)
+	}
+	if len(rec.calls) != 3 || !strings.HasPrefix(rec.calls[0], "glob ") || !strings.HasPrefix(rec.calls[1], "read ") {
+		t.Fatalf("dispatch = %v", rec.calls)
+	}
+}
+
+// A glob with no paths is a measurement, not an error: the script must be able
+// to branch on it instead of failing the whole call.
+func TestFixtureGlobEmptyIsNotAnError(t *testing.T) {
+	rec := &recorder{reply: json.RawMessage(`{"paths":[],"complete":true}`)}
+	res, cerr := run(t, ExecCaps{}, `const g = await tools.glob({pattern: "nope/*.yaml"}); return g.paths.length;`, rec, 5*time.Second)
+	if cerr != nil {
+		t.Fatalf("empty glob failed: %v", cerr)
+	}
+	if got := strings.TrimSpace(string(res.Value)); got != "0" {
+		t.Fatalf("value = %s", got)
 	}
 }

@@ -103,6 +103,9 @@
   Object.defineProperty(tools, "read", { value: function (a) { return inspect("read", a || {}); }, enumerable: true });
   Object.defineProperty(tools, "search", { value: function (a) { return inspect("search", a || {}); }, enumerable: true });
   Object.defineProperty(tools, "ls", { value: function (a) { return inspect("ls", a || {}); }, enumerable: true });
+  // glob names the paths a script needs before it can loop over them: without it
+  // "one program over all the files" is only writable when the names are known.
+  Object.defineProperty(tools, "glob", { value: function (a) { return inspect("glob", a || {}); }, enumerable: true });
 
   // __WEB_BEGIN__ the network variant's methods: cut from the source when the
   // stored variant is workspace-only (prelude.go), so the guest never sees them.
