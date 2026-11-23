@@ -508,7 +508,9 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	case plan.refusal:
 		reg.Register(tools.NewCodemodeRefusal(plan.preludeNetwork))
 	case plan.present:
-		reg.Register(tools.NewCodemode(codemodeHolder(plan.preludeNetwork, plan.admittedNetwork)))
+		holder := codemodeHolder(plan.preludeNetwork, plan.admittedNetwork)
+		env.Codemode = holder
+		reg.Register(tools.NewCodemode(holder))
 	}
 	a, err := New(Options{Config: cfg, Providers: st.reg, Tools: reg, Env: env,
 		Session: w, Snapshots: snaps, System: system, Model: model, Effort: effort, Emit: o.Emit, Prior: prior, MCP: mgr,

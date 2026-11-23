@@ -1707,3 +1707,40 @@ more than the saved tokens.
 **The only lever left is a mechanism, not a measurement**: refuse a second `codemode` script within a
 turn (run-scoped), so the first script must be the whole program. That is a product behaviour change,
 not a pilot, and it needs its own approval and its own predeclaration. No further Stage A spend.
+
+## codemode v1 — Task 7 Stage A **round 6**: one script per message, enforced
+
+Rounds 3-5 proved the hint cannot work: by the time a result says "one program", the second script is
+already written. Round 6 removes the choice. **Predeclared before running.**
+
+**The change.** A second `codemode` call in the same user message is refused without executing
+(`ClaimScript` on the holder, opened per message by `Env.BeginRun`); the refusal tells the model to
+carry on with `read`/`search`/`ls`. The prompt says so. The result-side echo is gone.
+
+**Instrument.** `/tmp/moca-carry5` (digest `b87b197446eb9dd8`), `sweep` only, 10 trials, `-c cm-on`, `-j 1`,
+`-cap 20`. **Control rows are round 4's `cmd-off`** (deepseek, same fixtures, same checkers, same
+binary except the codemode path): that arm never sees the tool, and its prompt is unchanged, so the
+change cannot reach it — a fresh control would re-measure the same thing for another $0.04.
+
+**Primary, every leg must hold:**
+
+1. **>= 7/10 trials call `codemode` at all** — the refusal must not scare the model off the tool.
+2. **>= 7/10 trials have a successful script** (`cmOk >= 1`) — one attempt that works, not one attempt
+   that throws and blocks the rest of the task.
+3. `sweep` carry ratio **upper CI <= 0.75** against `cmd-off`, and **>= 512 tokens saved**.
+4. **No lost pass** (>= 8/10, the control's rate).
+5. **Steps <= 7.2** (the `cmd-off` mean).
+
+**Secondary.** Count refused second calls: a trial that tried twice wasted a turn on a refusal, and
+that cost belongs in the record even when the primary passes.
+
+**What each outcome means, decided now:**
+
+- **All five hold** -> the mechanism works on this model, and Stage A finally has a claim that is not
+  "when it happens to be adopted": forcing one program pays. Then `sweep-search` runs to confirm no
+  regression, and the docs say codemode is worth turning on for many-file tasks.
+- **Any leg fails** -> forcing the idiom does not pay on this model either. v1 stays **disabled by
+  default** and the mechanism lever is spent with the prompt lever: what remains unmeasured is
+  whether a *stronger* model batches unprompted, which needs the owner's approval and a third model.
+
+Either way this is the last Stage A rate: the remaining work is documentation, not another round.

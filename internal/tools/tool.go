@@ -218,6 +218,10 @@ type Env struct {
 	Ask      Asker
 	Reads    *ReadTracker
 	Snap     Snapshotter
+	// Codemode is the session's {engine, caps} holder; the tool registered in
+	// this registry carries the same pointer. Env holds it only so BeginRun can
+	// open the per-message script budget.
+	Codemode *CodemodeHolder
 	ShellEnv []string
 	// ConfigFile is moca's own user config file as configured (unresolved).
 	// The ask-write approval resolves it through Paths when it asks and

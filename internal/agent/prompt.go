@@ -109,9 +109,10 @@ func codemodeHint(in PromptInput) string {
 	if in.CodemodeNetwork {
 		list = "read/search/ls/web"
 	}
-	return " Use `codemode` for a multi-file join or to filter a large result: ONE read-only JS program over " +
-		list + " that loops inside itself, never one call per file — for example " +
-		"`const g = await tools.glob({pattern: 'services/*/service.yaml'}); return await Promise.all(g.paths.map(p => tools.read({path: p})))`; " +
+	return " Use `codemode` for a multi-file join or to filter a large result — ONE call per message, and it " +
+		"must be ONE read-only JS program over " + list + " that loops inside itself, never one call per file; " +
+		"a second script in the same message is refused, so put the whole job in the first one (for example " +
+		"`const g = await tools.glob({pattern: 'services/*/service.yaml'}); return await Promise.all(g.paths.map(p => tools.read({path: p})))`); " +
 		"ordinary dependent calls still need separate turns."
 }
 

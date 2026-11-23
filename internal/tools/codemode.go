@@ -17,7 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -57,19 +57,45 @@ type CodemodeHolder struct {
 	openErr error
 	prelude string
 	built   bool
-	// runs counts the scripts this policy has executed. It exists so the second
-	// call can say "one program does the whole task": the pilot measured the
-	// model writing 4-5 small scripts per task, using the tool as a REPL, which
-	// saves carry and adds turns (Task 7 rounds 1-2).
-	runs atomic.Int64
+	// One script per user turn (Task 7 round 6). The pilot measured this model
+	// writing 2-8 small scripts per task when the tool allowed it, one turn
+	// each: adoption only ever paid in carry, never in turns, because the cost
+	// of a script IS a turn. The budget is therefore part of the tool's
+	// contract — "the first script is the program" — instead of a hint the
+	// result carries (Task 7 round 3 showed a hint after the second script
+	// cannot prevent the second script; it is already written).
+	mu        sync.Mutex
+	turn      int64
+	claimed   bool
+	claimTurn int64
 }
 
-// noteRun counts one executed script and returns the new total.
-func (h *CodemodeHolder) noteRun() int64 {
+// StartTurn opens a new script budget. The agent calls it once per user
+// message; a resumed process starts with a fresh budget, which is why the
+// counter lives on the holder rather than in the session file.
+func (h *CodemodeHolder) StartTurn() {
 	if h == nil {
-		return 0
+		return
 	}
-	return h.runs.Add(1)
+	h.mu.Lock()
+	h.turn++
+	h.mu.Unlock()
+}
+
+// ClaimScript spends the turn's script budget. It answers false when the budget
+// is already spent in this turn, and it is safe under parallel tool calls: the
+// claim is a compare-and-set, not a read-then-write.
+func (h *CodemodeHolder) ClaimScript() bool {
+	if h == nil {
+		return true
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.claimed && h.claimTurn == h.turn {
+		return false
+	}
+	h.claimed, h.claimTurn = true, h.turn
+	return true
 }
 
 // Engine resolves the engine once, memoizing both the success and the error.
@@ -221,6 +247,19 @@ func (t codemodeTool) Run(ctx context.Context, env *Env, input json.RawMessage) 
 	if !admit() {
 		return Result{Content: "steering pending: codemode was not run", Summary: "codemode (steered)", Steered: true}
 	}
+	// One script per user turn: a second call in the same turn is refused
+	// without running anything. This is the mechanism, not a nudge -- the pilot
+	// showed a hint arriving after the second script cannot prevent it, so the
+	// budget has to be enforced before the script, and the message has to say
+	// what to do instead.
+	if !t.holder.ClaimScript() {
+		return Result{
+			Content: "codemode allows one script per message and the script for this message has already run; " +
+				"carry on with read, search or ls.",
+			IsError: true,
+			Summary: "codemode (one per message)",
+		}
+	}
 
 	// The bridge is per call: its root, budgets and cursors are the script's,
 	// and a second call starts clean.
@@ -231,17 +270,6 @@ func (t codemodeTool) Run(ctx context.Context, env *Env, input json.RawMessage) 
 	steered := !admit() || res.Steered
 
 	content, isErr := br.render(res, cerr)
-	// The idiom echo: after the first script, say what one program would have
-	// done. It rides the result (the model's own turn) rather than the prompt,
-	// because the prompt's "one program" sentence was already there and the
-	// pilot showed it does not survive contact with a real task.
-	if n := t.holder.noteRun(); n >= 2 && !isErr && !strings.Contains(content, idiomEchoLead) {
-		joiner := "\n"
-		if content == "" {
-			joiner = ""
-		}
-		content += joiner + fmt.Sprintf("%s this run has called codemode %d times; one program that loops over the files does the whole task in one call.", idiomEchoLead, n)
-	}
 	return Result{Content: content, IsError: isErr, Summary: br.summary(cerr), Steered: steered}
 }
 
