@@ -1665,3 +1665,45 @@ no third model without a separate approval.
 
 **Boundary note.** This label sits on the *glm* side of the 2026-11-23 model boundary: its rows are
 comparable with other glm runs (and the pre-boundary corpus), never with a deepseek label.
+
+### Round 5 result — **a second model does not help: the pilot ends on both models**
+
+10 trials per arm per scenario on `opencode-go/glm-5.3-flash`, same binary (`0a9f99b6…`), `-j 1`,
+`-cap 20`, spend **US$0.0925** (on $0.0473 + off $0.0451 + a $0.0029 probe that proved the arm ran).
+**Stage A total across five rounds and two models: US$0.3049 of the US$20 ceiling.**
+
+| scenario | pass off→on | carry off→on | ratio [95% CI] | saved tok [CI] | steps off→on | scripts/adopting trial |
+|---|---|---|---|---|---|---|
+| `sweep` | 8/10 → 9/10 | 2 557 → 2 106 | **0.82** [0.62, 1.04] | 451 [−93, 1 028] | **6.1 → 7.5** | **2, 4, 4, 4 — mean 3.5** |
+| `sweep-search` | 10/10 → 10/10 | 96 → 94 | 0.98 [0.81, 1.14] | 2 | 6.5 → 6.7 | 0/10 |
+
+**Primary failed on both legs again, and worse than deepseek on one of them**: adoption **4/10**
+against the predeclared ≥7/10 (deepseek: 7/10 — the second model was *less* willing to use the tool),
+scripts **3.5** against ≤2.0, adopted trials **9.2 steps** against a 6.1 control. `evalstats`:
+**"worse — steps per trial rose 6.30→7.10"**. Secondary never applies.
+
+**Both models, side by side, same binary, same fixtures, same bar:**
+
+| | deepseek-v4.1-flash (r4) | glm-5.3-flash (r5) |
+|---|---|---|
+| adoption (attempts) | 7/10 | **4/10** |
+| scripts per adopting trial | 4.0 | **3.5** |
+| adopted-trial steps | 10.1 | **9.2** |
+| control steps | 7.2 | 6.1 |
+| `sweep` ratio [CI] | 0.85 [0.72, 1.00] | 0.82 [0.62, 1.04] |
+| verdict | worse | worse |
+
+**Decision, per the predeclaration: Stage A is closed on both models.** The behaviour is not a prompt
+problem, a primitive problem, or a model problem in this stack — it is what an agent does with a
+general-purpose script tool: it uses it as one more tool, one call at a time, and two to four calls
+cost two to four turns. Neither cheap model in the stack batches, and the carry saving that *is* real
+(2 106–2 555 against 2 557–3 062) does not survive the turn cost.
+
+v1 therefore ships **disabled by default**, and the docs say exactly this: implemented, qualified,
+hermetically gated, **unproven** — with the one measured claim that when a model does adopt it, the
+context it carries is smaller, and the measured note that on both models tested the extra turns cost
+more than the saved tokens.
+
+**The only lever left is a mechanism, not a measurement**: refuse a second `codemode` script within a
+turn (run-scoped), so the first script must be the whole program. That is a product behaviour change,
+not a pilot, and it needs its own approval and its own predeclaration. No further Stage A spend.
