@@ -24,12 +24,6 @@ const (
 
 // BeginRun resets the per-run state.
 func (e *Env) BeginRun() {
-	// One codemode script per user message: the budget is opened here, on the
-	// same hook that resets the other per-run tool state, so a resumed process
-	// and a second message in one process both start with a fresh script.
-	if e.Codemode != nil {
-		e.Codemode.StartTurn()
-	}
 	e.PlanWrote, e.Edited, e.Unverified = false, false, ""
 	e.failures, e.MaxRepeat = nil, 0
 	e.copied = nil

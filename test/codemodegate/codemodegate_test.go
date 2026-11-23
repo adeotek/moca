@@ -46,19 +46,6 @@ func sseText(w http.ResponseWriter, text string) {
 	fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%s},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", b)
 }
 
-func sseTools(w http.ResponseWriter, calls [][2]string, name string) {
-	var sb strings.Builder
-	sb.WriteString(`{"choices":[{"index":0,"delta":{"tool_calls":[`)
-	for i, c := range calls {
-		if i > 0 {
-			sb.WriteString(",")
-		}
-		fmt.Fprintf(&sb, `{"index":%d,"id":%q,"type":"function","function":{"name":%q,"arguments":%q}}`, i, c[0], name, c[1])
-	}
-	sb.WriteString(`]}}]}`)
-	fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", sb.String())
-}
-
 func sseTool(w http.ResponseWriter, id, name, args string) {
 	fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":%q,\"function\":{\"name\":%q,\"arguments\":%q}}]}}]}\n\n"+
 		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n", id, name, args)
@@ -74,7 +61,6 @@ type harness struct {
 	work   string
 	script []string // tool calls, one per work turn; a text turn ends the run
 	turns  int
-	dual   bool // the first work turn emits two codemode calls
 }
 
 func newHarness(t *testing.T, script ...string) *harness {
@@ -107,10 +93,6 @@ func newHarness(t *testing.T, script ...string) *harness {
 		}
 		i := h.turns
 		h.turns++
-		if i == 0 && h.dual && len(h.script) > 0 {
-			sseTools(w, [][2]string{{"c0a", h.script[0]}, {"c0b", `{"code":"2+2"}`}}, "codemode")
-			return
-		}
 		if i < len(h.script) {
 			sseTool(w, fmt.Sprintf("c%d", i), "codemode", h.script[i])
 			return
@@ -256,31 +238,6 @@ func TestWorkspaceScript(t *testing.T) {
 
 // The capability table is the boundary: write and shell do not exist inside a
 // script, the refusal says so, and nothing lands on disk.
-// One script per message, end to end: the SECOND call in one assistant turn is
-// refused without running, and the refusal is an error result the model can act
-// on — while the first result of that turn is untouched.
-func TestSecondScriptInOneMessageIsRefused(t *testing.T) {
-	h := newHarness(t)
-	h.cfg(enabled)
-	h.file("a.txt", "alpha\n")
-	h.dual = true
-	h.script = []string{`{"code":"const r = await tools.read({path: 'a.txt'}); return r.lines[0].text;"}`}
-	h.run("-p", "Read a.txt with one program.")
-
-	results := h.results()
-	if len(results) < 2 {
-		t.Fatalf("expected both results back, got %d", len(results))
-	}
-	if !strings.Contains(results[0], "alpha") {
-		t.Fatalf("the first script did not run: %q", results[0])
-	}
-	if !strings.Contains(results[1], "one script per message") {
-		t.Fatalf("the second script was not refused: %q", results[1])
-	}
-	if strings.Contains(results[1], "4") {
-		t.Fatalf("the refused script executed anyway: %q", results[1])
-	}
-}
 
 // A script that names the paths itself and loops over them: one call, one
 // result. This is the shape rounds 1-3 of the pilot could not get out of the

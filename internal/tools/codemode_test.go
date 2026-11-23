@@ -8,8 +8,6 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -129,63 +127,6 @@ func TestCodemodeDispatchRefusesUnknownNames(t *testing.T) {
 	}
 	if b.calls != 0 {
 		t.Fatalf("a refused name counted as a call: %d", b.calls)
-	}
-}
-
-// One script per message (Task 7 round 6). Rounds 3-5 measured 2-8 scripts per
-// task, one turn each: the carry saving was real and the turn cost ate it. The
-// budget is therefore enforced before the script, not hinted after it — the
-// second call in a message runs nothing, and the next user message reopens it.
-func TestCodemodeOneScriptPerMessage(t *testing.T) {
-	env, _ := newEnv(t)
-	eng := &fakeEngine{result: codemode.Result{Value: json.RawMessage(`42`)}}
-	holder := &CodemodeHolder{Open: func() (CodemodeEngine, error) { return eng, nil }}
-	tool := NewCodemode(holder)
-
-	first := tool.Run(context.Background(), env, json.RawMessage(`{"code":"1"}`))
-	if first.IsError {
-		t.Fatalf("the first script was refused: %q", first.Content)
-	}
-	second := tool.Run(context.Background(), env, json.RawMessage(`{"code":"2"}`))
-	if !second.IsError || !strings.Contains(second.Content, "one script per message") {
-		t.Fatalf("the second script ran: %q", second.Content)
-	}
-	if strings.Contains(second.Content, "42") {
-		t.Fatalf("the refused script still executed: %q", second.Content)
-	}
-	if got := second.Summary; got != "codemode (one per message)" {
-		t.Fatalf("summary = %q", got)
-	}
-
-	// A new user message opens a new budget.
-	holder.StartTurn()
-	third := tool.Run(context.Background(), env, json.RawMessage(`{"code":"3"}`))
-	if third.IsError {
-		t.Fatalf("a new message was still refused: %q", third.Content)
-	}
-
-	// Two parallel calls in one message: exactly one wins, and the claim is a
-	// compare-and-set rather than a read-then-write.
-	holder.StartTurn()
-	var won int32
-	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if !tool.Run(context.Background(), env, json.RawMessage(`{"code":"4"}`)).IsError {
-				atomic.AddInt32(&won, 1)
-			}
-		}()
-	}
-	wg.Wait()
-	if won != 1 {
-		t.Fatalf("%d parallel scripts were admitted in one message, want 1", won)
-	}
-
-	// A refusal-only tool has no holder and no budget.
-	if err := NewCodemodeRefusal(false).Run(context.Background(), env, json.RawMessage(`{"code":"1"}`)); !err.IsError {
-		t.Fatalf("the refusal tool ran a script: %q", err.Content)
 	}
 }
 

@@ -17,7 +17,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -57,45 +56,6 @@ type CodemodeHolder struct {
 	openErr error
 	prelude string
 	built   bool
-	// One script per user turn (Task 7 round 6). The pilot measured this model
-	// writing 2-8 small scripts per task when the tool allowed it, one turn
-	// each: adoption only ever paid in carry, never in turns, because the cost
-	// of a script IS a turn. The budget is therefore part of the tool's
-	// contract — "the first script is the program" — instead of a hint the
-	// result carries (Task 7 round 3 showed a hint after the second script
-	// cannot prevent the second script; it is already written).
-	mu        sync.Mutex
-	turn      int64
-	claimed   bool
-	claimTurn int64
-}
-
-// StartTurn opens a new script budget. The agent calls it once per user
-// message; a resumed process starts with a fresh budget, which is why the
-// counter lives on the holder rather than in the session file.
-func (h *CodemodeHolder) StartTurn() {
-	if h == nil {
-		return
-	}
-	h.mu.Lock()
-	h.turn++
-	h.mu.Unlock()
-}
-
-// ClaimScript spends the turn's script budget. It answers false when the budget
-// is already spent in this turn, and it is safe under parallel tool calls: the
-// claim is a compare-and-set, not a read-then-write.
-func (h *CodemodeHolder) ClaimScript() bool {
-	if h == nil {
-		return true
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.claimed && h.claimTurn == h.turn {
-		return false
-	}
-	h.claimed, h.claimTurn = true, h.turn
-	return true
 }
 
 // Engine resolves the engine once, memoizing both the success and the error.
@@ -252,14 +212,6 @@ func (t codemodeTool) Run(ctx context.Context, env *Env, input json.RawMessage) 
 	// showed a hint arriving after the second script cannot prevent it, so the
 	// budget has to be enforced before the script, and the message has to say
 	// what to do instead.
-	if !t.holder.ClaimScript() {
-		return Result{
-			Content: "codemode allows one script per message and the script for this message has already run; " +
-				"carry on with read, search or ls.",
-			IsError: true,
-			Summary: "codemode (one per message)",
-		}
-	}
 
 	// The bridge is per call: its root, budgets and cursors are the script's,
 	// and a second call starts clean.
