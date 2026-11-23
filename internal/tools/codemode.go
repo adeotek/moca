@@ -123,12 +123,25 @@ type bridge struct {
 
 // codemodeSpec is the tool's whole spec in the F17 form: name, description and
 // schema together, because a description edit resets the prompt cache for every
-// enabled session. Both descriptions are frozen and measured (453 B workspace,
-// 539 B network against the 512/640 budgets); the schema is identical in both
+// enabled session. Both specs are frozen and measured (508 B workspace, 539 B
+// network against the 512/640 budgets); the schema is identical in both
 // variants, so only the description moves.
+//
+// The workspace description names each call's result shape. Stage A's pilot
+// measured the cost of leaving it implicit: the one trial that scripted the
+// manifests carried the cheapest history of its six, and the trial that had to
+// guess `lines`/`entries` spent seven script attempts discovering them before
+// failing. A shape is part of the API, so it belongs where the model reads the
+// API -- three calls, three shapes, still under the byte budget.
+//
+// The network variant keeps its call list without shapes on purpose: its web
+// payloads are v1.1's contract (Task 9) and documenting a shape that does not
+// exist yet would be worse than naming the call.
 func codemodeSpec(network bool) llm.ToolSpec {
-	desc := "Run read-only workspace JS. Await tools.read({path}) or tools.read({next}), " +
-		"tools.search({pattern}), tools.ls({path}). Return your answer; bare expressions return null."
+	desc := "Read-only workspace JS. Await tools.read({path}|{next})\u2192{lines:[{n,text}]}, " +
+		"tools.search({pattern})\u2192{matches:[{path,line,text}]}, " +
+		"tools.ls({path})\u2192{entries:[{name,kind}]}. " +
+		"Return the answer; a bare expression is null."
 	if network {
 		desc = "Run read-only workspace JS. Await tools.read({path}) or tools.read({next}), " +
 			"tools.search({pattern}), tools.ls({path}); with network enabled also await " +

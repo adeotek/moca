@@ -1406,3 +1406,71 @@ ran, and the feature stays unmerged.**
   and only then test the carry effect.
 - **A fixture `shell` cannot batch** — the control arm's `find`/`cat` one-liners already read several
   manifests per call, which is why the ninth tool had so little to add on `sweep`.
+
+## codemode v1 — Task 7 Stage A **round 2**: the shape line (predeclared before running)
+
+Round 1's diagnosis was that adoption, not benefit, is the binding constraint: the model that reached
+for `codemode` had to discover `lines`/`entries`/`matches` by trial and error (seven attempts in the
+failing trial), and one clean adoption produced the cheapest history of its six. The fix is one
+description edit — the tool spec now names each call's result shape
+(`read→{lines:[{n,text}]}`, `search→{matches:[{path,line,text}]}`, `ls→{entries:[{name,kind}]}`),
+508 B against the 512 B budget, no schema change, no engine change.
+
+**This is a new exploratory round after an interface change, not a confirmation of round 1.** Round 1
+found no signal and triggered no confirmation; its result stands as recorded above. Round 2's rule is
+written here, before the first trial, and it is the rule the round is judged by.
+
+**Primary endpoint (new, and the reason for the round): adoption.** A treatment trial counts as
+adopted when the transcript shows a `codemode` call that succeeded (`cmOk > 0`) **and** the checker
+passed. Ship requires **≥ 6 of 10** adopted `sweep` trials — the scenario whose 12 manifests are the
+feature's use case. `sweep-search` carries no such requirement (round 1: 0/6 attempts, and nothing in
+that fixture needs a script).
+
+**Secondary gates, applied only if the primary passes.** On `sweep`: carry ratio upper CI **≤ 0.75**,
+**≥ 512 tokens saved** per trial, **no lost pass**, **no step increase**. A primary pass with a
+secondary failure does not ship: adoption without a measured saving is not a benefit.
+
+**Instrument.** Binary rebuilt from the same tree with the shape line
+(`go build -tags codemodecarry -o /tmp/moca-carry2 ./cmd/moca`), digest `c643605b4fb3d37c`; model
+`opencode-go/deepseek-v4.1-flash`; arms unchanged (`cm-on` / `cm-off`, differing only in the `codemode`
+block); 10 trials per arm per scenario, `-j 1`, `-cap 20`; same checkers; carry instrument unchanged.
+
+**Decision rule.** Primary + all secondaries on `sweep` ⇒ merge v1 and say so. Anything else ⇒ the
+feature stays unmerged and this section records exactly which leg failed — no further protocol change
+in this round, and no re-run of the same instrument to chase a number.
+
+### Round 2 result — **the shape line worked; the primary still fails, so unmerged**
+
+10 trials per arm per scenario, `-j 1`, binary `c643605b…`, model `deepseek-v4.1-flash`, spend
+**US$0.0799** (on $0.0410 + off $0.0388). Cumulative Stage A spend: **US$0.1282 of US$20**.
+
+| scenario | pass off→on | carry off→on | ratio [95% CI] | saved tok [CI] | steps off→on | adopted+passed |
+|---|---|---|---|---|---|---|
+| `sweep` | 7/10 → **9/10** | 3 002 → 2 305 | 0.77 [0.63, 0.91] | 697 [249, 1 145] | 7.5 → 8.4 | **4/10** |
+| `sweep-search` | 10/10 → 10/10 | 199 → 170 | 0.85 [0.64, 1.09] | 30 [−16, 81] | 7.5 → 7.3 | 0/10 |
+
+`evalstats`: **"worse — steps per trial rose 7.50→7.85"**. **Primary endpoint failed: 4/10 adopted
+against a predeclared ≥6/10**, so by the rule written before this round the feature stays unmerged and
+the secondaries are recorded as description only, not as a ship claim (they would fail too: ratio hi
+0.91 > 0.75, steps up).
+
+**What the round did prove** (all of it mechanistic, not inferred from a ratio):
+
+- **The shape line fixed the guessing.** Script calls went from 1 error in 2 adopting trials to **zero
+  errors across 15 script calls**; `cmOk == cmAttempted` in every adopting trial.
+- **Adoption roughly doubled**: 5/10 trials attempted (round 1: 2/6), 4/10 adopted-and-passed (1/6).
+- **The saving is real when the tool is used**: adopted trials carried **1 781** tokens against
+  **2 829** for non-adopted trials of the same arm — a 37 % cut, and the reason `sweep`'s ratio fell
+  from 0.87 to 0.77.
+- **The binding constraint moved, and it is now the idiom.** Adopting trials took **10.4 steps** against
+  **6.4** for non-adopted ones, because the model wrote **4–5 separate scripts per task** (trials 3, 5,
+  7, 9 made 3, 5, 5 and 4 calls). It is using `codemode` as a REPL: each script does one file's work,
+  which costs a turn per file and saves carry without saving turns. The description says what the calls
+  return and how to await them; it never says *the whole task belongs in one program*.
+
+**Reading.** Two rounds, one consistent story: the API is now learnable and the benefit is real, but the
+usage idiom the feature depends on (one program that loops inside itself) is not landing. That is a
+description problem of the same kind as the shapes, and it is testable with one more predeclared round
+— or it is where the feature stops, if the budget for tuning a ninth tool's prompt is judged not worth
+$0.08. **No round 3 runs without a predeclaration written first, and none runs on the same instrument
+to chase a number.**
