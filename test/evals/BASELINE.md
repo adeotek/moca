@@ -1744,3 +1744,50 @@ that cost belongs in the record even when the primary passes.
   whether a *stronger* model batches unprompted, which needs the owner's approval and a third model.
 
 Either way this is the last Stage A rate: the remaining work is documentation, not another round.
+
+### Round 6 result — **forcing one script costs a turn and buys nothing; the mechanism lever is spent**
+
+10 trials on `sweep` (`cm6-on`, binary `b87b1974…`), control rows reused from round 4's `cmd-off`
+(`sweep` only). Spend **US$0.0333**. **Stage A total: US$0.3382 of US$20.**
+
+| leg | predeclared | measured | |
+|---|---|---|---|
+| calls codemode at all | ≥7/10 | **8/10** | pass |
+| a script ran successfully | ≥7/10 | **7/10** | pass (exactly) |
+| carry ratio hi ≤0.75, ≥512 saved | — | **0.99** [0.91, 1.07], **39.7 saved** | **fail** |
+| no lost pass | ≥8/10 | 9/10 | pass |
+| steps ≤ control's 7.2 | — | **9.5** | **fail** |
+
+**Seven of ten trials tried a second script and were refused.** That refusal is the cost: the model
+spends a turn finding out the budget is gone, then finishes with `read`/`search`/`ls` — so it pays the
+turn *and* carries the same tool results it would have carried without the feature. The refusal does
+not make the first script better; it just makes the second one impossible. `evalstats`: **"worse —
+steps per trial rose 7.20→9.50"**, the largest step regression of the six rounds.
+
+**Stage A, complete.** Every lever a prompt, an API or a rule can pull was pulled:
+
+| round | lever | adoption | scripts/trial | steps vs control | carry ratio | verdict |
+|---|---|---|---|---|---|---|
+| 1 | (baseline description) | 2/6 | — | — | 0.87 | signal, unproven |
+| 2 | result shapes named | 5/10 | 3.8 | 10.4 vs 6.4 | 0.77 | worse |
+| 3 | "ONE program" + result-side echo | 7/10 | 3.4 | 9.0 vs 6.3 | 0.59 | worse |
+| 4 | `tools.glob` + worked example | 7/10 | 4.0 | 10.1 vs 6.3 | 0.85 | worse |
+| 5 | second model (glm-5.3-flash) | 4/10 | 3.5 | 9.2 vs 6.1 | 0.82 | worse |
+| 6 | one script per message, enforced | 8/10 | 1 (+1 refused) | **9.5 vs 7.2** | 0.99 | **worse** |
+
+**What the six rounds actually establish, as a product statement:**
+
+- Adoption is *not* the problem: a description that names result shapes and a prompt that names the
+  pattern take it from 2/6 to 7-8/10, and the capability the idiom needs (`glob`) is now in the API.
+- The idiom *is* the problem, and it lives below the level any of these levers reach: this agent treats
+  `codemode` as one more tool in a sequential plan, and every script is a turn. Making the second
+  script impossible does not make the first one whole; it makes the run one turn longer.
+- The carry saving is real and reproducible — adopted trials carry 2 106–2 555 tokens against
+  3 006–3 062 — and it never recovers the turns, on either cheap model.
+
+**Final decision: Stage A is closed for good.** v1 ships **disabled by default**: implemented,
+qualified, hermetically gated, **unproven**. The docs state the carry effect with its model and date,
+state that the turn cost exceeded it on both models tested, and state what a future attempt would need
+— a stronger model that batches unprompted (needs the owner's approval and a fresh predeclaration), or
+a task class where a single script replaces a genuinely large read (the carry saving grows with the
+bytes behind it; `sweep`'s 9.8 KB may simply be too small to pay for a turn).
