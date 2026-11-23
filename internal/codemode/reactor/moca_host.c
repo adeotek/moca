@@ -16,6 +16,13 @@
  *
  * qjs_run status: 0 ok, 1 syntax, 2 throw, 3 oom, 4 job limit, 5 output too
  * large, 6 internal. out_len is always written.
+ *
+ * The source runs inside `(async () => { ... })()` — the documented API is
+ * `await tools.read(...)` and `return`, and top-level await is not valid in
+ * global code. The prefix stays on line 1 so a reported line number still
+ * names the model's own line, and the arrow's return value IS the script's
+ * value: a bare expression yields undefined, which the ABI renders as null —
+ * exactly what the frozen description promises.
  */
 
 #include <stdint.h>
@@ -247,21 +254,78 @@ int32_t qjs_run(int32_t src_ptr, int32_t src_len, int32_t out_ptr, int32_t out_c
     JSValue json = JS_UNDEFINED;
     JSValue v = JS_UNDEFINED;
 
-    /* Compile first: a parse error is `syntax` and must not be reported as a
-     * runtime throw. JS_EvalFunction then runs the compiled global code. */
-    JSValue fn = JS_Eval(ctx, src, (size_t)src_len, "<codemode>",
-                         JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
-    if (JS_IsException(fn)) {
-        classify(ctx, 1, "syntax", &f);
+    /* Wrap in an async arrow: top-level `await` is not valid in global code,
+     * and the documented API is `await tools.read(...)` + `return`. The prefix
+     * stays on line 1, so a reported line number still names the model's own
+     * line. */
+    static const char PRE[] = "(async () => {";
+    static const char POST[] = "\n})()";
+    size_t plen = sizeof PRE - 1, qlen = sizeof POST - 1;
+    char *wrapped = malloc(plen + (size_t)src_len + qlen + 1);
+    if (!wrapped) {
+        f.status = 3;
+        snprintf(f.cls, sizeof f.cls, "oom");
+        f.msg = strdup("out of memory");
     } else {
-        v = JS_EvalFunction(ctx, fn);
-        if (JS_IsException(v)) {
-            classify(ctx, 2, "script", &f);
+        memcpy(wrapped, PRE, plen);
+        memcpy(wrapped + plen, src, (size_t)src_len);
+        memcpy(wrapped + plen + (size_t)src_len, POST, qlen + 1);
+
+        /* Compile first: a parse error is `syntax` and must not be reported as
+         * a runtime throw. JS_EvalFunction then runs the compiled code. */
+        JSValue fn = JS_Eval(ctx, wrapped, plen + (size_t)src_len + qlen, "<codemode>",
+                             JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+        free(wrapped);
+        if (JS_IsException(fn)) {
+            classify(ctx, 1, "syntax", &f);
         } else {
-            json = JS_JSONStringify(ctx, v, JS_UNDEFINED, JS_UNDEFINED);
-            if (JS_IsException(json)) {
-                JS_FreeValue(ctx, JS_GetException(ctx));
-                json = JS_UNDEFINED;
+            /* JS_EvalFunction consumes fn (JS_CallFree): never free it here. */
+            v = JS_EvalFunction(ctx, fn);
+            if (JS_IsException(v)) {
+                classify(ctx, 2, "script", &f);
+            } else {
+                JSValue settled = v;
+                if (JS_IsPromise(v)) {
+                    /* An async body's continuations are microtasks: pump the
+                     * job queue until the promise settles. A deadline kills the
+                     * instance out from under the pump (wazero's
+                     * close-on-context-done), which is how a `while (true) {}`
+                     * still ends. */
+                    JSContext *jctx = ctx;
+                    int jobs = 0;
+                    while (JS_PromiseState(ctx, v) == JS_PROMISE_PENDING) {
+                        int r = JS_ExecutePendingJob(rt, &jctx);
+                        if (r < 0) break;
+                        if (r == 0) break; /* nothing queued: it cannot settle */
+                        if (++jobs > 100000) {
+                            f.status = 4;
+                            snprintf(f.cls, sizeof f.cls, "limit");
+                            if (!f.msg) f.msg = strdup("the script did not settle");
+                            break;
+                        }
+                    }
+                    JSPromiseStateEnum st = JS_PromiseState(ctx, v);
+                    if (f.status == 0) {
+                        if (st == JS_PROMISE_REJECTED) {
+                            JS_Throw(ctx, JS_PromiseResult(ctx, v));
+                            classify(ctx, 2, "script", &f);
+                        } else if (st == JS_PROMISE_FULFILLED) {
+                            settled = JS_PromiseResult(ctx, v);
+                        } else {
+                            f.status = 2;
+                            snprintf(f.cls, sizeof f.cls, "script");
+                            if (!f.msg) f.msg = strdup("the script did not settle");
+                        }
+                    }
+                }
+                if (f.status == 0) {
+                    json = JS_JSONStringify(ctx, settled, JS_UNDEFINED, JS_UNDEFINED);
+                    if (JS_IsException(json)) {
+                        JS_FreeValue(ctx, JS_GetException(ctx));
+                        json = JS_UNDEFINED;
+                    }
+                }
+                if (settled != v) JS_FreeValue(ctx, settled);
             }
         }
     }

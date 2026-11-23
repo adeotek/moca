@@ -213,7 +213,7 @@ const enabled = `"codemode":{"enabled":true}`
 // One script does the work of many calls: read, search and ls in a single outer
 // result, with the tool present as the ninth entry.
 func TestWorkspaceScript(t *testing.T) {
-	h := newHarness(t, `{"code":"var a = tools.read({path: 'a.txt'}); var s = tools.search({pattern: 'needle'}); var l = tools.ls({path: '.'}); text(a.lines.map(function(x){return x.text}).join('|')); text(s.matches.length + ' hits'); ({entries: l.entries.length})"}`)
+	h := newHarness(t, `{"code":"const a = await tools.read({path: 'a.txt'}); const s = await tools.search({pattern: 'needle'}); const l = await tools.ls({path: '.'}); text(a.lines.map(x => x.text).join('|')); text(s.matches.length + ' hits'); return {entries: l.entries.length}"}`)
 	h.cfg(enabled)
 	h.file("a.txt", "alpha\n")
 	h.file("b.txt", "beta needle\n")
@@ -239,7 +239,7 @@ func TestWorkspaceScript(t *testing.T) {
 // The capability table is the boundary: write and shell do not exist inside a
 // script, the refusal says so, and nothing lands on disk.
 func TestCapabilityAllowlist(t *testing.T) {
-	h := newHarness(t, `{"code":"tools.write({path: 'pwned.txt', content: 'x'})"}`)
+	h := newHarness(t, `{"code":"await tools.write({path: 'pwned.txt', content: 'x'})"}`)
 	h.cfg(enabled)
 	h.run("-p", "try to write", "--approve")
 
@@ -257,7 +257,7 @@ func TestCapabilityAllowlist(t *testing.T) {
 func TestZeroApprovalsInEveryMode(t *testing.T) {
 	for _, mode := range []string{"default", "auto", "yolo", "plan"} {
 		t.Run(mode, func(t *testing.T) {
-			h := newHarness(t, `{"code":"tools.read({path: 'a.txt'}).value.lines.length"}`)
+			h := newHarness(t, `{"code":"const r = await tools.read({path: 'a.txt'}); return r.lines.length"}`)
 			h.cfg(enabled)
 			h.file("a.txt", "alpha\n")
 			out := h.run("-p", "read", "--approve", "--mode", mode)
@@ -273,7 +273,7 @@ func TestZeroApprovalsInEveryMode(t *testing.T) {
 
 // The 50-attempt cap latches at the 51st inspection and the ledger says so.
 func TestAttemptCap(t *testing.T) {
-	h := newHarness(t, `{"code":"for (var i = 0; i < 51; i++) { tools.read({path: 'f' + i + '.txt'}); }"}`)
+	h := newHarness(t, `{"code":"for (let i = 0; i < 51; i++) { await tools.read({path: 'f' + i + '.txt'}); }"}`)
 	h.cfg(enabled)
 	for i := 0; i < 51; i++ {
 		h.file(fmt.Sprintf("f%d.txt", i), "line\n")
@@ -293,7 +293,7 @@ func TestAttemptCap(t *testing.T) {
 func TestTimeoutThenReuse(t *testing.T) {
 	h := newHarness(t,
 		`{"code":"while (true) {}","timeoutSeconds":1}`,
-		`{"code":"1 + 1"}`,
+		`{"code":"return 1 + 1"}`,
 	)
 	h.cfg(enabled)
 	h.run("-p", "time out then work", "--approve")
@@ -315,14 +315,14 @@ func TestTimeoutThenReuse(t *testing.T) {
 // A resumed session keeps the tool its frozen prompt promised: with the switch
 // off now it is the refusal-only factory, not a missing tool.
 func TestResumeKeepsRefusalOnly(t *testing.T) {
-	h := newHarness(t, `{"code":"tools.read({path: 'a.txt'}).value.lines.length"}`)
+	h := newHarness(t, `{"code":"const r = await tools.read({path: 'a.txt'}); return r.lines.length"}`)
 	h.cfg(enabled)
 	h.file("a.txt", "alpha\n")
 	h.run("-p", "first run", "--approve")
 
 	// Second run of the same workdir: codemode is off now (the config loses the
 	// block), and the run resumes the session whose header promised the tool.
-	h.script = []string{`{"code":"1"}`}
+	h.script = []string{`{"code":"return 1"}`}
 	h.turns = 0
 	h.rec = &recorder{}
 	h.cfg("")
@@ -340,7 +340,7 @@ func TestResumeKeepsRefusalOnly(t *testing.T) {
 
 // The provider key must not reach stdout, stderr or any log file.
 func TestNoKeyLeak(t *testing.T) {
-	h := newHarness(t, `{"code":"tools.read({path: 'a.txt'}).value.lines.length"}`)
+	h := newHarness(t, `{"code":"const r = await tools.read({path: 'a.txt'}); return r.lines.length"}`)
 	h.cfg(enabled)
 	h.file("a.txt", "alpha\n")
 	out := h.run("-p", "read", "--approve")

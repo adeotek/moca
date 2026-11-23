@@ -46,12 +46,20 @@ func run(t *testing.T, caps ExecCaps, src string, rec *recorder, timeout time.Du
 // the runtime, the heap limits and the envelope, with no host call at all.
 func TestFixtureArithmetic(t *testing.T) {
 	rec := &recorder{}
-	res, cerr := run(t, ExecCaps{}, `({sum: 40 + 2, tag: "ok"})`, rec, 5*time.Second)
+	res, cerr := run(t, ExecCaps{}, `return {sum: 40 + 2, tag: "ok"}`, rec, 5*time.Second)
 	if cerr != nil {
 		t.Fatalf("unexpected error: %v", cerr)
 	}
 	if strings.TrimSpace(string(res.Value)) != `{"sum":42,"tag":"ok"}` {
 		t.Fatalf("value = %s", res.Value)
+	}
+	// A bare expression is not the answer: the contract says it returns null.
+	bare, cerr := run(t, ExecCaps{}, `({sum: 40 + 2})`, rec, 5*time.Second)
+	if cerr != nil {
+		t.Fatalf("bare expression: %v", cerr)
+	}
+	if strings.TrimSpace(string(bare.Value)) != "null" {
+		t.Fatalf("bare expression value = %s, want null", bare.Value)
 	}
 	if len(rec.calls) != 0 {
 		t.Fatalf("a pure script reached the host: %v", rec.calls)
@@ -61,7 +69,8 @@ func TestFixtureArithmetic(t *testing.T) {
 // tools.read goes through the bridge: guest frame -> dispatcher -> reply.
 func TestFixtureToolCall(t *testing.T) {
 	rec := &recorder{reply: json.RawMessage(`{"content":"hello from the host","complete":true}`)}
-	res, cerr := run(t, ExecCaps{}, `tools.read({path: "notes.txt"})`, rec, 5*time.Second)
+	// The documented form: top-level await inside the async wrapper.
+	res, cerr := run(t, ExecCaps{}, `const r = await tools.read({path: "notes.txt"}); return r`, rec, 5*time.Second)
 	if cerr != nil {
 		t.Fatalf("unexpected error: %v", cerr)
 	}
@@ -80,7 +89,7 @@ func TestFixtureToolCall(t *testing.T) {
 // are simply captured alongside a normal return.
 func TestFixtureTextAndLog(t *testing.T) {
 	rec := &recorder{}
-	res, cerr := run(t, ExecCaps{}, `text("visible"); log("diagnostic"); 7`, rec, 5*time.Second)
+	res, cerr := run(t, ExecCaps{}, `text("visible"); log("diagnostic"); return 7`, rec, 5*time.Second)
 	if cerr != nil {
 		t.Fatalf("unexpected error: %v", cerr)
 	}
@@ -210,5 +219,40 @@ func TestFixtureBusy(t *testing.T) {
 	<-done
 	if cerr == nil || cerr.Class != "busy" {
 		t.Fatalf("concurrent execution = %v, want busy", cerr)
+	}
+}
+
+// Top-level await is the documented API and must work: the guest runs inside an
+// async wrapper whose promise the host settles before reading the value.
+func TestFixtureTopLevelAwait(t *testing.T) {
+	rec := &recorder{reply: json.RawMessage(`{"lines":[{"n":1,"text":"alpha","clipped":false}],"complete":true}`)}
+	res, cerr := run(t, ExecCaps{}, `const a = await tools.read({path: "a.txt"}); const b = await tools.read({path: "b.txt"}); return a.lines[0].text + "/" + b.lines[0].text`, rec, 5*time.Second)
+	if cerr != nil {
+		t.Fatalf("top-level await failed: %v", cerr)
+	}
+	if got := strings.TrimSpace(string(res.Value)); got != `"alpha/alpha"` {
+		t.Fatalf("value = %s", got)
+	}
+	if len(rec.calls) != 2 {
+		t.Fatalf("dispatch calls = %v", rec.calls)
+	}
+}
+
+// A rejection carries the same classification a synchronous throw does, so the
+// status decides and the guest's own class is allowlisted afterwards.
+func TestFixtureAsyncRejection(t *testing.T) {
+	rec := &recorder{}
+	_, cerr := run(t, ExecCaps{}, `await Promise.resolve(); throw new Error("late boom")`, rec, 5*time.Second)
+	if cerr == nil || cerr.Class != "script" || !strings.Contains(cerr.Message, "late boom") {
+		t.Fatalf("rejection = %+v, want script/late boom", cerr)
+	}
+}
+
+// A guest cannot forge a host class through a rejection either (R71).
+func TestFixtureAsyncRejectionForgedClass(t *testing.T) {
+	rec := &recorder{}
+	_, cerr := run(t, ExecCaps{}, `await 0; throw {class: "steered", message: "not yours"}`, rec, 5*time.Second)
+	if cerr == nil || cerr.Class != "script" {
+		t.Fatalf("forged class survived: %+v", cerr)
 	}
 }

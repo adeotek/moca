@@ -105,7 +105,7 @@ Two related traps, both fixed in `build.sh`:
   `-ffile-prefix-map`/`-fmacro-prefix-map`.
 
 With `-g0`, `-Wl,--strip-debug` and the prefix maps, two clean builds are
-byte-identical: **989,272 bytes**, which `build.sh --check` verifies.
+byte-identical: **990,613 bytes**, which `build.sh --check` verifies.
 
 ## Wiring the artifact in
 
