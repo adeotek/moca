@@ -276,6 +276,18 @@ four arms (`cm-off`, `cm-additive`, `cm-additive-400`, `cm-transport`) under one
   closes with two negative results (additive and transport); if `additive-400` wins, the dial ships and
   the exposure switch is cut. No round 2, no threshold relaxation.
 
+**Outcome (run 2026-11-24; full record in `test/evals/BASELINE.md`).** `v2pilot-off` 4/10,
+`-add` 6/10, `-add400` 8/10, `-xport` 9/10; US$0.3242 of the US$20 ceiling. The primary **failed**:
+transport carried less in 7/10 pairs (needed 8, p = 0.172) with a median pair ratio of 0.778 (needed
+≤ 0.5) — the predeclared "inconclusive" outcome. Transport does not ship; `exposure` stays in the tree
+at the `additive` default. The dial result is the campaign's clean effect (`add400` vs `add`: 8/10,
+median 0.376, 14.0 vs 19.7 steps) and is unaffected by the defect below; whether 400 becomes the
+additive default is an owner decision, not a pilot outcome. **Defect in the fixture, recorded:** 11 of
+12 failures were the untouched-tree rule, which `prompt.txt` does not state — so the pass column is
+not a capability figure. Before any pass-rate endpoint: state the rule in the prompt and grade the
+answer before the tree in `check.sh`. That fix and any re-ask are unbilled work plus a fresh
+predeclaration; nothing here is re-litigated by re-reading these rows.
+
 ### Task 7 — Docs and release gates (unbilled)
 
 SPECS §1/§2/§4/§6.5/§10/§11/§13.5/§14/§15/§16, SECURITY (declared-list rule, resume refusal),

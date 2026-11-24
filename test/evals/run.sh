@@ -399,10 +399,16 @@ if [ "$SELFTEST" = 1 ]; then
   else
     echo "FAIL pilot-scope-accepted: a matching scope was refused"; bad=1
   fi
-  if (VARIANT=cm-additive CAP_USD=20 CAP_SCOPE="$EVALS/results/typo-*.jsonl" pilot_preflight sweep-bulk >/dev/null 2>&1); then
-    echo "FAIL pilot-scope-typo: a scope matching nothing was accepted while results exist"; bad=1
+  if (VARIANT=cm-additive CAP_USD=20 CAP_SCOPE="$EVALS/results/selftest-probe*.json" pilot_preflight sweep-bulk >/dev/null 2>&1); then
+    echo "FAIL pilot-scope-typo: a glob that misses its own family was accepted"; bad=1
   else
     echo "ok   pilot-scope-typo"
+  fi
+  # A brand-new campaign matches nothing and must still start.
+  if (VARIANT=cm-additive CAP_USD=20 CAP_SCOPE="$EVALS/results/selftest-fresh-*.jsonl" pilot_preflight sweep-bulk >/dev/null 2>&1); then
+    echo "ok   pilot-scope-fresh-campaign"
+  else
+    echo "FAIL pilot-scope-fresh-campaign: the first run of a campaign was refused"; bad=1
   fi
   rm -f "$probe"
   rm -rf "$capdir"

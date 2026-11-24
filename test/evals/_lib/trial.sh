@@ -39,11 +39,14 @@ pilot_preflight() {
         bad=1
       fi
     fi
-    # A scope that matches nothing guards nothing. A fresh campaign legitimately
-    # has no results yet, so this only refuses once the results area has files.
-    if [ -n "${CAP_SCOPE:-}" ] && [ -n "$(ls -A "$EVALS/results" 2>/dev/null | head -1)" ]; then
-      if ! compgen -G "$CAP_SCOPE" >/dev/null; then
-        echo "-cap-scope $CAP_SCOPE matches no results file, but $EVALS/results already has results — a scope that matches nothing is a ceiling that guards nothing"
+    # A scope that matches nothing guards nothing — but a brand-new campaign
+    # legitimately matches nothing yet. The two are told apart by the scope's own
+    # family: if files exist under the literal prefix but the glob misses them,
+    # the glob is a typo; if the family is empty, this is its first run.
+    if [ -n "${CAP_SCOPE:-}" ]; then
+      family=$(printf '%s' "$CAP_SCOPE" | sed 's/[][*?].*//')
+      if [ -n "$family" ] && compgen -G "$family*" >/dev/null && ! compgen -G "$CAP_SCOPE" >/dev/null; then
+        echo "-cap-scope $CAP_SCOPE matches no results file although $family* exists — a scope whose family is there but whose glob misses it is a typo, and a typo is a ceiling that guards nothing"
         bad=1
       fi
     fi

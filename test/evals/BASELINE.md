@@ -1791,3 +1791,87 @@ state that the turn cost exceeded it on both models tested, and state what a fut
 — a stronger model that batches unprompted (needs the owner's approval and a fresh predeclaration), or
 a task class where a single script replaces a genuinely large read (the carry saving grows with the
 bytes behind it; `sweep`'s 9.8 KB may simply be too small to pay for a turn).
+
+## codemode v2 pilot — `sweep-bulk`, four arms, the transport question (2026-11-24)
+
+**Predeclared before the first trial.** Label family `v2pilot-*`; one ledger via
+`-cap-scope 'test/evals/results/v2pilot-*.jsonl'`, ceiling **US$20**; model
+`opencode-go/deepseek-v4.1-flash`; one binary, `go build -tags codemodecarry` (`bin/moca-carry`, the
+carry instrument the trial reads); `-j 1`; headless `-p` (so a shell call that would need approval is
+denied — the claim is scoped to inspection without host command execution). Fixture:
+`test/evals/sweep-bulk` (generated: 361 files, 39 351 B, 120 services joined against
+`platform/defaults.yaml`). Trial: two prompts, one session, graded through the transcript.
+
+| arm | label | `codemode` block |
+|---|---|---|
+| off | `v2pilot-off` | none |
+| additive | `v2pilot-add` | `enabled: true` (budget 50) |
+| additive-400 | `v2pilot-add400` | `enabled: true, inspectAttempts: 400` |
+| transport | `v2pilot-xport` | `enabled: true, exposure: "transport"` (budget 400) |
+
+The four configs differ **only** inside `codemode` (`TestBulkPilotArmsAreTheFactorial`).
+
+### Endpoints, fixed now
+
+- **Primary (D26), transport vs off.** Paired by trial index over 10 pairs, on turn-1 carry
+  (`evalstats -compare-carry`, plus the per-pair median computed from the rows). Ship transport only
+  if **all** of:
+  1. transport carries less in **≥ 8 of 10 pairs** (paired sign test, p ≈ 0.055);
+  2. the **median pair ratio ≤ 0.5** — the median trial at least halves the carry;
+  3. **no lost pass**: `passes(transport) ≥ passes(off)`;
+  4. validity floor: **≤ 2 trials per arm** fail for harness reasons (no transcript, missing carry,
+     budget exceeded, timeout) — a checker failure on a *wrong answer* is a legitimate result, this
+     floor is about the instrument.
+- **The factorial read (the dial), transport vs additive-400.** If `median(add400/xport) ≥ 0.8` with
+  `passes(add400) ≥ passes(xport)` and `steps(add400) ≤ steps(xport) + 0.5`, the **budget** was the
+  fix: ship `inspectAttempts` and cut `exposure` from the release. If `additive-400` is clearly
+  worse than transport on the same pair test, the switch carries an effect the dial does not.
+- **Recorded, not gating:** additive vs off (does a ninth additive tool do anything on a bulk task?),
+  steps per trial, cost per trial, and the script count per successful transport trial.
+- **Outcome is written for every case:** *ship transport* | *ship the dial only* | *no effect*
+  (transport within 10 % of off on median carry) | *inconclusive* (validity floor failed, or the
+  median ratio lands in (0.5, 1.0) with no sign-test win).
+- **Stopping rule:** one round, 40 trials, no round 2 and no threshold relaxation after the numbers
+  are seen. A failed primary closes the codemode line with two negative results (additive, transport).
+
+### Result — `v2pilot-*`, 10 trials per arm, US$0.3242 total
+
+Run 2026-11-24 on `opencode-go/deepseek-v4.1-flash`, one `bin/moca-carry` binary, `-j 1`, the four
+labels under one `v2pilot-*` scope (a 1-trial transport smoke ran first: pass, carry 1 956,
+$0.0053).
+
+| arm | pass | turn-1 carry (median) | carry Σ | steps (mean) | cost |
+|---|---|---|---|---|---|
+| `off` | 4/10 | 4 014 | 47 882 | 15.8 | $0.0766 |
+| `additive` (50) | 6/10 | 6 322 | 68 678 | 19.7 | $0.1145 |
+| `additive-400` | 8/10 | 2 708 | 30 146 | 14.0 | $0.0597 |
+| `transport` | 9/10 | 2 917 | 32 679 | 16.1 | $0.0680 |
+
+**Primary (predeclared, transport vs off) — FAILED.** 7/10 pairs carry less (needs ≥ 8; p = 0.172),
+median pair ratio **0.778** (needs ≤ 0.5), no lost pass (9 ≥ 4). By the predeclared outcome table
+that is **inconclusive**: the median sits in (0.5, 1.0) with no sign-test win. **Transport does not
+ship.** `exposure` stays in the tree, default `additive`, off unless `codemode.enabled`.
+
+**The dial — the one clean effect.** `additive-400` vs `additive-50`: 8/10 pairs carry less (p = 0.055),
+median ratio **0.376**, carry Σ 30 146 vs 68 678, passes 8 vs 6, steps 14.0 vs 19.7. Both arms ran
+under the same rules, so this comparison is not exposed to the fixture defect below: the 50-attempt
+budget was throttling the additive arm on a bulk task, and raising it makes it cheaper *and* faster.
+`additive-400` ≈ `transport` on carry (median ratio 1.068 — the dial carries slightly less), so
+exposure adds no carry benefit over the budget; its only remaining delta is +1 pass and +2 steps,
+which at n = 10 is noise. Recommendation: keep `codemode.inspectAttempts` and decide separately
+whether 400 becomes the additive default.
+
+**Fixture defect found by this run (recorded, not a result).** Every failure but one was *"the run left
+untracked files"* — 11 of 12 (`off` 6/6, `additive` 3/4, `additive-400` 2/2, `transport` 1/1). The
+task prompt says how to *answer*, not that the tree must stay clean, so the rule discriminates against
+the arm that has no scratch space: without codemode, dumping intermediate rows to a file is the only
+way to hold 120 services, and the checker fails it before it can grade the answer. **The pass column
+above is therefore not a capability measurement** and must not be quoted as one. Before any pass-rate
+endpoint: `prompt.txt` must state the rule ("do not create or modify files in the repository"), and
+the checker should grade the answer before the tree so a failure says which one it was.
+
+**What stands after this pilot:** Stage A's turn-count verdict is unchanged; the carry effect of
+codemode on a real bulk task is real but modest (median 0.78 of the control's carry when it has the
+budget to be efficient), and it does not reach the predeclared half-the-context bar. The 50-attempt
+budget, not the exposure model, was the binding constraint at additive. No round 2 was run and no
+threshold moved.
