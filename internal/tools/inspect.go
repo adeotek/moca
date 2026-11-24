@@ -66,20 +66,32 @@ type Inspection struct {
 	entries  int
 	cursors  map[string]cursor
 	nextID   int
-	reasonN  int      // gaps over the whole execution, for the host ledger
-	callGaps int      // gaps during the current call
-	sample   []string // ≤inspectReasonSample examples from the current call
+	// Transport-session extras (SPECS §10.6). maxAttempts overrides the
+	// package budget when non-zero; grants are the extra roots read may touch;
+	// capture asks for a full-file stamp per read, memoised per path so a paged
+	// read hashes once.
+	maxAttempts int
+	grants      []string
+	capture     bool
+	stamps      map[string]stamp // requested path -> stamp, filled by Read
+	reasonN     int              // gaps over the whole execution, for the host ledger
+	callGaps    int              // gaps during the current call
+	sample      []string         // ≤inspectReasonSample examples from the current call
 }
 
 // cursor is the opaque continuation state. start is the chain's ORIGINAL
 // offset and never changes: without it a chain that began at a non-default
 // offset could not re-read the span its digest claims to verify (F19).
 type cursor struct {
-	path   string
-	start  int
-	next   int
-	limit  int
-	digest string
+	path string
+	abs  string // non-empty when the path resolved through a grant
+	// requested is the path string the caller passed, which is the key the
+	// transport stamp memo uses (a page write must reuse the first page's key).
+	requested string
+	start     int
+	next      int
+	limit     int
+	digest    string
 }
 
 // NewInspection records the execution's containment boundary. It opens nothing.
@@ -96,7 +108,7 @@ func (i *Inspection) openRoot() (*workspace, error) {
 	if i.ws != nil {
 		return i.ws, nil
 	}
-	w, err := openWorkspace(i.dir)
+	w, err := openWorkspace(i.dir, i.grants)
 	if err != nil {
 		return nil, err
 	}
@@ -123,16 +135,36 @@ func (i *Inspection) Close() error {
 // charge takes one attempt. The 51st latches: every later call fails the same
 // way, so a script cannot spend its way past the cap one error at a time.
 func (i *Inspection) charge() error {
-	if i.latched {
-		return inspectErr("limit", "inspection attempts exhausted (%d)", inspectAttempts)
+	limit := inspectAttempts
+	if i.maxAttempts > 0 {
+		limit = i.maxAttempts
 	}
-	if i.attempts >= inspectAttempts {
+	if i.latched {
+		return inspectErr("limit", "inspection attempts exhausted (%d)", limit)
+	}
+	if i.attempts >= limit {
 		i.latched = true
 		i.gap("attempts")
-		return inspectErr("limit", "inspection attempts exhausted (%d)", inspectAttempts)
+		return inspectErr("limit", "inspection attempts exhausted (%d)", limit)
 	}
 	i.attempts++
 	return nil
+}
+
+// configure applies a transport session's extras. attempts <= 0 keeps the
+// package budget; capture allocates the stamp memo.
+func (i *Inspection) configure(grants []string, attempts int, capture bool) {
+	i.grants, i.maxAttempts, i.capture = grants, attempts, capture
+	if capture {
+		i.stamps = map[string]stamp{}
+	}
+}
+
+// StampFor returns the full-file stamp captured for the path string the caller
+// passed to Read, if this execution captured one.
+func (i *Inspection) StampFor(requested string) (stamp, bool) {
+	st, ok := i.stamps[requested]
+	return st, ok
 }
 
 // chargeBytes accounts for source bytes read; the budget covers re-reads too,
@@ -222,6 +254,43 @@ type lsPayload struct {
 // continuation passes the cursor name and nothing else. The two forms are
 // mutually exclusive, because a cursor that could be combined with a new path
 // would describe a chain it never verified (S2).
+// readTarget resolves a read's path: workspace-relative (the common case) or an
+// absolute path that a typed grant admits. Anything else absolute is outside.
+func (i *Inspection) readTarget(p string) (rel, abs string, err error) {
+	if !filepath.IsAbs(p) {
+		rel, err = cleanRel(p)
+		return rel, "", err
+	}
+	ws, err := i.openRoot()
+	if err != nil {
+		return "", "", err
+	}
+	if root, r := ws.granted(p); root == nil || r == "" {
+		return "", "", &InspectError{Class: "outside", Message: "absolute path is not inside a granted directory: " + p}
+	}
+	return "", filepath.Clean(p), nil
+}
+
+// openCursor opens a cursor's file under the root the cursor belongs to.
+func (i *Inspection) openCursor(ws *workspace, c cursor) (*os.File, os.FileInfo, error) {
+	if c.abs == "" {
+		return ws.openFile(c.path)
+	}
+	root, rel := ws.granted(c.abs)
+	if root == nil || rel == "" {
+		return nil, nil, &InspectError{Class: "outside", Message: "absolute path is not inside a granted directory: " + c.abs}
+	}
+	return openRegular(root, rel, c.abs)
+}
+
+// label is how a cursor is named in messages and payloads.
+func (c cursor) label() string {
+	if c.abs != "" {
+		return c.abs
+	}
+	return c.path
+}
+
 func (i *Inspection) Read(ctx context.Context, args json.RawMessage) (any, error) {
 	var a struct {
 		Path   string  `json:"path"`
@@ -232,8 +301,6 @@ func (i *Inspection) Read(ctx context.Context, args json.RawMessage) (any, error
 	if r := decodeArgs(args, &a); r != nil {
 		return nil, r
 	}
-	i.begin()
-	i.begin()
 	i.begin()
 	if err := i.charge(); err != nil {
 		return nil, err
@@ -273,11 +340,11 @@ func (i *Inspection) Read(ctx context.Context, args json.RawMessage) (any, error
 		if limit < 1 {
 			return nil, inspectErr("invalid_args", "limit must be >= 1")
 		}
-		rel, err := cleanRel(a.Path)
+		rel, abs, err := i.readTarget(a.Path)
 		if err != nil {
 			return nil, err
 		}
-		c = cursor{path: rel, start: offset, next: offset, limit: limit}
+		c = cursor{path: rel, abs: abs, start: offset, next: offset, limit: limit, requested: a.Path}
 		pageFrom = offset
 	}
 
@@ -285,13 +352,13 @@ func (i *Inspection) Read(ctx context.Context, args json.RawMessage) (any, error
 	if err != nil {
 		return nil, err
 	}
-	f, fi, err := ws.openFile(c.path)
+	f, fi, err := i.openCursor(ws, c)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 	if fi.Size() > readMaxFileSize {
-		return nil, inspectErr("limit", "%s is %d bytes; too large to inspect (limit %d MiB)", c.path, fi.Size(), readMaxFileSize>>20)
+		return nil, inspectErr("limit", "%s is %d bytes; too large to inspect (limit %d MiB)", c.label(), fi.Size(), readMaxFileSize>>20)
 	}
 
 	payload := readPayload{Lines: []readRow{}}
@@ -306,6 +373,14 @@ func (i *Inspection) Read(ctx context.Context, args json.RawMessage) (any, error
 	// The running digest is always built: even a first page seals the span it
 	// returned, which is what lets page two verify page one.
 	h := sha256.New()
+	// A transport session also needs the file's whole content stamped, once per
+	// path per execution: a 30-page read hashes the file once, not 30 times.
+	var full hash.Hash
+	if i.capture && c.requested != "" {
+		if _, done := i.stamps[c.requested]; !done {
+			full = sha256.New()
+		}
+	}
 
 	br := newLineReader(f)
 	for {
@@ -322,6 +397,9 @@ func (i *Inspection) Read(ctx context.Context, args json.RawMessage) (any, error
 		}
 		if err := i.chargeBytes(len(raw)); err != nil {
 			return nil, err
+		}
+		if full != nil {
+			full.Write(raw)
 		}
 		total++
 		if total < c.start {
@@ -378,13 +456,20 @@ func (i *Inspection) Read(ctx context.Context, args json.RawMessage) (any, error
 
 	if !payload.Complete && len(payload.Lines) > 0 {
 		last := payload.Lines[len(payload.Lines)-1].N
-		name, err := i.storeCursor(cursor{path: c.path, start: c.start, next: last + 1, limit: limit, digest: digestTo(h, c.start, last)})
+		name, err := i.storeCursor(cursor{path: c.path, abs: c.abs, requested: c.requested, start: c.start, next: last + 1, limit: limit, digest: digestTo(h, c.start, last)})
 		if err != nil {
 			return nil, err
 		}
 		payload.Next = name
 	}
 	payload.Reasons = i.coverage()
+	if full != nil {
+		var sum [32]byte
+		copy(sum[:], full.Sum(nil))
+		// Size and mtime come from the descriptor that was read, not a later
+		// stat of the pathname: the stamp describes the bytes this call saw.
+		i.stamps[c.requested] = stamp{mod: fi.ModTime(), size: fi.Size(), sum: sum}
+	}
 	return payload, nil
 }
 

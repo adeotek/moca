@@ -13,19 +13,33 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 )
 
-// workspace is the root every nested read, search and ls is confined to.
-type workspace struct {
+// grant is one additional root a transport session may read: the paths the
+// direct `read` tool could always reach but the workspace root cannot — the
+// global and built-in skills directories, the prompts directory, the session's
+// spill directory and the config file. Each is opened as its own *os.Root, so a
+// grant inherits the same symlink refusal the workspace has (SPECS §10.6).
+type grant struct {
+	path string // absolute, as admitted
 	root *os.Root
-	name string // the workspace's own path, for messages that stay inside it
+}
+
+// workspace is the root every nested read, search and ls is confined to, plus
+// the typed grants a transport session adds.
+type workspace struct {
+	root   *os.Root
+	name   string // the workspace's own path, for messages that stay inside it
+	grants []grant
 }
 
 // openWorkspace opens dir as a root. It is the single place that turns a
-// directory into a containment boundary.
-func openWorkspace(dir string) (*workspace, error) {
+// directory into a containment boundary. grants are absolute paths; a file is
+// granted as its parent directory plus the file's own name.
+func openWorkspace(dir string, grants []string) (*workspace, error) {
 	if dir == "" {
 		return nil, &InspectError{Class: "denied", Message: "no workspace root"}
 	}
@@ -33,11 +47,53 @@ func openWorkspace(dir string) (*workspace, error) {
 	if err != nil {
 		return nil, &InspectError{Class: "denied", Message: "cannot open the workspace root: " + err.Error()}
 	}
-	return &workspace{root: r, name: dir}, nil
+	w := &workspace{root: r, name: dir}
+	seen := map[string]bool{}
+	for _, g := range grants {
+		if g == "" {
+			continue
+		}
+		base := g
+		if fi, err := os.Stat(g); err == nil && !fi.IsDir() {
+			base = filepath.Dir(g)
+		}
+		if seen[base] {
+			continue
+		}
+		gr, err := os.OpenRoot(base)
+		if err != nil {
+			continue // a grant that cannot be opened simply does not exist
+		}
+		seen[base] = true
+		w.grants = append(w.grants, grant{path: base, root: gr})
+	}
+	return w, nil
+}
+
+// granted resolves an absolute path against the grants. It returns the open
+// root and the path relative to it, or nil when no grant covers p. The match is
+// segment-wise, so /a/bc is not covered by a grant on /a/b.
+func (w *workspace) granted(p string) (*os.Root, string) {
+	clean := filepath.Clean(p)
+	for _, g := range w.grants {
+		if clean == g.path {
+			return nil, "" // the granted path itself is a directory, not a file
+		}
+		if strings.HasPrefix(clean, g.path+string(filepath.Separator)) {
+			return g.root, strings.TrimPrefix(clean, g.path+string(filepath.Separator))
+		}
+	}
+	return nil, ""
 }
 
 func (w *workspace) close() error {
-	if w == nil || w.root == nil {
+	if w == nil {
+		return nil
+	}
+	for _, g := range w.grants {
+		g.root.Close()
+	}
+	if w.root == nil {
 		return nil
 	}
 	return w.root.Close()
@@ -70,10 +126,16 @@ func cleanRel(p string) (string, error) {
 // openFile opens rel and requires a regular file. The mode gate runs on the
 // opened descriptor, not on a path that may have changed since it was checked.
 func (w *workspace) openFile(rel string) (*os.File, os.FileInfo, error) {
-	f, err := w.root.Open(rel)
+	return openRegular(w.root, rel, rel)
+}
+
+// openRegular opens name under root and requires a regular file; label is what
+// messages call it (a workspace-relative path or a granted absolute one).
+func openRegular(root *os.Root, name, label string) (*os.File, os.FileInfo, error) {
+	f, err := root.Open(name)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil, &InspectError{Class: "not_found", Message: "no such file: " + rel}
+			return nil, nil, &InspectError{Class: "not_found", Message: "no such file: " + label}
 		}
 		return nil, nil, &InspectError{Class: "denied", Message: err.Error()}
 	}
@@ -84,11 +146,11 @@ func (w *workspace) openFile(rel string) (*os.File, os.FileInfo, error) {
 	}
 	if fi.IsDir() {
 		f.Close()
-		return nil, nil, &InspectError{Class: "not_regular", Message: rel + " is a directory"}
+		return nil, nil, &InspectError{Class: "not_regular", Message: label + " is a directory"}
 	}
 	if !fi.Mode().IsRegular() {
 		f.Close()
-		return nil, nil, &InspectError{Class: "not_regular", Message: rel + " is not a regular file"}
+		return nil, nil, &InspectError{Class: "not_regular", Message: label + " is not a regular file"}
 	}
 	return f, fi, nil
 }

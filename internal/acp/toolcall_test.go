@@ -28,6 +28,9 @@ func TestStartUpdateTable(t *testing.T) {
 		{"web", `{"op":"fetch","url":"https://x.dev"}`, "fetch https://x.dev", "fetch", ""},
 		{"mcp", `{"action":"call","server":"gh","tool":"issues"}`, "mcp gh/issues", "other", ""},
 		{"mcp", `{"action":"search","query":"pr"}`, "mcp search pr", "other", ""},
+		// A transport session's only inspection path: the call still renders as
+		// execute, with the program's first line as its title (SPECS §10.6).
+		{"codemode", `{"code":"const g = await tools.glob({pattern: 'x'})"}`, "codemode const g = await tools.glob({pattern: 'x'})", "execute", ""},
 		{"read", `{"path":`, "read", "read", ""}, // cut-off input: name only, no rawInput
 	}
 	for _, c := range cases {

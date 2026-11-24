@@ -506,11 +506,38 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 		storedExposure = prior[0].Session.CodemodeExposure
 	}
 	plan := planCodemode(resumed, hadCodemode, storedNetwork, storedExposure, st.cm)
+	// A resumed session keeps the surface its frozen prompt promised (SPECS
+	// §10.6, D24). Running a transport prompt beside eight declared tools — or
+	// an additive prompt beside six — is a contradiction the model cannot
+	// resolve, and the second case leaves it unable to inspect anything at all.
+	// Refuse before a provider call, and name both ways out.
+	if resumed && plan.present {
+		now := ""
+		if st.cm.On {
+			now = st.cm.Exposure
+		}
+		stored := plan.exposure
+		if stored == "" {
+			stored = config.CodemodeAdditive
+		}
+		// Only the transport bit has to match: an additive session resumed with
+		// codemode off keeps today's refusal-tool behaviour (the tool is still
+		// declared, it just refuses), which its prompt already promised.
+		if (stored == config.CodemodeTransport) != (now == config.CodemodeTransport) {
+			return nil, &StartError{fmt.Errorf("%w: this session was recorded with codemode %s (read, search and ls %s), "+
+				"and the current config resolves to %s — start a new session, or restore \"codemode\": "+
+				"{\"enabled\": true, \"exposure\": \"%s\"} to %s and resume",
+				ErrSurfaceMismatch, surfaceName(stored), surfacePhrase(stored), surfaceName(now), stored, config.ConfigFile())}
+		}
+	}
 	switch {
 	case plan.refusal:
 		reg.Register(tools.NewCodemodeRefusal(plan.preludeNetwork))
 	case plan.present:
-		reg.Register(tools.NewCodemode(codemodeHolder(plan.preludeNetwork, plan.admittedNetwork)))
+		// The grants are the jail's own read roots, so a transport session's
+		// scripted read reaches exactly what the direct read tool could.
+		reg.Register(tools.NewCodemode(codemodeHolder(plan.preludeNetwork, plan.admittedNetwork,
+			st.cm.Attempts, plan.exposure == config.CodemodeTransport, st.jail.ReadRoots())))
 	}
 	// A transport session declares six tools: inspection lives inside the
 	// script, so the direct calls are not shipped to the model (SPECS §10.6).
@@ -912,6 +939,29 @@ type codemodePlan struct {
 	exposure string
 }
 
+// ErrSurfaceMismatch is the resume refusal for a codemode surface that differs
+// from the one the session froze (SPECS §10.6).
+var ErrSurfaceMismatch = errors.New("resume_surface_mismatch")
+
+// surfaceName and surfacePhrase keep the refusal readable: "" is a session that
+// started with codemode off.
+func surfaceName(surface string) string {
+	if surface == config.CodemodeTransport {
+		return "transport"
+	}
+	if surface == config.CodemodeAdditive {
+		return "additive"
+	}
+	return "off"
+}
+
+func surfacePhrase(surface string) string {
+	if surface == config.CodemodeTransport {
+		return "reachable only inside a script"
+	}
+	return "declared directly"
+}
+
 func planCodemode(resumed, hadCodemode, storedNetwork bool, storedExposure string, cm config.CodemodeState) codemodePlan {
 	if !resumed {
 		if !cm.On {
@@ -940,9 +990,12 @@ func planCodemode(resumed, hadCodemode, storedNetwork bool, storedExposure strin
 // codemodeHolder builds the {engine, caps} holder for one effective policy. The
 // engine is lazy: constructing the holder compiles no module and opens no root,
 // so a session that never calls codemode pays nothing for having it.
-func codemodeHolder(preludeNetwork, admittedNetwork bool) *tools.CodemodeHolder {
+func codemodeHolder(preludeNetwork, admittedNetwork bool, attempts int, transport bool, grants []string) *tools.CodemodeHolder {
 	return &tools.CodemodeHolder{
-		Open: func() (tools.CodemodeEngine, error) { return codemode.DefaultEngine(), nil },
-		Caps: codemode.ExecCaps{NetworkPrelude: preludeNetwork, Network: admittedNetwork},
+		Open:      func() (tools.CodemodeEngine, error) { return codemode.DefaultEngine(), nil },
+		Caps:      codemode.ExecCaps{NetworkPrelude: preludeNetwork, Network: admittedNetwork},
+		Attempts:  attempts,
+		Transport: transport,
+		Grants:    grants,
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -56,6 +57,25 @@ type CodemodeHolder struct {
 	openErr error
 	prelude string
 	built   bool
+
+	// Transport surface (SPECS §10.6): Attempts is this session's per-script
+	// inspection budget, Grants are the extra roots a scripted read may reach
+	// (the same paths the direct read tool always could), and Transport turns on
+	// read parity for the bridge.
+	Attempts  int
+	Grants    []string
+	Transport bool
+}
+
+// inspection builds this execution's Inspection and applies the session's
+// transport extras: typed grants, the configured attempt budget and read-stamp
+// capture. A nil holder (tests, the refusal tool) keeps the workspace defaults.
+func (h *CodemodeHolder) inspection(root string) *Inspection {
+	in := mustInspection(root)
+	if h != nil && (h.Transport || h.Attempts > 0) {
+		in.configure(h.Grants, h.Attempts, h.Transport)
+	}
+	return in
 }
 
 // Engine resolves the engine once, memoizing both the success and the error.
@@ -112,13 +132,19 @@ type capability struct {
 
 // bridge is one execution's workspace view plus its capture and ledger.
 type bridge struct {
-	in      *Inspection
-	caps    map[string]capability
-	texts   []string
-	logs    []string
-	calls   int
-	gaps    int
-	reasons []string
+	in   *Inspection
+	caps map[string]capability
+	// env is the session the script runs for; transport turns on read parity —
+	// a scripted read stamps the file (so a later edit passes the freshness
+	// rule) and a scripted search is the look-before-you-act signal a direct one
+	// is (SPECS §10.6, D23).
+	env       *Env
+	transport bool
+	texts     []string
+	logs      []string
+	calls     int
+	gaps      int
+	reasons   []string
 }
 
 // idiomEchoLead opens the result-side idiom reminder. It is matched, never
@@ -215,7 +241,7 @@ func (t codemodeTool) Run(ctx context.Context, env *Env, input json.RawMessage) 
 
 	// The bridge is per call: its root, budgets and cursors are the script's,
 	// and a second call starts clean.
-	br := &bridge{in: mustInspection(env.Root), caps: workspaceCapabilities()}
+	br := &bridge{in: t.holder.inspection(env.Root), caps: workspaceCapabilities(), env: env, transport: t.holder.Transport}
 	defer br.in.Close()
 
 	res, cerr := eng.Execute(ctx, t.holder.Caps, a.Code, br.dispatch, timeoutOf(a.TimeoutSeconds))
@@ -282,7 +308,43 @@ func (b *bridge) dispatch(ctx context.Context, name string, args json.RawMessage
 	if cerr != nil {
 		return nil, cerr
 	}
+	b.recordParity(name, args)
 	return out, nil
+}
+
+// recordParity mirrors, for a transport session only, the side effects the
+// direct tools have: `read` records the file so `edit`/`write` accept it as read,
+// and a `*_test.go` read arms the investigation hint; `search` marks the session
+// as having looked. Additive keeps today's "inspection records no read"
+// contract, which its own test pins.
+func (b *bridge) recordParity(name string, args json.RawMessage) {
+	if !b.transport || b.env == nil {
+		return
+	}
+	switch name {
+	case "search":
+		b.env.Searched = true
+	case "read":
+		var a struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(args, &a) != nil {
+			return
+		}
+		st, ok := b.in.StampFor(a.Path)
+		if !ok || b.env.Reads == nil {
+			return
+		}
+		abs := a.Path
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(b.env.Root, filepath.FromSlash(abs))
+		}
+		b.env.Reads.RecordStamp(abs, st.mod, st.size, st.sum)
+		if strings.HasSuffix(a.Path, "_test.go") {
+			b.env.TestSeen = true
+			b.env.FailingTest = ""
+		}
+	}
 }
 
 // encodeResult marshals a payload, notes its coverage for the ledger and turns

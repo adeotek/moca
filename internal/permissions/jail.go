@@ -64,6 +64,17 @@ func NewJail(root string, readOnly, askWrite []string) (*Jail, error) {
 
 func (j *Jail) Root() string { return j.root }
 
+// ReadRoots is the read-only area outside the root, canonicalized: the global
+// skills directory, the built-in skills, the prompts directory, this session's
+// spill dir and the config file. moca's own nested inspection uses it as its
+// grant list, so a script and the direct read tool reach exactly the same paths
+// (SPECS §10.6).
+func (j *Jail) ReadRoots() []string {
+	out := make([]string, len(j.readOnly))
+	copy(out, j.readOnly)
+	return out
+}
+
 // WithWritable returns a copy of the jail whose read and write area also
 // covers roots. Each root is made absolute and canonicalized with
 // resolveDeep; empty or missing roots are skipped, and so are the

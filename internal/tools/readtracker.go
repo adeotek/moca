@@ -57,6 +57,16 @@ func (t *ReadTracker) Record(abs string) error {
 	return nil
 }
 
+// RecordStamp stores a stamp another path already computed from its own open
+// descriptor — the transport bridge's scripted read (SPECS §10.6). It exists so
+// a transport session never reopens a pathname just to learn what the bytes it
+// already read were, which would be a different file under a rename.
+func (t *ReadTracker) RecordStamp(abs string, mod time.Time, size int64, sum [32]byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.m[abs] = stamp{mod: mod, size: size, sum: sum}
+}
+
 func (t *ReadTracker) Check(abs string) error {
 	cur, err := stampOf(abs)
 	if errors.Is(err, fs.ErrNotExist) {

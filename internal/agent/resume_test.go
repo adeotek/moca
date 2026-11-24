@@ -48,6 +48,76 @@ func TestResumeRebuildsExactContext(t *testing.T) {
 	_ = work
 }
 
+// A session's tool surface is frozen with its prompt: a resume whose current
+// config resolves to a different surface refuses before any provider call,
+// because neither direction is coherent (SPECS §10.6, D24). The two rows that
+// stay allowed are the same-surface resume and additive-then-off, which is the
+// refusal-tool behaviour that already existed.
+func TestResumeRefusesASurfaceMismatch(t *testing.T) {
+	cases := []struct {
+		name, start, resume string
+		wantErr             bool
+		wantTools           int
+	}{
+		{"additive to additive", "additive", "additive", false, 9},
+		{"additive to off", "additive", "", false, 9},
+		{"additive to transport", "additive", "transport", true, 0},
+		{"transport to transport", "transport", "transport", false, 6},
+		{"transport to additive", "transport", "additive", true, 0},
+		{"transport to off", "transport", "", true, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := newScript(t, textTurn("first answer"), textTurn("second answer"))
+			extra := `"codemode":{"enabled":true`
+			if c.start == "transport" {
+				extra += `,"exposure":"transport"`
+			}
+			extra += `}`
+			a, _, _ := startWith(t, s, 2, extra, "")
+			if _, err := a.Run(context.Background(), "first question"); err != nil {
+				t.Fatalf("first run: %v", err)
+			}
+			path := a.Session().Path()
+			cfg := a.opts.Config
+			off, transport, additive := false, "transport", "additive"
+			switch c.resume {
+			case "":
+				cfg.Codemode.Enabled = &off
+			case "transport":
+				cfg.Codemode.Exposure = &transport
+			default:
+				cfg.Codemode.Exposure = &additive
+			}
+			a.Session().Close()
+			before := len(s.bodies)
+
+			b, err := Resume(StartOptions{Config: cfg, Workdir: session.WorkdirOf(path), HTTP: s.srv.Client()}, path)
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("resume accepted a mismatched surface (%d tools)", len(b.opts.Tools.Specs()))
+				}
+				if !errors.Is(err, ErrSurfaceMismatch) {
+					t.Fatalf("error is not typed: %v", err)
+				}
+				if !strings.Contains(err.Error(), "start a new session") {
+					t.Fatalf("the refusal does not name the remedies: %v", err)
+				}
+				if got := len(s.bodies); got != before {
+					t.Fatalf("a refused resume spent a provider call (%d -> %d)", before, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resume: %v", err)
+			}
+			if got := len(b.opts.Tools.Specs()); got != c.wantTools {
+				t.Fatalf("resumed with %d declared tools, want %d", got, c.wantTools)
+			}
+		})
+	}
+}
+
 func TestResumeAfterCrashMidTool(t *testing.T) {
 	s := newScript(t)
 	a, _, _ := startTestWith(t, s, "", "")
