@@ -29,6 +29,24 @@ pilot_preflight() {
       echo "pilot scenario $s needs -cap <usd> — the spend ceiling is part of the approval, not an honour system"
       bad=1
     fi
+    # A factorial pilot ships more than one arm, and its arms are separate
+    # labels: -cap alone would hand each one its own ceiling, which is how three
+    # labels x a $20 cap becomes a $60 campaign. One ledger, one scope.
+    if [ -n "${CAP_USD:-}" ] && [ -z "${CAP_SCOPE:-}" ]; then
+      arms=$(ls "$EVALS/$s"/config.cm-*.jsonc 2>/dev/null | wc -l)
+      if [ "$arms" -gt 1 ]; then
+        echo "pilot scenario $s ships $arms arms: -cap alone caps each arm separately — pass -cap-scope '$EVALS/results/campaign.*.jsonl' so the ceiling covers the campaign"
+        bad=1
+      fi
+    fi
+    # A scope that matches nothing guards nothing. A fresh campaign legitimately
+    # has no results yet, so this only refuses once the results area has files.
+    if [ -n "${CAP_SCOPE:-}" ] && [ -n "$(ls -A "$EVALS/results" 2>/dev/null | head -1)" ]; then
+      if ! compgen -G "$CAP_SCOPE" >/dev/null; then
+        echo "-cap-scope $CAP_SCOPE matches no results file, but $EVALS/results already has results — a scope that matches nothing is a ceiling that guards nothing"
+        bad=1
+      fi
+    fi
     case "$VARIANT" in
       cm-*)
         # Any arm of the codemode family, so a model arm (cm-on.glm) runs on its
@@ -187,10 +205,32 @@ spend_total() {
     awk '{s += $1} END {printf "%.6f", s + 0}'
 }
 
+# spend_total_scope <glob>: the dollars recorded across every results file the
+# scope names, 6dp. A campaign is several labels — a factorial's arms are
+# separate runs — and one ceiling has to see all of them (R81).
+spend_total_scope() {
+  local f total=0
+  for f in $1; do
+    [ -f "$f" ] || continue
+    total=$(awk -v a="$total" -v b="$(spend_total "$f")" 'BEGIN {printf "%.6f", a + b}')
+  done
+  printf "%.6f" "$total"
+}
+
+# spend_total_for <jsonl>: the number the ceiling is checked against — the
+# scope's total when -cap-scope is set, the label's own file otherwise.
+spend_total_for() {
+  if [ -n "${CAP_SCOPE:-}" ]; then
+    spend_total_scope "$CAP_SCOPE"
+  else
+    spend_total "$1"
+  fi
+}
+
 # spend_guard <jsonl> <cap>: true when the recorded spend has reached the cap.
 # Checked before each run is launched, so a serial pilot stops on the run that
 # would cross the line rather than after it.
 spend_guard() {
   [ -n "${2:-}" ] || return 1
-  awk -v t="$(spend_total "$1")" -v c="$2" 'BEGIN {exit !(t >= c)}'
+  awk -v t="$(spend_total_for "$1")" -v c="$2" 'BEGIN {exit !(t >= c)}'
 }

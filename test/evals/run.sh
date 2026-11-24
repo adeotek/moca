@@ -36,7 +36,7 @@ MOCA="${MOCA:-$REPO/bin/moca}"
 # VARIANT is set only by -c: without it every scenario runs its own config
 # (or the shared corpus config), never a variant arm; the checkers still see
 # "on" (the scenarios' own configs are the on arm).
-RUNS=1 JOBS=4 LABEL="dev" MODEL="" SELFTEST=0 VARIANT="" CAP_USD="${MOCA_EVAL_CAP_USD:-}"
+RUNS=1 JOBS=4 LABEL="dev" MODEL="" SELFTEST=0 VARIANT="" CAP_USD="${MOCA_EVAL_CAP_USD:-}" CAP_SCOPE=""
 SCENARIOS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -46,6 +46,9 @@ while [ $# -gt 0 ]; do
     -m) MODEL="$2"; shift 2 ;;
     -c) VARIANT="$2"; shift 2 ;;
     -cap) CAP_USD="$2"; shift 2 ;;
+    # -cap-scope <glob>: one ceiling across a campaign's labels (arms are
+    # separate runs, so a per-label cap is not a campaign cap).
+    -cap-scope) CAP_SCOPE="$2"; shift 2 ;;
     --selftest) SELFTEST=1; shift ;;
     -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     *) SCENARIOS+=("$1"); shift ;;
@@ -359,6 +362,50 @@ if [ "$SELFTEST" = 1 ]; then
     fi
     rm -rf "$work"
   done
+  # The campaign ceiling (R81): a factorial's arms are separate labels, so the
+  # scope is what makes several runs one number. Synthetic ledgers — no model,
+  # no binary.
+  capdir=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-cap.XXXXXX")
+  printf '{"cost":0.4}\n' > "$capdir/a.jsonl"
+  printf '{"cost":0.4}\n' > "$capdir/b.jsonl"
+  if (CAP_SCOPE="$capdir/*.jsonl" spend_guard "$capdir/a.jsonl" 0.7); then
+    echo "ok   spend-scope-shares-the-cap"
+  else
+    echo "FAIL spend-scope-shares-the-cap: 0.4 + 0.4 did not reach a 0.7 cap"; bad=1
+  fi
+  if (CAP_SCOPE="$capdir/*.jsonl" spend_guard "$capdir/a.jsonl" 0.9); then
+    echo "FAIL spend-scope-under-the-cap: 0.8 of a 0.9 cap stopped the launch"; bad=1
+  else
+    echo "ok   spend-scope-under-the-cap"
+  fi
+  if (CAP_SCOPE="" spend_guard "$capdir/a.jsonl" 0.3); then
+    echo "ok   spend-label-alone"
+  else
+    echo "FAIL spend-label-alone: one label's own total stopped matching reality"; bad=1
+  fi
+  # The preflight: a multi-arm pilot with -cap and no scope refuses, a fresh
+  # campaign is allowed, and a scope that matches nothing is a typo once results
+  # exist.
+  mkdir -p "$EVALS/results"
+  probe="$EVALS/results/selftest-probe.jsonl"
+  : > "$probe"
+  if (VARIANT=cm-additive CAP_USD=20 CAP_SCOPE="" pilot_preflight sweep-bulk >/dev/null 2>&1); then
+    echo "FAIL pilot-cap-needs-a-scope: -cap without a scope was accepted on a four-arm pilot"; bad=1
+  else
+    echo "ok   pilot-cap-needs-a-scope"
+  fi
+  if (VARIANT=cm-additive CAP_USD=20 CAP_SCOPE="$EVALS/results/selftest-*.jsonl" pilot_preflight sweep-bulk >/dev/null 2>&1); then
+    echo "ok   pilot-scope-accepted"
+  else
+    echo "FAIL pilot-scope-accepted: a matching scope was refused"; bad=1
+  fi
+  if (VARIANT=cm-additive CAP_USD=20 CAP_SCOPE="$EVALS/results/typo-*.jsonl" pilot_preflight sweep-bulk >/dev/null 2>&1); then
+    echo "FAIL pilot-scope-typo: a scope matching nothing was accepted while results exist"; bad=1
+  else
+    echo "ok   pilot-scope-typo"
+  fi
+  rm -f "$probe"
+  rm -rf "$capdir"
   # The pre-change goldens (rendered prompt, ordered wire schema, direct-tool
   # output): captured before any codemode code so Tasks 3/4/8 can prove "nothing
   # else moved" against real bytes rather than an empty diff. No model, no
@@ -494,7 +541,7 @@ for n in $(seq 1 "$RUNS"); do
     # can lag by the in-flight runs, which is why the closing check below is a
     # real assertion, not a print.
     if spend_guard "$OUT" "${CAP_USD:-}"; then
-      echo "spend ceiling: $(spend_total "$OUT") USD recorded against a ${CAP_USD} USD cap — stopping (results: $OUT)" >&2
+      echo "spend ceiling: $(spend_total_for "$OUT") USD recorded against a ${CAP_USD} USD cap — stopping (ledger: ${CAP_SCOPE:-$OUT})" >&2
       wait
       exit 3
     fi
@@ -509,10 +556,10 @@ for n in $(seq 1 "$RUNS"); do
 done
 wait
 if [ -n "${CAP_USD:-}" ]; then
-  spent="$(spend_total "$OUT")"
-  echo "spend: $spent USD of the $CAP_USD USD cap"
+  spent="$(spend_total_for "$OUT")"
+  echo "spend: $spent USD of the $CAP_USD USD cap (ledger: ${CAP_SCOPE:-$OUT})"
   if awk -v t="$spent" -v c="$CAP_USD" 'BEGIN {exit !(t > c)}'; then
-    echo "spend ceiling exceeded: $spent USD > $CAP_USD USD (results: $OUT)" >&2
+    echo "spend ceiling exceeded: $spent USD > $CAP_USD USD (ledger: ${CAP_SCOPE:-$OUT})" >&2
     exit 3
   fi
 fi
