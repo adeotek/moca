@@ -341,6 +341,28 @@ type Env struct {
 // not advertise the feature (Agent.SelfManagedSkills reads it too).
 func (e *Env) SkillLearning() bool { return e.SkillGuard != nil && !e.SkillGuardRefusing }
 
+// Exposure is what the model is allowed to see of a tool (SPECS §10). Direct
+// tools are declared in every request; Codemode tools are callable only from a
+// script — the code-mode contract Pi and OpenCode both rely on: the shortcut is
+// not shipped, so the model cannot take it. The dispatcher is unchanged either
+// way: codemode's capability table, not this flag, decides what a script may
+// call.
+type Exposure uint8
+
+const (
+	Direct Exposure = iota
+	Codemode
+)
+
+// Exposable is the optional interface a Tool implements to declare its exposure.
+// Absent means Direct, so the eight built-ins are untouched by this feature.
+type Exposable interface{ Exposure() Exposure }
+
+// exposedTool marks a tool as callable only from a script.
+type exposedTool struct{ Tool }
+
+func (exposedTool) Exposure() Exposure { return Codemode }
+
 type Registry struct {
 	order []string
 	tools map[string]Tool
@@ -362,11 +384,50 @@ func (r *Registry) Register(t Tool) {
 	r.tools[name] = t
 }
 
-func (r *Registry) Specs() []llm.ToolSpec {
-	out := make([]llm.ToolSpec, len(r.order))
-	for i, n := range r.order {
-		out[i] = r.tools[n].Spec()
+// CodemodeOnly hides the named tools from the model while keeping them
+// dispatchable: a transport session's inspection paths exist, but only inside a
+// script. An unknown name is ignored here (the capability table is the authority
+// on what a script may call); the declared-list test pins the real names.
+func (r *Registry) CodemodeOnly(names ...string) {
+	for _, n := range names {
+		if t, ok := r.tools[n]; ok {
+			if _, already := t.(Exposable); !already {
+				r.tools[n] = exposedTool{t}
+			}
+		}
 	}
+}
+
+// ExposureOf reports a tool's exposure: Direct unless it implements Exposable.
+func (r *Registry) ExposureOf(name string) Exposure {
+	t, ok := r.tools[name]
+	if !ok {
+		return Direct
+	}
+	if e, ok := t.(Exposable); ok {
+		return e.Exposure()
+	}
+	return Direct
+}
+
+// Specs is the DECLARED list: what every request carries. A Codemode-exposed
+// tool is skipped — the model reaches it through a script, not a call.
+func (r *Registry) Specs() []llm.ToolSpec {
+	out := make([]llm.ToolSpec, 0, len(r.order))
+	for _, n := range r.order {
+		if r.ExposureOf(n) == Codemode {
+			continue
+		}
+		out = append(out, r.tools[n].Spec())
+	}
+	return out
+}
+
+// Names is every registered tool in declaration order, exposure aside: the
+// dispatch surface, which is what control accounting and tests compare against.
+func (r *Registry) Names() []string {
+	out := make([]string, len(r.order))
+	copy(out, r.order)
 	return out
 }
 
@@ -374,6 +435,12 @@ func (r *Registry) Run(ctx context.Context, env *Env, call llm.ToolCall) Result 
 	t, ok := r.tools[call.Name]
 	if !ok {
 		return errorf("unknown tool %q; available: %s", call.Name, strings.Join(r.order, ", "))
+	}
+	// A Codemode-exposed tool is not declared, so a direct call to it is a
+	// mistake the model can recover from: the call is refused and the model is
+	// pointed at the script that owns it. The bridge is what actually runs it.
+	if _, hidden := t.(Exposable); hidden {
+		return errorf("%s is available only inside a %s script in this session", call.Name, "codemode")
 	}
 	if !json.Valid(call.Input) {
 		return errorf("invalid JSON arguments for %s (the call was probably cut off at the output limit). "+

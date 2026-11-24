@@ -38,7 +38,7 @@ func TestPlanCodemode(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			p := planCodemode(c.resumed, c.had, c.stored, c.cm)
+			p := planCodemode(c.resumed, c.had, c.stored, "", c.cm)
 			if p.present != c.present || p.refusal != c.refusal {
 				t.Fatalf("present=%v refusal=%v, want %v/%v", p.present, p.refusal, c.present, c.refusal)
 			}
@@ -123,6 +123,39 @@ func TestCodemodeIsRegisteredLast(t *testing.T) {
 	a2, _, _ := startWith(t, s2, 1, "", "")
 	if n := len(a2.opts.Tools.Specs()); n != 8 {
 		t.Fatalf("off session has %d tools, want 8", n)
+	}
+}
+
+// A transport session declares six tools — inspection moved inside the script
+// (SPECS §10.6) — while the registry still holds all nine: the dispatcher is
+// what runs read/search/ls, and it is not the declaration list.
+func TestCodemodeTransportDeclaresSixTools(t *testing.T) {
+	s := newScript(t, textTurn("done"))
+	a, _, _ := startWith(t, s, 1, `"codemode":{"enabled":true,"exposure":"transport"}`, "")
+	specs := a.opts.Tools.Specs()
+	want := []string{"write", "edit", "shell", "web", "mcp", "codemode"}
+	got := make([]string, len(specs))
+	for i, sp := range specs {
+		got[i] = sp.Name
+	}
+	if len(got) != len(want) {
+		t.Fatalf("transport declares %v, want %v", got, want)
+	}
+	for i, name := range want {
+		if got[i] != name {
+			t.Fatalf("tool %d = %q, want %q", i, got[i], name)
+		}
+	}
+	if n := len(a.opts.Tools.Names()); n != 9 {
+		t.Fatalf("registry holds %d tools, want 9 (the dispatcher is unchanged)", n)
+	}
+	// The header owns the surface: what a transport start stores is what a
+	// resume will re-declare (Task 3's four-row table exercises the refusal).
+	if got := exposureForHeader(config.CodemodeState{On: true, Exposure: config.CodemodeTransport}); got != "transport" {
+		t.Fatalf("header exposure = %q, want transport", got)
+	}
+	if got := exposureForHeader(config.CodemodeState{On: false}); got != "" {
+		t.Fatalf("an off session stored exposure %q", got)
 	}
 }
 

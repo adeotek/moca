@@ -63,6 +63,13 @@ type Header struct {
 	// decode to false — a session that never had the tool.
 	Codemode        bool `json:"codemode,omitempty"`
 	CodemodeNetwork bool `json:"codemodeNetwork,omitempty"`
+	// CodemodeExposure is the surface the session froze: "" (additive, the
+	// legacy default) or "transport" (read/search/ls reachable only from a
+	// script). It is stored because a resumed session must declare exactly what
+	// its frozen prompt promised — a stored prompt that describes a transport
+	// surface must not run against eight declared tools, and the reverse would
+	// leave the model unable to inspect anything (SPECS §10.6).
+	CodemodeExposure string `json:"codemodeExposure,omitempty"`
 	// SpillDir is the session-scoped overflow directory admitted to the jail.
 	// It is chosen before the header and reused on resume; old headers have
 	// none and use a degraded stub for their pointers.

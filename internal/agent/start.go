@@ -500,15 +500,23 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	// a refusal-only tool when the switch has since gone off, because removing
 	// the tool would contradict the prompt the model is reading.
 	var hadCodemode, storedNetwork bool
+	var storedExposure string
 	if resumed && prior[0].Session != nil {
 		hadCodemode, storedNetwork = prior[0].Session.Codemode, prior[0].Session.CodemodeNetwork
+		storedExposure = prior[0].Session.CodemodeExposure
 	}
-	plan := planCodemode(resumed, hadCodemode, storedNetwork, st.cm)
+	plan := planCodemode(resumed, hadCodemode, storedNetwork, storedExposure, st.cm)
 	switch {
 	case plan.refusal:
 		reg.Register(tools.NewCodemodeRefusal(plan.preludeNetwork))
 	case plan.present:
 		reg.Register(tools.NewCodemode(codemodeHolder(plan.preludeNetwork, plan.admittedNetwork)))
+	}
+	// A transport session declares six tools: inspection lives inside the
+	// script, so the direct calls are not shipped to the model (SPECS §10.6).
+	// The dispatcher is untouched — the bridge is what runs read/search/ls.
+	if plan.exposure == config.CodemodeTransport {
+		reg.CodemodeOnly("read", "search", "ls")
 	}
 	a, err := New(Options{Config: cfg, Providers: st.reg, Tools: reg, Env: env,
 		Session: w, Snapshots: snaps, System: system, Model: model, Effort: effort, Emit: o.Emit, Prior: prior, MCP: mgr,
@@ -717,7 +725,7 @@ func Start(o StartOptions) (*Agent, error) {
 		Workdir: jail.Root(), Provider: m.Provider, Model: cfg.Model, Effort: string(effort),
 		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.mode() == ModeYolo, Mode: string(o.mode()),
 		SelfManagedSkills: selfManaged != nil, SpillDir: st.spillDir,
-		Codemode: st.cm.On, CodemodeNetwork: st.cm.On && st.cm.Network}
+		Codemode: st.cm.On, CodemodeNetwork: st.cm.On && st.cm.Network, CodemodeExposure: exposureForHeader(st.cm)}
 	var w *session.Writer
 	if o.DeferSession {
 		w, err = session.CreateLazy(filepath.Join(config.DataDir(), "sessions"), h, slug)
@@ -885,22 +893,38 @@ func isAutoSkill(data []byte, dirName string) bool {
 // current policy owns admission — and a resumed session whose header had the
 // tool keeps it even when the switch is off now, as a refusal-only factory,
 // because its frozen prompt still promises it.
+// exposureForHeader is what a fresh header stores: the mode when codemode is on,
+// empty when it is off (a session that never had the tool).
+func exposureForHeader(cm config.CodemodeState) string {
+	if !cm.On {
+		return ""
+	}
+	return cm.Exposure
+}
+
 type codemodePlan struct {
 	present         bool
 	refusal         bool
 	preludeNetwork  bool
 	admittedNetwork bool
+	// exposure is the surface this run declares: the stored one on resume (the
+	// prompt is already frozen to it), the resolved one on a fresh session.
+	exposure string
 }
 
-func planCodemode(resumed, hadCodemode, storedNetwork bool, cm config.CodemodeState) codemodePlan {
+func planCodemode(resumed, hadCodemode, storedNetwork bool, storedExposure string, cm config.CodemodeState) codemodePlan {
 	if !resumed {
 		if !cm.On {
 			return codemodePlan{}
 		}
-		return codemodePlan{present: true, preludeNetwork: cm.Network, admittedNetwork: cm.Network}
+		return codemodePlan{present: true, preludeNetwork: cm.Network, admittedNetwork: cm.Network, exposure: cm.Exposure}
 	}
 	if !hadCodemode {
 		return codemodePlan{} // never retroactive
+	}
+	exp := storedExposure
+	if exp == "" {
+		exp = config.CodemodeAdditive // legacy headers never had transport
 	}
 	return codemodePlan{
 		present: true,
@@ -909,6 +933,7 @@ func planCodemode(resumed, hadCodemode, storedNetwork bool, cm config.CodemodeSt
 		// the network spec is what its prompt shows, and web is refused.
 		preludeNetwork:  storedNetwork,
 		admittedNetwork: storedNetwork && cm.Network,
+		exposure:        exp,
 	}
 }
 

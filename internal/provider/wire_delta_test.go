@@ -85,6 +85,48 @@ func testAnthropicWireDeltaNoCache(t *testing.T, network bool) {
 	}
 }
 
+// A transport session declares six tools: read/search/ls are code-only, so the
+// request that carries them is smaller. codemode's entry must be byte-identical
+// to the additive ninth — the surface narrowed, the description did not fork.
+func TestAnthropicWireDeltaTransport(t *testing.T) {
+	base := builtins(t)
+	nine := append(append([]llm.ToolSpec(nil), base...), tools.NewCodemodeRefusal(false).Spec())
+
+	reg := tools.NewRegistry(tools.Builtins()...)
+	reg.Register(tools.NewCodemodeRefusal(false))
+	reg.CodemodeOnly("read", "search", "ls")
+	declared := reg.Specs()
+	if len(declared) != 6 {
+		t.Fatalf("transport declares %d tools, want 6", len(declared))
+	}
+
+	with9 := wireTools(t, llm.Request{Model: "m", MaxTokens: 1, Tools: nine, NoCacheWrite: true})
+	with6 := wireTools(t, llm.Request{Model: "m", MaxTokens: 1, Tools: declared, NoCacheWrite: true})
+	if len(with6) != 6 {
+		t.Fatalf("wire carries %d tools, want 6", len(with6))
+	}
+	if with6[5] != with9[8] {
+		t.Fatalf("codemode's wire entry differs between the surfaces:\n transport: %s\n additive: %s", with6[5], with9[8])
+	}
+	// write, edit, shell, web, mcp — the additive entries, in their new order.
+	for i, additive := range []int{1, 2, 3, 6, 7} {
+		if with6[i] != with9[additive] {
+			t.Fatalf("transport entry %d is not additive entry %d", i, additive)
+		}
+	}
+	// The narrowed request is strictly smaller: the saving is the point.
+	total6, total9 := 0, 0
+	for _, w := range with6 {
+		total6 += len(w)
+	}
+	for _, w := range with9 {
+		total9 += len(w)
+	}
+	if total6 >= total9 {
+		t.Fatalf("transport (%d B) is not smaller than additive (%d B)", total6, total9)
+	}
+}
+
 func TestAnthropicWireDeltaMovesTheBreakpoint(t *testing.T) {
 	for _, variant := range []struct {
 		name string

@@ -72,9 +72,13 @@ change.**
 **D20 — exposure is a property of the tool, and only the declared list moves.** `Registry` learns
 exposure through an **optional** interface — `interface{ Exposure() Exposure }`, absent ⇒ `Direct` —
 so `internal/tools/builtins.go` and `testdata/schemas.golden.json` stay byte-identical. `Specs()` is
-what the provider is given and what `control.go:324` charges; `Callable()` is what the bridge may
-dispatch. In transport, `read`/`search`/`ls` implement `Exposure() == Codemode`; `codemode` stays last.
-`glob` was never declared and remains a capability.
+what the provider is given and what `control.go:324` charges; `Registry.CodemodeOnly(names...)` wraps
+the named tools, `ExposureOf(name)` reports the flag and `Names()` keeps the dispatch surface visible
+to tests. There is deliberately **no** registry-level `Callable()`: the dispatcher is codemode's
+capability table, not the registry, and a second authority would be a place to drift. A direct call to
+a hidden tool is refused with "available only inside a codemode script". In transport,
+`read`/`search`/`ls` are `Codemode`-exposed; `codemode` stays last. `glob` was never declared and
+remains a capability.
 
 **D21 — the inspection budget is a dial with a mode-dependent default.** New config key
 `codemode.inspectAttempts` (50–2 000, default **50** for additive and **400** for transport; an
@@ -194,8 +198,9 @@ Doc counts in every commit: a new `.go` file refreshes AGENTS.md's count in the 
 `internal/tools/codemode_test.go`, `internal/acp/toolcall_test.go`.
 
 - [ ] **Red:** transport declares six tools with `codemode` last; additive is byte-identical to today;
-      `Callable()` is the four inspection capabilities in both modes (the bridge is unchanged —
-      exposure moves the declaration, not the dispatcher); an unknown exposure fails decode;
+      `Names()` still lists all nine in both modes (the bridge is unchanged — exposure moves the
+      declaration, not the dispatcher) and a direct call to a hidden tool is refused; an unknown
+      exposure fails decode;
       `inspectAttempts` outside 50..2000 fails validation and its default follows the mode unless set;
       `transport` without `enabled` fails validation; a project `true` alone warns and a project
       `false` vetoes; the wire-delta transport arm is positive and < 1 KiB.

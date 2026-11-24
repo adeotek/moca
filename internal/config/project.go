@@ -85,6 +85,9 @@ func LoadProject(workdir string) (*ProjectConfig, error) {
 	if err := f.validateMCP(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := f.Codemode.validate("codemode"); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return &f, nil
 }
 

@@ -152,6 +152,50 @@ type SkillsConfig struct {
 type CodemodeConfig struct {
 	Enabled *bool `json:"enabled,omitempty"`
 	Network *bool `json:"network,omitempty"`
+	// Exposure is additive (the default: the eight tools stay declared and
+	// codemode sits beside them) or transport (SPECS §10.6: read/search/ls are
+	// callable only from a script). A trusted project may narrow transport to
+	// additive; a project value alone never widens.
+	Exposure *string `json:"exposure,omitempty"`
+	// InspectAttempts is the per-script inspection budget (§11.4): 50..2000,
+	// default 50 in additive and 400 in transport. A project may lower it.
+	InspectAttempts *int `json:"inspectAttempts,omitempty"`
+}
+
+// Codemode exposures and the inspection budget's bounds (SPECS §11.4).
+const (
+	CodemodeAdditive  = "additive"
+	CodemodeTransport = "transport"
+
+	InspectAttemptsMin = 50
+	InspectAttemptsMax = 2000
+
+	inspectAttemptsAdditive  = 50
+	inspectAttemptsTransport = 400
+)
+
+// DefaultInspectAttempts is a mode's default per-script inspection budget.
+func DefaultInspectAttempts(exposure string) int {
+	if exposure == CodemodeTransport {
+		return inspectAttemptsTransport
+	}
+	return inspectAttemptsAdditive
+}
+
+// validate checks the codemode block the two layers share; prefix names the
+// file's own key path for the error text.
+func (c CodemodeConfig) validate(prefix string) error {
+	if c.Exposure != nil {
+		if v := *c.Exposure; v != CodemodeAdditive && v != CodemodeTransport {
+			return fmt.Errorf("%s.exposure must be %q or %q, got %q", prefix, CodemodeAdditive, CodemodeTransport, v)
+		}
+	}
+	if c.InspectAttempts != nil {
+		if n := *c.InspectAttempts; n < InspectAttemptsMin || n > InspectAttemptsMax {
+			return fmt.Errorf("%s.inspectAttempts must be between %d and %d, got %d", prefix, InspectAttemptsMin, InspectAttemptsMax, n)
+		}
+	}
+	return nil
 }
 
 // CodemodeState is the resolved codemode switch. Warning and Note are the
@@ -160,8 +204,12 @@ type CodemodeConfig struct {
 type CodemodeState struct {
 	On      bool
 	Network bool
-	Warning string
-	Note    string
+	// Exposure is the effective mode and Attempts the effective per-script
+	// inspection budget; both are meaningful only when On.
+	Exposure string
+	Attempts int
+	Warning  string
+	Note     string
 }
 
 // ResolveCodemode mirrors ResolveSelfManagedSkills' precedence exactly (F20):
@@ -172,8 +220,10 @@ type CodemodeState struct {
 // feature is off, and produces neither a warning nor a note.
 func ResolveCodemode(cfg Config) CodemodeState {
 	var projEnabled, projNetwork *bool
+	var projAttempts *int
 	if cfg.Project != nil {
 		projEnabled, projNetwork = cfg.Project.Codemode.Enabled, cfg.Project.Codemode.Network
+		projAttempts = cfg.Project.Codemode.InspectAttempts
 	}
 	userEnabled, userNetwork := cfg.Codemode.Enabled, cfg.Codemode.Network
 	userOn := userEnabled != nil && *userEnabled
@@ -195,6 +245,34 @@ func ResolveCodemode(cfg Config) CodemodeState {
 		return st
 	}
 	st.On = true
+	st.Exposure, st.Attempts = CodemodeAdditive, inspectAttemptsAdditive
+
+	// Exposure: the user's value, narrowed by a trusted project. A project
+	// `transport` alone warns, like network's — only the user config can widen
+	// what the model is allowed to reach.
+	if userExposure := cfg.Codemode.Exposure; userExposure != nil {
+		st.Exposure = *userExposure
+	}
+	if cfg.Project != nil && cfg.Project.Codemode.Exposure != nil {
+		pe := *cfg.Project.Codemode.Exposure
+		switch {
+		case pe == CodemodeAdditive && st.Exposure == CodemodeTransport:
+			st.Note = "codemode transport is off in this project: its .moca/config.jsonc sets codemode.exposure additive"
+			st.Exposure = CodemodeAdditive
+		case pe == CodemodeTransport && st.Exposure == CodemodeAdditive:
+			st.Warning = fmt.Sprintf("this project requests codemode transport, but only your user config can — "+
+				"set \"codemode\": {\"enabled\": true, \"exposure\": \"transport\"} in %s and restart moca", ConfigFile())
+		}
+	}
+	st.Attempts = DefaultInspectAttempts(st.Exposure)
+	if a := cfg.Codemode.InspectAttempts; a != nil {
+		st.Attempts = *a
+	}
+	// A project may only lower the budget: a repository cannot raise the bound
+	// on how much a script may inspect.
+	if projAttempts != nil && *projAttempts < st.Attempts {
+		st.Attempts = *projAttempts
+	}
 
 	if userNetwork != nil && *userNetwork {
 		if projNetwork != nil && !*projNetwork {
@@ -765,6 +843,13 @@ func SplitModel(q string) (string, string, error) {
 func (c Config) Validate() error {
 	if err := c.Permissions.validate("permissions"); err != nil {
 		return err
+	}
+	if err := c.Codemode.validate("codemode"); err != nil {
+		return err
+	}
+	if e := c.Codemode.Exposure; e != nil && *e == CodemodeTransport &&
+		(c.Codemode.Enabled == nil || !*c.Codemode.Enabled) {
+		return fmt.Errorf("codemode.exposure %q requires \"codemode\": {\"enabled\": true}", CodemodeTransport)
 	}
 	for _, e := range []struct{ key, val string }{{"modelEffort", c.ModelEffort}, {"modelHardEffort", c.ModelHardEffort}} {
 		if e.val != "" && !slices.Contains(Efforts, e.val) {
