@@ -152,6 +152,33 @@ No API key and no model list: moca asks the server (`/api/tags`, `/api/show`) wh
 
 `moca login openai` opens the browser for consent (SSH/headless: it prints the URL and accepts a pasted code — `--no-browser` forces that mode); tokens are auto-refreshed under a cross-process lock. Set `"auth": "oauth"` for `providers.openai` to use the subscription — after a successful TUI sign-in the wizard offers to flip it for you. The subscription route serves the Responses API only, and model slugs must be available to your ChatGPT account — declare them under `providers.openai.models` when they are not in the built-in catalog.
 
+### codemode (opt-in, unproven)
+
+`codemode` gives the model a JavaScript sandbox over the workspace: one program can read, search,
+list and glob, and only the program's result enters the conversation. It is **off by default** and
+stays that way until a pilot shows it pays — six measured rounds moved how often it was used and
+never how many turns a task took.
+
+```jsonc
+"codemode": {
+  "enabled": true,          // the only switch that turns it on
+  "exposure": "additive",   // additive (default) | transport
+  "inspectAttempts": 50,    // 50..2000 per script; transport defaults to 400
+  "network": false          // v1.1; web calls from a script are not implemented yet
+}
+```
+
+`additive` keeps the eight tools declared and adds `codemode` ninth. `transport` is the experiment:
+`read`, `search` and `ls` are reachable **only inside a script**, the declared list drops from nine
+tools to six, and a direct call is refused with a message pointing at the script. A transport
+session also records read stamps from scripted reads (so `edit`/`write` still accept a file the
+script read), reaches the skills/prompts/spill/config paths the direct `read` can, and resumes only
+into the surface its prompt promised.
+
+A script may call `read`, `search`, `ls` and `glob` — never `write`, `shell`, MCP or the web, and
+never itself. Budgets: 64 KiB of source, a 1–30 s deadline (10 s default), 20 000 entries and
+256 MiB of source per script, and the inspection budget above.
+
 ## Editors (ACP)
 
 `moca acp` speaks the [Agent Client Protocol](https://agentclientprotocol.com) on stdio, so ACP editors can drive moca. It uses your existing config and credentials (`moca login` in a terminal first) — the agent advertises one `Sign in` method, and answering it re-checks that credential and reports moca's own fix when there is none.

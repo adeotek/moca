@@ -59,8 +59,21 @@ type harness struct {
 	cfgDir string
 	data   string
 	work   string
+	// script and turns are touched by the test goroutine and by the provider
+	// handler, so they go through mu: without it -race reports the harness
+	// itself (a test that sets its script after newHarness) as a data race,
+	// which is what the gate's own -race run caught.
+	mu     sync.Mutex
 	script []string // tool calls, one per work turn; a text turn ends the run
 	turns  int
+}
+
+// setScript replaces the tool-call script and rewinds the turn counter.
+func (h *harness) setScript(lines ...string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.script = lines
+	h.turns = 0
 }
 
 func newHarness(t *testing.T, script ...string) *harness {
@@ -91,10 +104,12 @@ func newHarness(t *testing.T, script ...string) *harness {
 			sseText(w, "ok")
 			return
 		}
-		i := h.turns
+		h.mu.Lock()
+		i, script := h.turns, h.script
 		h.turns++
-		if i < len(h.script) {
-			sseTool(w, fmt.Sprintf("c%d", i), "codemode", h.script[i])
+		h.mu.Unlock()
+		if i < len(script) {
+			sseTool(w, fmt.Sprintf("c%d", i), "codemode", script[i])
 			return
 		}
 		sseText(w, "done")
@@ -249,7 +264,7 @@ func TestGlobThenReadInOneProgram(t *testing.T) {
 		h.file("services/"+svc+"/service.yaml", "cpu: 500m\n")
 	}
 	h.file("services/README.md", "not a manifest\n")
-	h.script = []string{`{"code":"const g = await tools.glob({pattern: 'services/*/service.yaml'}); const out = []; for (const p of g.paths) { const r = await tools.read({path: p}); out.push(p + ':' + r.lines[0].text); } return out;"}`}
+	h.setScript(`{"code":"const g = await tools.glob({pattern: 'services/*/service.yaml'}); const out = []; for (const p of g.paths) { const r = await tools.read({path: p}); out.push(p + ':' + r.lines[0].text); } return out;"}`)
 	h.run("-p", "Read every service manifest and report them.")
 
 	res := h.lastResult()
@@ -347,8 +362,7 @@ func TestResumeKeepsRefusalOnly(t *testing.T) {
 
 	// Second run of the same workdir: codemode is off now (the config loses the
 	// block), and the run resumes the session whose header promised the tool.
-	h.script = []string{`{"code":"return 1"}`}
-	h.turns = 0
+	h.setScript(`{"code":"return 1"}`)
 	h.rec = &recorder{}
 	h.cfg("")
 	h.run("-p", "again", "--approve", "--resume", "last")

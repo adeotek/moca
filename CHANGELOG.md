@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### codemode: code mode as transport (`codemode.exposure`)
+
+v1's pilot closed with six rounds and no proof that a ninth, additive tool pays:
+adoption rose, never turns. v2 changes the question from "is the tool used?" to
+"what is left to call directly?" — in `transport`, `read`, `search` and `ls` exist
+only inside a script, so the declared list is six tools instead of nine, and the
+shortcut is no longer shipped.
+
+- `codemode.exposure`: `additive` (default, v1 behaviour, byte-identical wire) or
+  `transport`. A trusted project may narrow to `additive`; a project value alone
+  never widens.
+- `codemode.inspectAttempts` (50..2000): the per-script inspection budget, 50 by
+  default in additive and 400 in transport, so a script can inspect a whole
+  fixture rather than 50 files. Explicit values override; a project may lower.
+- A transport session gets read parity (a scripted `read` stamps the file for
+  `edit`/`write`, `*_test.go` arms the investigation hint, `search` sets
+  `Searched`), typed grants (the jail's own read roots, each an `os.Root`), and a
+  direct call to a hidden tool is refused with a message naming the script path.
+- Resuming a session whose current config resolves to the other surface now
+  refuses before any provider call (`resume_surface_mismatch`), naming both
+  remedies: a transport prompt beside eight declared tools has no coherent
+  behaviour, and the reverse leaves no inspection path at all.
+
+The pilot that decides this (a generated 361-file fixture, four arms, a paired
+sign test) is predeclared in `docs/plans/2026-11-24-codemode-v2-code-mode-as-transport-v3.md`
+and runs under its own spend approval; until it reports, transport is
+**implemented and gated, unproven**.
+
 ## v0.8.5 (2026-11-21)
 
 ### One-command channel release
