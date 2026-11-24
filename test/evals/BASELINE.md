@@ -1863,12 +1863,24 @@ whether 400 becomes the additive default.
 
 **Fixture defect found by this run (recorded, not a result).** Every failure but one was *"the run left
 untracked files"* — 11 of 12 (`off` 6/6, `additive` 3/4, `additive-400` 2/2, `transport` 1/1). The
-task prompt says how to *answer*, not that the tree must stay clean, so the rule discriminates against
-the arm that has no scratch space: without codemode, dumping intermediate rows to a file is the only
-way to hold 120 services, and the checker fails it before it can grade the answer. **The pass column
-above is therefore not a capability measurement** and must not be quoted as one. Before any pass-rate
-endpoint: `prompt.txt` must state the rule ("do not create or modify files in the repository"), and
-the checker should grade the answer before the tree so a failure says which one it was.
+task prompt says how to *answer*, not that the tree must stay clean, so the rule silently punished a
+legitimate strategy. It is not that the control had no alternative — four `off` trials answered with
+`shell` alone (7-9 calls, no files) and passed — but that dumping rows to a scratch file is a natural
+move for an arm that has to hold 120 services, and the checker failed it before it could grade the
+answer. **The pass column above is therefore not a capability measurement** and must not be quoted as
+one.
+
+**Fixed in the follow-up, both halves.** `prompt.txt` now states the rule ("work from the files as
+they are: do not create, modify or delete anything in this repository") and `check.sh` grades the
+answer first and reports the tree after it, so a failure names what actually went wrong. A fourth
+selftest arm (`sweep-bulk-rejects-an-untracked-file`) pins the order; writing it caught a real bug in
+the reorder — the tree check that followed `python3` swallowed its exit status, so the wrong-answer arm
+went green-passing until the status was captured.
+
+**Follow-up decision (owner, same day):** the additive default moved from 50 to 400
+(`config.DefaultInspectAttempts` now returns 400 for both surfaces, `TestResolveCodemodeDefaults` pins
+it), and the four arm configs keep meaning what they measured — `cm-additive` pins `inspectAttempts:
+50` explicitly instead of inheriting a moving default.
 
 **What stands after this pilot:** Stage A's turn-count verdict is unchanged; the carry effect of
 codemode on a real bulk task is real but modest (median 0.78 of the control's carry when it has the

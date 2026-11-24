@@ -13,9 +13,12 @@ shortcut is no longer shipped.
 - `codemode.exposure`: `additive` (default, v1 behaviour, byte-identical wire) or
   `transport`. A trusted project may narrow to `additive`; a project value alone
   never widens.
-- `codemode.inspectAttempts` (50..2000): the per-script inspection budget, 50 by
-  default in additive and 400 in transport, so a script can inspect a whole
-  fixture rather than 50 files. Explicit values override; a project may lower.
+- `codemode.inspectAttempts` (50..2000): the per-script inspection budget, **400
+  by default on both surfaces**, so a script can inspect a whole fixture rather
+  than 50 files. The default was 50 at additive until the pilot measured what that
+  cost (`additive-400` vs `additive-50`: 8/10 pairs cheaper, median carry 0.376,
+  8 vs 6 passes, 14.0 vs 19.7 steps). Explicit values override; a project may
+  lower.
 - A transport session gets read parity (a scripted `read` stamps the file for
   `edit`/`write`, `*_test.go` arms the investigation hint, `search` sets
   `Searched`), typed grants (the jail's own read roots, each an `os.Root`), and a

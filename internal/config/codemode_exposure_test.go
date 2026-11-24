@@ -17,8 +17,8 @@ func intp(n int) *int      { return &n }
 func TestResolveCodemodeDefaults(t *testing.T) {
 	on := boolp(true)
 	st := ResolveCodemode(Config{Codemode: CodemodeConfig{Enabled: on}})
-	if !st.On || st.Exposure != CodemodeAdditive || st.Attempts != 50 {
-		t.Fatalf("defaults = %+v, want additive/50", st)
+	if !st.On || st.Exposure != CodemodeAdditive || st.Attempts != 400 {
+		t.Fatalf("defaults = %+v, want additive/400", st)
 	}
 	tr := strp(CodemodeTransport)
 	st = ResolveCodemode(Config{Codemode: CodemodeConfig{Enabled: on, Exposure: &tr}})
@@ -47,7 +47,7 @@ func TestResolveCodemodeProjectNarrowsOnly(t *testing.T) {
 		Codemode: CodemodeConfig{Enabled: on, Exposure: &tr},
 		Project:  &ProjectConfig{Codemode: CodemodeConfig{Exposure: &ad}},
 	})
-	if st.Exposure != CodemodeAdditive || st.Attempts != 50 || !strings.Contains(st.Note, "exposure additive") {
+	if st.Exposure != CodemodeAdditive || st.Attempts != 400 || !strings.Contains(st.Note, "exposure additive") {
 		t.Fatalf("project veto = %+v", st)
 	}
 
@@ -65,7 +65,7 @@ func TestResolveCodemodeProjectMayLowerTheBudgetOnly(t *testing.T) {
 	on := boolp(true)
 	low, high := intp(80), intp(1000)
 
-	// User asks for 400 (transport default); the project lowers to 80.
+	// Both surfaces default to 400; the project lowers to 80.
 	tr := strp(CodemodeTransport)
 	st := ResolveCodemode(Config{
 		Codemode: CodemodeConfig{Enabled: on, Exposure: &tr},
@@ -79,8 +79,8 @@ func TestResolveCodemodeProjectMayLowerTheBudgetOnly(t *testing.T) {
 		Codemode: CodemodeConfig{Enabled: on},
 		Project:  &ProjectConfig{Codemode: CodemodeConfig{InspectAttempts: high}},
 	})
-	if st.Attempts != 50 {
-		t.Fatalf("project raising = %d, want the user's 50", st.Attempts)
+	if st.Attempts != 400 {
+		t.Fatalf("project raising = %d, want the user's 400", st.Attempts)
 	}
 }
 

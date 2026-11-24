@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # pass: the exact five-line aggregate from turn one, restated with the disabled
-# list after the follow-up, over an untouched tree.
+# list after the follow-up, over an untouched tree (the tree is graded second and
+# reported, so a failure names what actually went wrong).
 #
 # The task is read-only analysis, so an edit or a stray file fails the run: a run
 # that changed a manifest to make its numbers agree with a guess did not answer
@@ -14,13 +15,17 @@ set -u
 
 [ -n "${SESSION:-}" ] && [ -f "$SESSION" ] || { echo "no session (selftest arm)"; exit 1; }
 
+# The tree is checked but reported after the answer: a run that answered
+# correctly and also left a scratch file must say so, and a run that answered
+# wrongly must not have that hidden behind a tree complaint.
 base=$(git rev-list --max-parents=0 HEAD)
+tree=""
 dirty=$(git status --porcelain -- . ':!.moca' 2>/dev/null | grep -v '^?? ' | head -3)
-[ -z "$dirty" ] || { echo "the run modified tracked files: $dirty"; exit 1; }
+[ -z "$dirty" ] || tree+="the run modified tracked files: $dirty"$'\n'
 untracked=$(git status --porcelain -- . ':!.moca' 2>/dev/null | sed -n 's/^?? //p' | head -3)
-[ -z "$untracked" ] || { echo "the run left untracked files: $untracked"; exit 1; }
+[ -z "$untracked" ] || tree+="the run left untracked files: $untracked"$'\n'
 committed=$(git diff --name-only "$base" -- . ':!.moca' 2>/dev/null | head -3)
-[ -z "$committed" ] || { echo "the run committed changes to: $committed"; exit 1; }
+[ -z "$committed" ] || tree+="the run committed changes to: $committed"$'\n'
 
 . "$(dirname "${BASH_SOURCE[0]}")/../_lib/answer_text.sh"
 text=$(answer_text "$SESSION") || exit 1
@@ -142,3 +147,13 @@ if got.get("disabled") != want_disabled:
     print("disabled = %r, want %r" % (got.get("disabled"), want_disabled))
     sys.exit(1)
 PY
+# The grader's status has to be captured before the tree check runs: a bare
+# `python3 ... || exit 1` followed by another command would let the last
+# command's status swallow a wrong answer (which is exactly how the selftest's
+# wrong-answer arm caught this reordering).
+answer=$?
+if [ "$answer" -ne 0 ]; then
+  [ -n "$tree" ] && printf '%s' "$tree"
+  exit 1
+fi
+[ -z "$tree" ] || { printf '%s' "$tree"; exit 1; }

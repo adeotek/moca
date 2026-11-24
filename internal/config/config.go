@@ -170,16 +170,20 @@ const (
 	InspectAttemptsMin = 50
 	InspectAttemptsMax = 2000
 
-	inspectAttemptsAdditive  = 50
-	inspectAttemptsTransport = 400
+	// The per-script inspection budget both surfaces start at. 50 was v1's
+	// default, and the v2 pilot measured what it costs a bulk task: additive-400
+	// against additive-50 carried 0.376 of the median and 0.44 of the total,
+	// passed 8/10 against 6/10 and ran 14.0 steps against 19.7 (BASELINE.md,
+	// 2026-11-24). The key stays because a lower ceiling is a legitimate project
+	// choice — and because 2000 is a legitimate user one.
+	inspectAttemptsDefault = 400
 )
 
-// DefaultInspectAttempts is a mode's default per-script inspection budget.
+// DefaultInspectAttempts is the per-script inspection budget a surface starts
+// at. Both surfaces now share it: the pilot asked whether exposure moves the
+// economics, and the answer was that the budget did.
 func DefaultInspectAttempts(exposure string) int {
-	if exposure == CodemodeTransport {
-		return inspectAttemptsTransport
-	}
-	return inspectAttemptsAdditive
+	return inspectAttemptsDefault
 }
 
 // validate checks the codemode block the two layers share; prefix names the
@@ -245,7 +249,7 @@ func ResolveCodemode(cfg Config) CodemodeState {
 		return st
 	}
 	st.On = true
-	st.Exposure, st.Attempts = CodemodeAdditive, inspectAttemptsAdditive
+	st.Exposure, st.Attempts = CodemodeAdditive, inspectAttemptsDefault
 
 	// Exposure: the user's value, narrowed by a trusted project. A project
 	// `transport` alone warns, like network's — only the user config can widen

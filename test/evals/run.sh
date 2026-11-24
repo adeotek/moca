@@ -192,6 +192,20 @@ if [ "$SELFTEST" = 1 ]; then
           echo "ok   $s-rejects-a-wrong-answer"
         fi
       fi
+      # The tree rule is part of the task now (prompt.txt says so), so it has its
+      # own arm: the right answer over a tree with a stray file must still fail,
+      # and the failure must name the tree rather than the answer.
+      if [ "$s" = sweep-bulk ]; then
+        : > "$work/scratch.js"
+        if out=$(cd "$work" && SESSION="$EVALS/$s/testdata/reference_session.jsonl" VARIANT=on bash "$EVALS/$s/check.sh" 2>&1); then
+          echo "FAIL $s: an untracked file passed the checker"; bad=1
+        elif ! printf '%s' "$out" | grep -q "untracked files"; then
+          echo "FAIL $s: the tree failure did not name itself: $out"; bad=1
+        else
+          echo "ok   $s-rejects-an-untracked-file"
+        fi
+        rm -f "$work/scratch.js"
+      fi
     fi
     rm -rf "$work"
   done

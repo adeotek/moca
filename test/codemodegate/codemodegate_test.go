@@ -225,6 +225,10 @@ func (h *harness) toolNames() []string {
 
 const enabled = `"codemode":{"enabled":true}`
 
+// smallBudget pins the inspection ceiling so the cap leg does not depend on the
+// product default.
+const smallBudget = `"codemode":{"enabled":true,"inspectAttempts":50}`
+
 // One script does the work of many calls: read, search and ls in a single outer
 // result, with the tool present as the ninth entry.
 func TestWorkspaceScript(t *testing.T) {
@@ -311,10 +315,12 @@ func TestZeroApprovalsInEveryMode(t *testing.T) {
 	}
 }
 
-// The 50-attempt cap latches at the 51st inspection and the ledger says so.
+// The configured attempt cap latches at the next inspection and the ledger says
+// so. Pinned small (50) rather than left to the default: the default is a
+// product number, and this leg is about the latch.
 func TestAttemptCap(t *testing.T) {
 	h := newHarness(t, `{"code":"for (let i = 0; i < 51; i++) { await tools.read({path: 'f' + i + '.txt'}); }"}`)
-	h.cfg(enabled)
+	h.cfg(smallBudget)
 	for i := 0; i < 51; i++ {
 		h.file(fmt.Sprintf("f%d.txt", i), "line\n")
 	}

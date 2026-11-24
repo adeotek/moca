@@ -163,7 +163,7 @@ never how many turns a task took.
 "codemode": {
   "enabled": true,          // the only switch that turns it on
   "exposure": "additive",   // additive (default) | transport
-  "inspectAttempts": 50,    // 50..2000 per script; transport defaults to 400
+  "inspectAttempts": 400,   // 50..2000 per script (the default; 50 throttles a bulk task)
   "network": false          // v1.1; web calls from a script are not implemented yet
 }
 ```
@@ -173,7 +173,9 @@ never how many turns a task took.
 tools to six, and a direct call is refused with a message pointing at the script. A transport
 session also records read stamps from scripted reads (so `edit`/`write` still accept a file the
 script read), reaches the skills/prompts/spill/config paths the direct `read` can, and resumes only
-into the surface its prompt promised.
+into the surface its prompt promised. Measured on a 361-file fixture, `transport` did not pay for
+itself (median carry 0.78 of the plain tools, short of the predeclared 0.5), so `additive` is the
+only surface a release turns on.
 
 A script may call `read`, `search`, `ls` and `glob` — never `write`, `shell`, MCP or the web, and
 never itself. Budgets: 64 KiB of source, a 1–30 s deadline (10 s default), 20 000 entries and

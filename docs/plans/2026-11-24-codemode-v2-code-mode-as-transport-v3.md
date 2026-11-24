@@ -282,10 +282,13 @@ transport carried less in 7/10 pairs (needed 8, p = 0.172) with a median pair ra
 ≤ 0.5) — the predeclared "inconclusive" outcome. Transport does not ship; `exposure` stays in the tree
 at the `additive` default. The dial result is the campaign's clean effect (`add400` vs `add`: 8/10,
 median 0.376, 14.0 vs 19.7 steps) and is unaffected by the defect below; whether 400 becomes the
-additive default is an owner decision, not a pilot outcome. **Defect in the fixture, recorded:** 11 of
-12 failures were the untouched-tree rule, which `prompt.txt` does not state — so the pass column is
-not a capability figure. Before any pass-rate endpoint: state the rule in the prompt and grade the
-answer before the tree in `check.sh`. That fix and any re-ask are unbilled work plus a fresh
+additive default is an owner decision, not a pilot outcome — **decided the same day: it does**, so
+`DefaultInspectAttempts` returns 400 on both surfaces and each arm config pins the budget it was
+measured with. **Defect in the fixture, recorded:** 11 of
+12 failures were the untouched-tree rule, which `prompt.txt` did not state at the time — so the pass
+column is not a capability figure. **Fixed since (unbilled):** `prompt.txt` states the rule, `check.sh` grades the
+answer first and reports the tree after it, and a fourth selftest arm pins the order (which caught a
+real status-swallowing bug in the reorder). Any re-ask of the pass-rate question is a fresh
 predeclaration; nothing here is re-litigated by re-reading these rows.
 
 ### Task 7 — Docs and release gates (unbilled)

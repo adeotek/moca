@@ -7,3 +7,5 @@ Answer as exactly these lines, policies alphabetically by name, and nothing else
 policy=<name> services=<n> disabled=<n> maxCpu=<value>
 inherited=<n>
 lowest=<service>:<limit>,<service>:<limit>,<service>:<limit>,<service>:<limit>,<service>:<limit>
+
+Work from the files as they are: do not create, modify or delete anything in this repository.

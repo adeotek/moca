@@ -60,7 +60,8 @@ func TestPilotArmsDifferOnlyInCodemode(t *testing.T) {
 // configurations whose only difference is the codemode block — and inside that
 // block, exactly the two knobs the design varies. A typo that made
 // additive-400 identical to additive would silently drop a cell of the design,
-// and transport's budget default (400) has to be visible in the resolved state
+// so the additive arm pins the 50 it was measured with (the product default moved
+// to 400 afterwards) and transport's budget has to be visible in the resolved state
 // rather than implied by the file.
 func TestBulkPilotArmsAreTheFactorial(t *testing.T) {
 	scenario := "sweep-bulk"
