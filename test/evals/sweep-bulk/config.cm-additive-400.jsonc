@@ -1,0 +1,8 @@
+{
+  // Additive with the transport-sized budget: the arm that tells the budget
+  // apart from the exposure switch (D21). If this one matches transport, the
+  // budget was the fix and the switch gets cut.
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } },
+  "codemode": { "enabled": true, "inspectAttempts": 400 }
+}

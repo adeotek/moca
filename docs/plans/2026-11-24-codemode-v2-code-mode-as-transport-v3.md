@@ -239,11 +239,13 @@ carry `inspectAttempts` into `NewInspection` as a field, so a script's budget fo
 
 ### Task 4 — The fixture with real economics (unbilled)
 
-**Files:** `test/evals/sweep-bulk/{prompt.txt,followup.txt,check.sh,fixture/gen.py,testdata/…}`,
+**Files:** `test/evals/sweep-bulk/{prompt.txt,followup.txt,check.sh,gen.py,testdata/…}` (the generator
+sits beside `check.sh`, not inside `fixture/`, so it never lands in the tree the agent inspects),
 `config.cm-{off,additive,additive-400,transport}.jsonc`, `test/evals/run.sh` (`fresh_repo` runs
 `gen.py` when present), `cmd/moca/pilot_arms_test.go` (four-arm rule), `PILOT` marker.
 
-- [ ] **Red:** `gen.py` is deterministic (same tree hash twice) and generates 120 services × 3 files;
+- [ ] **Red:** `gen.py` is deterministic (same tree hash twice) and generates 120 services × 3 files
+      (+ `platform/defaults.yaml`, 361 files, 39 351 B measured);
       the checker rejects an answer missing one service and one with a wrong number; the four configs
       differ **only** inside `codemode` (`off` has no block; `additive` has `enabled:true`;
       `additive-400` adds `inspectAttempts:400`; `transport` is `enabled:true` +

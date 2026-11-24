@@ -1,0 +1,6 @@
+{
+  // codemode v2 pilot, control arm: no codemode block at all. The four arms
+  // differ only inside `codemode`, which TestPilotArmsDifferOnlyInCodemode pins.
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } }
+}

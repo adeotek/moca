@@ -56,6 +56,57 @@ func TestPilotArmsDifferOnlyInCodemode(t *testing.T) {
 	}
 }
 
+// The v2 pilot is a 2x2 factorial, so its four arms have to be four DIFFERENT
+// configurations whose only difference is the codemode block — and inside that
+// block, exactly the two knobs the design varies. A typo that made
+// additive-400 identical to additive would silently drop a cell of the design,
+// and transport's budget default (400) has to be visible in the resolved state
+// rather than implied by the file.
+func TestBulkPilotArmsAreTheFactorial(t *testing.T) {
+	scenario := "sweep-bulk"
+	arms := []struct {
+		name, exposure string
+		attempts       int
+		enabled        bool
+	}{
+		{"cm-off", "", 0, false},
+		{"cm-additive", "additive", 50, true},
+		{"cm-additive-400", "additive", 400, true},
+		{"cm-transport", "transport", 400, true},
+	}
+	var base map[string]any
+	for i, arm := range arms {
+		cfgPath := filepath.Join(repoRoot, "test", "evals", scenario, "config."+arm.name+".jsonc")
+		cfg, err := config.Load(cfgPath)
+		if err != nil {
+			t.Fatalf("%s: %v", arm.name, err)
+		}
+		// What the resolver would run with, not what the file happens to omit.
+		res := config.ResolveCodemode(cfg)
+		if res.On != arm.enabled || res.Exposure != arm.exposure ||
+			(arm.enabled && res.Attempts != arm.attempts) {
+			t.Fatalf("%s resolves to %+v, want enabled=%v exposure=%q attempts=%d",
+				arm.name, res, arm.enabled, arm.exposure, arm.attempts)
+		}
+		raw, err := json.Marshal(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		delete(m, "codemode")
+		if i == 0 {
+			base = m
+			continue
+		}
+		if !reflect.DeepEqual(m, base) {
+			t.Fatalf("%s differs from cm-off beyond codemode:\n %v\n %v", arm.name, m, base)
+		}
+	}
+}
+
 // Every eval config names its model explicitly, and only two are allowed: the
 // corpus model, and the second model for the authorised model arms. A run that
 // silently measured another model would be a label nobody can compare.

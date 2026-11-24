@@ -25,8 +25,9 @@
 # .moca/skills and measures whether a run records what it had to discover —
 # expected to fail most runs) is named explicitly so it does not drag every
 # corpus run's pass rate, and the codemode pilot scenarios (sweep,
-# sweep-search, web-sweep) are opt-in for the same reason plus cost: their
-# `-c cm-on|cm-off` arms are the only way they run.
+# sweep-search, web-sweep, sweep-bulk) are opt-in for the same reason plus cost:
+# their `-c cm-*` arms are the only way they run. sweep-bulk is the v2 factorial
+# (off | additive | additive-400 | transport) over a generated 361-file tree.
 # The model key comes from the repo .env via env: indirection (never echoed).
 set -u
 EVALS="$(cd "$(dirname "$0")" && pwd)"
@@ -85,7 +86,14 @@ scenario_config() {
 # and would otherwise read as having written nothing.
 REPO_BASE=""
 fresh_repo() {
-  cp -r "$EVALS/$1/fixture/." "$2/"
+  cp -r "$EVALS/$1/fixture/." "$2/" 2>/dev/null || [ -f "$EVALS/$1/gen.py" ] || return 1
+  # A generated fixture: gen.py writes the tree from its own seed, and the
+  # checker re-derives the answer from it, so the generator must never appear in
+  # the repo the agent inspects (the clock and the CWD would make it a red
+  # herring at best).
+  if [ -f "$EVALS/$1/gen.py" ]; then
+    (cd "$2" && python3 "$EVALS/$1/gen.py") || return 1
+  fi
   (cd "$2" && git init -q -b main && git config user.name "moca eval" &&
     git config user.email "eval@example.com" && git add -A && git commit -qm fixture)
   REPO_BASE=$(git -C "$2" rev-parse HEAD)

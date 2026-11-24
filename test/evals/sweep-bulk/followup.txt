@@ -1,0 +1,8 @@
+Now add the disabled services, keeping every earlier line exactly as it was:
+
+policy=<name> services=<n> disabled=<n> maxCpu=<value>
+inherited=<n>
+lowest=<service>:<limit>,<service>:<limit>,<service>:<limit>,<service>:<limit>,<service>:<limit>
+disabled=<service>,<service>,...
+
+Disabled services alphabetically by name. Nothing else.

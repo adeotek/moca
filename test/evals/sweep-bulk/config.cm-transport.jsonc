@@ -1,0 +1,8 @@
+{
+  // The transport arm: read/search/ls are callable only from a script, and the
+  // default budget for that mode is 400 (so this arm needs no explicit
+  // inspectAttempts — the config says what it means).
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } },
+  "codemode": { "enabled": true, "exposure": "transport" }
+}

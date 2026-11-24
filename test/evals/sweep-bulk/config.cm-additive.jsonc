@@ -1,0 +1,6 @@
+{
+  // The additive arm at its default budget (50 attempts per script).
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } },
+  "codemode": { "enabled": true }
+}
