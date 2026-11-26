@@ -197,7 +197,8 @@ func codemodeSpecEdits() llm.ToolSpec {
 		"tools.ls({path})\u2192{entries:[{name,kind}]}, " +
 		"tools.glob({pattern})\u2192{paths}. " +
 		"Await tools.stageEdit({path,edits:[{old,new}]})\u2192{staged,path,edits} to stage exact edits " +
-		"the host applies after this program returns; read the file first; staged is not written. " +
+		"the host applies after this program returns; read the file first; staged is not written; " +
+		"sha256(text)\u2192hex is available. " +
 		"Return the answer; a bare expression is null.")
 }
 

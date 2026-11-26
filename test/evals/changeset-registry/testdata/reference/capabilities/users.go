@@ -6,5 +6,5 @@ var Users = Spec{
 	Kind:     "users",
 	Endpoint: "https://users.internal:8080",
 	Timeout:  1700,
-	Digest:   "279b3b0f",
+	Digest:   "e509c14c",
 }

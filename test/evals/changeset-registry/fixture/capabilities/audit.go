@@ -6,5 +6,5 @@ var Audit = Spec{
 	Kind:     "audit",
 	Endpoint: "https://audit.internal:8080",
 	Timeout:  5000,
-	Digest:   "48171b47",
+	Digest:   "df1aa983",
 }

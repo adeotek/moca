@@ -20,7 +20,11 @@ for rel in sorted(fx - wk):
 for rel in sorted(wk & fx):
     want = reference / rel if rel in ref else fixture / rel
     if (work / rel).read_bytes() != want.read_bytes():
-        bad.append(f"differs: {rel}")
+        import difflib
+        w = (work / rel).read_text(errors="replace").splitlines()
+        r = want.read_text(errors="replace").splitlines()
+        d = list(difflib.unified_diff(r, w, "expected", "got", lineterm="", n=1))[:8]
+        bad.append(f"differs: {rel}\n  " + "\n  ".join(d))
 for rel in sorted(ref - wk):
     bad.append(f"missing: {rel}")
 if bad:

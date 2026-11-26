@@ -6,5 +6,5 @@ var Notify = Spec{
 	Kind:     "notify",
 	Endpoint: "https://notify.internal:8080",
 	Timeout:  3000,
-	Digest:   "941fc003",
+	Digest:   "9c789d14",
 }

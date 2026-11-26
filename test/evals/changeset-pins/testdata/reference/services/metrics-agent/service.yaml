@@ -1,8 +1,8 @@
 # metrics-agent — owned by platform. Generated from the service template.
 name: metrics-agent
-image: ghcr.io/acme/metrics-agent:1.5.14-53f1034
+image: ghcr.io/acme/metrics-agent:1.5.14-466b116
 replicas: 2
 mode: blue-green
 pin:
-  tag: 1.5.14-53f1034
+  tag: 1.5.14-466b116
   weight: 20

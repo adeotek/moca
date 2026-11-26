@@ -6,5 +6,5 @@ var Billing = Spec{
 	Kind:     "billing",
 	Endpoint: "https://billing.internal:8080",
 	Timeout:  3000,
-	Digest:   "cddff1dd",
+	Digest:   "4cc8810b",
 }

@@ -3,12 +3,12 @@ releases.json holds this month's rollout: a salt, the active stage, the stage me
 A service is in this rollout when ALL of these hold: it is listed in the stage named by rollout.stage, it has an entry in services, and its own services/<name>/service.yaml declares replicas of 2 or more. Discover the set from the files; do not assume the release list is the target list.
 
 For every service in the rollout:
-- its new tag is <version>-<first 7 hex of sha1("salt:name:replicas")>, using the salt and the replicas from the files;
+- its new tag is <version>-<first 7 hex of sha256("salt:name:replicas")>, using the salt and the replicas from the files;
 - in services/<name>/service.yaml, replace the image tag with the new tag and append exactly these three lines at the end of the file:
     pin:
       tag: <new tag>
       weight: <replicas * 10>
-- in deploy/manifest.yaml, set that service's tag to the new tag and its releaseId to <first 10 hex of sha1("name:tag")>.
+- in deploy/manifest.yaml, set that service's tag to the new tag and its releaseId to <first 10 hex of sha256("name:tag")>.
 
 Leave every service that is not in the rollout exactly as it is — including released services that are not in the active stage and services in the stage with fewer than two replicas — and leave the legacy entry untouched. Do not reformat or reorder anything.
 

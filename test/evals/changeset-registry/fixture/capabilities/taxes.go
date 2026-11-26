@@ -6,5 +6,5 @@ var Taxes = Spec{
 	Kind:     "taxes",
 	Endpoint: "https://taxes.internal:8080",
 	Timeout:  2600,
-	Digest:   "2e8f9753",
+	Digest:   "aaa3c236",
 }

@@ -1,8 +1,8 @@
 # ingest-pipeline — owned by platform. Generated from the service template.
 name: ingest-pipeline
-image: ghcr.io/acme/ingest-pipeline:1.5.11-7b69115
+image: ghcr.io/acme/ingest-pipeline:1.5.11-114f9da
 replicas: 4
 mode: rolling
 pin:
-  tag: 1.5.11-7b69115
+  tag: 1.5.11-114f9da
   weight: 40

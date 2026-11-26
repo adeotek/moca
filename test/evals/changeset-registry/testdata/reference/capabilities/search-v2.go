@@ -6,5 +6,5 @@ var SearchV2 = Spec{
 	Kind:     "search",
 	Endpoint: "https://search2.internal:8080",
 	Timeout:  2500,
-	Digest:   "a306acfe",
+	Digest:   "599b7c73",
 }

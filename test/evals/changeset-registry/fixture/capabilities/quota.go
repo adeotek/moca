@@ -6,5 +6,5 @@ var Quota = Spec{
 	Kind:     "quota",
 	Endpoint: "https://quota.internal:8080",
 	Timeout:  1400,
-	Digest:   "0ac5e8bb",
+	Digest:   "468e7447",
 }

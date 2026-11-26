@@ -27,7 +27,7 @@ PIN = re.compile(r"^pin:\n  tag: (\S+)\n  weight: (\d+)$", re.M)
 
 
 def fp(*parts, n):
-    return hashlib.sha1(":".join(parts).encode()).hexdigest()[:n]
+    return hashlib.sha256(":".join(parts).encode()).hexdigest()[:n]
 
 
 def check(name):

@@ -6,5 +6,5 @@ var Mailer = Spec{
 	Kind:     "mailer",
 	Endpoint: "https://mailer.internal:8080",
 	Timeout:  4000,
-	Digest:   "e4ce1b2f",
+	Digest:   "84be4f4d",
 }

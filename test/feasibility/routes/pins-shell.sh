@@ -19,8 +19,8 @@ for name in "${names[@]}"; do
   replicas=$(awk '/^replicas:/{print $2}' "$f")
   [ "${replicas:-0}" -ge 2 ] || continue
   version=$(python3 -c 'import json,sys;print(json.load(open("releases.json"))["services"][sys.argv[1]]["version"])' "$name")
-  tag="$version-$(printf '%s:%s:%s' "$salt" "$name" "$replicas" | sha1sum | cut -c1-7)"
-  rid=$(printf '%s:%s' "$name" "$tag" | sha1sum | cut -c1-10)
+  tag="$version-$(printf '%s:%s:%s' "$salt" "$name" "$replicas" | sha256sum | cut -c1-7)"
+  rid=$(printf '%s:%s' "$name" "$tag" | sha256sum | cut -c1-10)
   sed -i "s|^image: ghcr.io/acme/$name:.*|image: ghcr.io/acme/$name:$tag|" "$f"
   printf 'pin:\n  tag: %s\n  weight: %s\n' "$tag" "$((replicas * 10))" >> "$f"
   python3 - "$name" "$tag" "$rid" <<'PY'

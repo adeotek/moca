@@ -18,7 +18,7 @@ DIGEST = re.compile(r"^\tDigest:   \"(\S+)\",$", re.M)
 
 
 def want(p):
-    return hashlib.sha1(f"{p['name']}|{p['kind']}|{p['endpoint']}".encode()).hexdigest()[:8]
+    return hashlib.sha256(f"{p['name']}|{p['kind']}|{p['endpoint']}".encode()).hexdigest()[:8]
 
 
 bad = []
@@ -32,7 +32,7 @@ rows = dict(re.findall(r'^\t"([^"]+)":\s+"([^"]+)",$', (root / "plugins" / "regi
 for name in targets:
     p = plugins[name]
     got = rows.get(name)
-    exp = "%s@%s" % (p["kind"], hashlib.sha1(f"{name}|{p['kind']}|{p['endpoint']}".encode()).hexdigest()[:6])
+    exp = "%s@%s" % (p["kind"], hashlib.sha256(f"{name}|{p['kind']}|{p['endpoint']}".encode()).hexdigest()[:6])
     if got != exp:
         bad.append(f"plugins/registry.go has {got!r} for {name}, the data implies {exp!r}")
 if bad:

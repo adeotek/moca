@@ -6,5 +6,5 @@ var Pricing = Spec{
 	Kind:     "pricing",
 	Endpoint: "https://pricing.internal:8080",
 	Timeout:  2200,
-	Digest:   "4ccfec14",
+	Digest:   "d4ef408c",
 }

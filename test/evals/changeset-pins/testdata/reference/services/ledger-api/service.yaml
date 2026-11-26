@@ -1,8 +1,8 @@
 # ledger-api — owned by platform. Generated from the service template.
 name: ledger-api
-image: ghcr.io/acme/ledger-api:1.5.13-a9a8fd9
+image: ghcr.io/acme/ledger-api:1.5.13-7cb3705
 replicas: 3
 mode: rolling
 pin:
-  tag: 1.5.13-a9a8fd9
+  tag: 1.5.13-7cb3705
   weight: 30

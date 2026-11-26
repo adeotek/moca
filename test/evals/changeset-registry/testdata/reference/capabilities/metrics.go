@@ -6,5 +6,5 @@ var Metrics = Spec{
 	Kind:     "metrics",
 	Endpoint: "https://metrics.internal:8080",
 	Timeout:  2000,
-	Digest:   "4cda38a9",
+	Digest:   "e97662f4",
 }

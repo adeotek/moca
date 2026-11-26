@@ -12,7 +12,7 @@ targets = [n for n in pages if n in data and data[n]["enabled"]]
 
 def dg(name, n):
     p = data[name]
-    return hashlib.sha1(f"{name}|{p['kind']}|{p['endpoint']}".encode()).hexdigest()[:n]
+    return hashlib.sha256(f"{name}|{p['kind']}|{p['endpoint']}".encode()).hexdigest()[:n]
 
 edits = 0
 for name in targets:

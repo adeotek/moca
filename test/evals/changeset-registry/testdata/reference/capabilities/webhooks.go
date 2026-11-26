@@ -6,5 +6,5 @@ var Webhooks = Spec{
 	Kind:     "webhooks",
 	Endpoint: "https://webhooks.internal:8080",
 	Timeout:  2100,
-	Digest:   "dedba993",
+	Digest:   "28e74c97",
 }

@@ -1,8 +1,8 @@
 # notify-hub — owned by platform. Generated from the service template.
 name: notify-hub
-image: ghcr.io/acme/notify-hub:1.5.15-342ba6d
+image: ghcr.io/acme/notify-hub:1.5.15-08b120a
 replicas: 3
 mode: rolling
 pin:
-  tag: 1.5.15-342ba6d
+  tag: 1.5.15-08b120a
   weight: 30

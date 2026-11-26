@@ -6,5 +6,5 @@ var TrialTracing = Spec{
 	Kind:     "tracing",
 	Endpoint: "https://tracing.internal:8080",
 	Timeout:  6000,
-	Digest:   "a3fffbe6",
+	Digest:   "fedb6eea",
 }

@@ -6,5 +6,5 @@ var Flags = Spec{
 	Kind:     "flags",
 	Endpoint: "https://flags.internal:8080",
 	Timeout:  1000,
-	Digest:   "94ca1a23",
+	Digest:   "57306dde",
 }

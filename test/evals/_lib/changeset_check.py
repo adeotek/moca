@@ -195,7 +195,7 @@ class PinsExpectations:
 
     def fp(self, *parts, n):
         import hashlib
-        return hashlib.sha1(":".join(parts).encode()).hexdigest()[:n]
+        return hashlib.sha256(":".join(parts).encode()).hexdigest()[:n]
 
     def tag(self, name):
         return f"{self.rel[name]['version']}-{self.fp(self.salt, name, str(self.rel[name]['replicas']), n=7)}"
@@ -281,7 +281,7 @@ class RegistryExpectations:
     def digest(self, name, n=8):
         import hashlib
         p = self.data[name]
-        return hashlib.sha1(f"{name}|{p['kind']}|{p['endpoint']}".encode()).hexdigest()[:n]
+        return hashlib.sha256(f"{name}|{p['kind']}|{p['endpoint']}".encode()).hexdigest()[:n]
 
     def expected(self, rel, want):
         if rel == "plugins/registry.go":

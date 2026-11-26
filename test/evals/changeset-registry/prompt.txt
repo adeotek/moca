@@ -1,8 +1,8 @@
 plugins/data.json is the source of truth; capabilities/ holds one page per installed plugin, and plugins/registry.go is generated from it.
 
 The target set is the pages that exist under capabilities/ (excluding spec.go), filtered by data.json:
-- for every installed page whose plugin is enabled, regenerate that page from the data, adding a Digest line computed as the first 8 hex of sha1("name|kind|endpoint");
-- regenerate plugins/registry.go in the same gofmt-aligned form it already has, with one row per regenerated plugin, whose value is "kind@<first 6 hex of sha1("name|kind|endpoint")>";
+- for every installed page whose plugin is enabled, regenerate that page from the data, adding a Digest line computed as the first 8 hex of sha256("name|kind|endpoint");
+- regenerate plugins/registry.go in the same gofmt-aligned form it already has, with one row per regenerated plugin, whose value is "kind@<first 6 hex of sha256("name|kind|endpoint")>";
 - a page whose plugin is disabled stays byte-identical, and an enabled plugin with no page gets no page: do not create files.
 
 Do not reformat anything else and leave no scratch files behind.

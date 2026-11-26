@@ -6,5 +6,5 @@ var BetaStorage = Spec{
 	Kind:     "storage",
 	Endpoint: "https://storage.internal:8080",
 	Timeout:  8000,
-	Digest:   "c04c1040",
+	Digest:   "6d8941d7",
 }

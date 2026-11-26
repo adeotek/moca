@@ -6,5 +6,5 @@ var Shipping = Spec{
 	Kind:     "shipping",
 	Endpoint: "https://shipping.internal:8080",
 	Timeout:  3200,
-	Digest:   "fc4d97b1",
+	Digest:   "682af72e",
 }

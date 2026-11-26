@@ -22,8 +22,8 @@ for name in d["stages"][stage]:
     if replicas < 2:
         continue
     tag = "%s-%s" % (d["services"][name]["version"],
-                     hashlib.sha1(f"{salt}:{name}:{replicas}".encode()).hexdigest()[:7])
-    rid = hashlib.sha1(f"{name}:{tag}".encode()).hexdigest()[:10]
+                     hashlib.sha256(f"{salt}:{name}:{replicas}".encode()).hexdigest()[:7])
+    rid = hashlib.sha256(f"{name}:{tag}".encode()).hexdigest()[:10]
     old = [l for l in body.splitlines() if l.startswith("image:")][0]
     f.write_text(body.replace(old, "image: ghcr.io/acme/%s:%s" % (name, tag)) +
                  "pin:\n  tag: %s\n  weight: %d\n" % (tag, replicas * 10))

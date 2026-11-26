@@ -1,8 +1,8 @@
 # file-store — owned by platform. Generated from the service template.
 name: file-store
-image: ghcr.io/acme/file-store:1.5.9-3e1841c
+image: ghcr.io/acme/file-store:1.5.9-dd61e9f
 replicas: 3
 mode: blue-green
 pin:
-  tag: 1.5.9-3e1841c
+  tag: 1.5.9-dd61e9f
   weight: 30

@@ -6,5 +6,5 @@ var Sessions = Spec{
 	Kind:     "sessions",
 	Endpoint: "https://sessions.internal:8080",
 	Timeout:  1800,
-	Digest:   "b837531e",
+	Digest:   "f9923ae0",
 }

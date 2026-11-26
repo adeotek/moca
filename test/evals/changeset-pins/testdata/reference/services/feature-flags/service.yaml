@@ -1,8 +1,8 @@
 # feature-flags — owned by platform. Generated from the service template.
 name: feature-flags
-image: ghcr.io/acme/feature-flags:1.5.8-2bef75e
+image: ghcr.io/acme/feature-flags:1.5.8-62d4333
 replicas: 5
 mode: rolling
 pin:
-  tag: 1.5.8-2bef75e
+  tag: 1.5.8-62d4333
   weight: 50

@@ -6,5 +6,5 @@ var OldReports = Spec{
 	Kind:     "reports",
 	Endpoint: "https://reports.internal:8080",
 	Timeout:  7000,
-	Digest:   "e5f84461",
+	Digest:   "7aa75088",
 }

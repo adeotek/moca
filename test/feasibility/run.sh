@@ -35,9 +35,17 @@ for scen in changeset-pins changeset-registry; do
     [ "$res" = FAIL ] && printf '  %s\n' "$diffout"
     rm -rf "$work"
   done
-  # The codemode route is declared, not executed: the guest has no hash
-  # function, so it cannot derive these fixtures' values at all.
-  js="$here/routes/${scen#changeset-}.js"
-  printf '%-18s %-8s %-8s %-9s %-10s %s\n' "$scen" codemode 3 "—" "$(wc -c < "$js")B" "blocked (no hash in guest)"
+  # The codemode route runs for real through the built binary and a scripted
+  # provider (codemode_test.go); the pins artefact is still work in progress.
+  if [ "${scen}" = changeset-registry ]; then
+    if [ -x "$repo/bin/moca" ] && ( cd "$here" && go test -tags feasibility . -run TestCodemodeRoute -count=1 -args -moca "$repo/bin/moca" >/dev/null 2>&1 ); then
+      res=pass
+    else
+      res=FAIL; bad=1
+    fi
+    printf '%-18s %-8s %-8s %-9s %-10s %s\n' "$scen" codemode 2 "—" "$(wc -c < "$here/routes/registry.js")B" "$res"
+  else
+    printf '%-18s %-8s %-8s %-9s %-10s %s\n' "$scen" codemode 2 "—" "$(wc -c < "$here/routes/pins.js")B" "work in progress"
+  fi
 done
 exit $bad

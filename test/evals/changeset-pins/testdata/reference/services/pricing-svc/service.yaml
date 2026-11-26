@@ -1,8 +1,8 @@
 # pricing-svc — owned by platform. Generated from the service template.
 name: pricing-svc
-image: ghcr.io/acme/pricing-svc:1.5.18-747dcd9
+image: ghcr.io/acme/pricing-svc:1.5.18-07db304
 replicas: 3
 mode: blue-green
 pin:
-  tag: 1.5.18-747dcd9
+  tag: 1.5.18-07db304
   weight: 30

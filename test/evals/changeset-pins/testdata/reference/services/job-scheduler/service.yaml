@@ -1,8 +1,8 @@
 # job-scheduler — owned by platform. Generated from the service template.
 name: job-scheduler
-image: ghcr.io/acme/job-scheduler:1.5.12-f63286f
+image: ghcr.io/acme/job-scheduler:1.5.12-bd54646
 replicas: 2
 mode: blue-green
 pin:
-  tag: 1.5.12-f63286f
+  tag: 1.5.12-bd54646
   weight: 20

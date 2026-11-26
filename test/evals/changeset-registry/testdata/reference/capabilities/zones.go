@@ -6,5 +6,5 @@ var Zones = Spec{
 	Kind:     "zones",
 	Endpoint: "https://zones.internal:8080",
 	Timeout:  1900,
-	Digest:   "d1d55e3b",
+	Digest:   "487e2da6",
 }

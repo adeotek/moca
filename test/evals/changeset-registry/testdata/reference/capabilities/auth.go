@@ -6,5 +6,5 @@ var Auth = Spec{
 	Kind:     "auth",
 	Endpoint: "https://auth.internal:8080",
 	Timeout:  1500,
-	Digest:   "31fd13a8",
+	Digest:   "0b8fda11",
 }

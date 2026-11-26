@@ -279,3 +279,34 @@ func moduleImports(t *testing.T, wasm []byte) []string {
 	}
 	return out
 }
+
+// The digest helper the prelude ships: a pure-JS SHA-256, so a workspace script
+// can derive a value from file content without a host capability. Correctness is
+// pinned against FIPS vectors and UTF-8 input, because a wrong hash would be a
+// wrong file rather than an error.
+func TestPreludeSHA256(t *testing.T) {
+	eng := DefaultEngine()
+	noop := func(context.Context, string, json.RawMessage) (json.RawMessage, *CallError) {
+		return nil, &CallError{Class: "refused", Message: "no host calls in this test"}
+	}
+	cases := []struct{ in, want string }{
+		{"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
+		{"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+		{"héllo", "3c48591d8d098a4538f5e013dfcf406e948eac4d3277b10bf614e295d6068179"},
+		{"x", "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"},
+	}
+	for _, c := range cases {
+		q, _ := json.Marshal(c.in)
+		res, cerr := eng.Execute(context.Background(), ExecCaps{}, "return sha256("+string(q)+")", noop, 5*time.Second)
+		if cerr != nil {
+			t.Fatalf("%q: %+v", c.in, cerr)
+		}
+		var got string
+		if err := json.Unmarshal(res.Value, &got); err != nil {
+			t.Fatalf("%q: value %s", c.in, res.Value)
+		}
+		if got != c.want {
+			t.Fatalf("sha256(%q) = %s, want %s", c.in, got, c.want)
+		}
+	}
+}

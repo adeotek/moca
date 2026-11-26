@@ -6,5 +6,5 @@ var Orders = Spec{
 	Kind:     "orders",
 	Endpoint: "https://orders.internal:8080",
 	Timeout:  3500,
-	Digest:   "9f1b55cc",
+	Digest:   "d29e6441",
 }

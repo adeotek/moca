@@ -1,8 +1,8 @@
 # session-store — owned by platform. Generated from the service template.
 name: session-store
-image: ghcr.io/acme/session-store:1.5.21-2da49a1
+image: ghcr.io/acme/session-store:1.5.21-04e4ea4
 replicas: 2
 mode: blue-green
 pin:
-  tag: 1.5.21-2da49a1
+  tag: 1.5.21-04e4ea4
   weight: 20

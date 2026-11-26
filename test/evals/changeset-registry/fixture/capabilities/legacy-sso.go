@@ -6,5 +6,5 @@ var LegacySso = Spec{
 	Kind:     "sso",
 	Endpoint: "https://sso.internal:8080",
 	Timeout:  9000,
-	Digest:   "c64f03a0",
+	Digest:   "ed477428",
 }

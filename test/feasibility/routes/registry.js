@@ -1,17 +1,27 @@
-// NOT RUNNABLE TODAY: the workspace sandbox exposes no hash function, so this
-// route cannot compute the fixtures' derived values. Kept as the artefact the
-// route would need; see docs/plans/2026-11-26-changeset-feasibility-phase6.md.
-// The codemode route for changeset-registry: one program.
-const data = JSON.parse((await tools.read({path: "plugins/data.json"})).lines.map(l => l.text).join("\n"));
-const pages = await tools.glob({pattern: "capabilities/*.go"});
+// The codemode route for changeset-registry: one program for every page and
+// the registry, with the gofmt alignment computed rather than shelled out to.
+const raw = await tools.read({ path: "plugins/data.json" });
+const data = JSON.parse(raw.lines.map(l => l.text).join("\n"));
+const byName = {};
+for (const p of data.plugins) byName[p.name] = p;
+const pages = await tools.glob({ pattern: "capabilities/*.go" });
+const done = [];
 for (const path of pages.paths) {
   const name = path.split("/")[1].replace(/\.go$/, "");
   if (name === "spec") continue;
-  const p = data.plugins.find(x => x.name === name);
+  const p = byName[name];
   if (!p || !p.enabled) continue;
-  const digest = await sha1(name + "|" + p.kind + "|" + p.endpoint);
-  const body = (await tools.read({path})).lines.map(l => l.text).join("\n");
-  await tools.stageEdit({path, edits: [
-    {old: body.match(/^\tDigest:   ".*",$/m)[0], new: '\tDigest:   "' + digest.slice(0, 8) + '",'}]});
+  const hex = sha256(name + "|" + p.kind + "|" + p.endpoint);
+  const text = (await tools.read({ path })).lines.map(l => l.text).join("\n");
+  const old = text.match(/^\tDigest:   ".*",$/m)[0];
+  await tools.stageEdit({ path, edits: [
+    { old, new: '\tDigest:   "' + hex.slice(0, 8) + '",' }] });
+  done.push([name, p.kind, hex.slice(0, 6)]);
 }
-return pages.paths.length;
+done.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+const width = Math.max(...done.map(d => ('"' + d[0] + '":').length));
+const rows = done.map(([n, k, h]) => '\t' + ('"' + n + '":').padEnd(width) + ' "' + k + "@" + h + '",').join("\n");
+await tools.stageEdit({ path: "plugins/registry.go", edits: [
+  { old: (await tools.read({ path: "plugins/registry.go" })).lines.map(l => l.text).join("\n")
+      .split("\n").filter(l => l.startsWith("\t\"")).join("\n"), new: rows }] });
+return done.length;
