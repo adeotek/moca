@@ -57,3 +57,42 @@ preference, not a lever.
 - Measured: target counts and decoys from the fixtures, pristine-fails/reference-passes for both
   `verify.py`, and the twelve grader arms (including the shell-solution arm) green.
 - Not measured: the three routes' actual request counts and pass rates. Those need the trajectory run.
+
+## Measured (revision 2 fixtures, `bash test/feasibility/run.sh`)
+
+The harness copies each fixture, runs the route's hand-written programme, and grades every byte:
+each written file must equal the reference image, every other file must be byte-identical to the
+fixture, and nothing may appear or vanish. No model, no provider, no spend.
+
+| scenario | route | requests | artefact | result |
+|---|---|---|---|---|
+| changeset-pins | shell | 3 | 1462 B | pass |
+| changeset-pins | direct edits | 3 (40 pairs) | 1493 B | pass |
+| changeset-pins | codemode | 3 | 1091 B | **blocked** |
+| changeset-registry | shell | 3 | 1782 B | pass |
+| changeset-registry | direct edits | 3 (19 pairs) | 1411 B | pass |
+| changeset-registry | codemode | 3 | 997 B | **blocked** |
+
+### Why the codemode route is blocked, and what that means
+
+The sandbox exposes `read`, `search`, `ls`, `glob` and — with edits on — `stageEdit`. It exposes **no
+hash function**. Both rewritten fixtures derive their values from a SHA-1 fingerprint, which the plan
+chose precisely because it cannot be copied from the data file. A guest program therefore cannot
+compute the task at all; the two programmes in `test/feasibility/routes/*.js` are the artefact the
+route would need, and they are not runnable today.
+
+That is a capability failure, not a cost one, and it inverts the earlier picture: shell and direct
+edits both pass in three requests, codemode cannot pass in any number. A campaign run now would
+measure the absence of a hash, not the value of JS.
+
+### The choice this leaves
+
+1. **Add a digest capability** to the guest (`tools.digest("sha1", text)`), with the prelude, spec
+   variant, ABI and byte budgets that implies — then re-run this harness, and only then decide on a
+   campaign. This is a feature change to a surface that is opt-in, dormant and unproven; it should be
+   a deliberate decision, not a step in a fixture rewrite.
+2. **Retire the changeset line** for these workloads: the fixtures were made non-trivial by making
+   them hash-derived, and the surface cannot express that. What remains valuable — the P0 grant fix,
+   the graders, the work counter, the rooted apply path — does not depend on this route shipping.
+
+Until one of those is chosen, phase 7 is not a campaign, it is a purchase of a negative result.
