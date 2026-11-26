@@ -19,21 +19,36 @@ for (const path of files.paths) {
   ] });
   done.push([name, tag]);
 }
-const manText = (await tools.read({ path: "deploy/manifest.yaml" })).lines.map(l => l.text).join("\n") + "\n";
-let next = manText.slice(0, manText.indexOf("  - service: "));
+
+const manLines = (await tools.read({ path: "deploy/manifest.yaml" })).lines.map(l => l.text);
+const manText = manLines.join("\n");
 const tagOf = {};
 for (const [n, t] of done) tagOf[n] = t;
-for (const name of Object.keys(d.services)) {
-  const tag = tagOf[name] || d.services[name].version;
-  next += "  - service: " + name + "\n    tag: " + tag + "\n    releaseId: " +
-    sha256(name + ":" + tag).slice(0, 10) + "\n";
+
+// Rewrite the manifest line by line, in place: every line that is not a tag or a
+// releaseId is preserved byte for byte, so the file's shape never has to be
+// reconstructed from a slice.
+//'x
+const out = [];
+let cur = null;
+let curTag = null;
+for (const line of manLines) {
+  let m = line.match(/^\s*- service: (\S+)$/);
+  if (m) { cur = m[1]; curTag = null; out.push(line); continue; }
+  m = line.match(/^(\s*tag: )(\S+)$/);
+  if (m && cur) {
+    curTag = tagOf[cur] || m[2];
+    out.push(m[1] + curTag);
+    continue;
+  }
+  m = line.match(/^(\s*releaseId: )(\S+)$/);
+  if (m && cur && curTag) {
+    out.push(m[1] + sha256(cur + ":" + curTag).slice(0, 10));
+    continue;
+  }
+  out.push(line);
 }
-for (const name of d.legacy) {
-  const body = (await tools.read({ path: "services/" + name + "/service.yaml" }))
-    .lines.map(l => l.text).join("\n");
-  const tag = (body.match(/^image: .*:(\S+)$/m) || [])[1];
-  next += "  - service: " + name + "\n    tag: " + tag + "\n    releaseId: " +
-    sha256(name + ":" + tag).slice(0, 10) + "\n";
-}
-await tools.stageEdit({ path: "deploy/manifest.yaml", edits: [{ old: manText, new: next }] });
+const nextMan = out.join("\n");
+if (nextMan === manText) throw new Error("manifest rewrite produced no change");
+await tools.stageEdit({ path: "deploy/manifest.yaml", edits: [{ old: manText, new: nextMan }] });
 return done.length;
