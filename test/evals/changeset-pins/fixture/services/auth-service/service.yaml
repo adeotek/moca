@@ -1,0 +1,4 @@
+# auth-service — owned by platform-identity. Generated from the service template.
+name: auth-service
+image: ghcr.io/acme/auth-service:1.4.2
+replicas: 2

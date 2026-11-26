@@ -10,20 +10,22 @@ import (
 // the statistics (plan v13, Task 1): every schema-2 row states its identity and
 // its carry, and a missing carry is a named gap rather than a free trial.
 func TestRowContract(t *testing.T) {
-	ok := map[string]bool{"carry": true}
+	ok := map[string]bool{"carry": true, "work": true}
 	cases := []struct {
 		name         string
 		schema       int
 		set          map[string]bool
 		carryMissing bool
+		workMissing  bool
 		trial, turns int
 		arm, sess    string
 		want         string // "" = accepted
 	}{
 		{name: "complete", schema: 2, set: ok, trial: 3, turns: 2, arm: "cm-on", sess: "ab12cd34"},
-		{name: "observed zero", schema: 2, set: map[string]bool{"carry": true}, trial: 1, turns: 2, arm: "cm-off", sess: "ab12cd34"},
-		{name: "gap recorded", schema: 2, set: map[string]bool{"carryMissing": true}, carryMissing: true, trial: 1, turns: 2, arm: "cm-on", sess: "ab12cd34"},
-		{name: "no carry at all", schema: 2, set: map[string]bool{}, trial: 1, turns: 2, arm: "cm-on", sess: "ab12cd34", want: "needs -carry"},
+		{name: "observed zero", schema: 2, set: map[string]bool{"carry": true, "work": true}, trial: 1, turns: 2, arm: "cm-off", sess: "ab12cd34"},
+		{name: "gaps recorded", schema: 2, set: map[string]bool{"carryMissing": true, "workMissing": true}, carryMissing: true, workMissing: true, trial: 1, turns: 2, arm: "cm-on", sess: "ab12cd34"},
+		{name: "no carry at all", schema: 2, set: map[string]bool{"work": true}, trial: 1, turns: 2, arm: "cm-on", sess: "ab12cd34", want: "needs -carry"},
+		{name: "no work at all", schema: 2, set: map[string]bool{"carry": true}, trial: 1, turns: 2, arm: "cm-on", sess: "ab12cd34", want: "needs -work"},
 		{name: "no trial", schema: 2, set: ok, trial: 0, turns: 2, arm: "cm-on", sess: "ab12cd34", want: "needs -trial"},
 		{name: "no turns", schema: 2, set: ok, trial: 1, turns: 0, arm: "cm-on", sess: "ab12cd34", want: "needs -turns"},
 		{name: "no arm", schema: 2, set: ok, trial: 1, turns: 2, sess: "ab12cd34", want: "needs -arm"},
@@ -34,7 +36,7 @@ func TestRowContract(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := checkRowContract(tc.schema, tc.set, tc.carryMissing, tc.trial, tc.turns, tc.arm, tc.sess)
+			err := checkRowContract(tc.schema, tc.set, tc.carryMissing, tc.workMissing, tc.trial, tc.turns, tc.arm, tc.sess)
 			if tc.want == "" {
 				if err != nil {
 					t.Fatalf("rejected a valid row: %v", err)

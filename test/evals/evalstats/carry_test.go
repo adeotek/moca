@@ -334,3 +334,71 @@ func TestCompareCarryRefusesMalformedRows(t *testing.T) {
 		})
 	}
 }
+
+// The work count is the changeset campaign's endpoint: one observation line is
+// one logical work request, so a trial's two processes add. A missing or empty
+// file is a gap, never a zero — the same rule carry already carries.
+func TestWorkOfSumsBothProcesses(t *testing.T) {
+	dir := t.TempDir()
+	one := filepath.Join(dir, "one.jsonl")
+	two := filepath.Join(dir, "two.jsonl")
+	if err := os.WriteFile(one, []byte(`{"turn":1,"carry":10,"attempts":1}
+{"turn":2,"carry":20,"attempts":3}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(two, []byte(`{"turn":1,"carry":5,"attempts":2}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := WorkOf([]string{one, two})
+	if err != nil {
+		t.Fatalf("WorkOf: %v", err)
+	}
+	if got != 3 {
+		t.Fatalf("WorkOf = %d, want 3 (2 + 1 observations)", got)
+	}
+	if _, err := WorkOf([]string{filepath.Join(dir, "absent.jsonl")}); err == nil {
+		t.Fatal("WorkOf accepted a missing observation file")
+	}
+	empty := filepath.Join(dir, "empty.jsonl")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WorkOf([]string{one, empty}); err == nil {
+		t.Fatal("WorkOf read an empty file as a measured zero")
+	}
+}
+
+// Attempts are cumulative per process, so each file contributes its last
+// observed value and the trial sums the processes. A file without the field is
+// not a measurement; the caller records the gap instead of a zero.
+func TestAttemptsOfTakesTheLastPerProcess(t *testing.T) {
+	dir := t.TempDir()
+	one := filepath.Join(dir, "one.jsonl")
+	two := filepath.Join(dir, "two.jsonl")
+	old := filepath.Join(dir, "old.jsonl")
+	if err := os.WriteFile(one, []byte(`{"turn":1,"carry":1,"attempts":2}
+{"turn":2,"carry":1,"attempts":5}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(two, []byte(`{"turn":1,"carry":1,"attempts":3}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(old, []byte(`{"turn":1,"carry":1}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := AttemptsOf([]string{one, two})
+	if err != nil || !ok {
+		t.Fatalf("AttemptsOf: got (%d, %v, %v), want (8, true, nil)", got, ok, err)
+	}
+	if got != 8 {
+		t.Fatalf("AttemptsOf = %d, want 8 (max 5 + max 3)", got)
+	}
+	if _, ok, err := AttemptsOf([]string{old}); err != nil || ok {
+		t.Fatalf("AttemptsOf on a file without the field: ok = %v, want false", ok)
+	}
+}

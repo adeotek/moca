@@ -28,6 +28,11 @@
 # sweep-search, web-sweep, sweep-bulk) are opt-in for the same reason plus cost:
 # their `-c cm-*` arms are the only way they run. sweep-bulk is the v2 factorial
 # (off | additive | additive-400 | transport) over a generated 361-file tree.
+# The two changeset pilots (changeset-pins, changeset-registry) are opt-in for
+# the same cost reason and additionally need the `workspace` surface to exist:
+# they grade a data-dependent many-file edit by bytes plus a verification run
+# after the last mutation, and their rows carry the `work` count (one per
+# turn() boundary) that the changeset campaign measures.
 # The model key comes from the repo .env via env: indirection (never echoed).
 set -u
 EVALS="$(cd "$(dirname "$0")" && pwd)"
@@ -207,6 +212,29 @@ if [ "$SELFTEST" = 1 ]; then
         rm -f "$work/scratch.js"
       fi
     fi
+  # A changeset task is graded on bytes AND on the verification running after
+  # the last mutation, so the reference transcript has an arm without one.
+  if [ "$s" = changeset-pins ] || [ "$s" = changeset-registry ]; then
+    if (cd "$work" && SESSION="$EVALS/$s/testdata/reference_session_noverify.jsonl" VARIANT=on bash "$EVALS/$s/check.sh" >/dev/null 2>&1); then
+      echo "FAIL $s: a run that never verified passed the checker"; bad=1
+    else
+      echo "ok   $s-requires-a-verification-run"
+    fi
+    # The task is solvable without the feature: a shell script that makes the
+    # same edit and verifies it is a correct ordinary solution, and a grader
+    # that requires codemode would silently make the campaign a tautology.
+    if (cd "$work" && SESSION="$EVALS/$s/testdata/reference_session_shell.jsonl" VARIANT=on bash "$EVALS/$s/check.sh" >/dev/null 2>&1); then
+      echo "ok   $s-accepts-a-shell-solution"
+    else
+      echo "FAIL $s: a shell script that made the same edit and verified was rejected"; bad=1
+    fi
+    # And the ordering rule has its own arm: verify first, edit after, must fail.
+    if (cd "$work" && SESSION="$EVALS/$s/testdata/reference_session_earlyverify.jsonl" VARIANT=on bash "$EVALS/$s/check.sh" >/dev/null 2>&1); then
+      echo "FAIL $s: a verify that ran before the last mutation passed"; bad=1
+    else
+      echo "ok   $s-rejects-a-verify-before-the-last-edit"
+    fi
+  fi
     rm -rf "$work"
   done
   # The write-up grader's extractor carries its own pin: the last assistant
@@ -426,6 +454,44 @@ if [ "$SELFTEST" = 1 ]; then
   fi
   rm -f "$probe"
   rm -rf "$capdir"
+  # The work counter (the changeset campaign's endpoint): one line per turn()
+  # call is one logical request, so both processes' files sum; an absent file is
+  # a gap, never a zero. Attempts are per-process maxima (cumulative), summed.
+  wdir=$(mktemp -d "${TMPDIR:-/tmp}/moca-eval-work.XXXXXX")
+  printf '{"session":"s","trial":1,"turn":1,"carry":3,"attempts":1}\n{"session":"s","trial":1,"turn":2,"carry":4,"attempts":2}\n' > "$wdir/one.jsonl"
+  printf '{"session":"s","trial":1,"turn":1,"carry":1,"attempts":2}\n' > "$wdir/two.jsonl"
+  wstats="$EVALS/results/.workstats"
+  if (cd "$REPO" && go build -o "$wstats" ./test/evals/evalstats); then
+    if [ "$("$wstats" -workOf "$wdir/one.jsonl,$wdir/two.jsonl" 2>/dev/null)" = 3 ]; then
+      echo "ok   work-count-sums-both-processes"
+    else
+      echo "FAIL work-count-sums-both-processes: 2 + 1 observations did not read as 3"; bad=1
+    fi
+    if "$wstats" -workOf "$wdir/absent.jsonl" >/dev/null 2>&1; then
+      echo "FAIL work-count-missing: an absent instrument read as a number"; bad=1
+    else
+      echo "ok   work-count-missing"
+    fi
+    if [ "$("$wstats" -attemptsOf "$wdir/one.jsonl,$wdir/two.jsonl" 2>/dev/null)" = 4 ]; then
+      echo "ok   attempts-count-last-per-process"
+    else
+      echo "FAIL attempts-count-last-per-process: max(1,2)+max(2) did not read as 4"; bad=1
+    fi
+    refsess="$EVALS/sweep-bulk/testdata/reference_session.jsonl"
+    if "$wstats" -schema 2 -trial 1 -turns 2 -arm cm-x -sessionId abc -carry 5 -session "$refsess" >/dev/null 2>&1; then
+      echo "FAIL work-row-requires-the-count: a schema-2 row was written without -work"; bad=1
+    else
+      echo "ok   work-row-requires-the-count"
+    fi
+    if "$wstats" -schema 2 -trial 1 -turns 2 -arm cm-x -sessionId abc -carry 5 -workMissing -session "$refsess" >/dev/null 2>&1; then
+      echo "ok   work-row-accepts-a-declared-gap"
+    else
+      echo "FAIL work-row-accepts-a-declared-gap: -workMissing was refused"; bad=1
+    fi
+  else
+    echo "FAIL work-count: evalstats did not build"; bad=1
+  fi
+  rm -rf "$wdir"
   # The pre-change goldens (rendered prompt, ordered wire schema, direct-tool
   # output): captured before any codemode code so Tasks 3/4/8 can prove "nothing
   # else moved" against real bytes rather than an empty diff. No model, no

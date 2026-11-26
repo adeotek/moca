@@ -1,0 +1,4 @@
+# metrics-agent — owned by platform-observability. Generated from the service template.
+name: metrics-agent
+image: ghcr.io/acme/metrics-agent:1.4.14
+replicas: 3

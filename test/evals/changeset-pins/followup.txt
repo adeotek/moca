@@ -1,0 +1,4 @@
+Restate the result. Finish with exactly these two lines and nothing after them:
+
+updated=<n> services,<m> manifest tags
+untouched=<k> services,<l> legacy entries

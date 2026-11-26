@@ -1,0 +1,4 @@
+# pricing-svc — owned by platform-commerce. Generated from the service template.
+name: pricing-svc
+image: ghcr.io/acme/pricing-svc:1.5.18
+replicas: 1

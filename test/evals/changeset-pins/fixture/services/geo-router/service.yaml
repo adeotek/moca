@@ -1,0 +1,4 @@
+# geo-router — owned by platform-edge. Generated from the service template.
+name: geo-router
+image: ghcr.io/acme/geo-router:1.4.10
+replicas: 3

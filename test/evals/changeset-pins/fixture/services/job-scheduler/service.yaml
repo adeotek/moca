@@ -1,0 +1,4 @@
+# job-scheduler — owned by platform-platform. Generated from the service template.
+name: job-scheduler
+image: ghcr.io/acme/job-scheduler:1.4.12
+replicas: 2

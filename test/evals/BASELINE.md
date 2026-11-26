@@ -1892,3 +1892,36 @@ codemode on a real bulk task is real but modest (median 0.78 of the control's ca
 budget to be efficient), and it does not reach the predeclared half-the-context bar. The 50-attempt
 budget, not the exposure model, was the binding constraint at additive. No round 2 was run and no
 threshold moved.
+
+## changeset campaign — phase 1 (2026-11-26, unbilled, no rows)
+
+Graders and instrumentation only; **no trial has run and no label exists**. This section is the
+protocol's starting point, not a result.
+
+- **Fixtures.** `changeset-pins` (a release join: 24 services, 4 decoys, 2 legacy manifest entries;
+  20 released versions must land in each `service.yaml` and in `deploy/manifest.yaml` — 21 targets) and
+  `changeset-registry` (22 plugins, 4 disabled; 18 enabled pages plus a regenerated sorted registry —
+  19 targets). Both are `PILOT` and cannot run until the `workspace` surface exists.
+- **What a pass means.** `test/evals/_lib/changeset_check.py` grades, in order: bytes (every permitted
+  file equals the image its data implies, every other file byte-identical, nothing created), the
+  transcript (a successful `verify.py` run with no typed mutation after it), and the two closing answer
+  lines. A shell script that makes the same edit and verifies it passes — the fixture must not require
+  the feature.
+- **Arms.** The campaign's A/B/C are `cm-off`, `cm-workspace`, `cm-workspace-edits`, which arrive with
+  phase 2's config keys. The selftest arms are model-free: `bash test/evals/run.sh --selftest
+  changeset-pins changeset-registry` (twelve checks).
+- **Instrument.** Schema-2 rows now carry `work` (one observation per `turn()` boundary across both
+  processes — the campaign's endpoint) and `attempts` (physical adapter attempts; diagnostic only,
+  never summed with `work`). Both are required-or-declared-gap fields: a missing observation fails the
+  trial instead of reading as zero.
+- **Not yet emitted.** Applied/unknown file counts and approval counts — they come from the changeset
+  tool's receipt (phases 3–4). The campaign cannot start before they exist: the preconditions in plan
+  v7 §6 need them in every C success.
+- **Deviations from plan v7 §5 phase 1, recorded.** The plan asked for physical attempts **tagged work
+  vs auxiliary**. The shipped counter is process-wide and untagged: a compaction can run inside a work
+  turn, so a global counter cannot attribute attempts to one side without threading a kind through the
+  adapter interface. `work` is exact and is the endpoint; `attempts` is recorded as a diagnostic with
+  that limitation stated. The plan also asked for a scripted-fixture proof of a retried request; the
+  Go tests pin the counting rules (`TestWorkOfSumsBothProcesses`, `TestAttemptsOfTakesTheLastPerProcess`)
+  and the retry call site is a single `evalAttempt()` in the loop, but no end-to-end retried trial is
+  scripted yet.

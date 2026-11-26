@@ -64,13 +64,19 @@ type Metrics struct {
 	// observed zero (a second turn that carried no tool output) from a
 	// missing observation — a missing one fails the trial and no comparison
 	// may silently read it as free.
-	Carry         int   `json:"carry,omitempty"`
-	CarryMeasured bool  `json:"carryMeasured,omitempty"`
-	MS            int64 `json:"ms,omitempty"`
-	CMAttempted   int   `json:"cmAttempted,omitempty"`
-	CMOk          int   `json:"cmOk,omitempty"`
-	Pass          bool  `json:"pass"`
-	Exit          int   `json:"exit"`
+	Carry         int  `json:"carry,omitempty"`
+	CarryMeasured bool `json:"carryMeasured,omitempty"`
+	// Work counts logical work requests — one per turn() boundary across both
+	// processes — and is the changeset campaign's primary endpoint. Attempts
+	// counts physical adapter attempts, a diagnostic; the two are never summed.
+	Work        int   `json:"work,omitempty"`
+	WorkMissing bool  `json:"workMissing,omitempty"`
+	Attempts    int   `json:"attempts,omitempty"`
+	MS          int64 `json:"ms,omitempty"`
+	CMAttempted int   `json:"cmAttempted,omitempty"`
+	CMOk        int   `json:"cmOk,omitempty"`
+	Pass        bool  `json:"pass"`
+	Exit        int   `json:"exit"`
 	// Steps counts assistant turns (each one is a model request).
 	Steps int            `json:"steps"`
 	Calls map[string]int `json:"calls"`
@@ -458,6 +464,11 @@ func main() {
 	carryMissing := flag.Bool("carryMissing", false, "the carry observation was absent: write the row with carryMeasured=false")
 	ms := flag.Int64("ms", 0, "trial wall-clock milliseconds (schema 2)")
 	carryOf := flag.String("carryOf", "", "print the carry of file.jsonl,turn (exit 1 when unobserved)")
+	work := flag.Int("work", 0, "logical work requests across the trial's two processes (schema 2)")
+	workMissing := flag.Bool("workMissing", false, "the work observation was absent (recorded, never read as zero)")
+	attempts := flag.Int("attempts", 0, "physical adapter attempts observed at the last work turn (diagnostic)")
+	workOf := flag.String("workOf", "", "print the logical work requests across file.jsonl,file.jsonl")
+	attemptsOf := flag.String("attemptsOf", "", "print the summed physical attempts across file.jsonl,file.jsonl")
 	trialCheck := flag.String("trialCheck", "", "verify a two-turn transcript")
 	p1 := flag.String("p1", "", "turn 1 prompt file (-trialCheck)")
 	p2 := flag.String("p2", "", "turn 2 prompt file (-trialCheck)")
@@ -500,6 +511,21 @@ func main() {
 			fatal(fmt.Errorf("no carry observation for turn %d in %s", turn, parts[0]))
 		}
 		fmt.Println(c)
+	case *workOf != "":
+		n, err := WorkOf(strings.Split(*workOf, ","))
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Println(n)
+	case *attemptsOf != "":
+		n, ok, err := AttemptsOf(strings.Split(*attemptsOf, ","))
+		if err != nil {
+			fatal(err)
+		}
+		if !ok {
+			fatal(fmt.Errorf("no attempt observations in %s", *attemptsOf))
+		}
+		fmt.Println(n)
 	case *trialCheck != "":
 		a, err := os.ReadFile(*p1)
 		if err != nil {
@@ -535,7 +561,7 @@ func main() {
 	case *summary != "":
 		fmt.Print(Summarize(readResultsFile(*summary)))
 	case *sess != "":
-		if err := checkRowContract(*schema, set, *carryMissing, *trial, *turns, *arm, *sessionID); err != nil {
+		if err := checkRowContract(*schema, set, *carryMissing, *workMissing, *trial, *turns, *arm, *sessionID); err != nil {
 			fatal(err)
 		}
 		entries, err := session.ReadFile(*sess)
@@ -550,6 +576,7 @@ func main() {
 		if *carryMissing {
 			m.CarryMeasured = false
 		}
+		m.Work, m.WorkMissing, m.Attempts = *work, *workMissing, *attempts
 		b, _ := json.Marshal(m)
 		fmt.Println(string(b))
 	default:
@@ -578,7 +605,7 @@ func refuseSchema2(rows ...[]Metrics) error {
 // carry observation is how a harness bug would become a silent zero in the
 // statistics (plan v13, Task 1 — "missing carry" and "mixed schemas" must
 // fail for the intended reason).
-func checkRowContract(schema int, set map[string]bool, carryMissing bool, trial, turns int, arm, sessionID string) error {
+func checkRowContract(schema int, set map[string]bool, carryMissing, workMissing bool, trial, turns int, arm, sessionID string) error {
 	if schema == 0 {
 		if set["trial"] || set["arm"] || set["carry"] {
 			return fmt.Errorf("schema-2 flags given without -schema 2")
@@ -603,6 +630,13 @@ func checkRowContract(schema int, set map[string]bool, carryMissing bool, trial,
 	}
 	if !set["carry"] && !carryMissing {
 		return fmt.Errorf("schema 2 row needs -carry (or -carryMissing to record the gap): an unmeasured trial must not read as zero")
+	}
+	// The changeset campaign's endpoint is the work count, so a schema-2 row
+	// without it is incomplete for every comparison that uses one — but old
+	// rows (carry-era labels) predate the field and must stay readable, which
+	// is why the refusal is on the writer, not on the reader.
+	if !set["work"] && !workMissing {
+		return fmt.Errorf("schema 2 row needs -work (or -workMissing to record the gap): the work count is the changeset endpoint")
 	}
 	return nil
 }

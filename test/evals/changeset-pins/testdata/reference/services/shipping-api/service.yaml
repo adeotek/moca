@@ -1,0 +1,4 @@
+# shipping-api — owned by platform-commerce. Generated from the service template.
+name: shipping-api
+image: ghcr.io/acme/shipping-api:1.5.22
+replicas: 2

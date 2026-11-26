@@ -161,6 +161,21 @@ run_trial() {
     why="${why:-missing carry observation (build with -tags codemodecarry)}"
   fi
 
+  # Work is the changeset campaign's endpoint: one observation per turn()
+  # boundary, so the sum over both processes is the number of model requests
+  # the trial spent making progress. Absent is not zero (same rule as carry),
+  # and the attempts figure is a diagnostic beside it, never added to it.
+  local work="" workargs=(-workMissing)
+  if work=$("$STATS" -workOf "$data/carry.1.jsonl,$data/carry.2.jsonl" 2>/dev/null); then
+    workargs=(-work "$work")
+  else
+    why="${why:-missing work observation (build with -tags codemodecarry)}"
+  fi
+  local attemptargs=()
+  local attempts=""
+  if attempts=$("$STATS" -attemptsOf "$data/carry.1.jsonl,$data/carry.2.jsonl" 2>/dev/null); then
+    attemptargs=(-attempts "$attempts")
+  fi
   local pass=false
   if [ -z "$why" ]; then
     if why=$(cd "$work" && SESSION="$sess" DATA="$data" VARIANT="$arm" bash "$EVALS/$s/check.sh" 2>&1); then
@@ -182,6 +197,7 @@ run_trial() {
     read -r s_added s_removed s_files s_new <<<"$(size_of "$work" "$base")"
     local args=(-session "$sess" -scenario "$s" -label "$LABEL" -schema 2 -trial "$n" -turns 2
       -arm "$arm" -sessionId "$id8" -ms "$ms" -exit "$code"
+      "${workargs[@]}" ${attemptargs[@]+"${attemptargs[@]}"}
       "${carryargs[@]}" -added "$s_added" -removed "$s_removed" -files "$s_files" -newFiles "$s_new")
     [ "$pass" = true ] && args+=(-pass)
     "$STATS" "${args[@]}" >> "$OUT"

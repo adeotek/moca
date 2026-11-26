@@ -1,0 +1,4 @@
+# feature-flags — owned by platform-platform. Generated from the service template.
+name: feature-flags
+image: ghcr.io/acme/feature-flags:1.5.8
+replicas: 2

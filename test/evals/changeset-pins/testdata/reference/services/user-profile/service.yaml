@@ -1,0 +1,4 @@
+# user-profile — owned by platform-identity. Generated from the service template.
+name: user-profile
+image: ghcr.io/acme/user-profile:1.5.24
+replicas: 2

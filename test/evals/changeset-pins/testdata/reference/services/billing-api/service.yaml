@@ -1,0 +1,4 @@
+# billing-api — owned by platform-payments. Generated from the service template.
+name: billing-api
+image: ghcr.io/acme/billing-api:1.5.3
+replicas: 2

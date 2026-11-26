@@ -31,6 +31,10 @@ type CarryObservation struct {
 	Trial   int    `json:"trial"`
 	Turn    int    `json:"turn"`
 	Carry   int    `json:"carry"`
+	// Attempts is the process's cumulative physical-adapter-attempt count at
+	// this turn. Diagnostic only: unlike Turn it cannot be attributed to work
+	// vs auxiliary requests, so it is never summed with a work count.
+	Attempts int `json:"attempts,omitempty"`
 }
 
 // ReadCarryObservations reads the hook's JSONL file. A torn final line is
@@ -57,6 +61,49 @@ func ReadCarryObservations(path string) ([]CarryObservation, error) {
 		out = append(out, o)
 	}
 	return out, sc.Err()
+}
+
+// WorkOf counts the logical work requests across the given observation files:
+// one line is one turn() boundary, i.e. one model request the agent made to
+// make progress. A missing file or an empty one is an error — the campaign
+// must never read an absent instrument as zero requests.
+func WorkOf(paths []string) (int, error) {
+	total := 0
+	for _, p := range paths {
+		obs, err := ReadCarryObservations(p)
+		if err != nil {
+			return 0, err
+		}
+		if len(obs) == 0 {
+			return 0, fmt.Errorf("no work observations in %s", p)
+		}
+		total += len(obs)
+	}
+	return total, nil
+}
+
+// AttemptsOf sums the last cumulative attempt count of each observation file
+// (each process counts from zero). ok is false when no file carried the field:
+// an instrument built without the hook must not read as "no retries".
+func AttemptsOf(paths []string) (int, bool, error) {
+	total, seen := 0, false
+	for _, p := range paths {
+		obs, err := ReadCarryObservations(p)
+		if err != nil {
+			return 0, false, err
+		}
+		last := 0
+		for _, o := range obs {
+			if o.Attempts > last {
+				last = o.Attempts
+			}
+		}
+		if last > 0 {
+			seen = true // every work turn makes at least one attempt
+		}
+		total += last
+	}
+	return total, seen, nil
 }
 
 // CarryOfTurn returns the carry figure of one turn. Turn 1 is the metric: the

@@ -83,6 +83,7 @@ func (r *retrying) stream(ctx context.Context, req llm.Request, emit func(llm.Ev
 	attempt, midRetried := 0, false
 	for {
 		streamed := false
+		evalAttempt()
 		resp, err := r.a.Stream(ctx, req, func(e llm.Event) { streamed = true; emit(e) })
 		if err == nil {
 			return resp, nil

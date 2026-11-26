@@ -1,0 +1,4 @@
+# ingest-pipeline — owned by platform-data. Generated from the service template.
+name: ingest-pipeline
+image: ghcr.io/acme/ingest-pipeline:1.5.11
+replicas: 4

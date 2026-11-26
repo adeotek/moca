@@ -1,0 +1,25 @@
+{
+  "month": "2026-11",
+  "services": {
+    "api-gateway": "1.5.1",
+    "auth-service": "1.5.2",
+    "billing-api": "1.5.3",
+    "cron-runner": "1.5.6",
+    "email-svc": "1.5.7",
+    "feature-flags": "1.5.8",
+    "file-store": "1.5.9",
+    "ingest-pipeline": "1.5.11",
+    "job-scheduler": "1.5.12",
+    "ledger-api": "1.5.13",
+    "metrics-agent": "1.5.14",
+    "notify-hub": "1.5.15",
+    "order-api": "1.5.16",
+    "payment-relay": "1.5.17",
+    "pricing-svc": "1.5.18",
+    "search-index": "1.5.20",
+    "session-store": "1.5.21",
+    "shipping-api": "1.5.22",
+    "tax-calc": "1.5.23",
+    "user-profile": "1.5.24"
+  }
+}

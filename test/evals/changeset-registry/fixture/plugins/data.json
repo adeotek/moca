@@ -1,0 +1,158 @@
+{
+  "plugins": [
+    {
+      "name": "auth",
+      "kind": "grpc",
+      "endpoint": "grpc://auth.internal:9443",
+      "timeoutMs": 5500,
+      "enabled": true
+    },
+    {
+      "name": "billing",
+      "kind": "grpc",
+      "endpoint": "grpc://billing.internal:9443",
+      "timeoutMs": 9000,
+      "enabled": true
+    },
+    {
+      "name": "catalog",
+      "kind": "http2",
+      "endpoint": "https://catalog.internal:8443/v2",
+      "timeoutMs": 6500,
+      "enabled": true
+    },
+    {
+      "name": "checkout",
+      "kind": "grpc",
+      "endpoint": "grpc://checkout.internal:9443",
+      "timeoutMs": 8500,
+      "enabled": true
+    },
+    {
+      "name": "config",
+      "kind": "file",
+      "endpoint": "file:///etc/acme/config",
+      "timeoutMs": 2000,
+      "enabled": true
+    },
+    {
+      "name": "emailer",
+      "kind": "smtp",
+      "endpoint": "smtp://mail.internal:25",
+      "timeoutMs": 10000,
+      "enabled": false
+    },
+    {
+      "name": "events",
+      "kind": "nats",
+      "endpoint": "nats://events.internal:4222",
+      "timeoutMs": 15500,
+      "enabled": true
+    },
+    {
+      "name": "files",
+      "kind": "s3",
+      "endpoint": "s3://acme-files",
+      "timeoutMs": 21000,
+      "enabled": true
+    },
+    {
+      "name": "flags",
+      "kind": "redis",
+      "endpoint": "redis://flags.internal:6380",
+      "timeoutMs": 3500,
+      "enabled": true
+    },
+    {
+      "name": "geo",
+      "kind": "http",
+      "endpoint": "http://geo.internal:8080",
+      "timeoutMs": 5000,
+      "enabled": false
+    },
+    {
+      "name": "inventory",
+      "kind": "sql",
+      "endpoint": "postgres://inventory.internal:5433",
+      "timeoutMs": 13000,
+      "enabled": true
+    },
+    {
+      "name": "ledger",
+      "kind": "sql",
+      "endpoint": "postgres://ledger.internal:5433",
+      "timeoutMs": 13500,
+      "enabled": true
+    },
+    {
+      "name": "metrics",
+      "kind": "kafka",
+      "endpoint": "kafka://metrics.internal:9093",
+      "timeoutMs": 15500,
+      "enabled": true
+    },
+    {
+      "name": "notify",
+      "kind": "smtp",
+      "endpoint": "smtp://notify.internal:25",
+      "timeoutMs": 10000,
+      "enabled": false
+    },
+    {
+      "name": "orders",
+      "kind": "grpc",
+      "endpoint": "grpc://orders.internal:9443",
+      "timeoutMs": 9500,
+      "enabled": true
+    },
+    {
+      "name": "pricing",
+      "kind": "http",
+      "endpoint": "http://pricing.internal:8081",
+      "timeoutMs": 5500,
+      "enabled": true
+    },
+    {
+      "name": "queue",
+      "kind": "mqtt",
+      "endpoint": "mqtt://queue.internal:1883",
+      "timeoutMs": 10000,
+      "enabled": true
+    },
+    {
+      "name": "search",
+      "kind": "grpc",
+      "endpoint": "grpc://search.internal:9443",
+      "timeoutMs": 6500,
+      "enabled": true
+    },
+    {
+      "name": "sessions",
+      "kind": "redis",
+      "endpoint": "redis://sessions.internal:6380",
+      "timeoutMs": 2500,
+      "enabled": true
+    },
+    {
+      "name": "shipping",
+      "kind": "http",
+      "endpoint": "http://shipping.internal:8081",
+      "timeoutMs": 6000,
+      "enabled": true
+    },
+    {
+      "name": "tax",
+      "kind": "http",
+      "endpoint": "http://tax.internal:8080",
+      "timeoutMs": 5000,
+      "enabled": false
+    },
+    {
+      "name": "users",
+      "kind": "sql",
+      "endpoint": "postgres://users.internal:5433",
+      "timeoutMs": 12500,
+      "enabled": true
+    }
+  ]
+}

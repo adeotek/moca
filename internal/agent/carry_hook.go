@@ -10,6 +10,7 @@ import (
 
 	"github.com/adeotek/moca/internal/compact"
 	"github.com/adeotek/moca/internal/llm"
+	"github.com/adeotek/moca/internal/provider"
 )
 
 // This file is the carry instrument (codemode plan v13, Task 1). It exists in
@@ -37,6 +38,11 @@ type carryObservation struct {
 	Trial   int    `json:"trial"`
 	Turn    int    `json:"turn"`
 	Carry   int    `json:"carry"`
+	// Attempts is the process's cumulative physical-attempt count at this
+	// turn (internal/provider/evalcount.go). A diagnostic beside the work
+	// count: the two are never summed, and this one cannot be split between
+	// work and auxiliary requests because a compaction may run mid-turn.
+	Attempts int `json:"attempts,omitempty"`
 }
 
 // carryTokens sums the estimate over every retained tool-result block of the
@@ -67,7 +73,8 @@ func (a *Agent) carryObserve(req llm.Request) {
 	if a.opts.Session != nil {
 		session = a.opts.Session.ID8()
 	}
-	obs := carryObservation{Session: session, Trial: envInt("MOCA_TRIAL"), Turn: turn, Carry: carryTokens(req.Messages)}
+	obs := carryObservation{Session: session, Trial: envInt("MOCA_TRIAL"), Turn: turn,
+		Carry: carryTokens(req.Messages), Attempts: provider.EvalAttempts()}
 	b, err := json.Marshal(obs)
 	if err != nil {
 		return

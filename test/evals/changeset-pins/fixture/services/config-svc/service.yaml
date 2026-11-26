@@ -1,0 +1,4 @@
+# config-svc — owned by platform-platform. Generated from the service template.
+name: config-svc
+image: ghcr.io/acme/config-svc:1.4.5
+replicas: 1

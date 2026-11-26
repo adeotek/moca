@@ -1,0 +1,4 @@
+# file-store — owned by platform-storage. Generated from the service template.
+name: file-store
+image: ghcr.io/acme/file-store:1.5.9
+replicas: 2

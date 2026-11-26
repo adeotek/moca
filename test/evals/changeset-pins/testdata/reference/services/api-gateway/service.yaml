@@ -1,0 +1,4 @@
+# api-gateway — owned by platform-edge. Generated from the service template.
+name: api-gateway
+image: ghcr.io/acme/api-gateway:1.5.1
+replicas: 3

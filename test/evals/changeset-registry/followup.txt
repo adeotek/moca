@@ -1,0 +1,4 @@
+Restate the result. Finish with exactly these two lines and nothing after them:
+
+updated=<n> plugin pages,<m> registry rows
+untouched=<k> disabled plugins

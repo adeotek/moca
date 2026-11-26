@@ -1,0 +1,4 @@
+# payment-relay — owned by platform-payments. Generated from the service template.
+name: payment-relay
+image: ghcr.io/acme/payment-relay:1.5.17
+replicas: 2

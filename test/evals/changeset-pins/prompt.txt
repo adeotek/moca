@@ -1,0 +1,7 @@
+releases.json holds this month's image versions for some of the services under services/.
+
+For every service releases.json names, put that version on its image tag in services/<name>/service.yaml and on its tag line in deploy/manifest.yaml. Leave every service releases.json does not name exactly as it is, and do not reformat, reorder or re-indent anything.
+
+Work from the files as they are: do not create, modify or delete any file other than those edits, and leave no scratch files behind.
+
+Then run python3 verify.py and make sure it passes.
