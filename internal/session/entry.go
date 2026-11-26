@@ -70,6 +70,10 @@ type Header struct {
 	// surface must not run against eight declared tools, and the reverse would
 	// leave the model unable to inspect anything (SPECS §10.6).
 	CodemodeExposure string `json:"codemodeExposure,omitempty"`
+	// CodemodeEdits records that the frozen prompt promised the writable
+	// workspace surface. The header owns the shape; current policy still owns
+	// authority, so a revoked bit keeps the method and refuses the call.
+	CodemodeEdits bool `json:"codemodeEdits,omitempty"`
 	// SpillDir is the session-scoped overflow directory admitted to the jail.
 	// It is chosen before the header and reused on resume; old headers have
 	// none and use a degraded stub for their pointers.

@@ -18,32 +18,46 @@ import (
 // ---- the session table ---------------------------------------------------
 
 func TestPlanCodemode(t *testing.T) {
-	on := config.CodemodeState{On: true}
-	onNet := config.CodemodeState{On: true, Network: true}
+	on := config.CodemodeState{On: true, Exposure: config.CodemodeAdditive}
+	onNet := config.CodemodeState{On: true, Network: true, Exposure: config.CodemodeAdditive}
+	ws := config.CodemodeState{On: true, Exposure: config.CodemodeWorkspace}
+	wsEdits := config.CodemodeState{On: true, Exposure: config.CodemodeWorkspace, WorkspaceEdits: true}
 	off := config.CodemodeState{}
 	cases := []struct {
 		name                                string
 		resumed, had, stored                bool
+		storedExposure                      string
+		storedEdits                         bool
 		cm                                  config.CodemodeState
 		present, refusal, prelude, admitted bool
+		wantExp                             string
+		wantEdits                           bool
 	}{
-		{"fresh off", false, false, false, off, false, false, false, false},
-		{"fresh on workspace", false, false, false, on, true, false, false, false},
-		{"fresh on network", false, false, false, onNet, true, false, true, true},
-		{"resumed legacy header", true, false, false, onNet, false, false, false, false},
-		{"resumed off-now", true, true, false, off, true, true, false, false},
-		{"resumed network header, still on", true, true, true, onNet, true, false, true, true},
-		{"resumed network header, switch lost", true, true, true, on, true, false, true, false},
-		{"resumed workspace header, network gained", true, true, false, onNet, true, false, false, false},
+		{"fresh off", false, false, false, "", false, off, false, false, false, false, "", false},
+		{"fresh additive", false, false, false, "", false, on, true, false, false, false, config.CodemodeAdditive, false},
+		{"fresh network", false, false, false, "", false, onNet, true, false, true, true, config.CodemodeAdditive, false},
+		{"fresh workspace", false, false, false, "", false, ws, true, false, false, false, config.CodemodeWorkspace, false},
+		{"fresh workspace with edits", false, false, false, "", false, wsEdits, true, false, false, false, config.CodemodeWorkspace, true},
+		{"resumed legacy header", true, false, false, "", false, onNet, false, false, false, false, "", false},
+		{"resumed off-now", true, true, false, "", false, off, true, true, false, false, config.CodemodeAdditive, false},
+		{"resumed network header, still on", true, true, true, "", false, onNet, true, false, true, true, config.CodemodeAdditive, false},
+		{"resumed network header, switch lost", true, true, true, "", false, on, true, false, true, false, config.CodemodeAdditive, false},
+		{"resumed workspace header, network gained", true, true, false, config.CodemodeWorkspace, false, onNet, true, false, false, false, config.CodemodeWorkspace, false},
+		{"resumed workspace header, edits declared", true, true, false, config.CodemodeWorkspace, true, wsEdits, true, false, false, false, config.CodemodeWorkspace, true},
+		{"resumed workspace header, edits revoked", true, true, false, config.CodemodeWorkspace, true, ws, true, false, false, false, config.CodemodeWorkspace, false},
+		{"resumed workspace header, tool off", true, true, false, config.CodemodeWorkspace, true, off, true, true, false, false, config.CodemodeWorkspace, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			p := planCodemode(c.resumed, c.had, c.stored, "", c.cm)
+			p := planCodemode(c.resumed, c.had, c.stored, c.storedExposure, c.storedEdits, c.cm)
 			if p.present != c.present || p.refusal != c.refusal {
 				t.Fatalf("present=%v refusal=%v, want %v/%v", p.present, p.refusal, c.present, c.refusal)
 			}
 			if p.preludeNetwork != c.prelude || p.admittedNetwork != c.admitted {
 				t.Fatalf("prelude=%v admitted=%v, want %v/%v", p.preludeNetwork, p.admittedNetwork, c.prelude, c.admitted)
+			}
+			if p.exposure != c.wantExp || p.workspaceEdits != c.wantEdits {
+				t.Fatalf("exposure=%q edits=%v, want %q/%v", p.exposure, p.workspaceEdits, c.wantExp, c.wantEdits)
 			}
 		})
 	}

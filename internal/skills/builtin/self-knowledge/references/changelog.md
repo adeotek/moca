@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### codemode: a `workspace` surface (opt-in, read-only so far)
+
+`codemode.exposure` gains `workspace`: the eight tools stay declared and the script is confined to
+the workdir — workspace-relative reads and searches, no external grants, no network. It is the first
+surface whose reach is explicit rather than inherited, and it is the one the changeset work builds on.
+`codemode.workspaceEdits` is accepted and resolved into authority, but **no writable method is
+registered yet**: the `stageEdit` tool, its apply protocol and its receipt land next on the same
+branch, so nothing in a workspace session can mutate a file today. Resuming a workspace session as
+any other surface (or the reverse) refuses before a provider call, the same way transport does; a
+project may narrow the surface back to additive and may revoke edits, and never grants either.
+
+Requires no migration: the default is still `additive`, and a session recorded before this change
+resumes exactly as before.
+
 ### Security: codemode could read credentials beside the config file
 
 A transport grant on a single file was implemented as a grant on its **parent directory**, so a script

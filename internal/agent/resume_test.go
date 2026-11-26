@@ -56,22 +56,39 @@ func TestResumeRebuildsExactContext(t *testing.T) {
 func TestResumeRefusesASurfaceMismatch(t *testing.T) {
 	cases := []struct {
 		name, start, resume string
+		startEdits          bool
+		resumeEdits         bool
 		wantErr             bool
 		wantTools           int
 	}{
-		{"additive to additive", "additive", "additive", false, 9},
-		{"additive to off", "additive", "", false, 9},
-		{"additive to transport", "additive", "transport", true, 0},
-		{"transport to transport", "transport", "transport", false, 6},
-		{"transport to additive", "transport", "additive", true, 0},
-		{"transport to off", "transport", "", true, 0},
+		{"additive to additive", "additive", "additive", false, false, false, 9},
+		{"additive to off", "additive", "", false, false, false, 9},
+		{"additive to transport", "additive", "transport", false, false, true, 0},
+		{"additive to workspace", "additive", "workspace", false, false, true, 0},
+		{"transport to transport", "transport", "transport", false, false, false, 6},
+		{"transport to additive", "transport", "additive", false, false, true, 0},
+		{"transport to workspace", "transport", "workspace", false, false, true, 0},
+		{"transport to off", "transport", "", false, false, true, 0},
+		{"workspace to workspace", "workspace", "workspace", false, false, false, 9},
+		{"workspace to workspace with edits kept", "workspace", "workspace", true, true, false, 9},
+		{"workspace to workspace with edits revoked", "workspace", "workspace", true, false, false, 9},
+		{"workspace to additive", "workspace", "additive", false, false, true, 0},
+		{"workspace to transport", "workspace", "transport", false, false, true, 0},
+		{"workspace to off", "workspace", "", false, false, true, 0},
+		{"off to workspace", "", "workspace", false, false, true, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			s := newScript(t, textTurn("first answer"), textTurn("second answer"))
 			extra := `"codemode":{"enabled":true`
-			if c.start == "transport" {
+			switch c.start {
+			case "transport":
 				extra += `,"exposure":"transport"`
+			case "workspace":
+				extra += `,"exposure":"workspace"`
+				if c.startEdits {
+					extra += `,"workspaceEdits":true`
+				}
 			}
 			extra += `}`
 			a, _, _ := startWith(t, s, 2, extra, "")
@@ -80,12 +97,17 @@ func TestResumeRefusesASurfaceMismatch(t *testing.T) {
 			}
 			path := a.Session().Path()
 			cfg := a.opts.Config
-			off, transport, additive := false, "transport", "additive"
+			off := false
+			transport, additive, workspace := "transport", "additive", "workspace"
+			edits := c.resumeEdits
 			switch c.resume {
 			case "":
 				cfg.Codemode.Enabled = &off
 			case "transport":
 				cfg.Codemode.Exposure = &transport
+			case "workspace":
+				cfg.Codemode.Exposure = &workspace
+				cfg.Codemode.WorkspaceEdits = &edits
 			default:
 				cfg.Codemode.Exposure = &additive
 			}

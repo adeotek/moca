@@ -157,8 +157,13 @@ type CodemodeConfig struct {
 	// callable only from a script). A trusted project may narrow transport to
 	// additive; a project value alone never widens.
 	Exposure *string `json:"exposure,omitempty"`
+	// WorkspaceEdits declares the writable workspace surface (SPECS §10.6):
+	// exact, ordered edits per target that the host applies after the program
+	// returns. It needs exposure "workspace" in the same file, and only the
+	// user config can set it; a trusted project may turn it off.
+	WorkspaceEdits *bool `json:"workspaceEdits,omitempty"`
 	// InspectAttempts is the per-script inspection budget (§11.4): 50..2000,
-	// default 50 in additive and 400 in transport. A project may lower it.
+	// default 400. A project may lower it.
 	InspectAttempts *int `json:"inspectAttempts,omitempty"`
 }
 
@@ -166,6 +171,7 @@ type CodemodeConfig struct {
 const (
 	CodemodeAdditive  = "additive"
 	CodemodeTransport = "transport"
+	CodemodeWorkspace = "workspace"
 
 	InspectAttemptsMin = 50
 	InspectAttemptsMax = 2000
@@ -190,8 +196,32 @@ func DefaultInspectAttempts(exposure string) int {
 // file's own key path for the error text.
 func (c CodemodeConfig) validate(prefix string) error {
 	if c.Exposure != nil {
-		if v := *c.Exposure; v != CodemodeAdditive && v != CodemodeTransport {
-			return fmt.Errorf("%s.exposure must be %q or %q, got %q", prefix, CodemodeAdditive, CodemodeTransport, v)
+		switch v := *c.Exposure; v {
+		case CodemodeAdditive, CodemodeTransport, CodemodeWorkspace:
+		default:
+			return fmt.Errorf("%s.exposure must be %q, %q or %q, got %q", prefix, CodemodeAdditive,
+				CodemodeTransport, CodemodeWorkspace, v)
+		}
+	}
+	// A surface needs its switch in the same file: an exposure key alone cannot
+	// turn codemode on, and a project that wants the surface must say so plainly
+	// (it still cannot widen — the resolver warns instead).
+	if c.Exposure != nil && *c.Exposure == CodemodeWorkspace {
+		if c.Enabled == nil || !*c.Enabled {
+			return fmt.Errorf("%s.exposure %q needs %s.enabled true in the same file", prefix,
+				CodemodeWorkspace, prefix)
+		}
+		// Workspace scripts stay inside the workdir; there is no egress to
+		// admit, and a task that needs the web is not a workspace task.
+		if c.Network != nil && *c.Network {
+			return fmt.Errorf("%s.network cannot be true with %s.exposure %q: a workspace script has no egress",
+				prefix, prefix, CodemodeWorkspace)
+		}
+	}
+	if c.WorkspaceEdits != nil && *c.WorkspaceEdits {
+		if c.Exposure == nil || *c.Exposure != CodemodeWorkspace {
+			return fmt.Errorf("%s.workspaceEdits needs %s.exposure %q in the same file", prefix, prefix,
+				CodemodeWorkspace)
 		}
 	}
 	if c.InspectAttempts != nil {
@@ -212,8 +242,12 @@ type CodemodeState struct {
 	// inspection budget; both are meaningful only when On.
 	Exposure string
 	Attempts int
-	Warning  string
-	Note     string
+	// WorkspaceEdits is the effective edit authority: the user's opt-in,
+	// narrowed by a trusted project. It is false unless the resolved surface is
+	// workspace, and it is never widened by a project.
+	WorkspaceEdits bool
+	Warning        string
+	Note           string
 }
 
 // ResolveCodemode mirrors ResolveSelfManagedSkills' precedence exactly (F20):
@@ -225,9 +259,11 @@ type CodemodeState struct {
 func ResolveCodemode(cfg Config) CodemodeState {
 	var projEnabled, projNetwork *bool
 	var projAttempts *int
+	var projEdits *bool
 	if cfg.Project != nil {
 		projEnabled, projNetwork = cfg.Project.Codemode.Enabled, cfg.Project.Codemode.Network
 		projAttempts = cfg.Project.Codemode.InspectAttempts
+		projEdits = cfg.Project.Codemode.WorkspaceEdits
 	}
 	userEnabled, userNetwork := cfg.Codemode.Enabled, cfg.Codemode.Network
 	userOn := userEnabled != nil && *userEnabled
@@ -263,10 +299,30 @@ func ResolveCodemode(cfg Config) CodemodeState {
 		case pe == CodemodeAdditive && st.Exposure == CodemodeTransport:
 			st.Note = "codemode transport is off in this project: its .moca/config.jsonc sets codemode.exposure additive"
 			st.Exposure = CodemodeAdditive
+		case pe == CodemodeAdditive && st.Exposure == CodemodeWorkspace:
+			st.Note = "codemode workspace is off in this project: its .moca/config.jsonc sets codemode.exposure additive"
+			st.Exposure = CodemodeAdditive
 		case pe == CodemodeTransport && st.Exposure == CodemodeAdditive:
 			st.Warning = fmt.Sprintf("this project requests codemode transport, but only your user config can — "+
 				"set \"codemode\": {\"enabled\": true, \"exposure\": \"transport\"} in %s and restart moca", ConfigFile())
+		case pe == CodemodeWorkspace && st.Exposure != CodemodeWorkspace:
+			st.Warning = fmt.Sprintf("this project requests the codemode workspace surface, but only your user config can — "+
+				"set \"codemode\": {\"enabled\": true, \"exposure\": \"workspace\"} in %s and restart moca", ConfigFile())
 		}
+	}
+
+	// Edit authority is the user's opt-in, never a project's: a trusted project
+	// may revoke it, and asking for it only produces the same warning as the
+	// other widening requests.
+	st.WorkspaceEdits = st.Exposure == CodemodeWorkspace &&
+		cfg.Codemode.WorkspaceEdits != nil && *cfg.Codemode.WorkspaceEdits
+	if projEdits != nil && !*projEdits && st.WorkspaceEdits {
+		st.WorkspaceEdits = false
+		st.Note = "codemode workspace edits are off in this project: its .moca/config.jsonc sets codemode.workspaceEdits false"
+	}
+	if projEdits != nil && *projEdits && !st.WorkspaceEdits && st.Exposure == CodemodeWorkspace {
+		st.Warning = fmt.Sprintf("this project enables codemode workspace edits, but only your user config can — "+
+			"set \"codemode\": {\"workspaceEdits\": true} beside \"exposure\": \"workspace\" in %s and restart moca", ConfigFile())
 	}
 	st.Attempts = DefaultInspectAttempts(st.Exposure)
 	if a := cfg.Codemode.InspectAttempts; a != nil {

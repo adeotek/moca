@@ -162,7 +162,7 @@ never how many turns a task took.
 ```jsonc
 "codemode": {
   "enabled": true,          // the only switch that turns it on
-  "exposure": "additive",   // additive (default) | transport
+  "exposure": "additive",   // additive (default) | transport | workspace
   "inspectAttempts": 400,   // 50..2000 per script (the default; 50 throttles a bulk task)
   "network": false          // v1.1; web calls from a script are not implemented yet
 }
@@ -177,6 +177,11 @@ never a script grant, so `config.jsonc` stays direct-only), and resumes only int
 prompt promised. Measured on a 361-file fixture, `transport` did not pay for
 itself (median carry 0.78 of the plain tools, short of the predeclared 0.5), so `additive` is the
 only surface a release turns on.
+
+`workspace` is the third surface, still read-only: the eight tools stay declared and the script is
+confined to the workdir — workspace-relative reads and searches, no external paths, no network. Its
+edit bit (`"workspaceEdits": true`) is accepted and resolved but no writable method exists yet; the
+change that adds one ships the tool and its receipt together.
 
 A script may call `read`, `search`, `ls` and `glob` — never `write`, `shell`, MCP or the web, and
 never itself. Budgets: 64 KiB of source, a 1–30 s deadline (10 s default), 20 000 entries and

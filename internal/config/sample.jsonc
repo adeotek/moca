@@ -144,8 +144,13 @@
   // admits web fetches inside a script. Both keys are opt-in — a trusted project
   // file can veto them or declare them, never enable them.
   // "codemode": { "enabled": true, "network": false, "exposure": "additive", "inspectAttempts": 400 },
-  //   exposure additive|transport — transport moves read/search/ls inside the
-  //   script (advanced); inspectAttempts 50..2000 is the per-script budget (default 400).
+  //   exposure additive|transport|workspace — transport moves read/search/ls inside the
+  //   script (advanced); workspace keeps the eight tools and confines the script to the
+  //   workdir (no external grants, no network); inspectAttempts 50..2000 is the per-script
+  //   budget (default 400).
+  // "codemode": { "enabled": true, "exposure": "workspace", "workspaceEdits": true },
+  //   workspaceEdits lets a workspace script stage exact edits the host applies after the
+  //   program returns; it needs exposure workspace, and no project can grant it.
 
   // Diagnostic log: ~/.local/state/moca/logs (MOCA_LOG overrides for one run).
   "log": { "level": "info" } // "info" | "debug" | "off"

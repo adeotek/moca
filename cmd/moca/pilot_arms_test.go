@@ -140,3 +140,65 @@ func TestEvalConfigsPinTheCorpusModel(t *testing.T) {
 		}
 	}
 }
+
+// The changeset campaign's three arms must be three DIFFERENT configurations
+// whose only difference is the codemode block, and inside it exactly the two
+// knobs the design varies: exposure (off | workspace) and the edit bit. A typo
+// that made the edits arm identical to the read-only arm would measure the same
+// cell twice and call it a treatment.
+func TestChangesetPilotArms(t *testing.T) {
+	for _, scenario := range []string{"changeset-pins", "changeset-registry"} {
+		t.Run(scenario, func(t *testing.T) {
+			arms := []struct {
+				name, exposure string
+				edits          bool
+			}{
+				{"cm-off", "", false},
+				{"cm-workspace", config.CodemodeWorkspace, false},
+				{"cm-workspace-edits", config.CodemodeWorkspace, true},
+			}
+			var base map[string]any
+			for i, arm := range arms {
+				raw := loadArm(t, scenario, arm.name)
+				cm, _ := raw["codemode"].(map[string]any)
+				delete(raw, "codemode")
+				if i == 0 {
+					base = raw
+					if len(cm) > 0 {
+						t.Fatalf("%s: the control carries a codemode block (%v)", arm.name, cm)
+					}
+					continue
+				}
+				if !reflect.DeepEqual(raw, base) {
+					t.Fatalf("%s differs beyond codemode:\n %v\n %v", arm.name, raw, base)
+				}
+				if cm["enabled"] != true {
+					t.Fatalf("%s: enabled = %v, want true", arm.name, cm["enabled"])
+				}
+				if cm["exposure"] != arm.exposure {
+					t.Fatalf("%s: exposure = %v, want %q", arm.name, cm["exposure"], arm.exposure)
+				}
+				gotEdits, _ := cm["workspaceEdits"].(bool)
+				if gotEdits != arm.edits {
+					t.Fatalf("%s: workspaceEdits = %v, want %v", arm.name, gotEdits, arm.edits)
+				}
+			}
+			// And the resolver agrees with the file: the edits arm is the only
+			// one that resolves edit authority.
+			editsCfg, err := config.Load(filepath.Join(repoRoot, "test", "evals", scenario, "config.cm-workspace-edits.jsonc"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st := config.ResolveCodemode(editsCfg); !st.On || st.Exposure != config.CodemodeWorkspace || !st.WorkspaceEdits {
+				t.Fatalf("cm-workspace-edits resolves to %+v", st)
+			}
+			roCfg, err := config.Load(filepath.Join(repoRoot, "test", "evals", scenario, "config.cm-workspace.jsonc"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st := config.ResolveCodemode(roCfg); !st.On || st.WorkspaceEdits {
+				t.Fatalf("cm-workspace resolves to %+v", st)
+			}
+		})
+	}
+}

@@ -499,13 +499,13 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	// resolver; a resumed one keeps what its frozen prompt promised — including
 	// a refusal-only tool when the switch has since gone off, because removing
 	// the tool would contradict the prompt the model is reading.
-	var hadCodemode, storedNetwork bool
+	var hadCodemode, storedNetwork, storedEdits bool
 	var storedExposure string
 	if resumed && prior[0].Session != nil {
 		hadCodemode, storedNetwork = prior[0].Session.Codemode, prior[0].Session.CodemodeNetwork
-		storedExposure = prior[0].Session.CodemodeExposure
+		storedExposure, storedEdits = prior[0].Session.CodemodeExposure, prior[0].Session.CodemodeEdits
 	}
-	plan := planCodemode(resumed, hadCodemode, storedNetwork, storedExposure, st.cm)
+	plan := planCodemode(resumed, hadCodemode, storedNetwork, storedExposure, storedEdits, st.cm)
 	// A resumed session keeps the surface its frozen prompt promised (SPECS
 	// §10.6, D24). Running a transport prompt beside eight declared tools — or
 	// an additive prompt beside six — is a contradiction the model cannot
@@ -520,10 +520,12 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 		if stored == "" {
 			stored = config.CodemodeAdditive
 		}
-		// Only the transport bit has to match: an additive session resumed with
-		// codemode off keeps today's refusal-tool behaviour (the tool is still
-		// declared, it just refuses), which its prompt already promised.
-		if (stored == config.CodemodeTransport) != (now == config.CodemodeTransport) {
+		// Two surfaces may differ without a refusal: a session that started
+		// with the tool keeps its shape when codemode is off now (the tool is
+		// still declared and refuses, which its prompt already promised), and
+		// an additive session resumed as additive is the same shape. Every
+		// other difference is a contradiction the model cannot resolve.
+		if surfaceMismatch(stored, now) {
 			return nil, &StartError{fmt.Errorf("%w: this session was recorded with codemode %s (read, search and ls %s), "+
 				"and the current config resolves to %s — start a new session, or restore \"codemode\": "+
 				"{\"enabled\": true, \"exposure\": \"%s\"} to %s and resume",
@@ -752,7 +754,8 @@ func Start(o StartOptions) (*Agent, error) {
 		Workdir: jail.Root(), Provider: m.Provider, Model: cfg.Model, Effort: string(effort),
 		MocaVersion: config.Version, SystemPrompt: system, Yolo: o.mode() == ModeYolo, Mode: string(o.mode()),
 		SelfManagedSkills: selfManaged != nil, SpillDir: st.spillDir,
-		Codemode: st.cm.On, CodemodeNetwork: st.cm.On && st.cm.Network, CodemodeExposure: exposureForHeader(st.cm)}
+		Codemode: st.cm.On, CodemodeNetwork: st.cm.On && st.cm.Network, CodemodeExposure: exposureForHeader(st.cm),
+		CodemodeEdits: st.cm.On && st.cm.Exposure == config.CodemodeWorkspace && st.cm.WorkspaceEdits}
 	var w *session.Writer
 	if o.DeferSession {
 		w, err = session.CreateLazy(filepath.Join(config.DataDir(), "sessions"), h, slug)
@@ -937,6 +940,11 @@ type codemodePlan struct {
 	// exposure is the surface this run declares: the stored one on resume (the
 	// prompt is already frozen to it), the resolved one on a fresh session.
 	exposure string
+	// workspaceEdits is the effective edit authority: the header's declaration
+	// (on resume) intersected with current policy. In this phase it is plumbing:
+	// nothing writable is registered until the changeset tool lands, and the
+	// spec variant stays read-only while it is true.
+	workspaceEdits bool
 }
 
 // ErrSurfaceMismatch is the resume refusal for a codemode surface that differs
@@ -949,6 +957,9 @@ func surfaceName(surface string) string {
 	if surface == config.CodemodeTransport {
 		return "transport"
 	}
+	if surface == config.CodemodeWorkspace {
+		return "workspace"
+	}
 	if surface == config.CodemodeAdditive {
 		return "additive"
 	}
@@ -959,15 +970,29 @@ func surfacePhrase(surface string) string {
 	if surface == config.CodemodeTransport {
 		return "reachable only inside a script"
 	}
+	if surface == config.CodemodeWorkspace {
+		return "reachable only inside a script, workspace-relative"
+	}
 	return "declared directly"
 }
 
-func planCodemode(resumed, hadCodemode, storedNetwork bool, storedExposure string, cm config.CodemodeState) codemodePlan {
+// surfaceMismatch is the resume matrix (SPECS §10.6): equal surfaces match, and
+// a tool-bearing session resumed with the switch off keeps its declared shape as
+// a refusal. Anything else is a mismatch.
+func surfaceMismatch(stored, now string) bool {
+	if stored == now {
+		return false
+	}
+	return !(stored == config.CodemodeAdditive && now == "")
+}
+
+func planCodemode(resumed, hadCodemode, storedNetwork bool, storedExposure string, storedEdits bool, cm config.CodemodeState) codemodePlan {
 	if !resumed {
 		if !cm.On {
 			return codemodePlan{}
 		}
-		return codemodePlan{present: true, preludeNetwork: cm.Network, admittedNetwork: cm.Network, exposure: cm.Exposure}
+		return codemodePlan{present: true, preludeNetwork: cm.Network, admittedNetwork: cm.Network,
+			exposure: cm.Exposure, workspaceEdits: cm.Exposure == config.CodemodeWorkspace && cm.WorkspaceEdits}
 	}
 	if !hadCodemode {
 		return codemodePlan{} // never retroactive
@@ -976,6 +1001,10 @@ func planCodemode(resumed, hadCodemode, storedNetwork bool, storedExposure strin
 	if exp == "" {
 		exp = config.CodemodeAdditive // legacy headers never had transport
 	}
+	// The header owns the shape; current policy owns authority. A revoked edit
+	// bit keeps the declared method and refuses it (never a silent removal),
+	// and it is never granted retroactively.
+	edits := storedEdits && cm.On && cm.Exposure == config.CodemodeWorkspace && cm.WorkspaceEdits
 	return codemodePlan{
 		present: true,
 		refusal: !cm.On,
@@ -984,6 +1013,7 @@ func planCodemode(resumed, hadCodemode, storedNetwork bool, storedExposure strin
 		preludeNetwork:  storedNetwork,
 		admittedNetwork: storedNetwork && cm.Network,
 		exposure:        exp,
+		workspaceEdits:  edits,
 	}
 }
 

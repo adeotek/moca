@@ -1,0 +1,7 @@
+{
+  // changeset campaign, cm-workspace arm. The three arms differ only inside
+  // `codemode`, pinned by TestChangesetPilotArms.
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } },
+  "codemode": { "enabled": true, "exposure": "workspace" }
+}

@@ -143,3 +143,105 @@ func TestProjectRejectsBadCodemode(t *testing.T) {
 		t.Fatalf("project rejected a valid block: %v", err)
 	}
 }
+
+// The workspace surface (SPECS §10.6): opt-in, workspace-relative, and with an
+// edit bit only the user can grant.
+func TestResolveCodemodeWorkspace(t *testing.T) {
+	on, yes := boolp(true), boolp(true)
+	ws := strp(CodemodeWorkspace)
+
+	st := ResolveCodemode(Config{Codemode: CodemodeConfig{Enabled: on, Exposure: &ws}})
+	if !st.On || st.Exposure != CodemodeWorkspace || st.Attempts != 400 || st.WorkspaceEdits {
+		t.Fatalf("workspace = %+v, want workspace/400 without edits", st)
+	}
+	st = ResolveCodemode(Config{Codemode: CodemodeConfig{Enabled: on, Exposure: &ws, WorkspaceEdits: yes}})
+	if !st.WorkspaceEdits {
+		t.Fatalf("workspaceEdits did not resolve: %+v", st)
+	}
+	// The bit is meaningless on the other surfaces, even if the file sets it
+	// (validation refuses that, but the resolver must not depend on validation
+	// having run first).
+	tr := strp(CodemodeTransport)
+	st = ResolveCodemode(Config{Codemode: CodemodeConfig{Enabled: on, Exposure: &tr, WorkspaceEdits: yes}})
+	if st.WorkspaceEdits {
+		t.Fatalf("transport resolved with edit authority: %+v", st)
+	}
+}
+
+func TestWorkspaceEditsAuthorityFollowsTheUser(t *testing.T) {
+	on, yes, no := boolp(true), boolp(true), boolp(false)
+	ws, ad := strp(CodemodeWorkspace), strp(CodemodeAdditive)
+
+	// A project may revoke the user's edits and must say so.
+	st := ResolveCodemode(Config{
+		Codemode: CodemodeConfig{Enabled: on, Exposure: &ws, WorkspaceEdits: yes},
+		Project:  &ProjectConfig{Codemode: CodemodeConfig{WorkspaceEdits: no}},
+	})
+	if st.WorkspaceEdits || !strings.Contains(st.Note, "workspace edits are off in this project") {
+		t.Fatalf("project revocation = %+v", st)
+	}
+	// A project asking for edits the user did not grant warns, never grants.
+	st = ResolveCodemode(Config{
+		Codemode: CodemodeConfig{Enabled: on, Exposure: &ws},
+		Project:  &ProjectConfig{Codemode: CodemodeConfig{WorkspaceEdits: yes}},
+	})
+	if st.WorkspaceEdits || !strings.Contains(st.Warning, "only your user config can") {
+		t.Fatalf("project widening = %+v", st)
+	}
+	// A project can narrow the surface back to additive, which carries no edits.
+	st = ResolveCodemode(Config{
+		Codemode: CodemodeConfig{Enabled: on, Exposure: &ws, WorkspaceEdits: yes},
+		Project:  &ProjectConfig{Codemode: CodemodeConfig{Exposure: &ad}},
+	})
+	if st.Exposure != CodemodeAdditive || st.WorkspaceEdits || !strings.Contains(st.Note, "workspace is off in this project") {
+		t.Fatalf("project narrowing = %+v", st)
+	}
+	// A project may not move the user to workspace.
+	st = ResolveCodemode(Config{
+		Codemode: CodemodeConfig{Enabled: on},
+		Project:  &ProjectConfig{Codemode: CodemodeConfig{Exposure: &ws}},
+	})
+	if st.Exposure != CodemodeAdditive || !strings.Contains(st.Warning, "workspace surface") {
+		t.Fatalf("project surface widening = %+v", st)
+	}
+}
+
+// The combinations a file may not state (each would resolve to a surface its
+// own keys contradict).
+func TestValidateWorkspaceBlock(t *testing.T) {
+	on, off, yes := boolp(true), boolp(false), boolp(true)
+	ws, ad := strp(CodemodeWorkspace), strp(CodemodeAdditive)
+	bad := []struct {
+		name string
+		cm   CodemodeConfig
+	}{
+		{"workspace without enabled", CodemodeConfig{Exposure: &ws}},
+		{"workspace with enabled false", CodemodeConfig{Enabled: off, Exposure: &ws}},
+		{"workspace with network", CodemodeConfig{Enabled: on, Exposure: &ws, Network: yes}},
+		{"edits without workspace", CodemodeConfig{Enabled: on, Exposure: &ad, WorkspaceEdits: yes}},
+		{"edits alone", CodemodeConfig{Enabled: on, WorkspaceEdits: yes}},
+	}
+	for _, c := range bad {
+		cfg := Default()
+		cfg.Codemode = c.cm
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("%s was accepted", c.name)
+		}
+	}
+	// The valid forms, including a project's bare revocation.
+	good := []CodemodeConfig{
+		{Enabled: on, Exposure: &ws},
+		{Enabled: on, Exposure: &ws, WorkspaceEdits: yes},
+		{Enabled: on, Exposure: &ws, WorkspaceEdits: boolp(false)},
+	}
+	for _, cm := range good {
+		cfg := Default()
+		cfg.Codemode = cm
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("valid workspace block rejected: %v", err)
+		}
+	}
+	if err := (CodemodeConfig{WorkspaceEdits: boolp(false)}).validate("codemode"); err != nil {
+		t.Fatalf("a bare project revocation was refused: %v", err)
+	}
+}
