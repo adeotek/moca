@@ -78,15 +78,18 @@ func (p ChangesetPolicy) NeedsQuestion() bool {
 
 // refuseReason names why a non-yolo session cannot apply, for the receipt.
 func (p ChangesetPolicy) refuseReason() string {
+	// Order matters: the most actionable reason wins. A -p run is untrusted by
+	// construction (oneshot trusts only yolo), so reporting trust first would
+	// hide the fact that no headless mode but yolo can ever apply.
 	switch {
 	case !p.Edits:
 		return "workspace edits are not enabled for this session"
-	case !p.Trusted:
-		return "the workspace is not trusted, so multi-file writes are refused"
 	case p.Mode == "plan":
 		return "plan mode does not apply changesets"
 	case p.Headless:
 		return "a changeset needs approval, and -p has no one to ask; run with --mode yolo or apply the edits directly"
+	case !p.Trusted:
+		return "the workspace is not trusted, so multi-file writes are refused"
 	}
 	return "a changeset needs approval"
 }
@@ -111,6 +114,9 @@ type Changeset struct {
 	now     func() time.Time
 	start   time.Time
 
+	// applied is the number of files whose write landed and read back as the
+	// postimage; the receipt reports it.
+	applied    int
 	targets    []*ChangesetStage
 	unresolved map[string]string // rel -> why, cleared only by a successful restage
 	editBytes  int
@@ -519,38 +525,48 @@ func (c *Changeset) Apply(ctx context.Context, env *Env) (status, receipt string
 	for _, t := range c.targets {
 		if ctx.Err() != nil || c.now().After(deadline) {
 			env.Journal.Abort("interrupted")
-			return finalOutcome(applied, len(c.targets), OutcomeDiscarded, "stopped before "+t.Rel)
+			return c.final(applied, len(c.targets), OutcomeDiscarded, "stopped before "+t.Rel)
 		}
 		err := img.GuardImage(t.Abs, t.Pre, t.Post, t.Mode.Perm(), func() error {
 			return c.rename(t)
 		})
 		if err != nil {
 			env.Journal.Abort("snapshot: " + err.Error())
-			return finalOutcome(applied, len(c.targets), OutcomeOutcomeUnknown, "snapshot failed for "+t.Rel+": "+err.Error())
+			return c.final(applied, len(c.targets), OutcomeOutcomeUnknown, "snapshot failed for "+t.Rel+": "+err.Error())
 		}
 		landed, rerr := c.readBack(t)
 		if rerr != nil {
 			env.Journal.Abort("read-back: " + rerr.Error())
-			return finalOutcome(applied+1, len(c.targets), OutcomeOutcomeUnknown, "read-back failed for "+t.Rel+": "+rerr.Error())
+			return c.final(applied+1, len(c.targets), OutcomeOutcomeUnknown, "read-back failed for "+t.Rel+": "+rerr.Error())
 		}
 		if !landed {
 			env.Journal.Abort("read-back mismatch")
-			return finalOutcome(applied+1, len(c.targets), OutcomeOutcomeUnknown, "the file on disk is not the image this changeset wrote: "+t.Rel)
+			return c.final(applied+1, len(c.targets), OutcomeOutcomeUnknown, "the file on disk is not the image this changeset wrote: "+t.Rel)
 		}
 		applied++
 		if err := env.Journal.Record(t.Rel, t.Pre, t.Post); err != nil {
 			env.Journal.Abort("record: " + err.Error())
 			// The write landed; without its record the outcome is unknown.
-			return finalOutcome(applied, len(c.targets), OutcomeOutcomeUnknown, "the journal could not record "+t.Rel+": "+err.Error())
+			return c.final(applied, len(c.targets), OutcomeOutcomeUnknown, "the journal could not record "+t.Rel+": "+err.Error())
 		}
 	}
 	if err := env.Journal.Finish(); err != nil {
-		return finalOutcome(applied, len(c.targets), OutcomeUnknownOrPartial(applied), "the journal could not finish: "+err.Error())
+		return c.final(applied, len(c.targets), OutcomeUnknownOrPartial(applied), "the journal could not finish: "+err.Error())
 	}
 	for _, t := range c.targets {
 		noteChange(env, t.Abs)
 	}
-	return finalOutcome(applied, len(c.targets), OutcomeApplied, "")
+	c.applied = applied
+	return c.final(applied, len(c.targets), OutcomeApplied, "")
+}
+
+// paths returns the ordered staged paths for the receipt.
+func (c *Changeset) paths() []string {
+	out := make([]string, len(c.targets))
+	for i, t := range c.targets {
+		out[i] = t.Rel
+	}
+	return out
 }
 
 func (c *Changeset) edits() int {
@@ -720,7 +736,9 @@ func changesetLines(b []byte) []string {
 	return s
 }
 
-func finalOutcome(applied, total int, status, why string) (string, string) {
+// final records how many files landed and renders the one-line status.
+func (c *Changeset) final(applied, total int, status, why string) (string, string) {
+	c.applied = applied
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s: %d of %d files written", status, applied, total)
 	if why != "" {

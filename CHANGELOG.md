@@ -12,8 +12,9 @@ the script stages exact `{old,new}` edits per file (it never writes), and the ho
 batch only after the program returns successfully — one aggregated approval first in ask/auto (refused
 outright under `-p` unless `--mode yolo`), a preflight and a post-approval revalidation of every
 target, a per-file snapshot that stores the preimage the script actually validated, a write through a
-single rooted handle, a read-back, and a receipt in the tool result. A mismatch is correctable inside
-the script; every other failure writes nothing (or reports `partial`/`outcome_unknown` honestly). Resuming a workspace session as
+single rooted handle, a read-back, and a receipt in the tool result — the panel shows `changeset applied (N files)` and ctrl+o pages the
+same preview the approval showed. A mismatch is correctable inside the script; every other failure
+writes nothing (or reports `partial`/`outcome_unknown` honestly). Resuming a workspace session as
 any other surface (or the reverse) refuses before a provider call, the same way transport does; a
 project may narrow the surface back to additive and may revoke edits, and never grants either.
 

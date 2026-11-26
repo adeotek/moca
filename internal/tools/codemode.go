@@ -296,7 +296,11 @@ func (t codemodeTool) Run(ctx context.Context, env *Env, input json.RawMessage) 
 	// The host applies the batch only after the program returned successfully:
 	// a script that failed or was steered stages nothing. The receipt is
 	// appended to the guest text, never instead of it.
+	summary := br.summary(cerr)
+	var rec *ChangesetReceipt
+	var detail string
 	if br.cs != nil && cerr == nil && !steered && br.cs.TargetCount() > 0 {
+		preview := br.cs.preview()
 		status, receipt := br.cs.Apply(ctx, env)
 		if receipt != "" {
 			content += "\n\n[changeset " + status + "] " + receipt
@@ -304,8 +308,13 @@ func (t codemodeTool) Run(ctx context.Context, env *Env, input json.RawMessage) 
 		if status != OutcomeApplied && status != OutcomeInspected {
 			isErr = true
 		}
+		rec = &ChangesetReceipt{Status: status, Applied: br.cs.applied, Total: len(br.cs.targets), Files: br.cs.paths()}
+		// The panel shows the status and the count; ctrl+o pages what was
+		// approved (the same body the consent question used) plus the receipt.
+		summary = fmt.Sprintf("codemode · changeset %s (%d files)", status, rec.Total)
+		detail = preview
 	}
-	return Result{Content: content, IsError: isErr, Summary: br.summary(cerr), Steered: steered}
+	return Result{Content: content, IsError: isErr, Summary: summary, Detail: detail, Changeset: rec, Steered: steered}
 }
 
 // mustInspection builds the execution's inspection. It defers the failure to

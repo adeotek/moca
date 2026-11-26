@@ -22,11 +22,24 @@ type Result struct {
 	IsError bool
 	Summary string
 	Detail  string
+	// Changeset is the typed host metadata a workspace changeset returns
+	// (SPECS §10.6): status, counts and the paths it touched. It travels beside
+	// the provider text, never inside it, so a receipt can be rendered without
+	// parsing prose and a rebuilt transcript can show the same summary.
+	Changeset *ChangesetReceipt
 	// Steered reports that annotation was withdrawn while this call ran (or
 	// before it started), so the agent delivers pending steering instead of
 	// finishing the batch. Only a codemode call can set it: nothing else runs
 	// long enough for admission to change mid-call.
 	Steered bool
+}
+
+// ChangesetReceipt is one apply's outcome, as the agent, TUI and ACP see it.
+type ChangesetReceipt struct {
+	Status  string   // applied | discarded | partial | outcome_unknown | inspected
+	Applied int      // files whose read-back matched
+	Total   int      // files in the batch
+	Files   []string // ordered relative paths, as staged
 }
 
 type Tool interface {

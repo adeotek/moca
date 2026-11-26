@@ -442,7 +442,12 @@ rooted apply through one `os.Root` with `GuardImage` + read-back, and the receip
 the transcript); `session.Snapshots.GuardImage` records the pre-image the changeset validated
 without reopening the path and never runs `gitClean`. A session without either capability refuses
 before the first write. Read-only workspace, additive and transport sessions never acquire the
-method or the clause.
+method or the clause. The receipt travels twice: as the labelled suffix of the tool result the
+provider sees, and as typed metadata (`Result.Changeset`: status, applied, total, ordered paths)
+beside `Summary`/`Detail`, so the panel can say `changeset applied (N files)` and the pager can
+show what was approved without parsing prose. The binary-level `TestChangesetConsent` pins the
+headless matrix on real bytes: yolo applies and reads back, ask and plan refuse with the file
+untouched and the reason named, and every leg still declares nine tools.
 
 A transport session carries three extra rights, and only in transport:
 

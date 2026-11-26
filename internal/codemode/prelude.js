@@ -131,7 +131,7 @@
 
   // __EDITS_BEGIN__ the writable workspace half: present only when the session
   // declared workspace + workspaceEdits (prelude.go cuts this block otherwise).
-  if (EDITS) {
+  if (__EDITS__) {
     Object.defineProperty(tools, "stageEdit", {
       enumerable: true,
       value: function (a) { return inspect("stageEdit", a || {}); }

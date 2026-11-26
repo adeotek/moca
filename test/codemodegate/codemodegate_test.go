@@ -490,3 +490,58 @@ func TestNoKeyLeak(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestChangesetConsent is the writable surface's consent leg (§4.10): a real
+// binary stages one edit and either applies it or refuses, driven by the
+// effective mode alone. Under -p there is no one to ask, so only yolo applies;
+// ask and plan discard with the remedy named and the file untouched. The tool
+// result is paired in both directions — a refused batch is still a result the
+// model sees, never a dropped call.
+func TestChangesetConsent(t *testing.T) {
+	const editsCfg = `"codemode":{"enabled":true,"exposure":"workspace","workspaceEdits":true}`
+	script := `{"code":"const r = await tools.stageEdit({path: 'a.txt', edits: [{old: 'alpha', new: 'ALPHA'}]}); return r"}`
+
+	cases := []struct {
+		name, mode string
+		applied    bool
+	}{
+		{"yolo-applies", "yolo", true},
+		{"ask-refuses", "ask", false},
+		{"plan-refuses", "plan", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, script)
+			h.cfg(editsCfg + `,"permissions":{"defaultMode":"` + c.mode + `"}`)
+			h.file("a.txt", "alpha\n")
+			out := h.run("-p", "rotate the marker")
+			got, err := os.ReadFile(filepath.Join(h.work, "a.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.applied {
+				if string(got) != "ALPHA\n" {
+					t.Fatalf("yolo did not apply: disk=%q\n%s", got, out)
+				}
+				if res := h.lastResult(); !strings.Contains(res, "changeset applied") {
+					t.Fatalf("no applied receipt: %q", res)
+				}
+			} else {
+				if string(got) != "alpha\n" {
+					t.Fatalf("%s wrote the file: %q", c.mode, got)
+				}
+				res := h.lastResult()
+				if !strings.Contains(res, "discarded") {
+					t.Fatalf("no discard receipt: %q", res)
+				}
+				if c.mode != "plan" && !strings.Contains(res, "-p") && !strings.Contains(res, "not trusted") {
+					t.Fatalf("the refusal names no remedy: %q", res)
+				}
+			}
+			// Every leg still declares nine tools: the surface adds no tool.
+			if names := h.toolNames(); len(names) != 9 || names[8] != "codemode" {
+				t.Fatalf("tools = %v", names)
+			}
+		})
+	}
+}
