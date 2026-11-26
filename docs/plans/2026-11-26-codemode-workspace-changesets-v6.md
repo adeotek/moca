@@ -117,3 +117,8 @@ exact-edit list reaches the same request floor as a program.
 Still needing the owner, unchanged: the unattended-yolo scope decision, the 768 B edits-variant cap, the
 env-example suffixes, and the campaign's own amount, ceiling and abort authority. The standalone
 directory-only P0 fix remains the first implementable item and depends on none of them.
+
+**P0 landed 2026-11-26, `f0f0b06`:** directory-only grants, transport-only grant configuration, the five
+`internal/tools/grants_test.go` pins, the binary-level `TestGrantScope` (prompts canary and a
+credential-shaped sibling on both surfaces), and the SPECS §10.6/§15 records. Everything below the P0
+is still unimplemented and unauthorized.
