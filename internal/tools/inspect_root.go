@@ -37,8 +37,14 @@ type workspace struct {
 }
 
 // openWorkspace opens dir as a root. It is the single place that turns a
-// directory into a containment boundary. grants are absolute paths; a file is
-// granted as its parent directory plus the file's own name.
+// directory into a containment boundary.
+//
+// A grant is a directory boundary, never a file. Widening a file grant to its
+// parent — the previous behaviour — handed a script every sibling of the granted
+// file, and since one of the jail's read roots is moca's own config file, that
+// included the credential store beside it (auth.json). A file entry is skipped
+// rather than widened, and a missing entry grants nothing: it is not retried
+// into existence, and its parent is not opened on its behalf.
 func openWorkspace(dir string, grants []string) (*workspace, error) {
 	if dir == "" {
 		return nil, &InspectError{Class: "denied", Message: "no workspace root"}
@@ -53,10 +59,10 @@ func openWorkspace(dir string, grants []string) (*workspace, error) {
 		if g == "" {
 			continue
 		}
-		base := g
-		if fi, err := os.Stat(g); err == nil && !fi.IsDir() {
-			base = filepath.Dir(g)
+		if fi, err := os.Stat(g); err != nil || !fi.IsDir() {
+			continue // a file (or an absent path) is not a grant: see above
 		}
+		base := filepath.Clean(g)
 		if seen[base] {
 			continue
 		}

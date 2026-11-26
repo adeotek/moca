@@ -72,8 +72,19 @@ type CodemodeHolder struct {
 // capture. A nil holder (tests, the refusal tool) keeps the workspace defaults.
 func (h *CodemodeHolder) inspection(root string) *Inspection {
 	in := mustInspection(root)
-	if h != nil && (h.Transport || h.Attempts > 0) {
-		in.configure(h.Grants, h.Attempts, h.Transport)
+	if h == nil {
+		return in
+	}
+	// External grants and the full-file stamp are transport rights (SPECS
+	// §10.6). Additive keeps the budget dial and nothing else: it used to be
+	// handed the jail's read roots whenever a budget was set, which let a
+	// script read outside the workspace on the surface that is one config key
+	// away from default. The stamp stays transport-only too — the parity
+	// contract is what makes it useful, and additive records nothing.
+	if h.Transport {
+		in.configure(h.Grants, h.Attempts, true)
+	} else if h.Attempts > 0 {
+		in.configure(nil, h.Attempts, false)
 	}
 	return in
 }

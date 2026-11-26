@@ -69,6 +69,10 @@ func (j *Jail) Root() string { return j.root }
 // spill dir and the config file. moca's own nested inspection uses it as its
 // grant list, so a script and the direct read tool reach exactly the same paths
 // (SPECS §10.6).
+// ReadRoots returns the read-only roots the jail admits outside the workdir.
+// They are handed to the codemode transport surface as external grants, which
+// are directory boundaries only: a file root (moca's own config file is one)
+// grants nothing to a script, while the direct read tool still resolves it.
 func (j *Jail) ReadRoots() []string {
 	out := make([]string, len(j.readOnly))
 	copy(out, j.readOnly)

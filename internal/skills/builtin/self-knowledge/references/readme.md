@@ -172,8 +172,9 @@ never how many turns a task took.
 `read`, `search` and `ls` are reachable **only inside a script**, the declared list drops from nine
 tools to six, and a direct call is refused with a message pointing at the script. A transport
 session also records read stamps from scripted reads (so `edit`/`write` still accept a file the
-script read), reaches the skills/prompts/spill/config paths the direct `read` can, and resumes only
-into the surface its prompt promised. Measured on a 361-file fixture, `transport` did not pay for
+script read), reaches the skills, prompts and spill **directories** the direct `read` can (a file is
+never a script grant, so `config.jsonc` stays direct-only), and resumes only into the surface its
+prompt promised. Measured on a 361-file fixture, `transport` did not pay for
 itself (median carry 0.78 of the plain tools, short of the predeclared 0.5), so `additive` is the
 only surface a release turns on.
 

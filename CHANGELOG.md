@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Security: codemode could read credentials beside the config file
+
+A transport grant on a single file was implemented as a grant on its **parent directory**, so a script
+could read `auth.json` — OAuth tokens and plaintext API keys — next to `config.jsonc`, and additive
+scripts were handed the same roots because grants were applied whenever a budget was set. Grants are
+now **directory boundaries only**, a file is never a grant, and only the transport surface receives
+them. A scripted absolute read outside the workspace now returns `outside` on every surface, additive
+included; the direct `read` tool still reads the jail's file roots, including moca's own config.
+
 ### codemode: code mode as transport (`codemode.exposure`)
 
 v1's pilot closed with six rounds and no proof that a ninth, additive tool pays:

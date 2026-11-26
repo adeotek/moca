@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -332,6 +333,86 @@ func TestAttemptCap(t *testing.T) {
 	if !strings.Contains(res, "[codemode: 51 calls") {
 		t.Fatalf("ledger is missing the call count: %q", res)
 	}
+}
+
+// Grant scope (SPECS §10.6, P0): a script reaches the jail's directory read
+// roots on the transport surface only, and a file is never a grant. The config
+// file is the regression — it used to be granted as its parent directory, which
+// admitted auth.json beside it, on additive too, because grants were applied
+// whenever a budget was set.
+func TestGrantScope(t *testing.T) {
+	const transportCfg = `"codemode":{"enabled":true,"exposure":"transport"}`
+	const additiveCfg = `"codemode":{"enabled":true}`
+
+	// fixture writes the prompts probe (a directory read root) and a credential
+	// store beside the config file (not a grant, and not reachable either way).
+	fixture := func(t *testing.T, mode string) (h *harness, probe, auth string) {
+		t.Helper()
+		h = newHarness(t)
+		h.cfg(mode)
+		dir := filepath.Join(h.cfgDir, "moca")
+		prompts := filepath.Join(dir, "prompts")
+		if err := os.MkdirAll(prompts, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		probe = filepath.Join(prompts, "probe.md")
+		if err := os.WriteFile(probe, []byte("PROMPT-CANARY\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		auth = filepath.Join(dir, "auth.json")
+		if err := os.WriteFile(auth, []byte(`{"apiKeys":{"fake":"sk-gate-must-not-leave"}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return h, probe, auth
+	}
+	read := func(path string) string {
+		// Two layers: the JS source needs a quoted path, and the script itself
+		// is a JSON string argument to the tool.
+		src := fmt.Sprintf("const r = await tools.read({path: %s}); return r.lines[0].text", strconv.Quote(path))
+		b, err := json.Marshal(map[string]string{"code": src})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	t.Run("transport reads a directory grant", func(t *testing.T) {
+		h, probe, _ := fixture(t, transportCfg)
+		h.setScript(read(probe))
+		h.run("-p", "read the prompt reference")
+		if res := h.lastResult(); !strings.Contains(res, "PROMPT-CANARY") {
+			t.Fatalf("a granted prompts read did not reach the file: %q", res)
+		}
+	})
+
+	t.Run("transport denies a file grant and its sibling", func(t *testing.T) {
+		h, _, auth := fixture(t, transportCfg)
+		cfgFile := filepath.Join(h.cfgDir, "moca", "config.jsonc")
+		for _, p := range []string{auth, cfgFile} {
+			h.setScript(read(p))
+			h.run("-p", "read a path outside the workdir")
+			res := h.lastResult()
+			if strings.Contains(res, "sk-gate-must-not-leave") || strings.Contains(res, "PROMPT-CANARY") {
+				t.Fatalf("a non-granted read returned content: %q", res)
+			}
+			if !strings.Contains(res, "not inside a granted directory") {
+				t.Fatalf("refusal did not name the reason: %q", res)
+			}
+		}
+	})
+
+	t.Run("additive has no external roots", func(t *testing.T) {
+		h, probe, _ := fixture(t, additiveCfg)
+		h.setScript(read(probe))
+		h.run("-p", "read the prompt reference")
+		res := h.lastResult()
+		if strings.Contains(res, "PROMPT-CANARY") {
+			t.Fatalf("additive reached a read root outside the workdir: %q", res)
+		}
+		if !strings.Contains(res, "not inside a granted directory") {
+			t.Fatalf("refusal did not name the reason: %q", res)
+		}
+	})
 }
 
 // A timed-out script must not poison the slot: the next call in the same run
