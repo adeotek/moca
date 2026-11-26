@@ -3,7 +3,8 @@ package capabilities
 // Pricing is generated from plugins/data.json — edit the data, not this file.
 var Pricing = Spec{
 	Name:     "pricing",
-	Kind:     "http",
-	Endpoint: "http://pricing.internal:8081",
-	Timeout:  5500,
+	Kind:     "pricing",
+	Endpoint: "https://pricing.internal:8080",
+	Timeout:  2200,
+	Digest:   "90be217f",
 }

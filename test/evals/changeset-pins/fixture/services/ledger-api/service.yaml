@@ -1,4 +1,5 @@
-# ledger-api — owned by platform-payments. Generated from the service template.
+# ledger-api — owned by platform. Generated from the service template.
 name: ledger-api
-image: ghcr.io/acme/ledger-api:1.4.13
-replicas: 2
+image: ghcr.io/acme/ledger-api:1.5.13
+replicas: 3
+mode: rolling

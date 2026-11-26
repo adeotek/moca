@@ -1,0 +1,5 @@
+# tax-engine — owned by platform. Generated from the service template.
+name: tax-engine
+image: ghcr.io/acme/tax-engine:1.5.24
+replicas: 2
+mode: blue-green

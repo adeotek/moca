@@ -1,4 +1,5 @@
-# cdn-edge — owned by platform-edge. Generated from the service template.
+# cdn-edge — owned by platform. Generated from the service template.
 name: cdn-edge
-image: ghcr.io/acme/cdn-edge:1.4.4
-replicas: 4
+image: ghcr.io/acme/cdn-edge:1.5.4
+replicas: 2
+mode: rolling

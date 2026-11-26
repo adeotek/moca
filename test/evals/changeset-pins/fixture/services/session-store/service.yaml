@@ -1,4 +1,5 @@
-# session-store — owned by platform-identity. Generated from the service template.
+# session-store — owned by platform. Generated from the service template.
 name: session-store
-image: ghcr.io/acme/session-store:1.4.21
+image: ghcr.io/acme/session-store:1.5.21
 replicas: 2
+mode: blue-green

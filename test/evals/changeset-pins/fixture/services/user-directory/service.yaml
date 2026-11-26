@@ -1,0 +1,5 @@
+# user-directory — owned by platform. Generated from the service template.
+name: user-directory
+image: ghcr.io/acme/user-directory:1.5.25
+replicas: 4
+mode: rolling

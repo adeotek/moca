@@ -1,4 +1,5 @@
-# email-svc — owned by platform-growth. Generated from the service template.
+# email-svc — owned by platform. Generated from the service template.
 name: email-svc
-image: ghcr.io/acme/email-svc:1.4.7
-replicas: 1
+image: ghcr.io/acme/email-svc:1.5.7
+replicas: 2
+mode: blue-green

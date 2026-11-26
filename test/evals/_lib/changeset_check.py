@@ -167,34 +167,68 @@ def tree_and_answer(scen_dir, work, session, expectations):
 # ----------------------------------------------------------------------- pins
 
 class PinsExpectations:
-    """Expected image for changeset-pins, derived from the fixture's releases."""
+    """Expected image for changeset-pins, derived from releases.json.
+
+    The rollout is discovered, not listed: a service is in it when it appears
+    in stages[rollout.stage], has a release, and its own service.yaml declares
+    at least two replicas. Its tag is the version plus a seven-hex fingerprint
+    of salt:name:replicas, its pin block carries ten times its replicas, and
+    the manifest's releaseId is a ten-hex fingerprint of name + tag.
+    """
+
+    ENTRY = ("  - service: {name}\n    tag: {tag}\n    releaseId: {rid}\n")
 
     def __init__(self, scen_dir):
+        import hashlib
         self.scen = pathlib.Path(scen_dir)
         self.fixture_files = {rel for rel, _ in walk(self.scen / "fixture")}
-        self.releases = json.loads(read(self.scen / "fixture" / "releases.json"))["services"]
-        self.written = {f"services/{n}/service.yaml" for n in self.releases} | {"deploy/manifest.yaml"}
+        d = json.loads(read(self.scen / "fixture" / "releases.json"))
+        self.d = d
+        self.rel = d["services"]
+        stage = d["rollout"]["stage"]
+        self.salt = d["salt"]
+        in_stage = set(d["stages"][stage])
+        self.targets = sorted(n for n, r in self.rel.items()
+                              if n in in_stage and r["replicas"] >= 2)
+        self.legacy = d.get("legacy", [])
+        self.written = {f"services/{n}/service.yaml" for n in self.targets} | {"deploy/manifest.yaml"}
+
+    def fp(self, *parts, n):
+        import hashlib
+        return hashlib.sha1(":".join(parts).encode()).hexdigest()[:n]
+
+    def tag(self, name):
+        return f"{self.rel[name]['version']}-{self.fp(self.salt, name, str(self.rel[name]['replicas']), n=7)}"
 
     def expected(self, rel, want):
-        """The exact bytes `rel` must hold, or None when it must be untouched."""
         src = read(self.scen / "fixture" / rel)
+        names = [n for n in self.rel] + self.legacy
         if rel == "deploy/manifest.yaml":
-            out = src
-            for name, version in self.releases.items():
-                pat = re.compile(r"(^  - service: %s\n    tag: )(\S+)$" % re.escape(name), re.M)
-                out, n = pat.subn(lambda m: m.group(1) + version, out)
-                if n != 1:
-                    fail(f"fixture defect: {n} manifest entries for {name}")
-            return out
+            entries = []
+            for name in names:
+                if name in self.targets:
+                    tag = self.tag(name)
+                    rid = self.fp(name, tag, n=10)
+                elif name in self.rel:
+                    tag = self.rel[name]["version"]
+                    rid = self.fp(name, tag, n=10)
+                else:
+                    tag = "0.9.4"
+                    rid = self.fp(name, tag, n=10)
+                entries.append(self.ENTRY.format(name=name, tag=tag, rid=rid))
+            head = src[:src.index("services:\n") + len("services:\n")]
+            return head + "".join(entries)
         m = re.match(r"services/([^/]+)/service\.yaml$", rel)
-        if not m or m.group(1) not in self.releases:
+        if not m or m.group(1) not in self.targets:
             return None
-        version = self.releases[m.group(1)]
+        name = m.group(1)
+        r = self.rel[name]
+        tag = self.tag(name)
         out, n = re.subn(r"^(image: ghcr\.io/acme/[a-z0-9-]+:)\S+$",
-                         lambda mm: mm.group(1) + version, src, count=1, flags=re.M)
+                         lambda mm: mm.group(1) + tag, src, count=1, flags=re.M)
         if n != 1:
             fail(f"fixture defect: no image line in {rel}")
-        return out
+        return out + f"pin:\n  tag: {tag}\n  weight: {r['replicas'] * 10}\n"
 
     def answer(self, text):
         one = re.search(r"^updated=(\d+) services,(\d+) manifest tags$", text, re.M)
@@ -202,7 +236,7 @@ class PinsExpectations:
         if not one or not two:
             return "the answer is missing the two required lines (updated=… / untouched=…)"
         total = sum(1 for p in (self.scen / "fixture" / "services").iterdir() if p.is_dir())
-        want = (len(self.releases), len(self.releases), total - len(self.releases), 2)
+        want = (len(self.targets), len(self.targets), total - len(self.targets), len(self.legacy))
         got = (int(one.group(1)), int(one.group(2)), int(two.group(1)), int(two.group(2)))
         if got != want:
             return f"the answer says {got}, the fixture implies {want}"
@@ -212,7 +246,13 @@ class PinsExpectations:
 # ------------------------------------------------------------------- registry
 
 class RegistryExpectations:
-    """Expected bytes for changeset-registry, derived from data.json."""
+    """Expected bytes for changeset-registry.
+
+    The target set is the pages that exist, filtered by data.json: an enabled
+    plugin with a page is regenerated with a digest derived from its name, kind
+    and endpoint; an enabled plugin with no page is not created, and a disabled
+    plugin's page stays byte-identical.
+    """
 
     HEADER = ("package plugins\n\n"
               "// registry maps an enabled plugin to the kind its factory expects.\n"
@@ -225,41 +265,44 @@ class RegistryExpectations:
             "\tKind:     \"{kind}\",\n"
             "\tEndpoint: \"{endpoint}\",\n"
             "\tTimeout:  {timeout},\n"
+            "\tDigest:   \"{digest}\",\n"
             "}}\n")
 
     def __init__(self, scen_dir):
         self.scen = pathlib.Path(scen_dir)
         self.fixture_files = {rel for rel, _ in walk(self.scen / "fixture")}
-        self.data = json.loads(read(self.scen / "fixture" / "plugins" / "data.json"))["plugins"]
-        self.enabled = [p for p in self.data if p["enabled"]]
-        self.written = {f"capabilities/{p['name']}.go" for p in self.enabled} | {"plugins/registry.go"}
+        self.data = {p["name"]: p for p in
+                     json.loads(read(self.scen / "fixture" / "plugins" / "data.json"))["plugins"]}
+        pages = {p.stem for p in (self.scen / "fixture" / "capabilities").glob("*.go") if p.stem != "spec"}
+        self.targets = sorted(n for n in pages if n in self.data and self.data[n]["enabled"])
+        self.disabled = sorted(n for n in pages if n in self.data and not self.data[n]["enabled"])
+        self.written = {f"capabilities/{n}.go" for n in self.targets} | {"plugins/registry.go"}
+
+    def digest(self, name, n=8):
+        import hashlib
+        p = self.data[name]
+        return hashlib.sha1(f"{name}|{p['kind']}|{p['endpoint']}".encode()).hexdigest()[:n]
 
     def expected(self, rel, want):
         if rel == "plugins/registry.go":
-            # gofmt aligns a map literal's keys, and the tree is gofmt-clean
-            # (`make vet`), so the expected image is the aligned form: pad every
-            # `"name":` to the longest one plus a space.
-            pairs = sorted((p["name"], p["kind"]) for p in self.enabled)
-            width = max(len(f'"{n}":') for n, _ in pairs)
-            rows = "\n".join(f'\t{key:<{width}} "{kind}",'
-                             for key, kind in ((f'"{n}":', k) for n, k in pairs))
+            pairs = sorted((n, self.data[n]["kind"], self.digest(n, 6)) for n in self.targets)
+            width = max(len(f'"{n}":') for n, _, _ in pairs)
+            rows = "\n".join('\t' + (f'"{n}":'.ljust(width)) + f' "{k}@{d}",' for n, k, d in pairs)
             return self.HEADER + rows + "\n}\n"
         m = re.match(r"capabilities/([^/]+)\.go$", rel)
-        if not m:
+        if not m or m.group(1) not in self.targets:
             return None
-        for p in self.enabled:
-            if p["name"] == m.group(1):
-                ident = p["name"].replace("-", " ").title().replace(" ", "")
-                return self.PAGE.format(ident=ident, name=p["name"], kind=p["kind"],
-                                        endpoint=p["endpoint"], timeout=p["timeoutMs"])
-        return None
+        p = self.data[m.group(1)]
+        return self.PAGE.format(ident=m.group(1).replace("-", " ").title().replace(" ", ""),
+                                name=p["name"], kind=p["kind"], endpoint=p["endpoint"],
+                                timeout=p["timeoutMs"], digest=self.digest(p["name"]))
 
     def answer(self, text):
         one = re.search(r"^updated=(\d+) plugin pages,(\d+) registry rows$", text, re.M)
         two = re.search(r"^untouched=(\d+) disabled plugins$", text, re.M)
         if not one or not two:
             return "the answer is missing the two required lines (updated=… / untouched=…)"
-        want = (len(self.enabled), len(self.enabled), len(self.data) - len(self.enabled))
+        want = (len(self.targets), len(self.targets), len(self.disabled))
         got = (int(one.group(1)), int(one.group(2)), int(two.group(1)))
         if got != want:
             return f"the answer says {got}, the fixture implies {want}"

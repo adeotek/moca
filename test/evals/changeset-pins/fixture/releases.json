@@ -1,25 +1,168 @@
 {
   "month": "2026-11",
+  "salt": "pins-v4",
+  "rollout": {
+    "stage": "stage-2"
+  },
+  "stages": {
+    "stage-1": [
+      "api-gateway",
+      "billing-api",
+      "email-svc",
+      "file-store",
+      "job-scheduler",
+      "ledger-api",
+      "notify-hub",
+      "pricing-svc",
+      "session-store",
+      "tax-engine"
+    ],
+    "stage-2": [
+      "api-gateway",
+      "auth-service",
+      "billing-api",
+      "cron-runner",
+      "email-svc",
+      "feature-flags",
+      "file-store",
+      "ingest-pipeline",
+      "job-scheduler",
+      "ledger-api",
+      "metrics-agent",
+      "notify-hub",
+      "order-api",
+      "payment-relay",
+      "pricing-svc",
+      "search-index",
+      "session-store",
+      "shipment-tracker",
+      "tax-engine",
+      "user-directory"
+    ]
+  },
   "services": {
-    "api-gateway": "1.5.1",
-    "auth-service": "1.5.2",
-    "billing-api": "1.5.3",
-    "cron-runner": "1.5.6",
-    "email-svc": "1.5.7",
-    "feature-flags": "1.5.8",
-    "file-store": "1.5.9",
-    "ingest-pipeline": "1.5.11",
-    "job-scheduler": "1.5.12",
-    "ledger-api": "1.5.13",
-    "metrics-agent": "1.5.14",
-    "notify-hub": "1.5.15",
-    "order-api": "1.5.16",
-    "payment-relay": "1.5.17",
-    "pricing-svc": "1.5.18",
-    "search-index": "1.5.20",
-    "session-store": "1.5.21",
-    "shipping-api": "1.5.22",
-    "tax-calc": "1.5.23",
-    "user-profile": "1.5.24"
-  }
+    "api-gateway": {
+      "version": "1.5.1",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "auth-service": {
+      "version": "1.5.2",
+      "replicas": 4,
+      "mode": "blue-green"
+    },
+    "billing-api": {
+      "version": "1.5.3",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "cron-runner": {
+      "version": "1.5.6",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "email-svc": {
+      "version": "1.5.7",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "feature-flags": {
+      "version": "1.5.8",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "file-store": {
+      "version": "1.5.9",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "ingest-pipeline": {
+      "version": "1.5.11",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "job-scheduler": {
+      "version": "1.5.12",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "ledger-api": {
+      "version": "1.5.13",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "metrics-agent": {
+      "version": "1.5.14",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "notify-hub": {
+      "version": "1.5.15",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "order-api": {
+      "version": "1.5.16",
+      "replicas": 4,
+      "mode": "blue-green"
+    },
+    "payment-relay": {
+      "version": "1.5.17",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "pricing-svc": {
+      "version": "1.5.18",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "search-index": {
+      "version": "1.5.20",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "session-store": {
+      "version": "1.5.21",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "shipment-tracker": {
+      "version": "1.5.22",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "tax-engine": {
+      "version": "1.5.24",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "user-directory": {
+      "version": "1.5.25",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "cdn-edge": {
+      "version": "1.5.4",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "config-svc": {
+      "version": "1.5.5",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "geo-router": {
+      "version": "1.5.10",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "quota-mgr": {
+      "version": "1.5.19",
+      "replicas": 1,
+      "mode": "rolling"
+    }
+  },
+  "legacy": [
+    "legacy-batch"
+  ]
 }

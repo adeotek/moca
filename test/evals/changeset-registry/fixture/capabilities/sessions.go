@@ -3,7 +3,8 @@ package capabilities
 // Sessions is generated from plugins/data.json — edit the data, not this file.
 var Sessions = Spec{
 	Name:     "sessions",
-	Kind:     "redis",
-	Endpoint: "redis://sessions.internal:6379",
-	Timeout:  2000,
+	Kind:     "sessions",
+	Endpoint: "https://sessions.internal:8080",
+	Timeout:  1800,
+	Digest:   "a0a01ff0",
 }

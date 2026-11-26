@@ -1,4 +1,5 @@
-# search-index — owned by platform-data. Generated from the service template.
+# search-index — owned by platform. Generated from the service template.
 name: search-index
-image: ghcr.io/acme/search-index:1.4.20
-replicas: 3
+image: ghcr.io/acme/search-index:1.5.20
+replicas: 4
+mode: rolling

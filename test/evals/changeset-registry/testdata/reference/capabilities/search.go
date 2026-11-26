@@ -3,7 +3,8 @@ package capabilities
 // Search is generated from plugins/data.json — edit the data, not this file.
 var Search = Spec{
 	Name:     "search",
-	Kind:     "grpc",
-	Endpoint: "grpc://search.internal:9443",
-	Timeout:  6500,
+	Kind:     "search",
+	Endpoint: "https://search.internal:8080",
+	Timeout:  2500,
+	Digest:   "e3d95470",
 }

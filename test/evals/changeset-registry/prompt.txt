@@ -1,7 +1,14 @@
-plugins/data.json is the source of truth for the plugin endpoints, and it has changed.
+plugins/data.json is the source of truth; capabilities/ holds one page per installed plugin, and plugins/registry.go is generated from it.
 
-For every plugin with "enabled": true, update capabilities/<name>.go so Name, Kind, Endpoint and Timeout match the data, and regenerate plugins/registry.go so it lists exactly the enabled plugins: sorted by name, one "name": "kind" row each. A disabled plugin is not registered and its page must not change. Do not reformat, reorder or re-indent anything else.
+The target set is the pages that exist under capabilities/ (excluding spec.go), filtered by data.json:
+- for every installed page whose plugin is enabled, regenerate that page from the data, adding a Digest line computed as the first 8 hex of sha1("name|kind|endpoint");
+- regenerate plugins/registry.go in the same gofmt-aligned form it already has, with one row per regenerated plugin, whose value is "kind@<first 6 hex of sha1("name|kind|endpoint")>";
+- a page whose plugin is disabled stays byte-identical, and an enabled plugin with no page gets no page: do not create files.
 
-Work from the files as they are: do not create, modify or delete any file other than those edits, and leave no scratch files behind.
+Do not reformat anything else and leave no scratch files behind.
 
 Then run python3 verify.py and make sure it passes.
+
+Finish with exactly two lines:
+updated=<n> plugin pages,<n> registry rows
+untouched=<n> disabled plugins

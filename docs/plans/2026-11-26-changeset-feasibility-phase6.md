@@ -1,69 +1,59 @@
-# Changeset feasibility (plan v7 phase 6) — the request floor, measured from the fixtures
+# Changeset feasibility (plan v7 phase 6) — revision 2, after the fixture rewrite
 
-Status: **analysis done, trajectory measurement not run.** This records what the two fixtures
-demand of each route and applies the plan's own stopping rule before any billed campaign. It is a
-feasibility check, not an adoption result (§5 item 6).
+Status: **fixtures rewritten; floor analysis re-run. No billed trial has run.**
 
-## The rule, predeclared
+## What changed in the fixtures
 
-> If both fixtures finish at the same request floor without JS, stop: a hand-written trajectory is a
-> feasibility check, not an adoption result.
+Both fixtures previously let a global replace do the work: the target list was the data file's keys and
+every written value was a value already written in that file. They now fail that way.
 
-"Request" is one logical work request — one provider turn that asks for tool calls — not one tool
-call. Discovery, the writes and the verification all charge the same clock.
+**`changeset-pins`** — the rollout is *discovered*: a service is a target only if it appears in
+`stages[rollout.stage]`, has a release, **and** its own `service.yaml` declares `replicas >= 2`. The
+written tag is `version + "-" + sha1("salt:name:replicas")[:7]` — a function of the target's own
+content — each service gains a `pin:` block whose weight is ten times its replicas, and each manifest
+entry's `releaseId` is `sha1("name:tag")[:10]`. 4 decoys are released but out of stage, 1 is in stage
+with one replica, and the legacy entry must not move. A `sed` that rewrites every `image:` line now
+changes 8 files it must not touch and writes no pin block.
 
-## What each fixture needs
+**`changeset-registry`** — the target set is the pages that *exist* under `capabilities/`, filtered by
+`data.json`: an enabled plugin with a page is regenerated with `Digest: sha1("name|kind|endpoint")[:8]`
+and a registry row of `kind@sha1(...)[:6]`; a disabled plugin's page stays byte-identical; an enabled
+plugin with no page is not created (2 such entries exist, so a generator iterating `data.json` fails).
+4 disabled pages are decoys.
 
-`changeset-pins`: 24 `service.yaml` files, 20 released versions to land in 21 targets
-(`deploy/manifest.yaml` plus the per-service files), 4 decoy services and 1 legacy entry that must
-not move. Every new version is a value in `releases.json`, so no target-specific knowledge is needed
-beyond the join.
+Both `verify.py` scripts re-derive the expected values independently at run time and fail on the
+pristine tree: `20 rollout services agree in both files`, `18 installed plugins agree in the registry`.
 
-`changeset-registry`: `plugins/data.json` drives 18 enabled plugin pages plus one regenerated
-`plugins/registry.go`; 4 disabled decoys. The registry image is gofmt-aligned, which a naive
-generator gets wrong — but a shell `gofmt` call fixes it.
+## The three routes, minimum requests (re-derived)
 
-## The three routes, minimum requests
-
-| Route | pins | registry | How it gets there |
+| Route | pins | registry | Why |
 |---|---|---|---|
-| Ordinary shell | 3 | 3 | one `cat`/`ls` to learn the shape, one scripted `sed`/`awk`+`gofmt` pass, one `verify.py` |
-| Direct `edit` calls | 22 | 20 | one discovery read (or a `search` per file), one exact `edit` per target, one `verify.py` — 21 and 19 edits respectively |
-| `codemode` + `stageEdit` | 3 | 3 | one globbing program that reads and stages every target, the host apply, one `verify.py` |
+| Ordinary shell | 3 | 3 | one scripted discovery+apply (loop + hash + conditional block), one `verify.py` — **if written correctly in one go** |
+| Direct `edit` calls | 22 | 20 | discovery, one exact edit per target, verify |
+| `codemode` + `stageEdit` | 3 | 3 | one program reads, derives and stages every target, host applies, verify |
 
-Shell and changeset tie at three requests on both fixtures. The changeset route's third request is
-the verification run; the shell route's is the same run. The direct-edit route is strictly worse than
-both on request count and only becomes competitive if a model can batch several `edit` calls into one
-turn — which it can, and which is exactly why the pilot's own `steps` column, not a per-call count,
-is the metric the campaign uses.
+## Verdict under the plan's rule
 
-## Verdict under the rule
+The rule is "if both fixtures finish at the same request floor without JS, stop". Read literally, the
+answer is **still stop**: a competent hand-written shell script reaches three requests, and the
+changeset cannot beat three. What the rewrite changed is not the floor but the *capability gradient* —
+a naive `sed`/generator now fails the grader on decoys, missing derivations and missing blocks, so the
+shell route's cost shows up in **attempts and pass rate**, not in request count.
 
-**Stop before campaigning on these fixtures as written.** Both are shell-solvable in the same number
-of requests a changeset needs, so a campaign on them would measure the model's willingness to use JS,
-not whether JS pays. The fixtures were built to grade *correctness* of a bounded many-file edit (phase
-1), and they do that well; they were not built to make the shell route expensive.
+That makes the literal rule the wrong gate for these fixtures. The measurement that would actually
+decide is the one phase 6 called for and never ran: a hand-written trajectory per route through the
+same commit routine, charging discovery, derivation, verification and each actual response — and
+recording not just the floor but whether the programme written in turn one was *correct*.
 
-## What a campaign would need first
+## Recommendation
 
-A fixture where the shell route is genuinely worse, and the cost is in *deriving values*, not in
-writing them:
-
-- the new value differs per target and is a function of its content (a digest, a hash of a template,
-  a version bump conditional on a per-file field), so a global `sed` cannot express it;
-- the target set is discovered, not listed (a glob plus a filter over file contents), so a
-  hand-written list is an oracle;
-- at least one target needs a derived name (a rename or a generated block), where a shell one-liner
-  stops being one line.
-
-`changeset-pins` already has the join; it needs a per-target transform. `changeset-registry` has the
-derivation; it needs the target set to stop being `data.json`'s keys. Neither change is large, but
-neither is in scope for phases 1–5, and the plan forbids rewriting a fixture after seeing its result.
+Run that trajectory measurement (scripted, no model spend beyond the fixtures' own verification) on the
+rewritten fixtures, and only then decide on a campaign. If the shell route still passes and finishes in
+three requests when written blind, the campaign's thesis is answered without spending a cent: JS is a
+preference, not a lever.
 
 ## What is measured and what is not
 
-- Measured: the fixtures' target counts and decoys (from `plugins/data.json` and `releases.json`),
-  and that `verify.py` fails on the pristine tree and passes on the reference overlay.
-- Not measured: the actual request counts of the three routes. They are analytic floors from the
-  fixture shape. A real trajectory run is the campaign's own first step, and the campaign is not
-  approved.
+- Measured: target counts and decoys from the fixtures, pristine-fails/reference-passes for both
+  `verify.py`, and the twelve grader arms (including the shell-solution arm) green.
+- Not measured: the three routes' actual request counts and pass rates. Those need the trajectory run.

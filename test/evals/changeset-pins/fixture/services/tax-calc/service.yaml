@@ -1,4 +1,0 @@
-# tax-calc — owned by platform-commerce. Generated from the service template.
-name: tax-calc
-image: ghcr.io/acme/tax-calc:1.4.23
-replicas: 1

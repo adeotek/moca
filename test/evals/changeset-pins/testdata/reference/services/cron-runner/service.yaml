@@ -1,4 +1,8 @@
-# cron-runner — owned by platform-platform. Generated from the service template.
+# cron-runner — owned by platform. Generated from the service template.
 name: cron-runner
-image: ghcr.io/acme/cron-runner:1.5.6
-replicas: 1
+image: ghcr.io/acme/cron-runner:1.5.6-a7a0ab3
+replicas: 3
+mode: rolling
+pin:
+  tag: 1.5.6-a7a0ab3
+  weight: 30

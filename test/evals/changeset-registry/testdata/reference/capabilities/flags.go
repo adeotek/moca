@@ -3,7 +3,8 @@ package capabilities
 // Flags is generated from plugins/data.json — edit the data, not this file.
 var Flags = Spec{
 	Name:     "flags",
-	Kind:     "redis",
-	Endpoint: "redis://flags.internal:6380",
-	Timeout:  3500,
+	Kind:     "flags",
+	Endpoint: "https://flags.internal:8080",
+	Timeout:  1000,
+	Digest:   "94ca1a23",
 }

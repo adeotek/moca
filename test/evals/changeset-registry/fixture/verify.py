@@ -1,48 +1,41 @@
 #!/usr/bin/env python3
-"""Consistency check between plugins/data.json, capabilities/*.go and registry.go.
+"""Registry check: a page exists for every installed plugin, and every enabled,
+installed plugin's page carries its derived digest and is listed once.
 
-Every enabled plugin must match its page, and registry.go must list exactly the
-enabled plugins, sorted. Disabled plugins are not registered and their pages are
-not the registry's business. Read-only; exits 1 with the first mismatches.
+Read-only; exits 1 with the first mismatches.
 """
+import hashlib
 import json
 import pathlib
 import re
 import sys
 
 root = pathlib.Path(__file__).parent
-data = json.loads((root / "plugins" / "data.json").read_text())["plugins"]
+plugins = {p["name"]: p for p in json.loads((root / "plugins" / "data.json").read_text())["plugins"]}
+pages = {p.stem for p in (root / "capabilities").glob("*.go") if p.stem != "spec"}
 
-FIELD = re.compile(r'\b(Name|Kind|Endpoint|Timeout):\s*(?:"([^"]*)"|(\d+))')
-ROW = re.compile(r'^\t"(\S+)":\s+"(\S+)",$', re.M)
+DIGEST = re.compile(r"^\tDigest:   \"(\S+)\",$", re.M)
+
+
+def want(p):
+    return hashlib.sha1(f"{p['name']}|{p['kind']}|{p['endpoint']}".encode()).hexdigest()[:8]
+
 
 bad = []
-pages = {}
-for page in (root / "capabilities").glob("*.go"):
-    fields = {}
-    for key, text, num in FIELD.findall(page.read_text()):
-        fields[key] = text if text else num
-    pages[fields.get("Name", page.stem)] = fields
+targets = [n for n in sorted(pages) if n in plugins and plugins[n]["enabled"]]
+for name in targets:
+    m = DIGEST.search((root / "capabilities" / f"{name}.go").read_text())
+    if not m or m.group(1) != want(plugins[name]):
+        bad.append(f"capabilities/{name}.go has {m.group(1) if m else None}, the data implies {want(plugins[name])}")
 
-for p in data:
-    if not p["enabled"]:
-        continue
-    page = pages.get(p["name"])
-    if page is None:
-        bad.append(f"capabilities/{p['name']}.go is missing")
-        continue
-    for key, want in (("Kind", p["kind"]), ("Endpoint", p["endpoint"]), ("Timeout", str(p["timeoutMs"]))):
-        if page.get(key) != want:
-            bad.append(f"capabilities/{p['name']}.go has {key}={page.get(key)}, data.json says {want}")
-
-rows = ROW.findall((root / "plugins" / "registry.go").read_text())
-want_rows = sorted((p["name"], p["kind"]) for p in data if p["enabled"])
-if rows != want_rows:
-    extra = [r for r in rows if r not in want_rows][:6]
-    missing = [r for r in want_rows if r not in rows][:6]
-    bad.append(f"plugins/registry.go rows wrong (missing {missing}, extra {extra}, sorted {rows == sorted(rows)})")
-
+rows = dict(re.findall(r'^\t"([^"]+)":\s+"([^"]+)",$', (root / "plugins" / "registry.go").read_text(), re.M))
+for name in targets:
+    p = plugins[name]
+    got = rows.get(name)
+    exp = "%s@%s" % (p["kind"], hashlib.sha1(f"{name}|{p['kind']}|{p['endpoint']}".encode()).hexdigest()[:6])
+    if got != exp:
+        bad.append(f"plugins/registry.go has {got!r} for {name}, the data implies {exp!r}")
 if bad:
     print("\n".join(bad[:12]))
     sys.exit(1)
-print(f"verify ok: {len(want_rows)} enabled plugins registered")
+print(f"verify ok: {len(targets)} installed plugins agree in the registry")

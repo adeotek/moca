@@ -1,4 +1,5 @@
-# notify-hub — owned by platform-growth. Generated from the service template.
+# notify-hub — owned by platform. Generated from the service template.
 name: notify-hub
-image: ghcr.io/acme/notify-hub:1.4.15
-replicas: 2
+image: ghcr.io/acme/notify-hub:1.5.15
+replicas: 3
+mode: rolling

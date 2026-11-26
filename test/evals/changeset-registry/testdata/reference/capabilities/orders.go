@@ -3,7 +3,8 @@ package capabilities
 // Orders is generated from plugins/data.json — edit the data, not this file.
 var Orders = Spec{
 	Name:     "orders",
-	Kind:     "grpc",
-	Endpoint: "grpc://orders.internal:9443",
-	Timeout:  9500,
+	Kind:     "orders",
+	Endpoint: "https://orders.internal:8080",
+	Timeout:  3500,
+	Digest:   "9f1b55cc",
 }

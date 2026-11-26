@@ -1,0 +1,5 @@
+# shipment-tracker — owned by platform. Generated from the service template.
+name: shipment-tracker
+image: ghcr.io/acme/shipment-tracker:1.5.22
+replicas: 3
+mode: rolling

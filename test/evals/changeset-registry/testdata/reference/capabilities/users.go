@@ -3,7 +3,8 @@ package capabilities
 // Users is generated from plugins/data.json — edit the data, not this file.
 var Users = Spec{
 	Name:     "users",
-	Kind:     "sql",
-	Endpoint: "postgres://users.internal:5433",
-	Timeout:  12500,
+	Kind:     "users",
+	Endpoint: "https://users.internal:8080",
+	Timeout:  1700,
+	Digest:   "279b3b0f",
 }

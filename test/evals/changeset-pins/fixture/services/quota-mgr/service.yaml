@@ -1,4 +1,5 @@
-# quota-mgr — owned by platform-platform. Generated from the service template.
+# quota-mgr — owned by platform. Generated from the service template.
 name: quota-mgr
-image: ghcr.io/acme/quota-mgr:1.4.19
+image: ghcr.io/acme/quota-mgr:1.5.19
 replicas: 1
+mode: rolling

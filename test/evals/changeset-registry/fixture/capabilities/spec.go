@@ -6,4 +6,5 @@ type Spec struct {
 	Kind     string
 	Endpoint string
 	Timeout  int
+	Digest   string
 }

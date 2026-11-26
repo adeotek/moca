@@ -1,4 +1,5 @@
-# order-api — owned by platform-commerce. Generated from the service template.
+# order-api — owned by platform. Generated from the service template.
 name: order-api
-image: ghcr.io/acme/order-api:1.4.16
-replicas: 3
+image: ghcr.io/acme/order-api:1.5.16
+replicas: 4
+mode: blue-green

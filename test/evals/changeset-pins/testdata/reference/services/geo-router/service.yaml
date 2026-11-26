@@ -1,0 +1,5 @@
+# geo-router — owned by platform. Generated from the service template.
+name: geo-router
+image: ghcr.io/acme/geo-router:1.5.10
+replicas: 2
+mode: rolling
