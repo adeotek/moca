@@ -404,9 +404,12 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 	m := o.mode()
 	// ConfigFile keeps the session allow away from the file that holds the
 	// permission policy; the ask-write approval resolves it when it asks.
+	// The changeset journal lives beside the session transcript; it is created
+	// lazily on the first Begin, so a session that never edits leaves no file.
 	env := &tools.Env{
 		Root: jail.Root(), Paths: jail, AutoJail: jail.WithWritable(permissions.TempRoots()...),
 		Ask: o.Ask, Reads: tools.NewReadTracker(), Snap: snaps, ConfigFile: config.ConfigFile(),
+		Journal:     newChangesetJournal(filepath.Join(filepath.Dir(w.Path()), "changeset.journal")),
 		ShellEnv:    tools.ShellEnv(os.Environ(), config.EnvRefs(cfg)),
 		WebProvider: cfg.Web.Search.Provider, WebKey: webKey,
 		SpillDir: st.spillDir, SpillPrefix: w.ID8() + "-"}
@@ -539,7 +542,8 @@ func build(o StartOptions, st *setup, w *session.Writer, system, model string, e
 		// The grants are the jail's own read roots, so a transport session's
 		// scripted read reaches exactly what the direct read tool could.
 		reg.Register(tools.NewCodemode(codemodeHolder(plan.preludeNetwork, plan.admittedNetwork,
-			st.cm.Attempts, plan.exposure == config.CodemodeTransport, st.jail.ReadRoots())))
+			st.cm.Attempts, plan.exposure == config.CodemodeTransport, st.jail.ReadRoots(),
+			changesetPolicy(&o, plan))))
 	}
 	// A transport session declares six tools: inspection lives inside the
 	// script, so the direct calls are not shipped to the model (SPECS §10.6).
@@ -1020,12 +1024,31 @@ func planCodemode(resumed, hadCodemode, storedNetwork bool, storedExposure strin
 // codemodeHolder builds the {engine, caps} holder for one effective policy. The
 // engine is lazy: constructing the holder compiles no module and opens no root,
 // so a session that never calls codemode pays nothing for having it.
-func codemodeHolder(preludeNetwork, admittedNetwork bool, attempts int, transport bool, grants []string) *tools.CodemodeHolder {
+func codemodeHolder(preludeNetwork, admittedNetwork bool, attempts int, transport bool, grants []string,
+	policy tools.ChangesetPolicy) *tools.CodemodeHolder {
 	return &tools.CodemodeHolder{
 		Open:      func() (tools.CodemodeEngine, error) { return codemode.DefaultEngine(), nil },
-		Caps:      codemode.ExecCaps{NetworkPrelude: preludeNetwork, Network: admittedNetwork},
+		Caps:      codemode.ExecCaps{NetworkPrelude: preludeNetwork, Network: admittedNetwork, Edits: policy.Edits},
 		Attempts:  attempts,
 		Transport: transport,
 		Grants:    grants,
+		Policy:    policy,
+	}
+}
+
+// changesetPolicy binds the narrow, deterministic consent data the changeset
+// tool reads (SPECS §10.6, plan v7 §4.10): effective mode, trust, headless and
+// the resolved edit authority. Nothing here is inferred from the presence of an
+// asker, and only the user's config grants the bit.
+func changesetPolicy(o *StartOptions, plan codemodePlan) tools.ChangesetPolicy {
+	mode := string(o.mode())
+	if o.Plan {
+		mode = "plan"
+	}
+	return tools.ChangesetPolicy{
+		Edits:    plan.workspaceEdits,
+		Mode:     mode,
+		Headless: o.Headless,
+		Trusted:  o.Trusted,
 	}
 }

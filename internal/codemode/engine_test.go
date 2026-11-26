@@ -50,10 +50,10 @@ func TestPreludeVariants(t *testing.T) {
 		wantWeb  bool
 		wantLive bool
 	}{
-		{ExecCaps{false, false}, false, false},
-		{ExecCaps{false, true}, false, false}, // impossible per R69, but must still render safely
-		{ExecCaps{true, false}, true, false},  // resumed network session, switch now off
-		{ExecCaps{true, true}, true, true},
+		{ExecCaps{NetworkPrelude: false, Network: false}, false, false},
+		{ExecCaps{NetworkPrelude: false, Network: true}, false, false}, // impossible per R69, but must still render safely
+		{ExecCaps{NetworkPrelude: true, Network: false}, true, false},  // resumed network session, switch now off
+		{ExecCaps{NetworkPrelude: true, Network: true}, true, true},
 	}
 	for _, tc := range cases {
 		src := PreludeSource(tc.caps)
@@ -80,7 +80,7 @@ func TestPreludeVariants(t *testing.T) {
 	if strings.Contains(PreludeSource(ExecCaps{}), `throw { class: "network_disabled"`) {
 		t.Fatal("a workspace-only prelude can still throw network_disabled")
 	}
-	if !strings.Contains(PreludeSource(ExecCaps{true, false}), `throw { class: "network_disabled"`) {
+	if !strings.Contains(PreludeSource(ExecCaps{NetworkPrelude: true, Network: false}), `throw { class: "network_disabled"`) {
 		t.Fatal("a network-shaped prelude must carry the refusal path")
 	}
 }

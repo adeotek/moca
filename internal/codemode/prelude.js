@@ -129,6 +129,16 @@
   }
   // __WEB_END__
 
+  // __EDITS_BEGIN__ the writable workspace half: present only when the session
+  // declared workspace + workspaceEdits (prelude.go cuts this block otherwise).
+  if (EDITS) {
+    Object.defineProperty(tools, "stageEdit", {
+      enumerable: true,
+      value: function (a) { return inspect("stageEdit", a || {}); }
+    });
+  }
+  // __EDITS_END__
+
   // An unknown property throws (§Payloads): a typo must not silently do nothing,
   // and it must not reach the host either.
   Object.preventExtensions(tools);

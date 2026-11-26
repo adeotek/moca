@@ -82,6 +82,11 @@ type Result struct {
 type ExecCaps struct {
 	NetworkPrelude bool
 	Network        bool
+	// Edits admits tools.stageEdit: the workspace surface's writable half. It is
+	// off unless the session declared workspace + workspaceEdits, and the prelude
+	// defines the method only when it is on (the same cut-the-source rule the web
+	// block follows).
+	Edits bool
 }
 
 // Engine owns the process-wide runtime, the compiled module and the slot.

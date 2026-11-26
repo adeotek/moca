@@ -65,6 +65,11 @@ type CodemodeHolder struct {
 	Attempts  int
 	Grants    []string
 	Transport bool
+
+	// Policy is the workspace changeset's write authority (SPECS §10.6). Edits
+	// decides whether stageEdit exists at all; the rest decides whether an
+	// apply may proceed without a human.
+	Policy ChangesetPolicy
 }
 
 // inspection builds this execution's Inspection and applies the session's
@@ -151,11 +156,14 @@ type bridge struct {
 	// is (SPECS §10.6, D23).
 	env       *Env
 	transport bool
-	texts     []string
-	logs      []string
-	calls     int
-	gaps      int
-	reasons   []string
+	// cs is the batch this script stages into; nil on every surface without
+	// edits, where stageEdit is not in the table at all.
+	cs      *Changeset
+	texts   []string
+	logs    []string
+	calls   int
+	gaps    int
+	reasons []string
 }
 
 // idiomEchoLead opens the result-side idiom reminder. It is matched, never
@@ -180,6 +188,19 @@ const idiomEchoLead = "hint:"
 // The network variant keeps its call list without shapes on purpose: its web
 // payloads are v1.1's contract (Task 9) and documenting a shape that does not
 // exist yet would be worse than naming the call.
+// codemodeSpecEdits is the writable workspace variant (plan v7 §4.12): the same
+// read calls, plus stageEdit. Frozen and measured at 711 B marshaled / 712 B
+// with newline against its own 768 B cap.
+func codemodeSpecEdits() llm.ToolSpec {
+	return codemodeSpecWith("Workspace JS. Await tools.read({path}|{next})\u2192{lines:[{n,text}]}, " +
+		"tools.search({pattern})\u2192{matches:[{path,line,text}]}, " +
+		"tools.ls({path})\u2192{entries:[{name,kind}]}, " +
+		"tools.glob({pattern})\u2192{paths}. " +
+		"Await tools.stageEdit({path,edits:[{old,new}]})\u2192{staged,path,edits} to stage exact edits " +
+		"the host applies after this program returns; read the file first; staged is not written. " +
+		"Return the answer; a bare expression is null.")
+}
+
 func codemodeSpec(network bool) llm.ToolSpec {
 	desc := "Read-only workspace JS. Await tools.read({path}|{next})\u2192{lines:[{n,text}]}, " +
 		"tools.search({pattern})\u2192{matches:[{path,line,text}]}, " +
@@ -196,6 +217,10 @@ func codemodeSpec(network bool) llm.ToolSpec {
 			"tools.web.fetch({url}) and tools.web.search({query}). " +
 			"Return the answer; a bare expression is null."
 	}
+	return codemodeSpecWith(desc)
+}
+
+func codemodeSpecWith(desc string) llm.ToolSpec {
 	return llm.ToolSpec{
 		Name:        "codemode",
 		Description: desc,
@@ -208,6 +233,9 @@ func codemodeSpec(network bool) llm.ToolSpec {
 }
 
 func (t codemodeTool) Spec() llm.ToolSpec {
+	if t.holder != nil && t.holder.Policy.Edits {
+		return codemodeSpecEdits()
+	}
 	v := t.variant
 	if t.holder != nil {
 		v = t.holder.Caps.NetworkPrelude
@@ -252,13 +280,31 @@ func (t codemodeTool) Run(ctx context.Context, env *Env, input json.RawMessage) 
 
 	// The bridge is per call: its root, budgets and cursors are the script's,
 	// and a second call starts clean.
-	br := &bridge{in: t.holder.inspection(env.Root), caps: workspaceCapabilities(), env: env, transport: t.holder.Transport}
+	edits := t.holder.Policy.Edits
+	br := &bridge{in: t.holder.inspection(env.Root), caps: workspaceCapabilities(edits), env: env,
+		transport: t.holder.Transport}
 	defer br.in.Close()
+	if edits {
+		br.cs = NewChangeset(t.holder.Policy, env.Root)
+		defer br.cs.Close()
+	}
 
 	res, cerr := eng.Execute(ctx, t.holder.Caps, a.Code, br.dispatch, timeoutOf(a.TimeoutSeconds))
 	steered := !admit() || res.Steered
 
 	content, isErr := br.render(res, cerr)
+	// The host applies the batch only after the program returned successfully:
+	// a script that failed or was steered stages nothing. The receipt is
+	// appended to the guest text, never instead of it.
+	if br.cs != nil && cerr == nil && !steered && br.cs.TargetCount() > 0 {
+		status, receipt := br.cs.Apply(ctx, env)
+		if receipt != "" {
+			content += "\n\n[changeset " + status + "] " + receipt
+		}
+		if status != OutcomeApplied && status != OutcomeInspected {
+			isErr = true
+		}
+	}
 	return Result{Content: content, IsError: isErr, Summary: br.summary(cerr), Steered: steered}
 }
 
@@ -277,7 +323,17 @@ func mustInspection(root string) *Inspection {
 // workspaceCapabilities is v1's table: the four workspace primitives, no
 // network row. A caller that is not admitted network never gets a table with
 // one, so there is nothing to filter at dispatch time.
-func workspaceCapabilities() map[string]capability {
+// workspaceCapabilities is the surface's table. Edits adds exactly one row;
+// every other name is identical, and stageEdit never appears anywhere else.
+func workspaceCapabilities(edits bool) map[string]capability {
+	caps := workspaceReadCapabilities()
+	if edits {
+		caps["stageEdit"] = capability{name: "stageEdit", call: callStageEdit}
+	}
+	return caps
+}
+
+func workspaceReadCapabilities() map[string]capability {
 	return map[string]capability{
 		"read":   {name: "read", network: false, call: callRead},
 		"search": {name: "search", network: false, call: callSearch},
@@ -309,6 +365,28 @@ func callGlob(ctx context.Context, b *bridge, args json.RawMessage) (json.RawMes
 // dispatch answers one guest frame. An unknown name is a host-side refusal, not
 // a guest-side throw: the script asked for something that does not exist in
 // this session, and the model needs to see that.
+// callStageEdit stages one target. A mismatch travels to the guest as a typed
+// CallError so the script can correct it; every other failure is fatal for the
+// batch and stops the script.
+func callStageEdit(ctx context.Context, b *bridge, args json.RawMessage) (json.RawMessage, *codemode.CallError) {
+	if b.cs == nil {
+		return nil, &codemode.CallError{Class: "refused", Message: "workspace edits are not enabled in this session"}
+	}
+	// Every stage attempt charges the inspection budget, failures included.
+	if err := b.in.charge(); err != nil {
+		return nil, &codemode.CallError{Class: "budget", Message: err.Error()}
+	}
+	out, err := b.cs.Stage(ctx, args)
+	if err != nil {
+		var ce *changesetError
+		if errors.As(err, &ce) {
+			return nil, &codemode.CallError{Class: ce.class, Message: ce.msg}
+		}
+		return nil, &codemode.CallError{Class: "refused", Message: err.Error()}
+	}
+	return out, nil
+}
+
 func (b *bridge) dispatch(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, *codemode.CallError) {
 	cap, ok := b.caps[name]
 	if !ok {

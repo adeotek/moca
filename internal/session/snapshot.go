@@ -93,6 +93,30 @@ func (s *Snapshots) Guard(abs string, write func() error) error {
 	return err
 }
 
+// GuardImage is tools.ImageSnapshotter: record the exact pre-image the caller
+// validated and the exact post-image it is about to write, without reopening
+// either path. It never runs gitClean — a changeset's preimage is already in
+// memory and verified, and always storing the blob is the safer undo direction
+// — and it writes After from post before write runs, so a later undo compares
+// against what the changeset actually intended.
+func (s *Snapshots) GuardImage(abs string, pre, post []byte, mode fs.FileMode, write func() error) error {
+	rec := SnapshotRec{Path: abs, Blob: sum(pre), Mode: uint32(mode.Perm()), After: sum(post)}
+	if err := os.MkdirAll(s.dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(s.dir, rec.Blob), pre, 0o600); err != nil {
+		return err
+	}
+	if err := write(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.stack = append(s.stack, rec)
+	s.mu.Unlock()
+	_, err := s.w.Append(Entry{Type: TypeSnapshot, Snapshot: &rec})
+	return err
+}
+
 // RefuseUnder bounds Undo: a snapshot of a file under this directory is not
 // rolled back by the user. The skill write guard owns those paths (§12) — an
 // undo that restores or deletes them is the same edit the guard exists to

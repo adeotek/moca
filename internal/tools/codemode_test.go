@@ -90,7 +90,7 @@ func TestCodemodeRefusalHasTheSameSpec(t *testing.T) {
 // ---- the capability table ------------------------------------------------
 
 func TestCodemodeCapabilityTableIsWorkspaceOnly(t *testing.T) {
-	caps := workspaceCapabilities()
+	caps := workspaceCapabilities(false)
 	want := map[string]bool{"read": true, "search": true, "ls": true, "glob": true}
 	if len(caps) != len(want) {
 		t.Fatalf("table has %d names, want %d", len(caps), len(want))
@@ -117,7 +117,7 @@ func TestCodemodeCapabilityTableIsWorkspaceOnly(t *testing.T) {
 // ignored, and it never reaches a tool.
 func TestCodemodeDispatchRefusesUnknownNames(t *testing.T) {
 	env, _ := newEnv(t)
-	b := &bridge{in: mustInspection(env.Root), caps: workspaceCapabilities()}
+	b := &bridge{in: mustInspection(env.Root), caps: workspaceCapabilities(false)}
 	defer b.in.Close()
 	for _, name := range []string{"write", "shell", "mcp__x", "codemode"} {
 		_, cerr := b.dispatch(context.Background(), name, json.RawMessage(`{}`))
@@ -245,7 +245,7 @@ func TestCodemodeAsksNothingSpillsNothingAndRecordsNoRead(t *testing.T) {
 
 	// The bridge the adapter builds is the real dispatch path; exercise it
 	// directly so the assertions are about that code and not a stub.
-	b := &bridge{in: mustInspection(env.Root), caps: workspaceCapabilities()}
+	b := &bridge{in: mustInspection(env.Root), caps: workspaceCapabilities(false)}
 	defer b.in.Close()
 	if _, cerr := b.dispatch(context.Background(), "read", json.RawMessage(`{"path":"a.txt"}`)); cerr != nil {
 		t.Fatalf("dispatch: %v", cerr)

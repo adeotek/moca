@@ -14,6 +14,9 @@ var preludeJS string
 // runtime, and a boolean is the whole state (no strings to compare).
 func renderPrelude(caps ExecCaps) string {
 	src := preludeJS
+	if !caps.Edits {
+		src = cutEditBlock(src)
+	}
 	if !caps.NetworkPrelude {
 		// The workspace-only variant has no web block AT ALL: the methods are
 		// not defined and then refused, they are absent from the source. A
@@ -28,6 +31,7 @@ func renderPrelude(caps ExecCaps) string {
 		"__NET_LIVE__", strconv.FormatBool(caps.Network && caps.NetworkPrelude),
 		"__REQ_MAX__", strconv.Itoa(TheABI.Limits.RequestBytes),
 		"__RES_MAX__", strconv.Itoa(TheABI.Limits.ResponseBytes),
+		"__EDITS__", strconv.FormatBool(caps.Edits),
 	)
 	return r.Replace(src)
 }
@@ -41,6 +45,17 @@ func cutWebBlock(src string) string {
 		return src // a template without markers must not silently lose code
 	}
 	return src[:begin] + src[end+len("  // __WEB_END__"):]
+}
+
+// cutEditBlock removes the stageEdit block from a prelude whose session has no
+// edit authority: the method is absent from the source, not defined and refused.
+func cutEditBlock(src string) string {
+	begin := strings.Index(src, "  // __EDITS_BEGIN__")
+	end := strings.Index(src, "  // __EDITS_END__")
+	if begin < 0 || end < begin {
+		return src
+	}
+	return src[:begin] + src[end+len("  // __EDITS_END__"):]
 }
 
 // PreludeSource exposes the rendered prelude for the tests and the build
