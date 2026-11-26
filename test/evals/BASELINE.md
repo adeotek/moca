@@ -1842,10 +1842,15 @@ $0.0053).
 
 | arm | pass | turn-1 carry (median) | carry Σ | steps (mean) | cost |
 |---|---|---|---|---|---|
-| `off` | 4/10 | 4 014 | 47 882 | 15.8 | $0.0766 |
-| `additive` (50) | 6/10 | 6 322 | 68 678 | 19.7 | $0.1145 |
+| `off` | 4/10 | 4 014 | 42 870 | 15.8 | $0.0766 |
+| `additive` (50) | 6/10 | 6 322 | 70 679 | 19.7 | $0.1145 |
 | `additive-400` | 8/10 | 2 708 | 30 146 | 14.0 | $0.0597 |
-| `transport` | 9/10 | 2 917 | 32 679 | 16.1 | $0.0680 |
+| `transport` | 9/10 | 2 917 | 32 863 | 16.1 | $0.0680 |
+
+*Corrected 2026-11-26: the revision 3 review fixed the mis-summed `off` and `additive` carry totals —
+47 882 → **42 870** and 68 678 → **70 679** — and the revision 5 review fixed `transport` from 32 679 to
+**32 863**. The per-trial rows, medians, paired ratios, passes and the verdict are unchanged; only the
+three column sums were wrong.*
 
 **Primary (predeclared, transport vs off) — FAILED.** 7/10 pairs carry less (needs ≥ 8; p = 0.172),
 median pair ratio **0.778** (needs ≤ 0.5), no lost pass (9 ≥ 4). By the predeclared outcome table
@@ -1853,7 +1858,7 @@ that is **inconclusive**: the median sits in (0.5, 1.0) with no sign-test win. *
 ship.** `exposure` stays in the tree, default `additive`, off unless `codemode.enabled`.
 
 **The dial — the one clean effect.** `additive-400` vs `additive-50`: 8/10 pairs carry less (p = 0.055),
-median ratio **0.376**, carry Σ 30 146 vs 68 678, passes 8 vs 6, steps 14.0 vs 19.7. Both arms ran
+median ratio **0.376**, carry Σ 30 146 vs 70 679, passes 8 vs 6, steps 14.0 vs 19.7. Both arms ran
 under the same rules, so this comparison is not exposed to the fixture defect below: the 50-attempt
 budget was throttling the additive arm on a bulk task, and raising it makes it cheaper *and* faster.
 `additive-400` ≈ `transport` on carry (median ratio 1.068 — the dial carries slightly less), so
