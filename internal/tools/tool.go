@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"runtime/debug"
@@ -44,6 +45,43 @@ type CommandChecker interface {
 
 type Snapshotter interface {
 	Guard(absPath string, write func() error) error
+}
+
+// ImageSnapshotter is the optional capability a changeset needs beside
+// Snapshotter: record the exact pre-image the caller validated and the exact
+// post-image it is about to write, without reopening either path. Guard cannot
+// serve a changeset — it reopens the absolute pathname, which is exactly the
+// window a changeset closes by carrying its own validated bytes.
+//
+// Discovered by type assertion (img, ok := env.Snap.(ImageSnapshotter)), the
+// same way Exposable is, so existing fakes stay valid. session.Snapshots
+// implements it; a session whose snapshotter does not refuses to stage.
+type ImageSnapshotter interface {
+	GuardImage(abs string, pre, post []byte, mode fs.FileMode, write func() error) error
+}
+
+// ChangesetBatch is the journal's begin record: the immutable set of paths and
+// digests approved for this call, identified by the outer call, never by JS
+// input. It is persisted before the first write; a begin failure means zero
+// writes.
+type ChangesetBatch struct {
+	CallID string
+	Paths  []string
+	Pre    [][32]byte
+	Post   [][32]byte
+}
+
+// ChangesetJournal is the crash record a changeset appends through Env. The
+// implementation belongs to the agent (it knows the session and its directory);
+// tools only needs the protocol. A nil journal means an apply refuses before
+// any write — there is no unjournaled path to disk.
+type ChangesetJournal interface {
+	Begin(b ChangesetBatch) error
+	Record(path string, pre, post []byte) error
+	// Abort closes an unfinished batch with a reason. It reports state, it does
+	// not undo: a changeset never rolls back (SPECS §10.6).
+	Abort(reason string) error
+	Finish() error
 }
 
 type Answer int
@@ -219,6 +257,9 @@ type Env struct {
 	Reads    *ReadTracker
 	Snap     Snapshotter
 	ShellEnv []string
+	// Journal is the changeset crash record (nil outside a workspace-edits
+	// session, and then stageEdit refuses every call).
+	Journal ChangesetJournal
 	// ConfigFile is moca's own user config file as configured (unresolved).
 	// The ask-write approval resolves it through Paths when it asks and
 	// compares the target against that, so a write there is never offered
