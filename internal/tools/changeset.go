@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,8 +32,12 @@ const (
 	maxEditTextPerTarget  = 32 << 10
 	maxEditTextTotal      = 256 << 10
 	maxRetainedImages     = 2 << 20
-	changesetHostBudget   = 30 * time.Second
-	maxReceiptBytes       = 4096
+	// maxStageContent bounds the post-edit image a staging result carries back to
+	// the guest. 32 targets x this window equals maxRetainedImages, so a program
+	// that holds every image it staged still cannot outgrow the host's own cap.
+	maxStageContent     = 64 << 10
+	changesetHostBudget = 30 * time.Second
+	maxReceiptBytes     = 4096
 )
 
 // Changeset outcomes (§4.8). These are the only values the receipt carries.
@@ -220,15 +225,14 @@ func (c *Changeset) Stage(ctx context.Context, args json.RawMessage) (json.RawMe
 			c.targets[i] = st
 			delete(c.unresolved, rel)
 			c.editBytes += textBytes
-			return staged(rel, len(a.Edits)), nil
+			return stagedResult(rel, len(a.Edits), post), nil
 		}
 	}
 	c.targets = append(c.targets, st)
 	c.editBytes += textBytes
 	delete(c.unresolved, rel)
 
-	out, _ := json.Marshal(map[string]any{"staged": true, "path": rel, "edits": len(a.Edits)})
-	return out, nil
+	return stagedResult(rel, len(a.Edits), post), nil
 }
 
 // drop removes an earlier stage of rel, if any (a failed restage supersedes it).
@@ -241,8 +245,27 @@ func (c *Changeset) drop(rel string) {
 	}
 }
 
-func staged(rel string, edits int) json.RawMessage {
-	out, _ := json.Marshal(map[string]any{"staged": true, "path": rel, "edits": edits})
+// stagedResult is what a successful stage returns to the guest: the identifying
+// fields, the size and digest of the whole post-edit image, and the image itself
+// up to maxStageContent. The guest needs the bytes to check its own work before
+// the host applies anything -- without them, verification has to happen in a
+// later turn through a shell, which is where the phase-7 campaign's ordering
+// failures came from.
+func stagedResult(rel string, edits int, post []byte) json.RawMessage {
+	sum := sha256.Sum256(post)
+	body, truncated := post, false
+	if len(body) > maxStageContent {
+		cut := maxStageContent
+		for cut > 0 && !utf8.RuneStart(post[cut]) {
+			cut-- // never hand the guest half a rune
+		}
+		body, truncated = post[:cut], true
+	}
+	out, _ := json.Marshal(map[string]any{
+		"staged": true, "path": rel, "edits": edits,
+		"bytes": len(post), "sha256": hex.EncodeToString(sum[:]),
+		"content": string(body), "truncated": truncated,
+	})
 	return out
 }
 

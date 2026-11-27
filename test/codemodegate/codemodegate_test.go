@@ -8,6 +8,8 @@
 package codemodegate
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -543,5 +545,44 @@ func TestChangesetConsent(t *testing.T) {
 				t.Fatalf("tools = %v", names)
 			}
 		})
+	}
+}
+
+// The staging result carries the image the host will write, so a program can
+// check its own work before apply instead of verifying through a shell in a
+// later turn. This is the only leg that proves the returned content and digest
+// describe the bytes that land on disk, not the edit engine's intent.
+func TestStagedContentMatchesTheAppliedBytes(t *testing.T) {
+	const editsCfg = `"codemode":{"enabled":true,"exposure":"workspace","workspaceEdits":true}`
+	script := `{"code":"const r = await tools.stageEdit({path: 'a.txt', edits: [{old: 'alpha', new: 'ALPHA'}]}); return {sha256: r.sha256, bytes: r.bytes, content: r.content, truncated: r.truncated}"}`
+	h := newHarness(t, script)
+	h.cfg(editsCfg + `,"permissions":{"defaultMode":"yolo"}`)
+	h.file("a.txt", "alpha\n")
+	out := h.run("-p", "rotate the marker")
+
+	disk, err := os.ReadFile(filepath.Join(h.work, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(disk) != "ALPHA\n" {
+		t.Fatalf("the batch did not apply: disk=%q\n%s", disk, out)
+	}
+	want := "ALPHA\n"
+	sum := sha256.Sum256(disk)
+
+	res := h.lastResult()
+	if !strings.Contains(res, hex.EncodeToString(sum[:])) {
+		t.Fatalf("the digest the program saw does not match the applied bytes (%s): %q\n%s",
+			hex.EncodeToString(sum[:]), res, out)
+	}
+	if !strings.Contains(res, `"bytes":`+strconv.Itoa(len(want))) {
+		t.Fatalf("the reported size is not the applied size (%d B): %q", len(want), res)
+	}
+	// content must be the post image, never the pre image.
+	if !strings.Contains(res, "ALPHA") || strings.Contains(res, `"content":"alpha`) {
+		t.Fatalf("content is not the post-edit image: %q", res)
+	}
+	if !strings.Contains(res, `"truncated":false`) {
+		t.Fatalf("a small file was reported truncated: %q", res)
 	}
 }

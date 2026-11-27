@@ -7,6 +7,8 @@ package tools
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -150,6 +152,76 @@ func TestChangesetStageAppliesOrderedPairs(t *testing.T) {
 	orig, _ := os.ReadFile(filepath.Join(dir, "svc.yaml"))
 	if !bytes.Contains(orig, []byte("1.4.1")) {
 		t.Fatal("staging wrote the file")
+	}
+}
+
+// The staging result carries the bytes the host will write, so a program can
+// check its own work instead of verifying through a shell in a later turn.
+func TestChangesetStageReturnsPostEditContent(t *testing.T) {
+	_, c := newBatch(t, map[string]string{"svc.yaml": "name: x\nreplicas: 2\n"})
+	defer c.Close()
+	out, err := stageCall(t, c, "svc.yaml", [2]string{"replicas: 2", "replicas: 3"})
+	if err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	var got struct {
+		Staged    bool   `json:"staged"`
+		Content   string `json:"content"`
+		SHA256    string `json:"sha256"`
+		Bytes     int    `json:"bytes"`
+		Truncated bool   `json:"truncated"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("result is not json: %v (%s)", err, out)
+	}
+	want := "name: x\nreplicas: 3\n"
+	if got.Content != want {
+		t.Fatalf("content = %q, want %q", got.Content, want)
+	}
+	if got.Bytes != len(want) || got.Truncated {
+		t.Fatalf("bytes=%d truncated=%v for a small file", got.Bytes, got.Truncated)
+	}
+	sum := sha256.Sum256([]byte(want))
+	if got.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("sha256 = %q, want %q", got.SHA256, hex.EncodeToString(sum[:]))
+	}
+}
+
+// A file over the window is cut at a rune boundary, and the digest still covers
+// the whole image -- identity must not depend on the text fitting.
+func TestChangesetStageTruncatesLargeImage(t *testing.T) {
+	pre := "name: big\n" + strings.Repeat("pad: 0123456789\n", 6000) + "END — done\n"
+	_, c := newBatch(t, map[string]string{"big.yaml": pre})
+	defer c.Close()
+	out, err := stageCall(t, c, "big.yaml", [2]string{"END — done\n", "END — done\nadded: 1\n"})
+	if err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	var got struct {
+		Content   string `json:"content"`
+		SHA256    string `json:"sha256"`
+		Bytes     int    `json:"bytes"`
+		Truncated bool   `json:"truncated"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("result is not json: %v", err)
+	}
+	post := pre + "added: 1\n"
+	if !got.Truncated {
+		t.Fatalf("a %d B image was not truncated", len(post))
+	}
+	if got.Bytes != len(post) {
+		t.Fatalf("bytes = %d, want %d", got.Bytes, len(post))
+	}
+	if len(got.Content) > maxStageContent {
+		t.Fatalf("content = %d B, over the %d B window", len(got.Content), maxStageContent)
+	}
+	if !strings.HasPrefix(post, got.Content) {
+		t.Fatal("content is not a prefix of the image")
+	}
+	sum := sha256.Sum256([]byte(post))
+	if got.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatal("sha256 does not cover the whole image")
 	}
 }
 

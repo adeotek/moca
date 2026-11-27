@@ -189,19 +189,21 @@ const idiomEchoLead = "hint:"
 // payloads are v1.1's contract (Task 9) and documenting a shape that does not
 // exist yet would be worse than naming the call.
 // codemodeSpecEdits is the writable workspace variant (plan v7 §4.12): the same
-// read calls, plus stageEdit. Frozen and measured at 578 B with newline against
-// its own 768 B cap; the trailing clause is the ordering rule the phase-7
-// campaign earned (stage once, then verify after the host applies), which took
-// the scale arm from 2/5 to 7/8.
+// read calls, plus stageEdit. Frozen and measured at 661 B with newline against
+// its own 768 B cap; the ordering clause is the rule the phase-7 campaign earned
+// (stage once, then verify after the host applies), which took the scale arm from
+// 2/5 to 7/8, and the content clause points at the staging result the guest can
+// check for itself before apply.
 func codemodeSpecEdits() llm.ToolSpec {
 	return codemodeSpecWith("Workspace JS. Await tools.read({path}|{next})\u2192{lines:[{n,text}]}, " +
 		"tools.search({pattern})\u2192{matches:[{path,line,text}]}, " +
 		"tools.ls({path})\u2192{entries:[{name,kind}]}, " +
 		"tools.glob({pattern})\u2192{paths}. " +
-		"Await tools.stageEdit({path,edits:[{old,new}]})\u2192{staged,path,edits} to stage exact edits " +
+		"Await tools.stageEdit({path,edits:[{old,new}]})\u2192{staged,path,edits,content,sha256} to stage exact edits " +
 		"the host applies after this program returns; read the file first; staged is not written; " +
 		"sha256(text)\u2192hex is available. " +
 		"stage every edit in this program; the host applies the batch when it returns, so verify after it returns, not before. " +
+		"content is the file as it will be: check it there, not after apply. " +
 		"Return the answer; a bare expression is null.")
 }
 
