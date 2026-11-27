@@ -1,5 +1,36 @@
 # Codemode P0 — `stageEdit` returns the post-edit content
 
+## OUTCOME (measured 2026-11-27, commit `99526e5`)
+
+**Verdict: FAILS its predeclared gate. P1/P2 are not built.** The change ships as implemented (it is
+strictly more information for the guest, no new authority, all gates green), but it did not earn the
+next phase.
+
+| read | base (n=8) | cand (n=13) | ratio [CI] | criterion | result |
+|---|---|---|---|---|---|
+| passes | 7/8 | **13/13** | — | ≥ base | **pass** |
+| tokens/solved | 1.44 M | 1.35 M | 0.82 [0.61, 1.18] | hi < 1.00 | **FAIL** |
+| cost/run | $0.0475 | $0.0443 | 0.93 [0.72, 1.30] | (informative) | — |
+| steps | 30.2 | 29.9 | 0.99 [0.83, 1.21] | hi ≤ 1.00 | **FAIL** |
+
+`evalstats` verdict: **underpowered — CI [0.61, 1.18] spans the band, need n 126** per arm (cv 32 %).
+
+What the numbers say, without the spin: the point estimates all lean the right way (18 % fewer
+tokens/solved, 7 % cheaper, 1 % shorter) and the arm went from 7/8 to 13/13 — the one base failure was
+`svc-053`, a content error, which is exactly the class the returned content lets a program catch. But a
+one-run difference cannot carry a claim, and the cost/turn effects sit inside their intervals. At
+~$0.044/run, pinning this to `need n` would cost ≈ $11 for the pair — over this phase's $5 cap and
+never approved.
+
+**Decision recorded: do not build P1 (`writeFile`/`rename`/`delete`) or P2 (`exec`) on the strength of
+this.** The surface is at its measured ceiling for this model on shell-present workloads; its real win
+remains the placement one from phase 7 (`changeset-noshell`, pinned: 0.65 tokens/solved [0.55, 0.77],
+13/13 vs 12/13). Do not re-open P0 with a bigger n unless someone is prepared to spend the $11 and
+accept that the plausible outcome is "cost is a wash and correctness improves marginally".
+
+Total phase spend: **$0.58** (13 runs) against a $5 cap; campaign ledger to date $4.34.
+
+
 **Goal:** let a codemode program check the bytes it is about to write, so verification happens inside
 the program instead of in a later turn through a shell.
 

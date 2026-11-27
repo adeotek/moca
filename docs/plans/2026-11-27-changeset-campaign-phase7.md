@@ -167,3 +167,24 @@ the whole campaign that beats the status quo on every axis.
 shell exists, codemode wins by a measured 17–35 % (13/13 vs 12/13, pinned at 13 runs/arm).**
 
 The writable workspace ships on that placement: sessions that cannot execute, not sessions that can.
+
+## Follow-up 5: the staged content (P0), and why it stopped there
+
+`stageEdit` now returns the post-edit image (`content`, `bytes`, `sha256`, `truncated`) so a program
+can check its own work before the host applies. Measured against the same arm without it:
+
+| read | base (n=8) | with content (n=13) | ratio [CI] |
+|---|---|---|---|
+| passes | 7/8 | 13/13 | — |
+| tokens/solved | 1.44 M | 1.35 M | 0.82 [0.61, 1.18] |
+| cost/run | $0.0475 | $0.0443 | 0.93 [0.72, 1.30] |
+| steps | 30.2 | 29.9 | 0.99 [0.83, 1.21] |
+
+Underpowered (cv 32 %, `need n` 126). The base arm's single failure was a content error the returned
+content would have caught — the mechanism hit exactly the failure class it was built for — but one run
+is not evidence, and the cost and turn intervals straddle 1.00.
+
+**Verdict: the phase failed its predeclared gate, so the wider primitives (`writeFile`, `rename`,
+`delete`, `exec`) are not built.** Pinning the cost effect honestly would cost ≈ $11, more than the
+phase's whole cap. Where codemode is worth shipping is unchanged and pinned: `changeset-noshell`,
+0.65 tokens/solved [0.55, 0.77] with 13/13 against the control's 12/13.
