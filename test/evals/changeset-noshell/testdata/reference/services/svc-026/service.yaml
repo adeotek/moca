@@ -1,0 +1,8 @@
+# svc-026 — owned by platform. Generated from the service template.
+name: svc-026
+image: ghcr.io/acme/svc-026:3.2.6-158d993
+replicas: 4
+mode: rolling
+pin:
+  tag: 3.2.6-158d993
+  weight: 40

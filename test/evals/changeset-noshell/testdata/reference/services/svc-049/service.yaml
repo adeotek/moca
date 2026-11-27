@@ -1,0 +1,8 @@
+# svc-049 — owned by platform. Generated from the service template.
+name: svc-049
+image: ghcr.io/acme/svc-049:3.4.9-87f2827
+replicas: 3
+mode: rolling
+pin:
+  tag: 3.4.9-87f2827
+  weight: 30

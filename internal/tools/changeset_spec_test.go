@@ -24,6 +24,7 @@ const editsDescription = "Workspace JS. Await tools.read({path}|{next})\u2192{li
 	"Await tools.stageEdit({path,edits:[{old,new}]})\u2192{staged,path,edits} to stage exact edits " +
 	"the host applies after this program returns; read the file first; staged is not written; " +
 	"sha256(text)\u2192hex is available. " +
+	"stage every edit in this program; the host applies the batch when it returns, so verify after it returns, not before. " +
 	"Return the answer; a bare expression is null."
 
 func TestCodemodeWorkspaceEditsSpec(t *testing.T) {

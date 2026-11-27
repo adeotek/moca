@@ -1,0 +1,5 @@
+# svc-018 — owned by platform. Generated from the service template.
+name: svc-018
+image: ghcr.io/acme/svc-018:3.1.8
+replicas: 2
+mode: blue-green

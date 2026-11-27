@@ -1,0 +1,5 @@
+# svc-020 — owned by platform. Generated from the service template.
+name: svc-020
+image: ghcr.io/acme/svc-020:3.2.0
+replicas: 4
+mode: rolling

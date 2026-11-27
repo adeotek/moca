@@ -1,0 +1,8 @@
+# svc-019 — owned by platform. Generated from the service template.
+name: svc-019
+image: ghcr.io/acme/svc-019:3.1.9-500d6b5
+replicas: 3
+mode: rolling
+pin:
+  tag: 3.1.9-500d6b5
+  weight: 30

@@ -1,0 +1,8 @@
+# svc-022 — owned by platform. Generated from the service template.
+name: svc-022
+image: ghcr.io/acme/svc-022:3.2.2-4a1f8d9
+replicas: 3
+mode: rolling
+pin:
+  tag: 3.2.2-4a1f8d9
+  weight: 30

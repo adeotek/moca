@@ -1,0 +1,5 @@
+# svc-039 — owned by platform. Generated from the service template.
+name: svc-039
+image: ghcr.io/acme/svc-039:3.3.9
+replicas: 2
+mode: blue-green

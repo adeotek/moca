@@ -90,7 +90,7 @@ def is_error(result):
     return bool(result.get("isError") or result.get("is_error"))
 
 
-def session_problems(session):
+def session_problems(session, needs_verify=True):
     """The transcript half: a successful verify.py run, and no typed mutation
     after it.
 
@@ -103,6 +103,8 @@ def session_problems(session):
     uses, results = tool_calls(session)
     if not uses:
         return "the transcript has no tool calls"
+    if not needs_verify:
+        return None
     verified = -1
     for i, (cid, name, inp) in enumerate(uses):
         if name != "shell":
@@ -153,14 +155,14 @@ def final_assistant_text(session):
     return last
 
 
-def tree_and_answer(scen_dir, work, session, expectations):
+def tree_and_answer(scen_dir, work, session, expectations, needs_verify=True):
     """Shared tail: extra-file refusal, session check, answer lines."""
     fixture_files = {rel for rel, _ in walk(pathlib.Path(scen_dir) / "fixture")}
     for rel, _ in walk(work):
         if rel not in fixture_files and rel not in expectations.written:
             fail(f"the run left a file the task did not allow: {rel}")
 
-    problem = session_problems(session)
+    problem = session_problems(session, needs_verify)
     if problem:
         fail(problem)
 
@@ -322,8 +324,12 @@ class RegistryExpectations:
 def check(scenario, work, session, scen_dir):
     if not session or not os.path.isfile(session):
         fail("no session transcript: a two-turn scenario is graded through one")
-    exp = (PinsExpectations if scenario in ("changeset-pins", "changeset-scale")
+    exp = (PinsExpectations if scenario in ("changeset-pins", "changeset-scale", "changeset-noshell")
            else RegistryExpectations)(scen_dir)
+    # The no-shell scenario has no executable path in either arm, so its task does
+    # not ask for a verification run; grading it on one would fail the control by
+    # construction rather than on its work.
+    needs_verify = scenario != "changeset-noshell"
     fixture = pathlib.Path(scen_dir) / "fixture"
     seen = False
     for rel, path in walk(work):
@@ -343,7 +349,7 @@ def check(scenario, work, session, scen_dir):
                  + (f" (first difference at line {first})" if first else " (length differs)"))
     if not seen:
         fail("no target file was touched")
-    tree_and_answer(scen_dir, work, session, exp)
+    tree_and_answer(scen_dir, work, session, exp, needs_verify)
 
 
 def main(argv):

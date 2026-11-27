@@ -1,0 +1,8 @@
+# svc-031 — owned by platform. Generated from the service template.
+name: svc-031
+image: ghcr.io/acme/svc-031:3.3.1-ddd8e8e
+replicas: 3
+mode: rolling
+pin:
+  tag: 3.3.1-ddd8e8e
+  weight: 30

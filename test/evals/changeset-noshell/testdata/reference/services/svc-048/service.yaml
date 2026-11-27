@@ -1,0 +1,8 @@
+# svc-048 — owned by platform. Generated from the service template.
+name: svc-048
+image: ghcr.io/acme/svc-048:3.4.8-3eabb45
+replicas: 2
+mode: blue-green
+pin:
+  tag: 3.4.8-3eabb45
+  weight: 20

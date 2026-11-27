@@ -1,0 +1,5 @@
+# svc-007 — owned by platform. Generated from the service template.
+name: svc-007
+image: ghcr.io/acme/svc-007:3.0.7
+replicas: 1
+mode: rolling

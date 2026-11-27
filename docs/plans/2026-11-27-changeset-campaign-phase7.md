@@ -77,3 +77,48 @@ A 0/N arm is a harness smell first and a result second; that is the lesson worth
   host applies") converts the four ordering failures. Five runs per arm would answer it for ~$0.25.
 - Whether the surface wins where the alternative is a read-only session: that needs a scenario whose
   control arm genuinely cannot write, which no current fixture provides.
+
+## Follow-up 1: the discipline clause (description only)
+
+`stage every edit in this program; the host applies the batch when it returns, so verify after it
+returns, not before.` — added to the frozen `stageEdit` description (still inside the 768 B variant
+cap), five runs on `changeset-scale`, same binary tags, same model:
+
+| arm | pass | turns | $/run |
+|---|---|---|---|
+| control (no codemode) | 5/5 | 20.0 | 0.0344 |
+| codemode, before the clause | 2/5 | 31.6 | 0.0525 |
+| codemode, after the clause | **4/5** | **27.6** | **0.0372** |
+
+The clause fixed most of the ordering failures (one remains: verify, then stage more). Turns −13 %,
+cost −29 %, and the arm is now within 8 % of the control on cost — but still behind it on pass rate
+and turns. A description cannot make it cheaper than doing the work directly.
+
+## Follow-up 2: the placement test (`changeset-noshell`)
+
+The claim the surface could still make is not "cheaper than shell" but "the only multi-file write
+path where nothing executes". New pilot scenario: 61 services, 46 targets, two arms, and **neither
+arm may run a command** (`shell.allow` holds one no-op). The grader skips the verification rule for
+this scenario by name — neither arm can verify, so grading on it would fail the control by
+construction.
+
+| arm | pass | turns | tokens | $/run |
+|---|---|---|---|---|
+| control: edit/write only | 5/5 | 28.2 | 1.06 M | 0.0348 |
+| codemode: one staged program | **5/5** | **23.4** | **0.73 M** | **0.0272** |
+
+**Codemode wins where there is no shell**: −17 % turns, −31 % tokens, −22 % cost, same 5/5. It is the
+only arm in the whole campaign that beats the status quo on every axis, and it does so in exactly the
+deployment the surface was designed for.
+
+## The two results together
+
+The surface's value is conditional and now measured in both directions:
+
+- **With a shell available**: it is a slower, more expensive way to do what the model already does
+  well (25/25 control vs 39/50 codemode across sizes).
+- **Without a shell**: it is the cheapest correct way to write many files at once (5/5, −22 % cost).
+
+That is a placement argument, not a performance one, and it is the argument the feature should ship
+on: the writable workspace is for sessions that cannot execute — sandboxed, locked-down, or
+review-only deployments — not for replacing `edit` in sessions that can.

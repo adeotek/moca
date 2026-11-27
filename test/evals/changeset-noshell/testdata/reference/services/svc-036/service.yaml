@@ -1,0 +1,8 @@
+# svc-036 — owned by platform. Generated from the service template.
+name: svc-036
+image: ghcr.io/acme/svc-036:3.3.6-9ec3871
+replicas: 2
+mode: blue-green
+pin:
+  tag: 3.3.6-9ec3871
+  weight: 20

@@ -1,0 +1,5 @@
+# svc-046 — owned by platform. Generated from the service template.
+name: svc-046
+image: ghcr.io/acme/svc-046:3.4.6
+replicas: 3
+mode: rolling

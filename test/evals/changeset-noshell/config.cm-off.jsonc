@@ -1,0 +1,10 @@
+{
+  // changeset placement test, cm-off arm. Neither arm can execute a command:
+  // the allowlist holds one no-op, so the control writes with edit/write only and
+  // the codemode arm with one staged program. That is the placement the surface
+  // was built for, and the only one where it has no shell to lose to.
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } },
+  
+  "shell": { "allow": ["true"] }
+}
