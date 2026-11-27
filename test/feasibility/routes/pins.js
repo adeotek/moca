@@ -15,7 +15,7 @@ for (const path of files.paths) {
   const mode = text.match(/^mode: .*$/m)[0];
   await tools.stageEdit({ path, edits: [
     { old: image, new: "image: ghcr.io/acme/" + name + ":" + tag },
-    { old: mode, new: mode + "\npin:\n  tag: " + tag + "\n  weight: " + (replicas * 10) + "\n" },
+    { old: mode, new: mode + "\npin:\n  tag: " + tag + "\n  weight: " + (replicas * 10) },
   ] });
   done.push([name, tag]);
 }

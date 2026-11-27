@@ -73,15 +73,12 @@ func sseText(w http.ResponseWriter, text string) {
 	fmt.Fprint(w, "data: [DONE]\n\n")
 }
 
-// changeset-pins is not in the table yet: its service-file stage lands (20
-// files) but the manifest rewrite still compares equal to its own input, so the
-// batch is discarded. The registry route proves the mechanism end to end; the
-// pins artefact stays in routes/pins.js as the work in progress it is.
 func TestCodemodeRoute(t *testing.T) {
 	if *mocaBin == "" {
 		t.Fatal("usage: go test -tags feasibility ./test/feasibility -args -moca <binary> -fixture <scenario>")
 	}
 	for _, sc := range []struct{ name, js string }{
+		{"changeset-pins", "pins.js"},
 		{"changeset-registry", "registry.js"},
 	} {
 		t.Run(sc.name, func(t *testing.T) {
