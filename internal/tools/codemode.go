@@ -189,8 +189,10 @@ const idiomEchoLead = "hint:"
 // payloads are v1.1's contract (Task 9) and documenting a shape that does not
 // exist yet would be worse than naming the call.
 // codemodeSpecEdits is the writable workspace variant (plan v7 §4.12): the same
-// read calls, plus stageEdit. Frozen and measured at 711 B marshaled / 712 B
-// with newline against its own 768 B cap.
+// read calls, plus stageEdit. Frozen and measured at 578 B with newline against
+// its own 768 B cap; the trailing clause is the ordering rule the phase-7
+// campaign earned (stage once, then verify after the host applies), which took
+// the scale arm from 2/5 to 7/8.
 func codemodeSpecEdits() llm.ToolSpec {
 	return codemodeSpecWith("Workspace JS. Await tools.read({path}|{next})\u2192{lines:[{n,text}]}, " +
 		"tools.search({pattern})\u2192{matches:[{path,line,text}]}, " +

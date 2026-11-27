@@ -43,6 +43,22 @@ import sys
 MUTATIONS = {"edit", "write", "codemode"}
 
 
+def is_mutation(name, inp):
+    """Whether a tool call can have changed the tree.
+
+    `codemode` is the subtle one: the surface is read *and* write, so a script that
+    only reads is not a mutation and must not invalidate a verification. The call
+    is a mutation exactly when the program calls `stageEdit` — the only write the
+    guest has — and the literal appears in the source, so dynamic access still
+    counts.
+    """
+    if name in ("edit", "write"):
+        return True
+    if name == "codemode":
+        return "stageEdit" in json.dumps(inp)
+    return False
+
+
 # --------------------------------------------------------------------- helpers
 
 def fail(msg):
@@ -116,8 +132,8 @@ def session_problems(session, needs_verify=True):
         verified = i
     if verified < 0:
         return "no successful `verify.py` run in the transcript"
-    for _, name, _ in uses[verified + 1:]:
-        if name in MUTATIONS:
+    for _, name, inp in uses[verified + 1:]:
+        if is_mutation(name, inp):
             return ("`verify.py` ran, then %s changed the tree: the verification "
                     "must come after the last mutation" % name)
     if verified == 0:

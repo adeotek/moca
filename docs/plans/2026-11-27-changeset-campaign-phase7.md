@@ -122,3 +122,48 @@ The surface's value is conditional and now measured in both directions:
 That is a placement argument, not a performance one, and it is the argument the feature should ship
 on: the writable workspace is for sessions that cannot execute — sandboxed, locked-down, or
 review-only deployments — not for replacing `edit` in sessions that can.
+
+## Follow-up 3: the discipline problem was the grader (and the fixture)
+
+The one surviving "verify, then change" failure turned out not to be the model: its transcript shows
+`python3 verify.py` → ok → two refused `git status` calls → a **read-only** codemode script that only
+recounted the targets. `MUTATIONS` held `"codemode"` wholesale, so any script counted as a tree
+change. The rule now matches the surface's real capability: a codemode call is a mutation exactly
+when the program contains `stageEdit`, the only write the guest has (matched in the source, so
+dynamic access still counts).
+
+Fixing that exposed a fake test: the selftest arm for "rejects a verify before the last edit" used
+`codemode({"code": "return 1;"})` as its stand-in for a mutation — a no-op script, not a change. It
+had been passing for the wrong reason. The fixture now uses a real `edit`, and the twelve arms are
+green under the sharper rule.
+
+Under the corrected rule, `changeset-scale` / cm-workspace-edits at n=8: **7/8**, 30.2 turns,
+$0.0475/run. The single failure is an ordinary content error (`svc-053` length differs), not a
+verifier artefact. The control stays ahead (5/5, 20.0 turns, $0.0344) — where a shell exists, the
+surface is still the slower way to do the same work.
+
+## Follow-up 4: the placement result, pinned
+
+`changeset-noshell`, thirteen runs per arm, same model, no execution in either arm:
+
+| arm | pass | turns | tokens | $/run |
+|---|---|---|---|---|
+| control (`edit`/`write` only) | 12/13 | 28.2 | 987 k | 0.0334 |
+| **codemode (one staged program)** | **13/13** | **23.4** | **726 k** | **0.0278** |
+
+`evalstats -compare` (stratified bootstrap, 13 runs/arm, cv 30 %, `need n` 7 — **pinned**):
+
+- tokens/solved **0.65 [0.55, 0.77]**
+- cost/run **0.83 [0.77, 0.89]**
+- steps **0.83 [0.73, 0.94]**
+
+Every interval sits entirely below 1.00 with passes 12→13: the codemode arm is cheaper in tokens,
+cheaper in dollars and shorter, and it also passed the run the control failed. This is the one arm in
+the whole campaign that beats the status quo on every axis.
+
+## The pin, in one line
+
+**Where a shell exists, codemode loses (25/25 control vs 39/50, and 7/8 vs 5/5 at scale). Where no
+shell exists, codemode wins by a measured 17–35 % (13/13 vs 12/13, pinned at 13 runs/arm).**
+
+The writable workspace ships on that placement: sessions that cannot execute, not sessions that can.

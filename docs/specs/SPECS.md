@@ -434,10 +434,14 @@ a provider call, naming both ways out.
 `codemode.workspaceEdits` is resolved into authority and the feature is **live on that surface
 only**. `tools.stageEdit` exists in exactly one capability table (the writable workspace's), in the
 prelude only when `ExecCaps.Edits` is set (the block is cut from the source otherwise, like the web
-block), and in exactly one description — the frozen 712 B edits variant, 56 B under its own 768 B
-cap. The host core in `internal/tools/changeset.go` owns staging (path policy, exact matching, the
+block), and in exactly one description — the frozen 578 B edits variant with newline, 190 B under its own
+768 B cap (the earlier 712 B figure measured the marshaled spec, not the description the cap counts). The host core in `internal/tools/changeset.go` owns staging (path policy, exact matching, the
 correctable/fatal split), the whole-set preflight, the single aggregated consent question, the
-rooted apply through one `os.Root` with `GuardImage` + read-back, and the receipt. The journal is
+rooted apply through one `os.Root` with `GuardImage` + read-back, and the receipt. The description ends with the ordering
+rule the phase-7 campaign earned: stage every edit in one program, and verify after the host applies,
+because a verification followed by a staged change verifies a tree that no longer exists (the
+clause took the scale arm from 2/5 to 7/8; where a shell exists the surface still loses, and where
+none exists it wins by 17-35 % — `docs/plans/2026-11-27-changeset-campaign-phase7.md`). The journal is
 `internal/agent/changeset_journal.go` (one fsynced JSONL line per begin/record/abort/finish, beside
 the transcript); `session.Snapshots.GuardImage` records the pre-image the changeset validated
 without reopening the path and never runs `gitClean`. A session without either capability refuses
