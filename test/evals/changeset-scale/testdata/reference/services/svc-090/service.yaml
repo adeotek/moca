@@ -1,0 +1,8 @@
+# svc-090 — owned by platform. Generated from the service template.
+name: svc-090
+image: ghcr.io/acme/svc-090:2.9.0-f954d99
+replicas: 4
+mode: blue-green
+pin:
+  tag: 2.9.0-f954d99
+  weight: 40

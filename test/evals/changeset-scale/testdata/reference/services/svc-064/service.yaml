@@ -1,0 +1,8 @@
+# svc-064 — owned by platform. Generated from the service template.
+name: svc-064
+image: ghcr.io/acme/svc-064:2.6.4-24c1508
+replicas: 2
+mode: rolling
+pin:
+  tag: 2.6.4-24c1508
+  weight: 20

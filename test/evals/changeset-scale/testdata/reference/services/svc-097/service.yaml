@@ -1,0 +1,8 @@
+# svc-097 — owned by platform. Generated from the service template.
+name: svc-097
+image: ghcr.io/acme/svc-097:2.9.7-4e4805f
+replicas: 3
+mode: rolling
+pin:
+  tag: 2.9.7-4e4805f
+  weight: 30

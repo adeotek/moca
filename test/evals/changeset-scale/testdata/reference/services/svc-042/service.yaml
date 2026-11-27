@@ -1,0 +1,8 @@
+# svc-042 — owned by platform. Generated from the service template.
+name: svc-042
+image: ghcr.io/acme/svc-042:2.4.2-7eacc6a
+replicas: 4
+mode: blue-green
+pin:
+  tag: 2.4.2-7eacc6a
+  weight: 40

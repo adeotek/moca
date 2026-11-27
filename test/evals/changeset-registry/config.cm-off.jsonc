@@ -2,5 +2,8 @@
   // changeset campaign, cm-off arm. The three arms differ only inside
   // `codemode`, pinned by TestChangesetPilotArms.
   "model": "opencode-go/deepseek-v4.1-flash",
-  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } }
+  "providers": { "opencode-go": { "apiKey": "env:OPENCODE_API_KEY" } },
+  // The verification step is a shell call (prompt.txt requires verify.py),
+  // and -p has no one to ask: allow the interpreter, not everything.
+  "shell": { "allow": ["python3", "node"] }
 }

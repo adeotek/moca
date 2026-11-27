@@ -1,0 +1,8 @@
+# svc-067 — owned by platform. Generated from the service template.
+name: svc-067
+image: ghcr.io/acme/svc-067:2.6.7-9cf3b7f
+replicas: 5
+mode: rolling
+pin:
+  tag: 2.6.7-9cf3b7f
+  weight: 50

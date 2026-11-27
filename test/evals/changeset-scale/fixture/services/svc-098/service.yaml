@@ -1,0 +1,5 @@
+# svc-098 — owned by platform. Generated from the service template.
+name: svc-098
+image: ghcr.io/acme/svc-098:2.9.8
+replicas: 4
+mode: rolling

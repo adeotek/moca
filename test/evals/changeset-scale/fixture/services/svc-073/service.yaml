@@ -1,0 +1,5 @@
+# svc-073 — owned by platform. Generated from the service template.
+name: svc-073
+image: ghcr.io/acme/svc-073:2.7.3
+replicas: 3
+mode: rolling

@@ -1,0 +1,8 @@
+# svc-074 — owned by platform. Generated from the service template.
+name: svc-074
+image: ghcr.io/acme/svc-074:2.7.4-b610139
+replicas: 4
+mode: rolling
+pin:
+  tag: 2.7.4-b610139
+  weight: 40

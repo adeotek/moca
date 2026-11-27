@@ -1,0 +1,8 @@
+# svc-001 — owned by platform. Generated from the service template.
+name: svc-001
+image: ghcr.io/acme/svc-001:2.0.1-5785aa9
+replicas: 3
+mode: rolling
+pin:
+  tag: 2.0.1-5785aa9
+  weight: 30

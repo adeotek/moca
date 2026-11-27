@@ -1,0 +1,5 @@
+# svc-027 — owned by platform. Generated from the service template.
+name: svc-027
+image: ghcr.io/acme/svc-027:2.2.7
+replicas: 5
+mode: blue-green

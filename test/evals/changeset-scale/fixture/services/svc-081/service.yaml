@@ -1,0 +1,5 @@
+# svc-081 — owned by platform. Generated from the service template.
+name: svc-081
+image: ghcr.io/acme/svc-081:2.8.1
+replicas: 3
+mode: blue-green

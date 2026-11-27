@@ -1,0 +1,5 @@
+# svc-015 — owned by platform. Generated from the service template.
+name: svc-015
+image: ghcr.io/acme/svc-015:2.1.5
+replicas: 5
+mode: blue-green

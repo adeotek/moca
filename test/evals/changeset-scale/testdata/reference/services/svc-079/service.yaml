@@ -1,0 +1,8 @@
+# svc-079 — owned by platform. Generated from the service template.
+name: svc-079
+image: ghcr.io/acme/svc-079:2.7.9-bd2004b
+replicas: 5
+mode: rolling
+pin:
+  tag: 2.7.9-bd2004b
+  weight: 50

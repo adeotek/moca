@@ -1,0 +1,8 @@
+# svc-044 — owned by platform. Generated from the service template.
+name: svc-044
+image: ghcr.io/acme/svc-044:2.4.4-aab5af5
+replicas: 2
+mode: rolling
+pin:
+  tag: 2.4.4-aab5af5
+  weight: 20

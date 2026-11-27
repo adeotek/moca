@@ -1,0 +1,8 @@
+# svc-071 — owned by platform. Generated from the service template.
+name: svc-071
+image: ghcr.io/acme/svc-071:2.7.1-e71b163
+replicas: 5
+mode: rolling
+pin:
+  tag: 2.7.1-e71b163
+  weight: 50

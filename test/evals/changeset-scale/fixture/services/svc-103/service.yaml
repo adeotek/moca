@@ -1,0 +1,5 @@
+# svc-103 — owned by platform. Generated from the service template.
+name: svc-103
+image: ghcr.io/acme/svc-103:2.10.3
+replicas: 5
+mode: rolling

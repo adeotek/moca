@@ -1,0 +1,8 @@
+# svc-096 — owned by platform. Generated from the service template.
+name: svc-096
+image: ghcr.io/acme/svc-096:2.9.6-e8ac6aa
+replicas: 2
+mode: blue-green
+pin:
+  tag: 2.9.6-e8ac6aa
+  weight: 20

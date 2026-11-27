@@ -1,0 +1,8 @@
+# svc-087 — owned by platform. Generated from the service template.
+name: svc-087
+image: ghcr.io/acme/svc-087:2.8.7-f1f77ea
+replicas: 5
+mode: blue-green
+pin:
+  tag: 2.8.7-f1f77ea
+  weight: 50

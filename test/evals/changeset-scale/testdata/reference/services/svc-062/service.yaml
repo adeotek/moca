@@ -1,0 +1,8 @@
+# svc-062 — owned by platform. Generated from the service template.
+name: svc-062
+image: ghcr.io/acme/svc-062:2.6.2-563e055
+replicas: 4
+mode: rolling
+pin:
+  tag: 2.6.2-563e055
+  weight: 40

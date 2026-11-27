@@ -1,0 +1,5 @@
+# svc-105 — owned by platform. Generated from the service template.
+name: svc-105
+image: ghcr.io/acme/svc-105:2.10.5
+replicas: 3
+mode: blue-green

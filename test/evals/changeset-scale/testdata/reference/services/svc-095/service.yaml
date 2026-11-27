@@ -1,0 +1,8 @@
+# svc-095 — owned by platform. Generated from the service template.
+name: svc-095
+image: ghcr.io/acme/svc-095:2.9.5-af7e693
+replicas: 5
+mode: rolling
+pin:
+  tag: 2.9.5-af7e693
+  weight: 50

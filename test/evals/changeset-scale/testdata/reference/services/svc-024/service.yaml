@@ -1,0 +1,8 @@
+# svc-024 — owned by platform. Generated from the service template.
+name: svc-024
+image: ghcr.io/acme/svc-024:2.2.4-fc46e4a
+replicas: 2
+mode: blue-green
+pin:
+  tag: 2.2.4-fc46e4a
+  weight: 20

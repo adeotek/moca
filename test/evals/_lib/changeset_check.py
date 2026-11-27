@@ -138,8 +138,16 @@ def final_assistant_text(session):
         m = e.get("message") or {}
         if m.get("role") != "assistant":
             continue
-        text = "\n".join(c.get("text", "") for c in m.get("content", [])
-                         if c.get("type") == "text")
+        # A turn that only calls tools carries `content: null` (or a list with no
+        # text block), and the final turn of a failed run is usually one of those.
+        content = m.get("content")
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            text = "\n".join(c.get("text", "") for c in content
+                             if isinstance(c, dict) and c.get("type") == "text")
+        else:
+            continue
         if text.strip():
             last = text
     return last
@@ -236,7 +244,7 @@ class PinsExpectations:
         if not one or not two:
             return "the answer is missing the two required lines (updated=… / untouched=…)"
         total = sum(1 for p in (self.scen / "fixture" / "services").iterdir() if p.is_dir())
-        want = (len(self.targets), len(self.targets), total - len(self.targets), len(self.legacy))
+        want = (len(self.targets), len(self.targets), total - len(self.targets) - len(self.legacy), len(self.legacy))
         got = (int(one.group(1)), int(one.group(2)), int(two.group(1)), int(two.group(2)))
         if got != want:
             return f"the answer says {got}, the fixture implies {want}"
@@ -314,7 +322,8 @@ class RegistryExpectations:
 def check(scenario, work, session, scen_dir):
     if not session or not os.path.isfile(session):
         fail("no session transcript: a two-turn scenario is graded through one")
-    exp = (PinsExpectations if scenario == "changeset-pins" else RegistryExpectations)(scen_dir)
+    exp = (PinsExpectations if scenario in ("changeset-pins", "changeset-scale")
+           else RegistryExpectations)(scen_dir)
     fixture = pathlib.Path(scen_dir) / "fixture"
     seen = False
     for rel, path in walk(work):

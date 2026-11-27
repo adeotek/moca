@@ -165,9 +165,12 @@ run_trial() {
   # boundary, so the sum over both processes is the number of model requests
   # the trial spent making progress. Absent is not zero (same rule as carry),
   # and the attempts figure is a diagnostic beside it, never added to it.
-  local work="" workargs=(-workMissing)
-  if work=$("$STATS" -workOf "$data/carry.1.jsonl,$data/carry.2.jsonl" 2>/dev/null); then
-    workargs=(-work "$work")
+  # The work counter is NOT called `work`: that name is this function's workdir,
+  # and shadowing it turned `cd "$work"` into `cd 18` — the checker never ran and
+  # every trial reported "no session" instead of its real verdict.
+  local wcount="" workargs=(-workMissing)
+  if wcount=$("$STATS" -workOf "$data/carry.1.jsonl,$data/carry.2.jsonl" 2>/dev/null); then
+    workargs=(-work "$wcount")
   else
     why="${why:-missing work observation (build with -tags codemodecarry)}"
   fi

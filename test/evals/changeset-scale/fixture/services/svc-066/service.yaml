@@ -1,0 +1,5 @@
+# svc-066 — owned by platform. Generated from the service template.
+name: svc-066
+image: ghcr.io/acme/svc-066:2.6.6
+replicas: 4
+mode: blue-green

@@ -1,0 +1,8 @@
+# svc-043 — owned by platform. Generated from the service template.
+name: svc-043
+image: ghcr.io/acme/svc-043:2.4.3-34d109d
+replicas: 5
+mode: rolling
+pin:
+  tag: 2.4.3-34d109d
+  weight: 50

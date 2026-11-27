@@ -1,0 +1,716 @@
+{
+  "month": "2026-12",
+  "salt": "scale-v1",
+  "rollout": {
+    "stage": "stage-2"
+  },
+  "stages": {
+    "stage-2": [
+      "svc-000",
+      "svc-001",
+      "svc-002",
+      "svc-003",
+      "svc-004",
+      "svc-005",
+      "svc-006",
+      "svc-007",
+      "svc-008",
+      "svc-009",
+      "svc-010",
+      "svc-011",
+      "svc-012",
+      "svc-013",
+      "svc-014",
+      "svc-015",
+      "svc-016",
+      "svc-017",
+      "svc-018",
+      "svc-019",
+      "svc-020",
+      "svc-021",
+      "svc-022",
+      "svc-023",
+      "svc-024",
+      "svc-025",
+      "svc-026",
+      "svc-027",
+      "svc-028",
+      "svc-029",
+      "svc-030",
+      "svc-031",
+      "svc-032",
+      "svc-033",
+      "svc-034",
+      "svc-035",
+      "svc-036",
+      "svc-037",
+      "svc-038",
+      "svc-039",
+      "svc-040",
+      "svc-041",
+      "svc-042",
+      "svc-043",
+      "svc-044",
+      "svc-045",
+      "svc-046",
+      "svc-047",
+      "svc-048",
+      "svc-049",
+      "svc-050",
+      "svc-051",
+      "svc-052",
+      "svc-053",
+      "svc-054",
+      "svc-055",
+      "svc-056",
+      "svc-057",
+      "svc-058",
+      "svc-059",
+      "svc-060",
+      "svc-061",
+      "svc-062",
+      "svc-063",
+      "svc-064",
+      "svc-065",
+      "svc-066",
+      "svc-067",
+      "svc-068",
+      "svc-069",
+      "svc-070",
+      "svc-071",
+      "svc-072",
+      "svc-073",
+      "svc-074",
+      "svc-075",
+      "svc-076",
+      "svc-077",
+      "svc-078",
+      "svc-079",
+      "svc-080",
+      "svc-081",
+      "svc-082",
+      "svc-083",
+      "svc-084",
+      "svc-085",
+      "svc-086",
+      "svc-087",
+      "svc-088",
+      "svc-089",
+      "svc-090",
+      "svc-091",
+      "svc-092",
+      "svc-093",
+      "svc-094",
+      "svc-095",
+      "svc-096",
+      "svc-097",
+      "svc-098",
+      "svc-099"
+    ]
+  },
+  "services": {
+    "svc-000": {
+      "version": "2.0.0",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "svc-001": {
+      "version": "2.0.1",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-002": {
+      "version": "2.0.2",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-003": {
+      "version": "2.0.3",
+      "replicas": 5,
+      "mode": "blue-green"
+    },
+    "svc-004": {
+      "version": "2.0.4",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-005": {
+      "version": "2.0.5",
+      "replicas": 1,
+      "mode": "rolling"
+    },
+    "svc-006": {
+      "version": "2.0.6",
+      "replicas": 1,
+      "mode": "blue-green"
+    },
+    "svc-007": {
+      "version": "2.0.7",
+      "replicas": 1,
+      "mode": "rolling"
+    },
+    "svc-008": {
+      "version": "2.0.8",
+      "replicas": 1,
+      "mode": "rolling"
+    },
+    "svc-009": {
+      "version": "2.0.9",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "svc-010": {
+      "version": "2.1.0",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-011": {
+      "version": "2.1.1",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-012": {
+      "version": "2.1.2",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "svc-013": {
+      "version": "2.1.3",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-014": {
+      "version": "2.1.4",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-015": {
+      "version": "2.1.5",
+      "replicas": 5,
+      "mode": "blue-green"
+    },
+    "svc-016": {
+      "version": "2.1.6",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-017": {
+      "version": "2.1.7",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-018": {
+      "version": "2.1.8",
+      "replicas": 4,
+      "mode": "blue-green"
+    },
+    "svc-019": {
+      "version": "2.1.9",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-020": {
+      "version": "2.2.0",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-021": {
+      "version": "2.2.1",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "svc-022": {
+      "version": "2.2.2",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-023": {
+      "version": "2.2.3",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-024": {
+      "version": "2.2.4",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "svc-025": {
+      "version": "2.2.5",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-026": {
+      "version": "2.2.6",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-027": {
+      "version": "2.2.7",
+      "replicas": 5,
+      "mode": "blue-green"
+    },
+    "svc-028": {
+      "version": "2.2.8",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-029": {
+      "version": "2.2.9",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-030": {
+      "version": "2.3.0",
+      "replicas": 4,
+      "mode": "blue-green"
+    },
+    "svc-031": {
+      "version": "2.3.1",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-032": {
+      "version": "2.3.2",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-033": {
+      "version": "2.3.3",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "svc-034": {
+      "version": "2.3.4",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-035": {
+      "version": "2.3.5",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-036": {
+      "version": "2.3.6",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "svc-037": {
+      "version": "2.3.7",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-038": {
+      "version": "2.3.8",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-039": {
+      "version": "2.3.9",
+      "replicas": 5,
+      "mode": "blue-green"
+    },
+    "svc-040": {
+      "version": "2.4.0",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-041": {
+      "version": "2.4.1",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-042": {
+      "version": "2.4.2",
+      "replicas": 4,
+      "mode": "blue-green"
+    },
+    "svc-043": {
+      "version": "2.4.3",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-044": {
+      "version": "2.4.4",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-045": {
+      "version": "2.4.5",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "svc-046": {
+      "version": "2.4.6",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-047": {
+      "version": "2.4.7",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-048": {
+      "version": "2.4.8",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "svc-049": {
+      "version": "2.4.9",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-050": {
+      "version": "2.5.0",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-051": {
+      "version": "2.5.1",
+      "replicas": 5,
+      "mode": "blue-green"
+    },
+    "svc-052": {
+      "version": "2.5.2",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-053": {
+      "version": "2.5.3",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-054": {
+      "version": "2.5.4",
+      "replicas": 4,
+      "mode": "blue-green"
+    },
+    "svc-055": {
+      "version": "2.5.5",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-056": {
+      "version": "2.5.6",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-057": {
+      "version": "2.5.7",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "svc-058": {
+      "version": "2.5.8",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-059": {
+      "version": "2.5.9",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-060": {
+      "version": "2.6.0",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "svc-061": {
+      "version": "2.6.1",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-062": {
+      "version": "2.6.2",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-063": {
+      "version": "2.6.3",
+      "replicas": 5,
+      "mode": "blue-green"
+    },
+    "svc-064": {
+      "version": "2.6.4",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-065": {
+      "version": "2.6.5",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-066": {
+      "version": "2.6.6",
+      "replicas": 4,
+      "mode": "blue-green"
+    },
+    "svc-067": {
+      "version": "2.6.7",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-068": {
+      "version": "2.6.8",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-069": {
+      "version": "2.6.9",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "svc-070": {
+      "version": "2.7.0",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-071": {
+      "version": "2.7.1",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-072": {
+      "version": "2.7.2",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "svc-073": {
+      "version": "2.7.3",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-074": {
+      "version": "2.7.4",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-075": {
+      "version": "2.7.5",
+      "replicas": 5,
+      "mode": "blue-green"
+    },
+    "svc-076": {
+      "version": "2.7.6",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-077": {
+      "version": "2.7.7",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-078": {
+      "version": "2.7.8",
+      "replicas": 4,
+      "mode": "blue-green"
+    },
+    "svc-079": {
+      "version": "2.7.9",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-080": {
+      "version": "2.8.0",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-081": {
+      "version": "2.8.1",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "svc-082": {
+      "version": "2.8.2",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-083": {
+      "version": "2.8.3",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-084": {
+      "version": "2.8.4",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "svc-085": {
+      "version": "2.8.5",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-086": {
+      "version": "2.8.6",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-087": {
+      "version": "2.8.7",
+      "replicas": 5,
+      "mode": "blue-green"
+    },
+    "svc-088": {
+      "version": "2.8.8",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-089": {
+      "version": "2.8.9",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-090": {
+      "version": "2.9.0",
+      "replicas": 4,
+      "mode": "blue-green"
+    },
+    "svc-091": {
+      "version": "2.9.1",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-092": {
+      "version": "2.9.2",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-093": {
+      "version": "2.9.3",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "svc-094": {
+      "version": "2.9.4",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-095": {
+      "version": "2.9.5",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-096": {
+      "version": "2.9.6",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "svc-097": {
+      "version": "2.9.7",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-098": {
+      "version": "2.9.8",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-099": {
+      "version": "2.9.9",
+      "replicas": 5,
+      "mode": "blue-green"
+    },
+    "svc-100": {
+      "version": "2.10.0",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-101": {
+      "version": "2.10.1",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-102": {
+      "version": "2.10.2",
+      "replicas": 4,
+      "mode": "blue-green"
+    },
+    "svc-103": {
+      "version": "2.10.3",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-104": {
+      "version": "2.10.4",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-105": {
+      "version": "2.10.5",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "svc-106": {
+      "version": "2.10.6",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-107": {
+      "version": "2.10.7",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-108": {
+      "version": "2.10.8",
+      "replicas": 2,
+      "mode": "blue-green"
+    },
+    "svc-109": {
+      "version": "2.10.9",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-110": {
+      "version": "2.11.0",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-111": {
+      "version": "2.11.1",
+      "replicas": 5,
+      "mode": "blue-green"
+    },
+    "svc-112": {
+      "version": "2.11.2",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-113": {
+      "version": "2.11.3",
+      "replicas": 3,
+      "mode": "rolling"
+    },
+    "svc-114": {
+      "version": "2.11.4",
+      "replicas": 4,
+      "mode": "blue-green"
+    },
+    "svc-115": {
+      "version": "2.11.5",
+      "replicas": 5,
+      "mode": "rolling"
+    },
+    "svc-116": {
+      "version": "2.11.6",
+      "replicas": 2,
+      "mode": "rolling"
+    },
+    "svc-117": {
+      "version": "2.11.7",
+      "replicas": 3,
+      "mode": "blue-green"
+    },
+    "svc-118": {
+      "version": "2.11.8",
+      "replicas": 4,
+      "mode": "rolling"
+    },
+    "svc-119": {
+      "version": "2.11.9",
+      "replicas": 5,
+      "mode": "rolling"
+    }
+  },
+  "legacy": [
+    "legacy-batch"
+  ]
+}

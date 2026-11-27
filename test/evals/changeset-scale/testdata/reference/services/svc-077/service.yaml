@@ -1,0 +1,8 @@
+# svc-077 — owned by platform. Generated from the service template.
+name: svc-077
+image: ghcr.io/acme/svc-077:2.7.7-96f329e
+replicas: 3
+mode: rolling
+pin:
+  tag: 2.7.7-96f329e
+  weight: 30

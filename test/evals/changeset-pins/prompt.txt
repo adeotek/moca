@@ -16,6 +16,8 @@ Work from the files as they are: do not create, modify or delete any file other 
 
 Then run python3 verify.py and make sure it passes.
 
+The legacy entry is not a service and is counted only on the second line.
+
 Finish with exactly two lines:
 updated=<n> services,<n> manifest tags
 untouched=<n> services,<n> legacy entries

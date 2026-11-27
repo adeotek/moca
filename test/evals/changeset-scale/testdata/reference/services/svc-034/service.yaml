@@ -1,0 +1,8 @@
+# svc-034 — owned by platform. Generated from the service template.
+name: svc-034
+image: ghcr.io/acme/svc-034:2.3.4-e100a54
+replicas: 4
+mode: rolling
+pin:
+  tag: 2.3.4-e100a54
+  weight: 40

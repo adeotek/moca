@@ -1,0 +1,8 @@
+# svc-076 — owned by platform. Generated from the service template.
+name: svc-076
+image: ghcr.io/acme/svc-076:2.7.6-e6556ce
+replicas: 2
+mode: rolling
+pin:
+  tag: 2.7.6-e6556ce
+  weight: 20

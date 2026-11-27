@@ -1,0 +1,8 @@
+# svc-063 — owned by platform. Generated from the service template.
+name: svc-063
+image: ghcr.io/acme/svc-063:2.6.3-eeaed2d
+replicas: 5
+mode: blue-green
+pin:
+  tag: 2.6.3-eeaed2d
+  weight: 50

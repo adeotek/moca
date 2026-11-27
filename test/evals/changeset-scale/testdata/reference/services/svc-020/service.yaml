@@ -1,0 +1,8 @@
+# svc-020 — owned by platform. Generated from the service template.
+name: svc-020
+image: ghcr.io/acme/svc-020:2.2.0-c6340a4
+replicas: 2
+mode: rolling
+pin:
+  tag: 2.2.0-c6340a4
+  weight: 20

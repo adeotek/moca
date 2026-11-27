@@ -1,0 +1,8 @@
+# svc-099 — owned by platform. Generated from the service template.
+name: svc-099
+image: ghcr.io/acme/svc-099:2.9.9-7d92c9c
+replicas: 5
+mode: blue-green
+pin:
+  tag: 2.9.9-7d92c9c
+  weight: 50

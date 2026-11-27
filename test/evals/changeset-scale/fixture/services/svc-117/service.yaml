@@ -1,0 +1,5 @@
+# svc-117 — owned by platform. Generated from the service template.
+name: svc-117
+image: ghcr.io/acme/svc-117:2.11.7
+replicas: 3
+mode: blue-green

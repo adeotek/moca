@@ -1,0 +1,8 @@
+# svc-078 — owned by platform. Generated from the service template.
+name: svc-078
+image: ghcr.io/acme/svc-078:2.7.8-58453cc
+replicas: 4
+mode: blue-green
+pin:
+  tag: 2.7.8-58453cc
+  weight: 40

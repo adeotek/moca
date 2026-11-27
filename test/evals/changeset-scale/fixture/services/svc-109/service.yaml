@@ -1,0 +1,5 @@
+# svc-109 — owned by platform. Generated from the service template.
+name: svc-109
+image: ghcr.io/acme/svc-109:2.10.9
+replicas: 3
+mode: rolling

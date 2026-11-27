@@ -1,0 +1,8 @@
+# svc-070 — owned by platform. Generated from the service template.
+name: svc-070
+image: ghcr.io/acme/svc-070:2.7.0-ae8a57c
+replicas: 4
+mode: rolling
+pin:
+  tag: 2.7.0-ae8a57c
+  weight: 40

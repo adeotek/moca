@@ -1,0 +1,8 @@
+# svc-075 — owned by platform. Generated from the service template.
+name: svc-075
+image: ghcr.io/acme/svc-075:2.7.5-fcc9abb
+replicas: 5
+mode: blue-green
+pin:
+  tag: 2.7.5-fcc9abb
+  weight: 50

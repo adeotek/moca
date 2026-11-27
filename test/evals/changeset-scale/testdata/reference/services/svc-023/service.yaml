@@ -1,0 +1,8 @@
+# svc-023 — owned by platform. Generated from the service template.
+name: svc-023
+image: ghcr.io/acme/svc-023:2.2.3-9c034bd
+replicas: 5
+mode: rolling
+pin:
+  tag: 2.2.3-9c034bd
+  weight: 50

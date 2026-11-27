@@ -1,0 +1,8 @@
+# svc-058 — owned by platform. Generated from the service template.
+name: svc-058
+image: ghcr.io/acme/svc-058:2.5.8-83be675
+replicas: 4
+mode: rolling
+pin:
+  tag: 2.5.8-83be675
+  weight: 40

@@ -1,0 +1,5 @@
+# svc-118 — owned by platform. Generated from the service template.
+name: svc-118
+image: ghcr.io/acme/svc-118:2.11.8
+replicas: 4
+mode: rolling

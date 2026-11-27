@@ -1,0 +1,8 @@
+# svc-051 — owned by platform. Generated from the service template.
+name: svc-051
+image: ghcr.io/acme/svc-051:2.5.1-38a1fc3
+replicas: 5
+mode: blue-green
+pin:
+  tag: 2.5.1-38a1fc3
+  weight: 50
